@@ -192,6 +192,16 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	return c.GetHotReadRegions()
 }
 
+// GetHotRegionsInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsInterval() time.Duration {
+	return h.opt.GetHotRegionsInterval()
+}
+
+//  GetHotRegionsReservedDays gets days hot region information is kept.
+func (h *Handler) GetHotRegionsReservedDays() uint64 {
+	return h.opt.GetHotRegionsReservedDays()
+}
+
 // GetStoresLoads gets all hot write stores stats.
 func (h *Handler) GetStoresLoads() map[uint64][]float64 {
 	rc := h.s.GetRaftCluster()

@@ -46,8 +46,6 @@ type HotRegionStorage struct {
 	mu                      sync.RWMutex
 	hotRegionLoopWg         sync.WaitGroup
 	batchHotInfo            map[string]*HistoryHotRegion
-	remianedDays            int64
-	pullInterval            time.Duration
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
 	hotRegionStorageHandler HotRegionStorageHandler
@@ -90,6 +88,10 @@ type HotRegionStorageHandler interface {
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
 	// IsLeader return true means this server is leader.
 	IsLeader() bool
+	// GetHotRegionInterval gets interval for PD to store Hot Region information..
+	GetHotRegionsInterval() time.Duration
+	// GetHotRegionsReservedDays gets days hot region information is kept.
+	GetHotRegionsReservedDays() uint64
 }
 
 const (
@@ -129,8 +131,6 @@ func NewHotRegionsStorage(
 	path string,
 	encryptionKeyManager *encryptionkm.KeyManager,
 	hotRegionStorageHandler HotRegionStorageHandler,
-	remianedDays int64,
-	pullInterval time.Duration,
 ) (*HotRegionStorage, error) {
 	levelDB, err := kv.NewLeveldbKV(path)
 	if err != nil {
@@ -141,17 +141,13 @@ func NewHotRegionsStorage(
 		LeveldbKV:               levelDB,
 		encryptionKeyManager:    encryptionKeyManager,
 		batchHotInfo:            make(map[string]*HistoryHotRegion),
-		remianedDays:            remianedDays,
-		pullInterval:            pullInterval,
 		hotRegionInfoCtx:        hotRegionInfoCtx,
 		hotRegionInfoCancel:     hotRegionInfoCancle,
 		hotRegionStorageHandler: hotRegionStorageHandler,
 	}
-	if remianedDays > 0 {
-		h.hotRegionLoopWg.Add(2)
-		go h.backgroundFlush()
-		go h.backgroundDelete()
-	}
+	h.hotRegionLoopWg.Add(2)
+	go h.backgroundFlush()
+	go h.backgroundDelete()
 	return &h, nil
 }
 
@@ -171,13 +167,17 @@ func (h *HotRegionStorage) backgroundDelete() {
 		h.hotRegionLoopWg.Done()
 	}()
 	for {
+		reserverDays := int(h.hotRegionStorageHandler.GetHotRegionsReservedDays())
 		select {
 		case <-ticker.C:
 			if isFirst {
 				ticker.Reset(24 * time.Hour)
 				isFirst = false
 			}
-			h.delete()
+			if reserverDays == 0 {
+				continue
+			}
+			h.delete(reserverDays)
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}
@@ -186,14 +186,21 @@ func (h *HotRegionStorage) backgroundDelete() {
 
 // Write hot_region info into db in the background.
 func (h *HotRegionStorage) backgroundFlush() {
-	ticker := time.NewTicker(h.pullInterval)
+	interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
+	ticker := time.NewTicker(interval)
 	defer func() {
 		ticker.Stop()
 		h.hotRegionLoopWg.Done()
 	}()
 	for {
+		reserverDays := int(h.hotRegionStorageHandler.GetHotRegionsReservedDays())
+		interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
 		select {
 		case <-ticker.C:
+			ticker.Reset(interval)
+			if reserverDays == 0 {
+				continue
+			}
 			if h.hotRegionStorageHandler.IsLeader() {
 				if err := h.pullHotRegionInfo(); err != nil {
 					log.Error("get hot_region stat meet error", errs.ZapError(err))
@@ -288,14 +295,14 @@ func (h *HotRegionStorage) flush() error {
 	return nil
 }
 
-func (h *HotRegionStorage) delete() error {
+func (h *HotRegionStorage) delete(reserverDays int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	db := h.LeveldbKV
 	batch := new(leveldb.Batch)
 	for _, hotRegionType := range HotRegionTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
-		endTime := time.Now().AddDate(0, 0, 0-int(h.remianedDays)).UnixNano() / int64(time.Millisecond)
+		endTime := time.Now().AddDate(0, 0, 0-reserverDays).UnixNano() / int64(time.Millisecond)
 		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
 		iter := db.NewIterator(&util.Range{
 			Start: []byte(startKey), Limit: []byte(endKey)}, nil)

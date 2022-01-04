@@ -526,6 +526,16 @@ func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
+// GetHotRegionsInterval gets interval for PD to store Hot Region information..
+func (o *PersistOptions) GetHotRegionsInterval() time.Duration {
+	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
+}
+
+// GetHotRegionsReservedDays gets days hot region information is kept.
+func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
+	return o.GetScheduleConfig().HotRegionsReservedDays
+}
+
 // AddSchedulerCfg adds the scheduler configurations.
 func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
 	v := o.GetScheduleConfig().Clone()

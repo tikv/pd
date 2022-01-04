@@ -739,7 +739,7 @@ type ScheduleConfig struct {
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
 	// The day of hot regions data to be reserved. 0 means close.
-	HotRegionsReservedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -805,6 +805,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
 	if !meta.IsDefined("leader-schedule-limit") {
 		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}
@@ -868,12 +869,8 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
 	}
 
-	if !meta.IsDefined("hot-regions-write-interval") {
-		adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	}
-
 	if !meta.IsDefined("hot-regions-reserved-days") {
-		adjustInt64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
+		adjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
 	return c.Validate()

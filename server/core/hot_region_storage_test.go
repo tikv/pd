@@ -32,6 +32,8 @@ type MockPackHotRegionInfo struct {
 	isLeader         bool
 	historyHotReads  []HistoryHotRegion
 	historyHotWrites []HistoryHotRegion
+	reservedDays     uint64
+	pullInterval     time.Duration
 }
 
 // PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
@@ -73,6 +75,22 @@ func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Ti
 			m.historyHotReads = append(m.historyHotReads, historyHotRegion)
 		}
 	}
+}
+
+func (m *MockPackHotRegionInfo) GetHotRegionsReservedDays() uint64 {
+	return m.reservedDays
+}
+
+func (m *MockPackHotRegionInfo) SetHotRegionsReservedDays(reservedDays uint64) {
+	m.reservedDays = reservedDays
+}
+
+func (m *MockPackHotRegionInfo) GetHotRegionsInterval() time.Duration {
+	return m.pullInterval
+}
+
+func (m *MockPackHotRegionInfo) SetHotRegionsInterval(interval time.Duration) {
+	m.pullInterval = interval
 }
 
 // ClearHotRegion delete all region cached.
@@ -157,11 +175,11 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 }
 
 func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
-	defaultReaminDay := 7
+	defaultRemainDay := 7
 	defaultDelteData := 30
 	deleteDate := time.Now().AddDate(0, 0, 0)
 	packHotRegionInfo := &MockPackHotRegionInfo{}
-	store, clean, err := newTestHotRegionStorage(10*time.Minute, int64(defaultReaminDay), packHotRegionInfo)
+	store, clean, err := newTestHotRegionStorage(10*time.Minute, uint64(defaultRemainDay), packHotRegionInfo)
 	c.Assert(err, IsNil)
 	defer clean()
 	historyHotRegions := make([]HistoryHotRegion, 0)
@@ -177,14 +195,14 @@ func (t *testHotRegionStorage) TestHotRegionDelete(c *C) {
 	packHotRegionInfo.historyHotReads = historyHotRegions
 	store.pullHotRegionInfo()
 	store.flush()
-	store.delete()
+	store.delete(defaultRemainDay)
 	iter := store.NewIterator(HotRegionTypes,
 		deleteDate.UnixNano()/int64(time.Millisecond),
 		time.Now().UnixNano()/int64(time.Millisecond))
 	num := 0
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		num++
-		c.Assert(reflect.DeepEqual(next, &historyHotRegions[defaultReaminDay-num]), IsTrue)
+		c.Assert(reflect.DeepEqual(next, &historyHotRegions[defaultRemainDay-num]), IsTrue)
 	}
 }
 
@@ -202,10 +220,10 @@ func BenchmarkInsert(b *testing.B) {
 	b.StopTimer()
 }
 
-func BenchmarkInsertAfterMonth(b *testing.B) {
+func BenchmarkInsertAfterManyDays(b *testing.B) {
 	defaultInsertDay := 30
 	packHotRegionInfo := &MockPackHotRegionInfo{}
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, int64(defaultInsertDay), packHotRegionInfo)
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, uint64(defaultInsertDay), packHotRegionInfo)
 	defer clear()
 	if err != nil {
 		b.Fatal(err)
@@ -222,7 +240,7 @@ func BenchmarkDelete(b *testing.B) {
 	defaultInsertDay := 7
 	defaultReaminDay := 7
 	packHotRegionInfo := &MockPackHotRegionInfo{}
-	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, int64(defaultReaminDay), packHotRegionInfo)
+	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, uint64(defaultReaminDay), packHotRegionInfo)
 	defer clear()
 	if err != nil {
 		b.Fatal(err)
@@ -230,7 +248,7 @@ func BenchmarkDelete(b *testing.B) {
 	deleteTime := time.Now().AddDate(0, 0, -14)
 	newTestHotRegions(regionStorage, packHotRegionInfo, 144*defaultInsertDay, 1000, deleteTime)
 	b.ResetTimer()
-	regionStorage.delete()
+	regionStorage.delete(defaultReaminDay)
 	b.StopTimer()
 }
 
@@ -269,8 +287,8 @@ func newTestHotRegions(storage *HotRegionStorage, mock *MockPackHotRegionInfo, c
 }
 
 func newTestHotRegionStorage(pullInterval time.Duration,
-	remianedDays int64,
-	packHotRegionInfo HotRegionStorageHandler) (
+	reservedDays uint64,
+	packHotRegionInfo *MockPackHotRegionInfo) (
 	hotRegionStorage *HotRegionStorage,
 	clear func(), err error) {
 	writePath := "./tmp"
@@ -278,9 +296,11 @@ func newTestHotRegionStorage(pullInterval time.Duration,
 	if err != nil {
 		return nil, nil, err
 	}
+	packHotRegionInfo.pullInterval = pullInterval
+	packHotRegionInfo.reservedDays = reservedDays
 	// delete data in between today and tomrrow
 	hotRegionStorage, err = NewHotRegionsStorage(ctx,
-		writePath, nil, packHotRegionInfo, remianedDays, pullInterval)
+		writePath, nil, packHotRegionInfo)
 	if err != nil {
 		return nil, nil, err
 	}
