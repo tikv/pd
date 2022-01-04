@@ -30,26 +30,14 @@ var _ = Suite(&testRequestContextSuite{})
 type testRequestContextSuite struct {
 }
 
-func (s *testRequestContextSuite) TestSourceInfo(c *C) {
+func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	ctx := context.Background()
-	_, ok := SourceInfoFrom(ctx)
+	_, ok := RequestInfoFrom(ctx)
 	c.Assert(ok, Equals, false)
 
-	ctx = WithSourceInfo(ctx, SourceInfo{})
+	ctx = WithRequestInfo(ctx, RequestInfo{})
 
-	result, ok := SourceInfoFrom(ctx)
+	result, ok := RequestInfoFrom(ctx)
 	c.Assert(result, NotNil)
-	c.Assert(ok, Equals, true)
-}
-
-func (s *testRequestContextSuite) TestServiceLabel(c *C) {
-	ctx := context.Background()
-	_, ok := ServiceLabelFrom(ctx)
-	c.Assert(ok, Equals, false)
-
-	ctx = WithServiceLabel(ctx, "testService")
-
-	result, ok := ServiceLabelFrom(ctx)
-	c.Assert(result, Equals, "testService")
 	c.Assert(ok, Equals, true)
 }

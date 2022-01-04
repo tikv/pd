@@ -21,31 +21,17 @@ import (
 type key int
 
 const (
-	// compoenent is the context key for the request compoenent.
-	sourceInfoKey key = iota
-
-	// serviceLabel is the context key for the request user.
-	serviceLabelKey
+	// requestInfoKey is the context key for the request compoenent.
+	requestInfoKey key = iota
 )
 
-// WithSourceInfo returns a copy of parent in which the user value is set
-func WithSourceInfo(parent context.Context, sourceInfo SourceInfo) context.Context {
-	return context.WithValue(parent, sourceInfoKey, sourceInfo)
+// WithRequestInfo returns a copy of parent in which the user value is set
+func WithRequestInfo(parent context.Context, requestInfo RequestInfo) context.Context {
+	return context.WithValue(parent, requestInfoKey, requestInfo)
 }
 
-// SourceInfoFrom returns the value of the source info key on the ctx
-func SourceInfoFrom(ctx context.Context) (SourceInfo, bool) {
-	sourceInfo, ok := ctx.Value(sourceInfoKey).(SourceInfo)
-	return sourceInfo, ok
-}
-
-// WithServiceLabel returns a copy of parent in which the service label value is set
-func WithServiceLabel(parent context.Context, serviceLabel string) context.Context {
-	return context.WithValue(parent, serviceLabelKey, serviceLabel)
-}
-
-// ServiceLabelFrom returns the value of the service label key on the ctx
-func ServiceLabelFrom(ctx context.Context) (string, bool) {
-	serviceLabel, ok := ctx.Value(serviceLabelKey).(string)
-	return serviceLabel, ok
+// RequestInfoFrom returns the value of the request info key on the ctx
+func RequestInfoFrom(ctx context.Context) (RequestInfo, bool) {
+	requestInfo, ok := ctx.Value(requestInfoKey).(RequestInfo)
+	return requestInfo, ok
 }

@@ -42,11 +42,11 @@ func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request
 		next(w, r)
 	}
 
-	serviceLabel := requestutil.GetServiceLabel(r)
-	r = r.WithContext(requestutil.WithServiceLabel(r.Context(), serviceLabel))
+	requestInfo := requestutil.GetRequestInfo(r)
+	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {
-		w.Header().Add("service-label", serviceLabel)
+		w.Header().Add("service-label", requestInfo.ServiceLabel)
 	})
 
 	// todo: implement getting source info and storing into request.Context
