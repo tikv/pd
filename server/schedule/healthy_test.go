@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package opt
+package schedule
 
 import (
 	"context"
-	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -25,10 +24,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
-
-func TestOpt(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testRegionHealthySuite{})
 

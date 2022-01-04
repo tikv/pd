@@ -26,6 +26,9 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -77,63 +80,10 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 		s.cluster.PutStoreWithLabels(storeID, labels...)
 	}
 	s.regions = []*core.RegionInfo{
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       1,
-				StartKey: []byte(""),
-				EndKey:   []byte("a"),
-				Peers: []*metapb.Peer{
-					{Id: 101, StoreId: 1},
-					{Id: 102, StoreId: 2},
-				},
-			},
-			&metapb.Peer{Id: 101, StoreId: 1},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       2,
-				StartKey: []byte("a"),
-				EndKey:   []byte("t"),
-				Peers: []*metapb.Peer{
-					{Id: 103, StoreId: 1},
-					{Id: 104, StoreId: 4},
-					{Id: 105, StoreId: 5},
-				},
-			},
-			&metapb.Peer{Id: 104, StoreId: 4},
-			core.SetApproximateSize(200),
-			core.SetApproximateKeys(200),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       3,
-				StartKey: []byte("t"),
-				EndKey:   []byte("x"),
-				Peers: []*metapb.Peer{
-					{Id: 106, StoreId: 2},
-					{Id: 107, StoreId: 5},
-					{Id: 108, StoreId: 6},
-				},
-			},
-			&metapb.Peer{Id: 108, StoreId: 6},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       4,
-				StartKey: []byte("x"),
-				EndKey:   []byte(""),
-				Peers: []*metapb.Peer{
-					{Id: 109, StoreId: 4},
-				},
-			},
-			&metapb.Peer{Id: 109, StoreId: 4},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
+		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
+		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		newRegionInfo(4, "x", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
 	for _, region := range s.regions {
@@ -496,9 +446,73 @@ func (s *testMergeCheckerSuite) TestMatchPeers(c *C) {
 	})
 }
 
-var _ = Suite(&testSplitMergeSuite{})
+func (s *testMergeCheckerSuite) TestStoreLimitWithMerge(c *C) {
+	cfg := config.NewTestOptions()
+	tc := mockcluster.NewCluster(s.ctx, cfg)
+	tc.SetMaxMergeRegionSize(2)
+	tc.SetMaxMergeRegionKeys(2)
+	tc.SetSplitMergeInterval(0)
+	regions := []*core.RegionInfo{
+		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
+		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		newRegionInfo(4, "x", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
+	}
 
-type testSplitMergeSuite struct{}
+	for i := uint64(1); i <= 6; i++ {
+		tc.AddLeaderStore(i, 10)
+	}
+
+	for _, region := range regions {
+		tc.PutRegion(region)
+	}
+
+	mc := NewMergeChecker(s.ctx, tc)
+	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
+	oc := schedule.NewOperatorController(s.ctx, tc, stream)
+
+	regions[2] = regions[2].Clone(
+		core.SetPeers([]*metapb.Peer{
+			{Id: 109, StoreId: 2},
+			{Id: 110, StoreId: 3},
+			{Id: 111, StoreId: 6},
+		}),
+		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
+	)
+
+	// set to a small rate to reduce unstable possibility.
+	tc.SetAllStoresLimit(storelimit.AddPeer, 0.0000001)
+	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
+	tc.PutRegion(regions[2])
+	// The size of Region is less or equal than 1MB.
+	for i := 0; i < 50; i++ {
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
+		c.Assert(oc.AddOperator(ops...), IsTrue)
+		for _, op := range ops {
+			oc.RemoveOperator(op)
+		}
+	}
+	regions[2] = regions[2].Clone(
+		core.SetApproximateSize(2),
+		core.SetApproximateKeys(2),
+	)
+	tc.PutRegion(regions[2])
+	// The size of Region is more than 1MB but no more than 20MB.
+	for i := 0; i < 5; i++ {
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
+		c.Assert(oc.AddOperator(ops...), IsTrue)
+		for _, op := range ops {
+			oc.RemoveOperator(op)
+		}
+	}
+	{
+		ops := mc.Check(regions[2])
+		c.Assert(ops, NotNil)
+		c.Assert(oc.AddOperator(ops...), IsFalse)
+	}
+}
 
 func (s *testMergeCheckerSuite) TestCache(c *C) {
 	cfg := config.NewTestOptions()
@@ -514,36 +528,8 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 		s.cluster.PutStoreWithLabels(storeID, labels...)
 	}
 	s.regions = []*core.RegionInfo{
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       2,
-				StartKey: []byte("a"),
-				EndKey:   []byte("t"),
-				Peers: []*metapb.Peer{
-					{Id: 103, StoreId: 1},
-					{Id: 104, StoreId: 4},
-					{Id: 105, StoreId: 5},
-				},
-			},
-			&metapb.Peer{Id: 104, StoreId: 4},
-			core.SetApproximateSize(200),
-			core.SetApproximateKeys(200),
-		),
-		core.NewRegionInfo(
-			&metapb.Region{
-				Id:       3,
-				StartKey: []byte("t"),
-				EndKey:   []byte("x"),
-				Peers: []*metapb.Peer{
-					{Id: 106, StoreId: 2},
-					{Id: 107, StoreId: 5},
-					{Id: 108, StoreId: 6},
-				},
-			},
-			&metapb.Peer{Id: 108, StoreId: 6},
-			core.SetApproximateSize(1),
-			core.SetApproximateKeys(1),
-		),
+		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
+		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
 	}
 
 	for _, region := range s.regions {
@@ -566,4 +552,22 @@ func makeKeyRanges(keys ...string) []interface{} {
 		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
+}
+
+func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader []uint64, peers ...[]uint64) *core.RegionInfo {
+	prs := make([]*metapb.Peer, 0, len(peers))
+	for _, peer := range peers {
+		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
+	}
+	return core.NewRegionInfo(
+		&metapb.Region{
+			Id:       id,
+			StartKey: []byte(startKey),
+			EndKey:   []byte(endKey),
+			Peers:    prs,
+		},
+		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
+		core.SetApproximateSize(size),
+		core.SetApproximateKeys(keys),
+	)
 }
