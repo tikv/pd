@@ -15,7 +15,9 @@
 package audit
 
 import (
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/requestutil"
+	"go.uber.org/zap/zapcore"
 )
 
 type AuditConfig struct {
@@ -41,4 +43,17 @@ func (m *SinkTypeMatcher) MatchType(types []string) bool {
 type Sink interface {
 	ProcessRequest(event requestutil.RequsetEvent) bool
 	TypeMatcher
+}
+
+type MainLogSink struct {
+	TypeMatcher
+}
+
+func (l *MainLogSink) ProcessRequest(event requestutil.RequsetEvent) bool {
+
+	log.Info("Audit Log")
+}
+
+func convertRequestEventToZapFields(event requestutil.RequsetEvent) []zapcore.Field {
+	fields := make([]zapcore.Field)
 }
