@@ -28,12 +28,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	log "github.com/sirupsen/logrus"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -264,7 +264,7 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	regions := rc.ScanRegions(startKey, endKey, -1)
 	replicated := true
 	for _, region := range regions {
-		if !opt.IsRegionReplicated(rc, region) {
+		if !schedule.IsRegionReplicated(rc, region) {
 			replicated = false
 			break
 		}
