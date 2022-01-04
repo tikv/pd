@@ -21,9 +21,25 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
+
+var (
+	// registeredSericeLabel is used to find service which request wants to access
+	registeredSericeLabel *requestutil.RequestSchemaList
+)
+
+func init() {
+	registeredSericeLabel = requestutil.NewRequestSchemaList(3)
+
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "version"}, "GET", "GetPDVersion")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", ""}, "GET", "ShowStore")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "state"}, "POST", "SetStoreState")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "label"}, "POST", "SetStoreLabel")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "debug", "pprof", "profile"}, "", "DebugPprofProfile")
+}
 
 func createStreamingRender() *render.Render {
 	return render.New(render.Options{

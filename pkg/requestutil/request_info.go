@@ -20,26 +20,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
-	"github.com/gorilla/mux"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
-	"go.uber.org/zap"
 )
-
-var (
-	// registeredSericeLabel is used to find service which request wants to access
-	registeredSericeLabel map[requestSchema]string
-)
-
-func init() {
-	registeredSericeLabel = make(map[requestSchema]string)
-
-	if ok := addServiceLabel("/pd/api/v1/version", "GET", "GetPDVersion"); !ok {
-		log.Error("Service Label Repetition", zap.String("URL PATH", "pd/api/v1/version"), zap.String("METHOD", "GET"))
-	}
-}
 
 // RequestInfo holds source information from http.Request
 type RequestInfo struct {
@@ -52,38 +37,66 @@ type RequestInfo struct {
 	BodyParm     string
 }
 
-// RequestSchema identifies http.Reuqest schema info
-type requestSchema struct {
-	path   string
-	method string
+type RequestSchemaList struct {
+	requestSchemas []*RequestSchema
 }
 
-// NewRequestSchema returns a new RequestSchema
-func NewRequestSchema(path string, method string) requestSchema {
-	return requestSchema{path: path, method: method}
+func NewRequestSchemaList(len int) *RequestSchemaList {
+	return &RequestSchemaList{requestSchemas: make([]*RequestSchema, 0, len)}
+}
+
+func (l *RequestSchemaList) match(path string, method string) string {
+	for _, schema := range l.requestSchemas {
+		if schema.match(path, method) {
+			return schema.serviceLabel
+		}
+	}
+	return ""
+}
+
+func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel string) {
+	l.requestSchemas = append(l.requestSchemas,
+		&RequestSchema{paths: paths, method: method, serviceLabel: serviceLabel})
 }
 
 // getServiceLabel returns service label which is defined when register router handle
-func getServiceLabel(r *http.Request) string {
-	schema := NewRequestSchema(r.URL.Path, r.Method)
-	return registeredSericeLabel[schema]
+func (l *RequestSchemaList) getServiceLabel(r *http.Request) string {
+	return l.match(r.URL.Path, r.Method)
 }
 
-// addServiceLabel is used to add service label
-// when request schema has been added, it returns false
-func addServiceLabel(path string, method string, serviceLabel string) bool {
-	result, ok := registeredSericeLabel[NewRequestSchema(path, method)]
-	if ok && result != serviceLabel {
+// RequestSchema identifies http.Reuqest schema info
+type RequestSchema struct {
+	paths        []string
+	method       string
+	serviceLabel string
+}
+
+func (r *RequestSchema) match(path, method string) bool {
+	if len(r.method) > 0 && r.method != method {
 		return false
 	}
-	registeredSericeLabel[NewRequestSchema(path, method)] = serviceLabel
+	paths := strings.Split(strings.Trim(path, "/"), "/")
+	if len(r.paths) != len(paths) {
+		return false
+	}
+	for i := 0; i < len(paths); i++ {
+		if len(r.paths[i]) == 0 {
+			continue
+		}
+		if r.paths[i] != paths[i] {
+			return false
+		}
+	}
 	return true
 }
 
+// AddServiceLabel is used to add service label
+// when request schema has been added, it returns false
+
 // GetRequestInfo returns request info needed from http.Request
-func GetRequestInfo(r *http.Request) RequestInfo {
+func (l *RequestSchemaList) GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
-		ServiceLabel: getServiceLabel(r),
+		ServiceLabel: l.getServiceLabel(r),
 		Method:       fmt.Sprintf("HTTP/%s:%s", r.Method, r.URL.Path),
 		Component:    apiutil.GetComponentNameOnHTTP(r),
 		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
@@ -94,11 +107,9 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 }
 
 func getURLParam(r *http.Request) string {
-	vars := mux.Vars(r)
-
-	buf, err := json.Marshal(vars)
+	buf, err := json.Marshal(r.URL.Query())
 	var param = ""
-	if err != nil {
+	if err == nil {
 		param = string(buf)
 	}
 
@@ -108,7 +119,7 @@ func getURLParam(r *http.Request) string {
 func getBodyParam(r *http.Request) string {
 	buf, err := io.ReadAll(r.Body)
 	var bodyParam = ""
-	if err != nil {
+	if err == nil {
 		bodyParam = string(buf)
 	}
 	r.Body = io.NopCloser(bytes.NewBuffer(buf))

@@ -19,12 +19,14 @@ import (
 	"net/http"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
+	"go.uber.org/zap"
 )
 
 // requestInfoMiddleware is used to gather info from requsetInfo
@@ -38,15 +40,23 @@ func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
 func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if s.s.GetConfig().DisableServiceMiddleware {
+	log.Info("failpoint", zap.Bool("DisableServiceMiddleware", s.s.GetConfig().DisableServiceMiddleware))
+	if s.s.GetDisabledServiceMiddleware() {
 		next(w, r)
+		return
 	}
 
-	requestInfo := requestutil.GetRequestInfo(r)
+	requestInfo := registeredSericeLabel.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {
+		log.Info("failpoint", zap.String("service-label", requestInfo.ServiceLabel))
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
+		w.Header().Add("body-param", requestInfo.BodyParm)
+		w.Header().Add("url-param", requestInfo.URLParam)
+		w.Header().Add("method", requestInfo.Method)
+		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("ip", requestInfo.IP)
 	})
 
 	// todo: implement getting source info and storing into request.Context

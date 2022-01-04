@@ -732,6 +732,16 @@ func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
 }
 
+// SetDisabledServiceMiddleware change DisabledServiceMiddleware
+func (s *Server) SetDisabledServiceMiddleware(status bool) {
+	s.cfg.DisableServiceMiddleware = status
+}
+
+// GetDisabledServiceMiddleware returns DisabledServiceMiddleware status
+func (s *Server) GetDisabledServiceMiddleware() bool {
+	return s.cfg.DisableServiceMiddleware
+}
+
 // GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster

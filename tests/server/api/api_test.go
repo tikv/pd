@@ -15,9 +15,12 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,8 +140,41 @@ func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addSericeInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
+	labels := make(map[string]interface{})
+	labels["testkey"] = "testvalue"
+	data, _ := json.Marshal(labels)
+	resp, err := dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPprofProfile")
+	c.Assert(resp.Header.Get("url-param"), Equals, "{\"force\":[\"true\"]}")
+	c.Assert(resp.Header.Get("body-param"), Equals, "{\"testkey\":\"testvalue\"}")
+	c.Assert(resp.Header.Get("method"), Equals, "HTTP/POST:/pd/api/v1/debug/pprof/profile")
+	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
+	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
+
+	req, err := http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/store/7788", strings.NewReader(""))
+	c.Assert(err, IsNil)
+	req.Header.Set("component", "test")
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
+	c.Assert(resp.Header.Get("service-label"), Equals, "ShowStore")
+	c.Assert(resp.Header.Get("method"), Equals, "HTTP/GET:/pd/api/v1/store/7788")
+	c.Assert(resp.Header.Get("component"), Equals, "test")
+	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
+
+	leader.GetServer().SetDisabledServiceMiddleware(true)
 	header := mustRequestSuccess(c, leader.GetServer())
-	c.Assert(header.Get("service-label"), Equals, "GetPDVersion")
+	c.Assert(header.Get("service-label"), Equals, "")
+	leader.GetConfig().DisableServiceMiddleware = false
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addSericeInfoMiddleware"), IsNil)
 }
 
