@@ -136,7 +136,7 @@ func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
 			EndKey:   tc.endKey,
 			Peers:    tc.originPeers,
 		}, tc.originPeers[0])
-		op, err := CreateSplitRegionOperator("test", region, 0, tc.policy, tc.keys)
+		op, err := CreateSplitRegionOperator("test", region, 0, tc.policy, tc.keys, 6)
 		if tc.expectedError {
 			c.Assert(err, NotNil)
 			continue
