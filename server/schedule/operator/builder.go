@@ -140,7 +140,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	}
 
 	// build flags
-	supportJointConsensus := cluster.IsFeatureSupported(versioninfo.JointConsensus)
+	supportJointConsensus := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
 
 	b.rules = rules
 	b.originPeers = originPeers
