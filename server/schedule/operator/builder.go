@@ -664,46 +664,48 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 
 func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	if len(b.toPromote)+len(b.toDemote) == 0 {
-		// No need to add empty enter / leave joint consensus step if no peer in toPromote and toDemote
-
-		// Transfer Leader
-		if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
-		}
-	} else {
-		// Enter
-		step := ChangePeerV2Enter{
-			PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
-			DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
-		}
-
-		for _, p := range b.toPromote.IDs() {
-			peer := b.toPromote[p]
-			step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
-			b.currentPeers.Set(peer)
-		}
-		b.toPromote = newPeersMap()
-
-		for _, d := range b.toDemote.IDs() {
-			peer := b.toDemote[d]
-			step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
-			b.currentPeers.Set(peer)
-		}
-		b.toDemote = newPeersMap()
-
-		if needEnter {
-			b.steps = append(b.steps, step)
-		}
+		// No need to add empty enter / leave joint consensus step if no peer in `toPromote` and `toDemote`
 
 		// Transfer Leader
 		if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
 			b.execTransferLeader(b.targetLeaderStoreID)
 		}
 
-		// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
-		if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
-			b.steps = append(b.steps, ChangePeerV2Leave(step))
-		}
+		return
+	}
+
+	// Enter
+	step := ChangePeerV2Enter{
+		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
+		DemoteVoters:    make([]DemoteVoter, 0, len(b.toDemote)),
+	}
+
+	for _, p := range b.toPromote.IDs() {
+		peer := b.toPromote[p]
+		step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.currentPeers.Set(peer)
+	}
+	b.toPromote = newPeersMap()
+
+	for _, d := range b.toDemote.IDs() {
+		peer := b.toDemote[d]
+		step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.currentPeers.Set(peer)
+	}
+	b.toDemote = newPeersMap()
+
+	if needEnter {
+		b.steps = append(b.steps, step)
+	}
+
+	// Transfer Leader
+	if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
+		b.execTransferLeader(b.targetLeaderStoreID)
+	}
+
+	// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
+	if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
+		b.steps = append(b.steps, ChangePeerV2Leave(step))
 	}
 }
 
