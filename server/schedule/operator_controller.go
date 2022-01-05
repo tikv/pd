@@ -790,7 +790,7 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 	oc.RLock()
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
-		if !op.CheckTimeout() && !op.CheckSuccess() {
+		if status := op.Status(); operator.IsEndStatus(status) {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
 				op.UnfinishedInfluence(influence, region)

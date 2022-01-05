@@ -82,12 +82,6 @@ func (o *Operator) String() string {
 		stepStrs[i] = o.steps[i].String()
 	}
 	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, steps:[%s])", o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(), o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
-	if o.CheckSuccess() {
-		s += " finished"
-	}
-	if o.CheckTimeout() {
-		s += " timeout"
-	}
 	return s
 }
 
@@ -139,18 +133,6 @@ func (o *Operator) SchedulerKind() OpKind {
 // Status returns operator status.
 func (o *Operator) Status() OpStatus {
 	return o.status.Status()
-}
-
-// CheckAndGetStatus returns operator status after `CheckExpired` and `CheckTimeout`.
-func (o *Operator) CheckAndGetStatus() OpStatus {
-	switch {
-	case o.CheckExpired():
-		return EXPIRED
-	case o.CheckTimeout():
-		return TIMEOUT
-	default:
-		return o.Status()
-	}
 }
 
 // GetReachTimeOf returns the time when operator reaches the given status.
@@ -251,7 +233,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 		return nil
 	}
 	// CheckTimeout will call CheckSuccess first
-	defer func() { _ = o.CheckTimeout() }()
+	defer func() { _ = o.CheckTimeout() || o.CheckExpired() }()
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
