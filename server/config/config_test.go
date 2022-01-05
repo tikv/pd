@@ -194,6 +194,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
+	c.Assert(cfg.Log.Level, Equals, "info")
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
 
@@ -464,7 +465,7 @@ wait-store-timeout = "120s"
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
 
-func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+func (s *testConfigSuite) TestHotHistoryRegionConfig(c *C) {
 	cfgData := `
 [schedule]
 hot-regions-reserved-days= 30
@@ -475,8 +476,14 @@ hot-regions-write-interval= "30m"
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
-	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*30)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 30*time.Minute)
 	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(30))
+	// Verify default value
+	cfg = NewConfig()
+	err = cfg.Adjust(nil, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 10*time.Minute)
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(7))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {
