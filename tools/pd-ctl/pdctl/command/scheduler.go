@@ -54,29 +54,45 @@ func NewSchedulerCommand() *cobra.Command {
 // NewPauseSchedulerCommand returns a command to pause a scheduler.
 func NewPauseSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "pause <scheduler> <delay>",
+		Use:   "pause <scheduler> <delay_seconds>",
 		Short: "pause a scheduler",
-		Run:   pauseOrResumeSchedulerCommandFunc,
+		Run:   pauseSchedulerCommandFunc,
 	}
 	return c
 }
 
-func pauseOrResumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 && len(args) != 1 {
+func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 2 {
+		cmd.Usage()
+		return
+	}
+	delay, err := strconv.ParseInt(args[1], 10, 64)
+	if err != nil || delay <= 0 {
 		cmd.Usage()
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
-	input := make(map[string]interface{})
-	input["delay"] = 0
-	if len(args) == 2 {
-		delay, err := strconv.Atoi(args[1])
-		if err != nil {
-			cmd.Usage()
-			return
-		}
-		input["delay"] = delay
+	input := map[string]interface{}{"delay": delay}
+	postJSON(cmd, path, input)
+}
+
+// NewResumeSchedulerCommand returns a command to resume a scheduler.
+func NewResumeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "resume <scheduler>",
+		Short: "resume a scheduler",
+		Run:   resumeSchedulerCommandFunc,
 	}
+	return c
+}
+
+func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
+		return
+	}
+	path := schedulersPrefix + "/" + args[0]
+	input := map[string]interface{}{"delay": 0}
 	postJSON(cmd, path, input)
 }
 
@@ -87,17 +103,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Short: "show schedulers",
 		Run:   showSchedulerCommandFunc,
 	}
-	c.Flags().String("status", "", "the scheduler status")
-	return c
-}
-
-// NewResumeSchedulerCommand returns a command to resume a scheduler.
-func NewResumeSchedulerCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "resume <scheduler>",
-		Short: "resume a scheduler",
-		Run:   pauseOrResumeSchedulerCommandFunc,
-	}
+	c.Flags().String("status", "", "the scheduler status value can be [paused | disabled]")
 	return c
 }
 

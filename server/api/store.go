@@ -36,56 +36,10 @@ import (
 	"github.com/unrolled/render"
 )
 
-// MetaStore contains meta information about a store which needed to show.
+// MetaStore contains meta information about a store.
 type MetaStore struct {
-	StoreID             uint64               `json:"id,omitempty"`
-	Address             string               `json:"address,omitempty"`
-	Labels              []*metapb.StoreLabel `json:"labels,omitempty"`
-	Version             string               `json:"version,omitempty"`
-	PeerAddress         string               `json:"peer_address,omitempty"`
-	StatusAddress       string               `json:"status_address,omitempty"`
-	GitHash             string               `json:"git_hash,omitempty"`
-	StartTimestamp      int64                `json:"start_timestamp,omitempty"`
-	DeployPath          string               `json:"deploy_path,omitempty"`
-	LastHeartbeat       int64                `json:"last_heartbeat,omitempty"`
-	PhysicallyDestroyed bool                 `json:"physically_destroyed,omitempty"`
-	StateName           string               `json:"state_name"`
-}
-
-// NewMetaStore convert metapb.Store to MetaStore without State
-func NewMetaStore(store *metapb.Store, stateName string) *MetaStore {
-	metaStore := &MetaStore{StateName: stateName}
-	metaStore.StoreID = store.GetId()
-	metaStore.Address = store.GetAddress()
-	metaStore.Labels = store.GetLabels()
-	metaStore.Version = store.GetVersion()
-	metaStore.PeerAddress = store.GetPeerAddress()
-	metaStore.StatusAddress = store.GetStatusAddress()
-	metaStore.GitHash = store.GetGitHash()
-	metaStore.StartTimestamp = store.GetStartTimestamp()
-	metaStore.DeployPath = store.GetDeployPath()
-	metaStore.LastHeartbeat = store.GetLastHeartbeat()
-	metaStore.PhysicallyDestroyed = store.GetPhysicallyDestroyed()
-	return metaStore
-}
-
-// ConvertToMetapbStore convert to metapb.Store
-// For test only.
-func (m *MetaStore) ConvertToMetapbStore() *metapb.Store {
-	metapbStore := &metapb.Store{
-		Id:             m.StoreID,
-		Address:        m.Address,
-		State:          metapb.StoreState(metapb.StoreState_value[m.StateName]),
-		Labels:         m.Labels,
-		Version:        m.Version,
-		PeerAddress:    m.PeerAddress,
-		StatusAddress:  m.StatusAddress,
-		GitHash:        m.GitHash,
-		StartTimestamp: m.StartTimestamp,
-		DeployPath:     m.DeployPath,
-		LastHeartbeat:  m.LastHeartbeat,
-	}
-	return metapbStore
+	*metapb.Store
+	StateName string `json:"state_name"`
 }
 
 // StoreStatus contains status about a store.
@@ -123,7 +77,10 @@ const (
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	s := &StoreInfo{
-		Store: NewMetaStore(store.GetMeta(), store.GetState().String()),
+		Store: &MetaStore{
+			Store:     store.GetMeta(),
+			StateName: store.GetState().String(),
+		},
 		Status: &StoreStatus{
 			Capacity:           typeutil.ByteSize(store.GetCapacity()),
 			Available:          typeutil.ByteSize(store.GetAvailable()),

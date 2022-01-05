@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -115,12 +116,12 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// skip region has down peers or pending peers
-	if !opt.IsRegionHealthy(region) {
+	if !schedule.IsRegionHealthy(region) {
 		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
 	}
 
-	if !opt.IsRegionReplicated(m.cluster, region) {
+	if !schedule.IsRegionReplicated(m.cluster, region) {
 		checkerCounter.WithLabelValues("merge_checker", "abnormal-replica").Inc()
 		return nil
 	}
@@ -176,7 +177,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
 		AllowMerge(m.cluster, region, adjacent) && checkPeerStore(m.cluster, region, adjacent) &&
-		opt.IsRegionHealthy(adjacent) && opt.IsRegionReplicated(m.cluster, adjacent)
+		schedule.IsRegionHealthy(adjacent) && schedule.IsRegionReplicated(m.cluster, adjacent)
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.

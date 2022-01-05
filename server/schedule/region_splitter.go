@@ -166,7 +166,7 @@ func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 	if r.cluster.IsRegionHot(region) {
 		return false
 	}
-	if !opt.IsRegionReplicated(r.cluster, region) {
+	if !IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		return false
 	}
