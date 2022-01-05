@@ -72,7 +72,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 		return nil
 	}
 
-	op, err := operator.CreateSplitRegionOperator(desc, region, 0, pdpb.CheckPolicy_USEKEY, keys)
+	op, err := operator.CreateSplitRegionOperator(desc, region, 0, pdpb.CheckPolicy_USEKEY, keys, c.cluster.GetOpts().GetOperatorTimeFactor())
 	if err != nil {
 		log.Debug("create split region operator failed", errs.ZapError(err))
 		return nil

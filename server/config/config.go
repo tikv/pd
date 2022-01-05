@@ -742,6 +742,15 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays int64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// OperatorTimeFactor is the time factor for operator.
+	// The max duration of one operator step is: multi(region_size, factor)
+	// Default: 6 s/MB
+	OperatorTimeFactor uint64 `toml:"operator-time-factor" json:"operator-time-factor"`
+
+	// MaxRegionSize is the max size of region.
+	// default: 96MB
+	MaxRegionSize uint64 `toml:"max-region-size" json:"max-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -789,6 +798,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsResevervedDays    = 0
+	defaultOperatorTimeFactor          = 6
+	defaultMaxRegionSize               = 96
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -842,6 +853,12 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
+	}
+	if !meta.IsDefined("operator-time-factor") {
+		adjustUint64(&c.OperatorTimeFactor, defaultOperatorTimeFactor)
+	}
+	if !meta.IsDefined("operator-time-factor") {
+		adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

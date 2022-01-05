@@ -334,7 +334,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.cluster.GetOpts().GetOperatorTimeFactor(), b.steps...), nil
 }
 
 // Initialize intermediate states.

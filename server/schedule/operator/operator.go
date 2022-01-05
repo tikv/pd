@@ -55,10 +55,11 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
+	TimeFactor       uint64
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
+func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, factor uint64, steps ...OpStep) *Operator {
 	level := core.NormalPriority
 	if kind&OpAdmin != 0 {
 		level = core.HighPriority
@@ -75,6 +76,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
+		TimeFactor:      factor,
 	}
 }
 
@@ -369,9 +371,12 @@ func (o *Operator) GetAdditionalInfo() string {
 }
 
 // mock region default region size is 96Mb.
-const mockRegionSize = 96 * (1 << 20)
+const (
+	mockRegionSize = 96 * (1 << 20)
+	mockFactor     = 6
+)
 
 // NewTestOperator creates a test operator.
 func NewTestOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator(desc, brief, regionID, regionEpoch, kind, mockRegionSize, steps...)
+	return NewOperator(desc, brief, regionID, regionEpoch, kind, mockRegionSize, mockFactor, steps...)
 }
