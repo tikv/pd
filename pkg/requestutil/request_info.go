@@ -93,9 +93,6 @@ func (r *RequestSchema) match(path, method string) bool {
 	return true
 }
 
-// AddServiceLabel is used to add service label
-// when request schema has been added, it returns false
-
 // GetRequestInfo returns request info needed from http.Request
 func (l *RequestSchemaList) GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{

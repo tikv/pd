@@ -31,22 +31,29 @@ import (
 
 // serviceInfoMiddleware is used to gather info from requsetInfo
 type serviceInfoMiddleware struct {
-	s *server.Server
+	s                     *server.Server
+	registeredSericeLabel *requestutil.RequestSchemaList
 }
 
 func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
-	return &serviceInfoMiddleware{s: s}
+	registeredSericeLabel := requestutil.NewRequestSchemaList(5)
+
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "version"}, "GET", "GetPDVersion")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", ""}, "GET", "ShowStore")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "state"}, "POST", "SetStoreState")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "label"}, "POST", "SetStoreLabel")
+	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "debug", "pprof", "profile"}, "", "DebugPprofProfile")
+	return &serviceInfoMiddleware{s: s, registeredSericeLabel: registeredSericeLabel}
 }
 
 // ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
 func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	log.Info("failpoint", zap.Bool("DisableServiceMiddleware", s.s.GetConfig().DisableServiceMiddleware))
 	if s.s.GetDisabledServiceMiddleware() {
 		next(w, r)
 		return
 	}
 
-	requestInfo := registeredSericeLabel.GetRequestInfo(r)
+	requestInfo := s.registeredSericeLabel.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {
