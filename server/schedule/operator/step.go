@@ -361,6 +361,7 @@ func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
 	return nil
 }
 
+<<<<<<< HEAD
 // DemoteFollower is an OpStep that demotes a region follower peer to learner.
 type DemoteFollower struct {
 	ToStore, PeerID uint64
@@ -402,6 +403,8 @@ func (df DemoteFollower) CheckSafety(region *core.RegionInfo) error {
 // Influence calculates the store difference that current step makes.
 func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
+=======
+>>>>>>> 1c0286c5f (operator: remove empty JointConsensus steps and fix single voter demote bug (#4534))
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
