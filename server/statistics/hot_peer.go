@@ -18,6 +18,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"go.uber.org/zap"
@@ -101,7 +102,7 @@ type HotPeerStat struct {
 	isLeader               bool
 	interval               uint64
 	thresholds             []float64
-	peers                  []uint64
+	peers                  []*metapb.Peer
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag

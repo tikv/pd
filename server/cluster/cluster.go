@@ -177,7 +177,7 @@ func (c *RaftCluster) isInitialized() bool {
 	if c.core.GetRegionCount() > 1 {
 		return true
 	}
-	region := c.core.SearchRegion(nil)
+	region := c.core.GetRegionByKey(nil)
 	return region != nil &&
 		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
@@ -624,6 +624,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
+	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
 }
@@ -774,12 +775,12 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 
 // GetRegionByKey gets regionInfo by region key from cluster.
 func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchRegion(regionKey)
+	return c.core.GetRegionByKey(regionKey)
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
 func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchPrevRegion(regionKey)
+	return c.core.GetPrevRegionByKey(regionKey)
 }
 
 // ScanRegions scans region with start key, until the region contains endKey, or
@@ -1449,19 +1450,6 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 	return c.changedRegions
-}
-
-// IsFeatureSupported checks if the feature is supported by current cluster.
-func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	clusterVersion := *c.opt.GetClusterVersion()
-	minSupportVersion := *versioninfo.MinSupportedVersion(f)
-	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
-	// original logic. But according to Semantic Versioning, specify a version MAJOR.MINOR.PATCH, PATCH is used when you
-	// make backwards compatible bug fixes. In version 5.0 and later, we need to strictly comply.
-	if versioninfo.IsCompatible(minSupportVersion, *versioninfo.MinSupportedVersion(versioninfo.Version4_0)) {
-		return !clusterVersion.LessThan(minSupportVersion)
-	}
-	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
 }
 
 // GetMetaCluster gets meta cluster.

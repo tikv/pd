@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
@@ -134,6 +136,28 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+// GetIPAddrFromHTTPRequest returns http client IP from context.
+// Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
+// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// And both of them have the higher priority than `RemoteAddr`
+func GetIPAddrFromHTTPRequest(r *http.Request) string {
+	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if len(strings.Trim(ips[0], " ")) > 0 {
+		return ips[0]
+	}
+
+	ip := r.Header.Get("X-Real-Ip")
+	if ip != "" {
+		return ip
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return ip
 }
 
 // GetComponentNameOnHTTP returns component name from Request Header

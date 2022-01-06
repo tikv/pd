@@ -70,7 +70,7 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		config.RejectLeader: {{Key: "reject", Value: "leader"}},
 	})
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},
@@ -520,7 +520,7 @@ func (s *testMergeCheckerSuite) TestCache(c *C) {
 	s.cluster.SetMaxMergeRegionSize(2)
 	s.cluster.SetMaxMergeRegionKeys(2)
 	s.cluster.SetSplitMergeInterval(time.Hour)
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 	}

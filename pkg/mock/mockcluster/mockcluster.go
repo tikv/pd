@@ -50,24 +50,24 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID               uint64
-	suspectRegions   map[uint64]struct{}
-	disabledFeatures map[versioninfo.Feature]struct{}
+	ID             uint64
+	suspectRegions map[uint64]struct{}
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:     core.NewBasicCluster(),
-		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(ctx),
-		PersistOptions:   opts,
-		suspectRegions:   map[uint64]struct{}{},
-		disabledFeatures: make(map[versioninfo.Feature]struct{}),
+		BasicCluster:   core.NewBasicCluster(),
+		IDAllocator:    mockid.NewIDAllocator(),
+		HotStat:        statistics.NewHotStat(ctx),
+		PersistOptions: opts,
+		suspectRegions: map[uint64]struct{}{},
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
+	// It should be updated to the latest feature version.
+	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	clus.RegionLabeler, _ = labeler.NewRegionLabeler(core.NewStorage(kv.NewMemoryKV()))
 	return clus
 }
@@ -729,26 +729,6 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
-// DisableFeature marks that these features are not supported in the cluster.
-func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
-	for _, f := range fs {
-		mc.disabledFeatures[f] = struct{}{}
-	}
-}
-
-// EnableFeature marks that these features are supported in the cluster.
-func (mc *Cluster) EnableFeature(fs ...versioninfo.Feature) {
-	for _, f := range fs {
-		delete(mc.disabledFeatures, f)
-	}
-}
-
-// IsFeatureSupported checks if the feature is supported by current cluster.
-func (mc *Cluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	_, ok := mc.disabledFeatures[f]
-	return !ok
-}
-
 // AddSuspectRegions mock method
 func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	for _, id := range ids {
@@ -774,7 +754,7 @@ func (mc *Cluster) ResetSuspectRegions() {
 
 // GetRegionByKey get region by key
 func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return mc.SearchRegion(regionKey)
+	return mc.BasicCluster.GetRegionByKey(regionKey)
 }
 
 // SetStoreLastHeartbeatInterval set the last heartbeat to the target store

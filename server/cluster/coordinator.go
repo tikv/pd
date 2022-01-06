@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
@@ -88,6 +89,10 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
 	}
+}
+
+func (c *coordinator) GetWaitingRegions() []*cache.Item {
+	return c.checkers.GetWaitingRegions()
 }
 
 // patrolRegions is used to scan regions.
