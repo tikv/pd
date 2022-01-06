@@ -512,7 +512,7 @@ func waitLeader(c *C, cli client, leader string) {
 }
 
 func (s *clientTestSuite) TestCloseClient(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 	endpoints := s.runServer(c, cluster)
