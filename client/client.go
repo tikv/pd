@@ -265,6 +265,10 @@ func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
 	tbc.collectedRequestCount++
 }
 
+func (tbc *tsoBatchController) getCollectedRequests() []*tsoRequest {
+	return tbc.collectedRequests[:tbc.collectedRequestCount]
+}
+
 // adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (tbc *tsoBatchController) adjustBestBatchSize() {
 	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
@@ -767,7 +771,7 @@ tsoBatchLoop:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
-					c.finishTSORequest(tbc.collectedRequests[:tbc.collectedRequestCount], 0, 0, 0, errors.WithStack(err))
+					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					retryTimeConsuming = 0
 					continue tsoBatchLoop
 				}
@@ -1024,7 +1028,7 @@ func (c *client) tryConnectWithProxy(
 }
 
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range tbc.collectedRequests[:tbc.collectedRequestCount] {
+	for _, req := range tbc.getCollectedRequests() {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
@@ -1038,7 +1042,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		defer span.Finish()
 	}
 	start := time.Now()
-	requests := tbc.collectedRequests[:tbc.collectedRequestCount]
+	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(),
