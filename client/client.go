@@ -278,17 +278,6 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) revokeTSORequest(err error) {
-	for i := 0; i < tbc.collectedRequestCount; i++ {
-		select {
-		// The TSO request in tbc.collectedRequests may be finished by the time we get here,
-		// so using select to prevent from the blocking.
-		case tbc.collectedRequests[i].done <- err:
-		default:
-		}
-	}
-}
-
 func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
@@ -778,7 +767,7 @@ tsoBatchLoop:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
-					tbc.revokeTSORequest(errors.WithStack(err))
+					c.finishTSORequest(tbc.collectedRequests[:tbc.collectedRequestCount], 0, 0, 0, errors.WithStack(err))
 					retryTimeConsuming = 0
 					continue tsoBatchLoop
 				}
@@ -1140,7 +1129,6 @@ func (c *client) Close() {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
 			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokeTSORequest(tsoErr)
 			dispatcher.tsoBatchController.revokePendingTSORequest(tsoErr)
 			dispatcher.dispatcherCancel()
 		}
