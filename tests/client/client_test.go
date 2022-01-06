@@ -511,6 +511,17 @@ func waitLeader(c *C, cli client, leader string) {
 	})
 }
 
+func (s *clientTestSuite) TestCloseClient(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+	endpoints := s.runServer(c, cluster)
+	cli := setupCli(c, s.ctx, endpoints)
+	cli.GetTSAsync(context.TODO())
+	time.Sleep(time.Second)
+	cli.Close()
+}
+
 var _ = Suite(&testClientSuite{})
 
 type idAllocator struct {
