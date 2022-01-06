@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
+	"go.uber.org/zap"
 )
 
 // HotRegionStorage is used to storage hot region info,
@@ -43,12 +44,15 @@ import (
 type HotRegionStorage struct {
 	*kv.LeveldbKV
 	encryptionKeyManager    *encryptionkm.KeyManager
-	mu                      sync.RWMutex
 	hotRegionLoopWg         sync.WaitGroup
 	batchHotInfo            map[string]*HistoryHotRegion
 	hotRegionInfoCtx        context.Context
 	hotRegionInfoCancel     context.CancelFunc
 	hotRegionStorageHandler HotRegionStorageHandler
+
+	curReservedDays uint64
+	curInterval     time.Duration
+	mu              sync.RWMutex
 }
 
 // HistoryHotRegions wraps historyHotRegion
@@ -144,6 +148,8 @@ func NewHotRegionsStorage(
 		hotRegionInfoCtx:        hotRegionInfoCtx,
 		hotRegionInfoCancel:     hotRegionInfoCancle,
 		hotRegionStorageHandler: hotRegionStorageHandler,
+		curReservedDays:         hotRegionStorageHandler.GetHotRegionsReservedDays(),
+		curInterval:             hotRegionStorageHandler.GetHotRegionsInterval(),
 	}
 	h.hotRegionLoopWg.Add(2)
 	go h.backgroundFlush()
@@ -166,18 +172,20 @@ func (h *HotRegionStorage) backgroundDelete() {
 		ticker.Stop()
 		h.hotRegionLoopWg.Done()
 	}()
+	h.updateReservedDays()
 	for {
-		reserverDays := int(h.hotRegionStorageHandler.GetHotRegionsReservedDays())
 		select {
 		case <-ticker.C:
 			if isFirst {
 				ticker.Reset(24 * time.Hour)
 				isFirst = false
 			}
-			if reserverDays == 0 {
+			if h.curReservedDays == 0 {
+				log.Warn(`hot region reserved days is 0, if previous reserved days is non 0,
+				 there may be residual hot regions, you can remove it manually, [pd-dir]/data/hot-region.`)
 				continue
 			}
-			h.delete(reserverDays)
+			h.delete(int(h.curReservedDays))
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}
@@ -193,12 +201,12 @@ func (h *HotRegionStorage) backgroundFlush() {
 		h.hotRegionLoopWg.Done()
 	}()
 	for {
-		reserverDays := int(h.hotRegionStorageHandler.GetHotRegionsReservedDays())
-		interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
+		h.updateReservedDays()
+		h.updateInterval()
 		select {
 		case <-ticker.C:
-			ticker.Reset(interval)
-			if reserverDays == 0 {
+			ticker.Reset(h.curInterval)
+			if h.curReservedDays == 0 {
 				continue
 			}
 			if h.hotRegionStorageHandler.IsLeader() {
@@ -277,6 +285,30 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 	return nil
 }
 
+func (h *HotRegionStorage) updateInterval() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
+	if interval != h.curInterval {
+		log.Info("hot region write interval changed",
+			zap.Duration("previous-interval", h.curInterval),
+			zap.Duration("new-interval", interval))
+		h.curInterval = interval
+	}
+}
+
+func (h *HotRegionStorage) updateReservedDays() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	reservedDays := h.hotRegionStorageHandler.GetHotRegionsReservedDays()
+	if reservedDays != h.curReservedDays {
+		log.Info("hot region reserved days changed",
+			zap.Uint64("previous-reserved-days", h.curReservedDays),
+			zap.Uint64("new-reserved-days", reservedDays))
+		h.curReservedDays = reservedDays
+	}
+}
+
 func (h *HotRegionStorage) flush() error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -295,14 +327,14 @@ func (h *HotRegionStorage) flush() error {
 	return nil
 }
 
-func (h *HotRegionStorage) delete(reserverDays int) error {
+func (h *HotRegionStorage) delete(reservedDays int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	db := h.LeveldbKV
 	batch := new(leveldb.Batch)
 	for _, hotRegionType := range HotRegionTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
-		endTime := time.Now().AddDate(0, 0, 0-reserverDays).UnixNano() / int64(time.Millisecond)
+		endTime := time.Now().AddDate(0, 0, 0-reservedDays).UnixNano() / int64(time.Millisecond)
 		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)
 		iter := db.NewIterator(&util.Range{
 			Start: []byte(startKey), Limit: []byte(endKey)}, nil)
