@@ -361,50 +361,6 @@ func (sr SplitRegion) CheckSafety(region *core.RegionInfo) error {
 	return nil
 }
 
-<<<<<<< HEAD
-// DemoteFollower is an OpStep that demotes a region follower peer to learner.
-type DemoteFollower struct {
-	ToStore, PeerID uint64
-}
-
-func (df DemoteFollower) String() string {
-	return fmt.Sprintf("demote follower peer %v on store %v to learner", df.PeerID, df.ToStore)
-}
-
-// ConfVerChanged returns the delta value for version increased by this step.
-func (df DemoteFollower) ConfVerChanged(region *core.RegionInfo) uint64 {
-	peer := region.GetStoreLearner(df.ToStore)
-	return typeutil.BoolToUint64(peer.GetId() == df.PeerID)
-}
-
-// IsFinish checks if current step is finished.
-func (df DemoteFollower) IsFinish(region *core.RegionInfo) bool {
-	if peer := region.GetStoreLearner(df.ToStore); peer != nil {
-		if peer.GetId() != df.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", df.String()), zap.Uint64("obtain-learner", peer.GetId()))
-		}
-		return peer.GetId() == df.PeerID
-	}
-	return false
-}
-
-// CheckSafety checks if the step meets the safety properties.
-func (df DemoteFollower) CheckSafety(region *core.RegionInfo) error {
-	peer := region.GetStorePeer(df.ToStore)
-	if peer.GetId() != df.PeerID {
-		return errors.New("peer does not exist")
-	}
-	if peer.GetId() == region.GetLeader().GetId() {
-		return errors.New("cannot demote leader peer")
-	}
-	return nil
-}
-
-// Influence calculates the store difference that current step makes.
-func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
-
-=======
->>>>>>> 1c0286c5f (operator: remove empty JointConsensus steps and fix single voter demote bug (#4534))
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
