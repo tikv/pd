@@ -280,7 +280,12 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 
 func (tbc *tsoBatchController) revokeTSORequest(err error) {
 	for i := 0; i < tbc.collectedRequestCount; i++ {
-		tbc.collectedRequests[i].done <- err
+		select {
+		// The TSO request in tbc.collectedRequests may be finished by the time we get here,
+		// so using select to prevent from the blocking.
+		case tbc.collectedRequests[i].done <- err:
+		default:
+		}
 	}
 }
 
@@ -292,7 +297,6 @@ func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
 }
 
 type tsoDispatcher struct {
-	dispatcherCtx      context.Context
 	dispatcherCancel   context.CancelFunc
 	tsoBatchController *tsoBatchController
 }
@@ -662,7 +666,6 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:    dispatcherCtx,
 		dispatcherCancel: dispatcherCancel,
 		tsoBatchController: newTSOBatchController(
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
