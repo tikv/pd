@@ -57,7 +57,7 @@ func (t *checkPeerTask) taskType() flowItemTaskKind {
 func (t *checkPeerTask) runTask(cache *hotPeerCache) {
 	stat := cache.checkPeerFlow(t.peerInfo, t.regionInfo)
 	if stat != nil {
-		updateStat(cache, stat)
+		cache.updateStat(stat)
 	}
 }
 
@@ -79,7 +79,7 @@ func (t *checkExpiredTask) taskType() flowItemTaskKind {
 func (t *checkExpiredTask) runTask(cache *hotPeerCache) {
 	expiredStats := cache.collectExpiredItems(t.region)
 	for _, stat := range expiredStats {
-		updateStat(cache, stat)
+		cache.updateStat(stat)
 	}
 }
 
@@ -105,7 +105,7 @@ func (t *collectUnReportedPeerTask) taskType() flowItemTaskKind {
 func (t *collectUnReportedPeerTask) runTask(cache *hotPeerCache) {
 	stats := cache.checkColdPeer(t.storeID, t.regions, t.interval)
 	for _, stat := range stats {
-		updateStat(cache, stat)
+		cache.updateStat(stat)
 	}
 }
 
