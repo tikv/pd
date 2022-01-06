@@ -139,12 +139,14 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	}
 
 	// build flags
+	supportJointConsensus := cluster.IsFeatureSupported(versioninfo.JointConsensus)
+
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.useJointConsensus = cluster.IsFeatureSupported(versioninfo.JointConsensus) && cluster.GetOpts().IsUseJointConsensus()
+	b.useJointConsensus = supportJointConsensus && cluster.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
 }
