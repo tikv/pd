@@ -30,7 +30,6 @@ import (
 const (
 	RedirectorHeader    = "PD-Redirector"
 	AllowFollowerHandle = "PD-Allow-follower-handle"
-	FollowerHandle      = "PD-Follower-handle"
 )
 
 const (
@@ -90,9 +89,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
 	isLeader := h.s.GetMember().IsLeader()
 	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) {
-		if !isLeader {
-			w.Header().Add(FollowerHandle, "true")
-		}
 		next(w, r)
 		return
 	}
