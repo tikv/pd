@@ -160,7 +160,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	checkFn := func(id uint64) error {
+	checkStoreStateFn := func(id uint64) error {
 		store := oc.cluster.GetStore(id)
 		if store == nil {
 			return errors.New("target store does not exist")
@@ -171,7 +171,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 		return nil
 	}
 
-	err := step.CheckInProgress(checkFn, region)
+	err := step.CheckInProgress(checkStoreStateFn, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
