@@ -40,6 +40,8 @@ type MockPackHotRegionInfo struct {
 
 // PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
 func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	result := make([]HistoryHotRegion, len(m.historyHotReads))
 	copy(result, m.historyHotReads)
 	return result, nil
@@ -47,9 +49,25 @@ func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion,
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
 func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	result := make([]HistoryHotRegion, len(m.historyHotWrites))
 	copy(result, m.historyHotWrites)
 	return result, nil
+}
+
+func (m *MockPackHotRegionInfo) SetHistoryHotReadRegions(historyHotReads []HistoryHotRegion) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.historyHotReads = make([]HistoryHotRegion, len(historyHotReads))
+	copy(m.historyHotReads, historyHotReads)
+}
+
+func (m *MockPackHotRegionInfo) SetHistoryHotWriteRegions(historyHotWrites []HistoryHotRegion) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.historyHotWrites = make([]HistoryHotRegion, len(historyHotWrites))
+	copy(m.historyHotReads, historyHotWrites)
 }
 
 // IsLeader return isLeader.
@@ -266,7 +284,7 @@ func (t *testHotRegionStorage) TestHotRegionConfigChange(c *C) {
 			UpdateTime: now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 	}
-	packHotRegionInfo.historyHotReads = historyHotRegions[:1]
+	packHotRegionInfo.SetHistoryHotReadRegions(historyHotRegions[:1])
 	// wait for 300ms, three times as previous interval
 	time.Sleep(300 * time.Millisecond)
 	// reserved days is 0, record 0 hot regions
@@ -286,7 +304,7 @@ func (t *testHotRegionStorage) TestHotRegionConfigChange(c *C) {
 	time.Sleep(300 * time.Millisecond)
 
 	// add one hot region
-	packHotRegionInfo.historyHotReads = historyHotRegions[:2]
+	packHotRegionInfo.SetHistoryHotReadRegions(historyHotRegions[:2])
 	// wait for 300ms
 	time.Sleep(300 * time.Millisecond)
 	// interval change to 1s, 600ms <1s, still record 1 hot regions
@@ -301,7 +319,7 @@ func (t *testHotRegionStorage) TestHotRegionConfigChange(c *C) {
 	t.checkConfigChangeResult(now, store, historyHotRegions, 2, c)
 
 	// add another one hot region
-	packHotRegionInfo.historyHotReads = historyHotRegions[:3]
+	packHotRegionInfo.SetHistoryHotReadRegions(historyHotRegions[:3])
 	// wait for 300ms
 	time.Sleep(300 * time.Millisecond)
 	// reserved days change to 0, still record 2 hot regions
