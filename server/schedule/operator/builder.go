@@ -689,7 +689,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 		// Transfer Leader
 		if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 		}
 
 		return
