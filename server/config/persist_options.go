@@ -526,7 +526,7 @@ func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
-// GetHotRegionsInterval gets interval for PD to store Hot Region information..
+// GetHotRegionsInterval gets interval for PD to store Hot Region information.
 func (o *PersistOptions) GetHotRegionsInterval() time.Duration {
 	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
 }
