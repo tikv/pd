@@ -468,6 +468,7 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 	}
 }
 
+// See issue #4510
 func (t *testHotPeerCache) TestCacheInherit(c *C) {
 	cache := NewHotPeerCache(Read)
 	region := buildRegion(Read, 3, 10)
