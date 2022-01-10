@@ -89,11 +89,11 @@ func (m *MockPackHotRegionInfo) SetHotRegionsReservedDays(reservedDays uint64) {
 	m.reservedDays = reservedDays
 }
 
-func (m *MockPackHotRegionInfo) GetHotRegionsInterval() time.Duration {
+func (m *MockPackHotRegionInfo) GetHotRegionsWriteInterval() time.Duration {
 	return m.pullInterval
 }
 
-func (m *MockPackHotRegionInfo) SetHotRegionsInterval(interval time.Duration) {
+func (m *MockPackHotRegionInfo) SetHotRegionsWriteInterval(interval time.Duration) {
 	m.pullInterval = interval
 }
 

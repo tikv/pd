@@ -191,9 +191,9 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	return c.GetHotReadRegions()
 }
 
-// GetHotRegionsInterval gets interval for PD to store Hot Region information..
-func (h *Handler) GetHotRegionsInterval() time.Duration {
-	return h.opt.GetHotRegionsInterval()
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
+	return h.opt.GetHotRegionsWriteInterval()
 }
 
 //  GetHotRegionsReservedDays gets days hot region information is kept.

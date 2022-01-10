@@ -92,8 +92,8 @@ type HotRegionStorageHandler interface {
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
 	// IsLeader return true means this server is leader.
 	IsLeader() bool
-	// GetHotRegionInterval gets interval for PD to store Hot Region information..
-	GetHotRegionsInterval() time.Duration
+	// GetHotRegionWriteInterval gets interval for PD to store Hot Region information..
+	GetHotRegionsWriteInterval() time.Duration
 	// GetHotRegionsReservedDays gets days hot region information is kept.
 	GetHotRegionsReservedDays() uint64
 }
@@ -149,7 +149,7 @@ func NewHotRegionsStorage(
 		hotRegionInfoCancel:     hotRegionInfoCancle,
 		hotRegionStorageHandler: hotRegionStorageHandler,
 		curReservedDays:         hotRegionStorageHandler.GetHotRegionsReservedDays(),
-		curInterval:             hotRegionStorageHandler.GetHotRegionsInterval(),
+		curInterval:             hotRegionStorageHandler.GetHotRegionsWriteInterval(),
 	}
 	h.hotRegionLoopWg.Add(2)
 	go h.backgroundFlush()
@@ -172,20 +172,21 @@ func (h *HotRegionStorage) backgroundDelete() {
 		ticker.Stop()
 		h.hotRegionLoopWg.Done()
 	}()
-	h.updateReservedDays()
 	for {
 		select {
 		case <-ticker.C:
+			h.updateReservedDays()
+			curReservedDays := h.getCurReservedDays()
 			if isFirst {
 				ticker.Reset(24 * time.Hour)
 				isFirst = false
 			}
-			if h.curReservedDays == 0 {
+			if curReservedDays == 0 {
 				log.Warn(`hot region reserved days is 0, if previous reserved days is non 0,
 				 there may be residual hot regions, you can remove it manually, [pd-dir]/data/hot-region.`)
 				continue
 			}
-			h.delete(int(h.curReservedDays))
+			h.delete(int(curReservedDays))
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}
@@ -194,19 +195,19 @@ func (h *HotRegionStorage) backgroundDelete() {
 
 // Write hot_region info into db in the background.
 func (h *HotRegionStorage) backgroundFlush() {
-	interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
+	interval := h.getCurInterval()
 	ticker := time.NewTicker(interval)
 	defer func() {
 		ticker.Stop()
 		h.hotRegionLoopWg.Done()
 	}()
 	for {
-		h.updateReservedDays()
-		h.updateInterval()
 		select {
 		case <-ticker.C:
-			ticker.Reset(h.curInterval)
-			if h.curReservedDays == 0 {
+			h.updateInterval()
+			h.updateReservedDays()
+			ticker.Reset(h.getCurInterval())
+			if h.getCurReservedDays() == 0 {
 				continue
 			}
 			if h.hotRegionStorageHandler.IsLeader() {
@@ -288,13 +289,19 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 func (h *HotRegionStorage) updateInterval() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	interval := h.hotRegionStorageHandler.GetHotRegionsInterval()
+	interval := h.hotRegionStorageHandler.GetHotRegionsWriteInterval()
 	if interval != h.curInterval {
 		log.Info("hot region write interval changed",
 			zap.Duration("previous-interval", h.curInterval),
 			zap.Duration("new-interval", interval))
 		h.curInterval = interval
 	}
+}
+
+func (h *HotRegionStorage) getCurInterval() time.Duration {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.curInterval
 }
 
 func (h *HotRegionStorage) updateReservedDays() {
@@ -307,6 +314,12 @@ func (h *HotRegionStorage) updateReservedDays() {
 			zap.Uint64("new-reserved-days", reservedDays))
 		h.curReservedDays = reservedDays
 	}
+}
+
+func (h *HotRegionStorage) getCurReservedDays() uint64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.curReservedDays
 }
 
 func (h *HotRegionStorage) flush() error {
