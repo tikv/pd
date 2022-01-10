@@ -26,11 +26,13 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
@@ -62,7 +64,7 @@ type coordinator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	cluster         *RaftCluster
-	checkers        *schedule.CheckerController
+	checkers        *checker.Controller
 	regionScatterer *schedule.RegionScatterer
 	regionSplitter  *schedule.RegionSplitter
 	schedulers      map[string]*scheduleController
@@ -79,7 +81,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
-		checkers:        schedule.NewCheckerController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      make(map[string]*scheduleController),
@@ -87,6 +89,10 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
 	}
+}
+
+func (c *coordinator) GetWaitingRegions() []*cache.Item {
+	return c.checkers.GetWaitingRegions()
 }
 
 // patrolRegions is used to scan regions.

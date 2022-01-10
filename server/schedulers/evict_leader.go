@@ -280,7 +280,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges 
 	ops := make([]*operator.Operator, 0, len(storeRanges))
 	for id, ranges := range storeRanges {
 		var filters []filter.Filter
-		region := cluster.RandLeaderRegion(id, ranges, opt.IsRegionHealthy)
+		region := cluster.RandLeaderRegion(id, ranges, schedule.IsRegionHealthy)
 		if region == nil {
 			// try to pick unhealthy region
 			region = cluster.RandLeaderRegion(id, ranges)

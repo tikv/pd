@@ -33,8 +33,8 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
@@ -1001,30 +1001,30 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		regionKey := []byte{byte(i)}
 
 		c.Assert(cache.GetRegion(i), IsNil)
-		c.Assert(cache.SearchRegion(regionKey), IsNil)
+		c.Assert(cache.GetRegionByKey(regionKey), IsNil)
 		checkRegions(c, cache, regions[0:i])
 
 		cache.SetRegion(region)
 		checkRegion(c, cache.GetRegion(i), region)
-		checkRegion(c, cache.SearchRegion(regionKey), region)
+		checkRegion(c, cache.GetRegionByKey(regionKey), region)
 		checkRegions(c, cache, regions[0:(i+1)])
 		// previous region
 		if i == 0 {
-			c.Assert(cache.SearchPrevRegion(regionKey), IsNil)
+			c.Assert(cache.GetPrevRegionByKey(regionKey), IsNil)
 		} else {
-			checkRegion(c, cache.SearchPrevRegion(regionKey), regions[i-1])
+			checkRegion(c, cache.GetPrevRegionByKey(regionKey), regions[i-1])
 		}
 		// Update leader to peer np-1.
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
 		cache.SetRegion(newRegion)
 		checkRegion(c, cache.GetRegion(i), newRegion)
-		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
+		checkRegion(c, cache.GetRegionByKey(regionKey), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
 
 		cache.RemoveRegion(region)
 		c.Assert(cache.GetRegion(i), IsNil)
-		c.Assert(cache.SearchRegion(regionKey), IsNil)
+		c.Assert(cache.GetRegionByKey(regionKey), IsNil)
 		checkRegions(c, cache, regions[0:i])
 
 		// Reset leader to peer 0.
@@ -1033,14 +1033,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 		cache.SetRegion(newRegion)
 		checkRegion(c, cache.GetRegion(i), newRegion)
 		checkRegions(c, cache, regions[0:(i+1)])
-		checkRegion(c, cache.SearchRegion(regionKey), newRegion)
+		checkRegion(c, cache.GetRegionByKey(regionKey), newRegion)
 	}
 
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
 
 		c.Assert(region.GetStorePeer(i), NotNil)
@@ -1056,14 +1056,14 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy)
+			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
+		c.Assert(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy), IsNil)
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, opt.IsRegionHealthy), IsNil)
+		c.Assert(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy), IsNil)
 	}
 }
 

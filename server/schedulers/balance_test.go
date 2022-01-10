@@ -602,7 +602,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -640,7 +640,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -705,7 +705,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -766,7 +766,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetTolerantSizeRatio(1)
 	tc.SetRegionScheduleLimit(1)
 	tc.SetRegionScoreFormulaVersion("v1")
@@ -845,7 +845,7 @@ func (s *testBalanceRegionSchedulerSuite) TestStoreWeight(c *C) {
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	// TODO: enable placementrules
 	tc.SetPlacementRuleEnabled(false)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -873,7 +873,7 @@ func (s *testBalanceRegionSchedulerSuite) TestReplacePendingRegion(c *C) {
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -889,7 +889,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	// TODO: enable placementrules
 	tc.SetEnablePlacementRules(false)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	stream := hbstream.NewTestHeartbeatStreams(s.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(s.ctx, tc, stream)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -938,7 +938,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mo
 func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -955,7 +955,7 @@ func (s *testBalanceRegionSchedulerSuite) TestShouldNotBalance(c *C) {
 func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	oc := schedule.NewOperatorController(s.ctx, nil, nil)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewBuilder().WithMemoryBackend().Build(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -1058,7 +1058,7 @@ func (s *testScatterRangeSuite) TestBalance(c *C) {
 	// TODO: enable palcementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	// range cluster use a special tolerant ratio, cluster opt take no impact
 	tc.SetTolerantSizeRatio(10000)
 	// Add stores 1,2,3,4,5.
@@ -1122,7 +1122,7 @@ func (s *testScatterRangeSuite) TestBalanceLeaderLimit(c *C) {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetTolerantSizeRatio(2.5)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)

@@ -158,6 +158,10 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*o
 	defer h.Unlock()
 
 	h.prepareForBalance(typ, cluster)
+	// it can not move earlier to support to use api and metrics.
+	if h.conf.IsForbidRWType(typ) {
+		return nil
+	}
 
 	switch typ {
 	case statistics.Read:
@@ -650,12 +654,12 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		}
 	}
 
-	if !opt.IsRegionHealthyAllowPending(region) {
+	if !schedule.IsRegionHealthyAllowPending(region) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
 		return false
 	}
 
-	if !opt.IsRegionReplicated(bs.cluster, region) {
+	if !schedule.IsRegionReplicated(bs.cluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "abnormal-replica").Inc()
 		return false

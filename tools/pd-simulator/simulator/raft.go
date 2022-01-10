@@ -280,11 +280,11 @@ func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	return r.regionsInfo.SetRegion(region)
 }
 
-// SearchRegion searches the RegionInfo from regionTree
-func (r *RaftEngine) SearchRegion(regionKey []byte) *core.RegionInfo {
+// GetRegionByKey searches the RegionInfo from regionTree
+func (r *RaftEngine) GetRegionByKey(regionKey []byte) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionsInfo.SearchRegion(regionKey)
+	return r.regionsInfo.GetRegionByKey(regionKey)
 }
 
 // BootstrapRegion gets a region to construct bootstrap info.

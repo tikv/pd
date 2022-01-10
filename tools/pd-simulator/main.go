@@ -25,7 +25,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -114,7 +113,7 @@ func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*serv
 		log.Fatal("setup logger error", zap.Error(err))
 	}
 
-	err = logutil.InitLogger(&simConfig.ServerConfig.Log)
+	simConfig.ServerConfig.SetupLogger()
 	if err != nil {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}

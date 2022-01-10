@@ -27,9 +27,13 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
+
+// HeartbeatStream is an interface.
+type HeartbeatStream interface {
+	Send(*pdpb.RegionHeartbeatResponse) error
+}
 
 const (
 	heartbeatStreamKeepAliveInterval = time.Minute
@@ -38,7 +42,7 @@ const (
 
 type streamUpdate struct {
 	storeID uint64
-	stream  opt.HeartbeatStream
+	stream  HeartbeatStream
 }
 
 // HeartbeatStreams is the bridge of communication with TIKV instance.
@@ -47,7 +51,7 @@ type HeartbeatStreams struct {
 	hbStreamCtx    context.Context
 	hbStreamCancel context.CancelFunc
 	clusterID      uint64
-	streams        map[uint64]opt.HeartbeatStream
+	streams        map[uint64]HeartbeatStream
 	msgCh          chan *pdpb.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
 	storeInformer  core.StoreSetInformer
@@ -71,7 +75,7 @@ func newHbStreams(ctx context.Context, clusterID uint64, storeInformer core.Stor
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
-		streams:        make(map[uint64]opt.HeartbeatStream),
+		streams:        make(map[uint64]HeartbeatStream),
 		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		storeInformer:  storeInformer,
@@ -158,7 +162,7 @@ func (s *HeartbeatStreams) Close() {
 }
 
 // BindStream binds a stream with a specified store.
-func (s *HeartbeatStreams) BindStream(storeID uint64, stream opt.HeartbeatStream) {
+func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 	update := streamUpdate{
 		storeID: storeID,
 		stream:  stream,

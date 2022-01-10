@@ -136,13 +136,13 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
-			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
+			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLeader) {
-			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
+			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLearner) {
-			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), opt.IsRegionHealthy, opt.ReplicatedRegion(cluster))
+			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
 		}
 		if region != nil {
 			return region, region.GetStorePeer(source.GetID())
