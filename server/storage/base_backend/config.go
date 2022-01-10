@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,28 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package base
+package backend
 
 import (
 	"encoding/json"
 	"strings"
 
 	"github.com/tikv/pd/pkg/errs"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// ConfigStorage defines the storage operations on the config.
-type ConfigStorage interface {
-	LoadConfig(cfg interface{}) (bool, error)
-	SaveConfig(cfg interface{}) error
-	LoadAllScheduleConfig() ([]string, []string, error)
-	SaveScheduleConfig(scheduleName string, data []byte) error
-	RemoveScheduleConfig(scheduleName string) error
-}
+var _ storage.ConfigStorage = (*BaseBackend)(nil)
 
 // LoadConfig loads config from configPath then unmarshal it to cfg.
-func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
-	value, err := s.Load(configPath)
+func (bb *BaseBackend) LoadConfig(cfg interface{}) (bool, error) {
+	value, err := bb.Load(configPath)
 	if err != nil {
 		return false, err
 	}
@@ -48,18 +42,18 @@ func (s *Storage) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // SaveConfig stores marshallable cfg to the configPath.
-func (s *Storage) SaveConfig(cfg interface{}) error {
+func (bb *BaseBackend) SaveConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	return s.Save(configPath, string(value))
+	return bb.Save(configPath, string(value))
 }
 
 // LoadAllScheduleConfig loads all schedulers' config.
-func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
+func (bb *BaseBackend) LoadAllScheduleConfig() ([]string, []string, error) {
 	prefix := customScheduleConfigPath + "/"
-	keys, values, err := s.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
+	keys, values, err := bb.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
 	for i, key := range keys {
 		keys[i] = strings.TrimPrefix(key, prefix)
 	}
@@ -67,11 +61,11 @@ func (s *Storage) LoadAllScheduleConfig() ([]string, []string, error) {
 }
 
 // SaveScheduleConfig saves the config of scheduler.
-func (s *Storage) SaveScheduleConfig(scheduleName string, data []byte) error {
-	return s.Save(scheduleConfigPath(scheduleName), string(data))
+func (bb *BaseBackend) SaveScheduleConfig(scheduleName string, data []byte) error {
+	return bb.Save(scheduleConfigPath(scheduleName), string(data))
 }
 
 // RemoveScheduleConfig removes the config of scheduler.
-func (s *Storage) RemoveScheduleConfig(scheduleName string) error {
-	return s.Remove(scheduleConfigPath(scheduleName))
+func (bb *BaseBackend) RemoveScheduleConfig(scheduleName string) error {
+	return bb.Remove(scheduleConfigPath(scheduleName))
 }

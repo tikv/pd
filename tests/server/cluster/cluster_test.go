@@ -648,19 +648,19 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetEtcdStorage(), svr.GetBasicCluster())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetNewStorage(), svr.GetBasicCluster())
 	raftCluster, err := rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
-	storageV2 := rc.GetStorageV2()
+	newStorage := rc.GetNewStorage()
 	basicCluster := rc.GetCacheCluster()
 	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	c.Assert(storageV2.SaveMeta(meta), IsNil)
+	c.Assert(newStorage.SaveMeta(meta), IsNil)
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -668,7 +668,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 
 	for _, store := range stores {
-		c.Assert(storageV2.SaveStore(store), IsNil)
+		c.Assert(newStorage.SaveStore(store), IsNil)
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -688,7 +688,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(storage.Flush(), IsNil)
 
 	raftCluster = cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, storageV2, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, newStorage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
 	c.Assert(raftCluster, NotNil)

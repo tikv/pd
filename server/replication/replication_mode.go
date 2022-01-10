@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.uber.org/zap"
 )
 
@@ -67,7 +67,7 @@ type ModeManager struct {
 
 	sync.RWMutex
 	config            config.ReplicationModeConfig
-	storage           base.ReplicationStatusStorage
+	storage           storage.ReplicationStatusStorage
 	cluster           opt.Cluster
 	fileReplicater    FileReplicater
 	replicatedMembers []uint64
@@ -87,7 +87,7 @@ type ModeManager struct {
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage base.ReplicationStatusStorage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage storage.ReplicationStatusStorage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
 		initTime:              time.Now(),
 		config:                config,

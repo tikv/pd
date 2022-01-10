@@ -22,13 +22,13 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/base"
+	base_storage "github.com/tikv/pd/server/storage/base_storage"
 )
 
 var _ = Suite(&testManagerSuite{})
 
 type testManagerSuite struct {
-	store   base.RuleStorage
+	store   base_storage.RuleStorage
 	manager *RuleManager
 }
 

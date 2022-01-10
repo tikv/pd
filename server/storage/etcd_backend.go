@@ -16,19 +16,17 @@ package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/storage/base"
+	backend "github.com/tikv/pd/server/storage/base_backend"
 	"go.etcd.io/etcd/clientv3"
 )
 
-var _ Storage = (*EtcdStorage)(nil)
-
-// EtcdStorage is a storage that stores data in etcd,
-// which is used by the PD server.
-type EtcdStorage struct {
-	*base.Storage
+// etcdBackend is a storage backend that stores data in etcd,
+// which is mainly used by the PD server.
+type etcdBackend struct {
+	*backend.BaseBackend
 }
 
-// newEtcdStorage is used to create a new etcd storage.
-func newEtcdStorage(client *clientv3.Client, rootPatch string) *EtcdStorage {
-	return &EtcdStorage{base.NewStorage(kv.NewEtcdKVBase(client, rootPatch), nil)}
+// newEtcdBackend is used to create a new etcd storage.
+func newEtcdBackend(client *clientv3.Client, rootPatch string) *etcdBackend {
+	return &etcdBackend{backend.NewBaseBackend(kv.NewEtcdKVBase(client, rootPatch), nil)}
 }

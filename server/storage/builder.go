@@ -16,20 +16,22 @@ package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.etcd.io/etcd/clientv3"
 )
 
 // Storage is the interface for the backend storage of the PD.
 // TODO: replace the core.Storage with this interface later.
 type Storage interface {
+	// Introducing the kv.Base here is to provide
+	// the basic key-value read/write ability for the Storage.
 	kv.Base
-	base.ConfigStorage
-	base.MetaStorage
-	base.RuleStorage
-	base.ComponentStorage
-	base.ReplicationStatusStorage
-	base.GCSafePointStorage
+	storage.ConfigStorage
+	storage.MetaStorage
+	storage.RuleStorage
+	storage.ComponentStorage
+	storage.ReplicationStatusStorage
+	storage.GCSafePointStorage
 }
 
 // Builder is used to build a storage with some options.
@@ -44,28 +46,29 @@ func NewBuilder() *Builder {
 }
 
 // WithEtcdBackend sets the backend of the storage to etcd with the given client.
-func (sb *Builder) WithEtcdBackend(client *clientv3.Client) *Builder {
-	sb.client = client
-	return sb
+func (b *Builder) WithEtcdBackend(client *clientv3.Client) *Builder {
+	b.client = client
+	return b
 }
 
 // WithMemoryBackend sets the backend of the storage to memory.
-func (sb *Builder) WithMemoryBackend() *Builder {
-	sb.client = nil
-	return sb
+func (b *Builder) WithMemoryBackend() *Builder {
+	b.client = nil
+	return b
 }
 
 // WithKeyRootPath sets the storage key root path.
-func (sb *Builder) WithKeyRootPath(rootPath string) *Builder {
-	sb.rootPath = rootPath
-	return sb
+func (b *Builder) WithKeyRootPath(rootPath string) *Builder {
+	b.rootPath = rootPath
+	return b
 }
 
 // Build creates a new storage with the given options.
-func (sb *Builder) Build() Storage {
-	if sb.client != nil {
-		return newEtcdStorage(sb.client, sb.rootPath)
+// TODO: build different storages, e.g, RegionStorage.
+func (b *Builder) Build() Storage {
+	if b.client != nil {
+		return newEtcdBackend(b.client, b.rootPath)
 	}
-	// TODO: support setting the key root path for the memory storage backend.
-	return newMemoryStorage()
+	// TODO: support setting the key root path for other storage backends.
+	return newMemoryBackend()
 }

@@ -102,7 +102,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 
 	for i, store := range stores {
 		tmp := &metapb.Store{}
-		ok, err := cluster.storageV2.LoadStore(store.GetID(), tmp)
+		ok, err := cluster.newStorage.LoadStore(store.GetID(), tmp)
 		c.Assert(ok, IsTrue)
 		c.Assert(err, IsNil)
 		c.Assert(tmp, DeepEquals, storeMetasAfterHeartbeat[i])

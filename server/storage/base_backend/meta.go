@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package base
+package backend
 
 import (
 	"context"
@@ -26,68 +26,55 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 )
+
+var _ storage.MetaStorage = (*BaseBackend)(nil)
 
 const (
 	maxKVRangeLimit = 10000
 	minKVRangeLimit = 100
 )
 
-// MetaStorage defines the storage operations on the PD cluster meta info.
-type MetaStorage interface {
-	LoadMeta(meta *metapb.Cluster) (bool, error)
-	SaveMeta(meta *metapb.Cluster) error
-	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
-	SaveStore(store *metapb.Store) error
-	// TODO: refine this method with a more reasonable way.
-	SaveStoreWeight(storeID uint64, leader, region float64) error
-	LoadStores(f func(store *core.StoreInfo)) error
-	DeleteStore(store *metapb.Store) error
-	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
-	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
-	SaveRegion(region *metapb.Region) error
-	DeleteRegion(region *metapb.Region) error
-}
-
 // LoadMeta loads cluster meta from the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
-func (s *Storage) LoadMeta(meta *metapb.Cluster) (bool, error) {
-	return s.loadProto(clusterPath, meta)
+func (bb *BaseBackend) LoadMeta(meta *metapb.Cluster) (bool, error) {
+	return bb.loadProto(clusterPath, meta)
 }
 
 // SaveMeta save cluster meta to the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
-func (s *Storage) SaveMeta(meta *metapb.Cluster) error {
-	return s.saveProto(clusterPath, meta)
+func (bb *BaseBackend) SaveMeta(meta *metapb.Cluster) error {
+	return bb.saveProto(clusterPath, meta)
 }
 
 // LoadStore loads one store from storage.
-func (s *Storage) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
-	return s.loadProto(StorePath(storeID), store)
+func (bb *BaseBackend) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
+	return bb.loadProto(StorePath(storeID), store)
 }
 
 // SaveStore saves one store to storage.
-func (s *Storage) SaveStore(store *metapb.Store) error {
-	return s.saveProto(StorePath(store.GetId()), store)
+func (bb *BaseBackend) SaveStore(store *metapb.Store) error {
+	return bb.saveProto(StorePath(store.GetId()), store)
 }
 
 // SaveStoreWeight saves a store's leader and region weight to storage.
-func (s *Storage) SaveStoreWeight(storeID uint64, leader, region float64) error {
+func (bb *BaseBackend) SaveStoreWeight(storeID uint64, leader, region float64) error {
 	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
-	if err := s.Save(storeLeaderWeightPath(storeID), leaderValue); err != nil {
+	if err := bb.Save(storeLeaderWeightPath(storeID), leaderValue); err != nil {
 		return err
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
-	return s.Save(storeRegionWeightPath(storeID), regionValue)
+	return bb.Save(storeRegionWeightPath(storeID), regionValue)
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
-func (s *Storage) LoadStores(f func(store *core.StoreInfo)) error {
+func (bb *BaseBackend) LoadStores(f func(store *core.StoreInfo)) error {
 	nextID := uint64(0)
 	endKey := StorePath(math.MaxUint64)
 	for {
 		key := StorePath(nextID)
-		_, res, err := s.LoadRange(key, endKey, minKVRangeLimit)
+		_, res, err := bb.LoadRange(key, endKey, minKVRangeLimit)
 		if err != nil {
 			return err
 		}
@@ -96,11 +83,11 @@ func (s *Storage) LoadStores(f func(store *core.StoreInfo)) error {
 			if err := store.Unmarshal([]byte(str)); err != nil {
 				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
-			leaderWeight, err := s.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
+			leaderWeight, err := bb.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			regionWeight, err := s.loadFloatWithDefaultValue(storeRegionWeightPath(store.GetId()), 1.0)
+			regionWeight, err := bb.loadFloatWithDefaultValue(storeRegionWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
@@ -115,8 +102,8 @@ func (s *Storage) LoadStores(f func(store *core.StoreInfo)) error {
 	}
 }
 
-func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
-	res, err := s.Load(path)
+func (bb *BaseBackend) loadFloatWithDefaultValue(path string, def float64) (float64, error) {
+	res, err := bb.Load(path)
 	if err != nil {
 		return 0, err
 	}
@@ -131,13 +118,13 @@ func (s *Storage) loadFloatWithDefaultValue(path string, def float64) (float64, 
 }
 
 // DeleteStore deletes one store from storage.
-func (s *Storage) DeleteStore(store *metapb.Store) error {
-	return s.Remove(StorePath(store.GetId()))
+func (bb *BaseBackend) DeleteStore(store *metapb.Store) error {
+	return bb.Remove(StorePath(store.GetId()))
 }
 
 // LoadRegion loads one region from the backend storage.
-func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
-	value, err := s.Load(RegionPath(regionID))
+func (bb *BaseBackend) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
+	value, err := bb.Load(RegionPath(regionID))
 	if err != nil {
 		return false, err
 	}
@@ -148,12 +135,12 @@ func (s *Storage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, e
 	if err != nil {
 		return true, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
-	err = encryption.DecryptRegion(region, s.encryptionKeyManager)
+	err = encryption.DecryptRegion(region, bb.encryptionKeyManager)
 	return true, err
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	nextID := uint64(0)
 	endKey := RegionPath(math.MaxUint64)
 
@@ -167,7 +154,7 @@ func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInf
 			time.Sleep(time.Second)
 		})
 		startKey := RegionPath(nextID)
-		_, res, err := s.LoadRange(startKey, endKey, rangeLimit)
+		_, res, err := bb.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
 				continue
@@ -185,14 +172,14 @@ func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInf
 			if err := region.Unmarshal([]byte(r)); err != nil {
 				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
-			if err = encryption.DecryptRegion(region, s.encryptionKeyManager); err != nil {
+			if err = encryption.DecryptRegion(region, bb.encryptionKeyManager); err != nil {
 				return err
 			}
 
 			nextID = region.GetId() + 1
 			overlaps := f(core.NewRegionInfo(region, nil))
 			for _, item := range overlaps {
-				if err := s.DeleteRegion(item.GetMeta()); err != nil {
+				if err := bb.DeleteRegion(item.GetMeta()); err != nil {
 					return err
 				}
 			}
@@ -205,8 +192,8 @@ func (s *Storage) LoadRegions(ctx context.Context, f func(region *core.RegionInf
 }
 
 // SaveRegion saves one region to storage.
-func (s *Storage) SaveRegion(region *metapb.Region) error {
-	region, err := encryption.EncryptRegion(region, s.encryptionKeyManager)
+func (bb *BaseBackend) SaveRegion(region *metapb.Region) error {
+	region, err := encryption.EncryptRegion(region, bb.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
@@ -214,10 +201,10 @@ func (s *Storage) SaveRegion(region *metapb.Region) error {
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return s.Save(RegionPath(region.GetId()), string(value))
+	return bb.Save(RegionPath(region.GetId()), string(value))
 }
 
 // DeleteRegion deletes one region from storage.
-func (s *Storage) DeleteRegion(region *metapb.Region) error {
-	return s.Remove(RegionPath(region.GetId()))
+func (bb *BaseBackend) DeleteRegion(region *metapb.Region) error {
+	return bb.Remove(RegionPath(region.GetId()))
 }

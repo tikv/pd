@@ -24,7 +24,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/base"
+	base_backend "github.com/tikv/pd/server/storage/base_backend"
+	base_storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -38,10 +39,10 @@ type testStorageSuite struct {
 }
 
 func (s *testStorageSuite) TestBasic(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 
-	c.Assert(base.StorePath(123), Equals, "raft/s/00000000000000000123")
-	c.Assert(base.RegionPath(123), Equals, "raft/r/00000000000000000123")
+	c.Assert(base_backend.StorePath(123), Equals, "raft/s/00000000000000000123")
+	c.Assert(base_backend.RegionPath(123), Equals, "raft/r/00000000000000000123")
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := storage.LoadMeta(meta)
@@ -97,7 +98,7 @@ func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
 }
 
 func (s *testStorageSuite) TestLoadStores(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 	cache := core.NewStoresInfo()
 
 	n := 10
@@ -111,7 +112,7 @@ func (s *testStorageSuite) TestLoadStores(c *C) {
 }
 
 func (s *testStorageSuite) TestStoreWeight(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 	cache := core.NewStoresInfo()
 	const n = 3
 
@@ -128,7 +129,7 @@ func (s *testStorageSuite) TestStoreWeight(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
@@ -144,9 +145,9 @@ func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
-	serviceSafePoints := []*base.ServiceSafePoint{
+	serviceSafePoints := []*base_storage.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: expireAt, SafePoint: 1},
 		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
 		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
@@ -156,14 +157,14 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
-	prefix := base.GCSafePointServicePrefixPath()
+	prefix := base_backend.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)
 	c.Assert(keys, HasLen, 3)
 	c.Assert(values, HasLen, 3)
 
-	ssp := &base.ServiceSafePoint{}
+	ssp := &base_storage.ServiceSafePoint{}
 	for i, key := range keys {
 		c.Assert(strings.HasSuffix(key, serviceSafePoints[i].ServiceID), IsTrue)
 
@@ -175,9 +176,9 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
-	storage := newMemoryStorage()
+	storage := NewBuilder().WithMemoryBackend().Build()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
-	serviceSafePoints := []*base.ServiceSafePoint{
+	serviceSafePoints := []*base_storage.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},
 		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
 		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
@@ -194,7 +195,7 @@ func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
 
 	// Advance gc_worker's safepoint
-	c.Assert(storage.SaveServiceGCSafePoint(&base.ServiceSafePoint{
+	c.Assert(storage.SaveServiceGCSafePoint(&base_storage.ServiceSafePoint{
 		ServiceID: "gc_worker",
 		ExpiredAt: math.MaxInt64,
 		SafePoint: 10,

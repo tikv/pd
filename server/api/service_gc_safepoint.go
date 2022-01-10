@@ -19,7 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"github.com/unrolled/render"
 )
 
@@ -36,8 +36,8 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 }
 
 type listServiceGCSafepoint struct {
-	ServiceGCSafepoints []*base.ServiceSafePoint `json:"service_gc_safe_points"`
-	GCSafePoint         uint64                   `json:"gc_safe_point"`
+	ServiceGCSafepoints []*storage.ServiceSafePoint `json:"service_gc_safe_points"`
+	GCSafePoint         uint64                      `json:"gc_safe_point"`
 }
 
 // @Tags servicegcsafepoint
@@ -47,7 +47,7 @@ type listServiceGCSafepoint struct {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request) {
-	storage := h.svr.GetEtcdStorage()
+	storage := h.svr.GetNewStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -74,7 +74,7 @@ func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request)
 // @Router /gc/safepoint/{service_id} [delete]
 // @Tags rule
 func (h *serviceGCSafepointHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	storage := h.svr.GetEtcdStorage()
+	storage := h.svr.GetNewStorage()
 	serviceID := mux.Vars(r)["service_id"]
 	err := storage.RemoveServiceGCSafePoint(serviceID)
 	if err != nil {

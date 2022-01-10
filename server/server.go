@@ -123,9 +123,8 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
-	storage *core.Storage /* NOTICE: this field will be removed later. */
-	// for etcd storage operation.
-	etcdStorage *storage.EtcdStorage
+	storage    *core.Storage   /* NOTICE: this field will be removed later. */
+	newStorage storage.Storage /* NOTICE: this field will be renamed to storage. */
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -397,7 +396,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		core.WithRegionStorage(regionStorage),
 		core.WithEncryptionKeyManager(encryptionKeyManager),
 	)
-	s.etcdStorage = storage.NewBuilder().WithEtcdBackend(s.client).WithKeyRootPath(s.rootPath).Build().(*storage.EtcdStorage)
+	s.newStorage = storage.NewBuilder().WithEtcdBackend(s.client).WithKeyRootPath(s.rootPath).Build()
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -726,9 +725,10 @@ func (s *Server) GetStorage() *core.Storage {
 	return s.storage
 }
 
-// GetEtcdStorage returns the backend etcd storage of server.
-func (s *Server) GetEtcdStorage() *storage.EtcdStorage {
-	return s.etcdStorage
+// GetNewStorage returns the storage of server.
+// NOTICE: this method will be renamed to GetStorage later.
+func (s *Server) GetNewStorage() storage.Storage {
+	return s.newStorage
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
@@ -800,10 +800,10 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	if s.etcdStorage == nil {
+	if s.newStorage == nil {
 		return cfg
 	}
-	sches, configs, err := s.etcdStorage.LoadAllScheduleConfig()
+	sches, configs, err := s.newStorage.LoadAllScheduleConfig()
 	if err != nil {
 		return cfg
 	}
@@ -840,7 +840,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	old := s.persistOptions.GetScheduleConfig()
 	cfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.etcdStorage); err != nil {
+	if err := s.persistOptions.Persist(s.newStorage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
@@ -920,7 +920,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
-	if err := s.persistOptions.Persist(s.etcdStorage); err != nil {
+	if err := s.persistOptions.Persist(s.newStorage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
 		if rule != nil {
 			rule.Count = int(old.MaxReplicas)
@@ -962,7 +962,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 	old := s.persistOptions.GetPDServerConfig()
 	s.persistOptions.SetPDServerConfig(&cfg)
-	if err := s.persistOptions.Persist(s.etcdStorage); err != nil {
+	if err := s.persistOptions.Persist(s.newStorage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
@@ -978,7 +978,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 	old := s.persistOptions.GetLabelPropertyConfig()
 	s.persistOptions.SetLabelPropertyConfig(cfg)
-	if err := s.persistOptions.Persist(s.etcdStorage); err != nil {
+	if err := s.persistOptions.Persist(s.newStorage); err != nil {
 		s.persistOptions.SetLabelPropertyConfig(old)
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
@@ -993,7 +993,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
-	err := s.persistOptions.Persist(s.etcdStorage)
+	err := s.persistOptions.Persist(s.newStorage)
 	if err != nil {
 		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
@@ -1012,7 +1012,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 // DeleteLabelProperty deletes a label property config.
 func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
-	err := s.persistOptions.Persist(s.etcdStorage)
+	err := s.persistOptions.Persist(s.newStorage)
 	if err != nil {
 		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
@@ -1041,7 +1041,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	}
 	old := s.persistOptions.GetClusterVersion()
 	s.persistOptions.SetClusterVersion(version)
-	err = s.persistOptions.Persist(s.etcdStorage)
+	err = s.persistOptions.Persist(s.newStorage)
 	if err != nil {
 		s.persistOptions.SetClusterVersion(old)
 		log.Error("failed to update cluster version",
@@ -1154,7 +1154,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 
 	old := s.persistOptions.GetReplicationModeConfig()
 	s.persistOptions.SetReplicationModeConfig(&cfg)
-	if err := s.persistOptions.Persist(s.etcdStorage); err != nil {
+	if err := s.persistOptions.Persist(s.newStorage); err != nil {
 		s.persistOptions.SetReplicationModeConfig(old)
 		log.Error("failed to update replication mode config",
 			zap.Reflect("new", cfg),
@@ -1175,7 +1175,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			// (when below revert fail). They will become the same after PD is
 			// restart or PD leader is changed.
 			s.persistOptions.SetReplicationModeConfig(old)
-			revertErr := s.persistOptions.Persist(s.etcdStorage)
+			revertErr := s.persistOptions.Persist(s.newStorage)
 			if revertErr != nil {
 				log.Error("failed to revert replication mode persistent config", errs.ZapError(revertErr))
 			}
@@ -1354,7 +1354,7 @@ func (s *Server) etcdLeaderLoop() {
 }
 
 func (s *Server) reloadConfigFromKV() error {
-	err := s.persistOptions.Reload(s.etcdStorage)
+	err := s.persistOptions.Reload(s.newStorage)
 	if err != nil {
 		return err
 	}

@@ -35,7 +35,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -78,7 +78,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage base.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage storage.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grantHotRegionSchedulerConfig{StoreIDs: make([]uint64, 0), storage: storage}
 		conf.cluster = opController.GetCluster()
 		if err := decoder(conf); err != nil {
@@ -90,7 +90,7 @@ func init() {
 
 type grantHotRegionSchedulerConfig struct {
 	mu          sync.RWMutex
-	storage     base.ConfigStorage
+	storage     storage.ConfigStorage
 	cluster     opt.Cluster
 	StoreIDs    []uint64 `json:"store-id"`
 	StoreLeadID uint64   `json:"store-leader-id"`

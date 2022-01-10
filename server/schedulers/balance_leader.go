@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.uber.org/zap"
 )
 
@@ -56,7 +56,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage base.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage storage.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err

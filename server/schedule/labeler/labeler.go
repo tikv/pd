@@ -26,20 +26,20 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/rangelist"
-	"github.com/tikv/pd/server/storage/base"
+	storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.uber.org/zap"
 )
 
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
-	storage base.RuleStorage
+	storage storage.RuleStorage
 	sync.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
 }
 
 // NewRegionLabeler creates a Labeler instance.
-func NewRegionLabeler(storage base.RuleStorage) (*RegionLabeler, error) {
+func NewRegionLabeler(storage storage.RuleStorage) (*RegionLabeler, error) {
 	l := &RegionLabeler{
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),

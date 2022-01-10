@@ -681,30 +681,30 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
-	storageV2 := tc.RaftCluster.storageV2
+	newStorage := tc.RaftCluster.newStorage
 
-	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, newStorage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
+	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, newStorage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(evict, "2"), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
-	sches, _, err := storageV2.LoadAllScheduleConfig()
+	sches, _, err := newStorage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 5)
 	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
 	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
 	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.cluster.opt.Persist(storageV2), IsNil)
+	c.Assert(co.cluster.opt.Persist(newStorage), IsNil)
 	co.stop()
 	co.wg.Wait()
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storageV2, schedule.ConfigJSONDecoder([]byte("null")))
+	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, newStorage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
@@ -712,15 +712,15 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
 	}()
 	c.Assert(newOpt.GetSchedulers(), HasLen, 3)
-	c.Assert(newOpt.Reload(storageV2), IsNil)
+	c.Assert(newOpt.Reload(newStorage), IsNil)
 	// only remains 3 items with independent config.
-	sches, _, err = storageV2.LoadAllScheduleConfig()
+	sches, _, err = newStorage.LoadAllScheduleConfig()
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 3)
 
 	// option have 6 items because the default scheduler do not remove.
 	c.Assert(newOpt.GetSchedulers(), HasLen, 6)
-	c.Assert(newOpt.Persist(storageV2), IsNil)
+	c.Assert(newOpt.Persist(newStorage), IsNil)
 	tc.RaftCluster.opt = newOpt
 
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
@@ -731,15 +731,15 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// suppose restart PD again
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(storageV2), IsNil)
+	c.Assert(newOpt.Reload(newStorage), IsNil)
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	c.Assert(co.schedulers, HasLen, 3)
-	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, newStorage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(bls), IsNil)
-	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, newStorage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(brs), IsNil)
 	c.Assert(co.schedulers, HasLen, 5)
@@ -751,12 +751,12 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// the scheduler that is not enable by default will be completely deleted
 	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 5)
 	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.cluster.opt.Persist(co.cluster.storageV2), IsNil)
+	c.Assert(co.cluster.opt.Persist(co.cluster.newStorage), IsNil)
 	co.stop()
 	co.wg.Wait()
 	_, newOpt, err = newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(co.cluster.storageV2), IsNil)
+	c.Assert(newOpt.Reload(co.cluster.newStorage), IsNil)
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 
@@ -779,7 +779,7 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 
 	c.Assert(co.schedulers, HasLen, 3)
 	oc := co.opController
-	storage := tc.RaftCluster.storageV2
+	storage := tc.RaftCluster.newStorage
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
@@ -799,14 +799,14 @@ func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(sches, HasLen, 0)
 	c.Assert(co.schedulers, HasLen, 0)
-	c.Assert(co.cluster.opt.Persist(co.cluster.storageV2), IsNil)
+	c.Assert(co.cluster.opt.Persist(co.cluster.newStorage), IsNil)
 	co.stop()
 	co.wg.Wait()
 
 	// suppose restart PD again
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(tc.storageV2), IsNil)
+	c.Assert(newOpt.Reload(tc.newStorage), IsNil)
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
@@ -952,7 +952,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.newStorage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	opt := tc.GetOpts()
 	c.Assert(tc.addRegionStore(4, 100), IsNil)
@@ -1003,7 +1003,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storageV2, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.newStorage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 
 	c.Assert(tc.addRegionStore(4, 100), IsNil)

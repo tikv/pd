@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,20 +14,15 @@
 
 package storage
 
-import (
-	"github.com/tikv/pd/server/kv"
-	"github.com/tikv/pd/server/storage/base"
-)
-
-var _ Storage = (*MemoryStorage)(nil)
-
-// MemoryStorage is a storage that stores data in a memory B-Tree without any locks,
-// which should only be used in tests.
-type MemoryStorage struct {
-	*base.Storage
-}
-
-// NewMemoryStorage is used to create a new memory storage.
-func newMemoryStorage() *MemoryStorage {
-	return &MemoryStorage{base.NewStorage(kv.NewMemoryKV(), nil)}
+// RuleStorage defines the storage operations on the rule.
+type RuleStorage interface {
+	LoadRules(f func(k, v string)) error
+	SaveRule(ruleKey string, rule interface{}) error
+	DeleteRule(ruleKey string) error
+	LoadRuleGroups(f func(k, v string)) error
+	SaveRuleGroup(groupID string, group interface{}) error
+	DeleteRuleGroup(groupID string) error
+	LoadRegionRules(f func(k, v string)) error
+	SaveRegionRule(ruleKey string, rule interface{}) error
+	DeleteRegionRule(ruleKey string) error
 }

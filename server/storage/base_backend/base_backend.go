@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,26 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package base
+package backend
 
 import (
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 )
 
-// Storage is the underlying storage base for all other specific storages.
-// It should define some common storage interfaces and operations.
-type Storage struct {
+// BaseBackend is the base underlying storage backend for all other upper specific storage backends.
+// It should define some common storage interfaces and operations, which provides the default
+// implementations for all kinds of storages.
+type BaseBackend struct {
 	kv.Base
 	encryptionKeyManager *encryptionkm.KeyManager
 }
 
-// NewStorage creates a new base Storage with the given KV and encryption key manager.
-func NewStorage(
+// NewBaseBackend creates a new base storage backend with the given KV and encryption key manager.
+func NewBaseBackend(
 	kvBase kv.Base,
 	encryptionKeyManager *encryptionkm.KeyManager,
-) *Storage {
-	return &Storage{
+) *BaseBackend {
+	return &BaseBackend{
 		kvBase,
 		encryptionKeyManager,
 	}
