@@ -38,7 +38,7 @@ type testLearnerCheckerSuite struct {
 func (s *testLearnerCheckerSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster = mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	s.lc = NewLearnerChecker(s.cluster)
 	for id := uint64(1); id <= 10; id++ {
 		s.cluster.PutStoreWithLabels(id)

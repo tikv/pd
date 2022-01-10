@@ -121,7 +121,7 @@ func checkFlow(cache *hotPeerCache, region *core.RegionInfo, peers []*metapb.Pee
 
 func updateFlow(cache *hotPeerCache, res []*HotPeerStat) []*HotPeerStat {
 	for _, p := range res {
-		cache.update(p)
+		cache.updateStat(p)
 	}
 	return res
 }
@@ -396,7 +396,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 				break
 			}
 			item := cache.updateHotPeerStat(nil, newItem, oldItem, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
-			cache.update(item)
+			cache.updateStat(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
@@ -542,6 +542,45 @@ func (t *testHotPeerCache) TestCoolDownTransferLeader(c *C) {
 	}
 }
 
+// See issue #4510
+func (t *testHotPeerCache) TestCacheInherit(c *C) {
+	cache := NewHotPeerCache(Read)
+	region := buildRegion(Read, 3, 10)
+	// prepare
+	for i := 1; i <= 200; i++ {
+		checkAndUpdate(c, cache, region)
+	}
+	// move peer
+	newStoreID := uint64(10)
+	_, region = schedule(c, addReplica, region, newStoreID)
+	checkAndUpdate(c, cache, region)
+	newStoreID, region = schedule(c, removeReplica, region)
+	rets := checkAndUpdate(c, cache, region)
+	for _, ret := range rets {
+		if ret.actionType != Remove {
+			flow := ret.GetLoads()[RegionReadBytes]
+			c.Assert(flow, Equals, float64(region.GetBytesRead()/ReadReportInterval))
+		}
+	}
+	// new flow
+	newFlow := region.GetBytesRead() * 10
+	region = region.Clone(core.SetReadBytes(newFlow))
+	for i := 1; i <= 200; i++ {
+		checkAndUpdate(c, cache, region)
+	}
+	// move peer
+	_, region = schedule(c, addReplica, region, newStoreID)
+	checkAndUpdate(c, cache, region)
+	_, region = schedule(c, removeReplica, region)
+	rets = checkAndUpdate(c, cache, region)
+	for _, ret := range rets {
+		if ret.actionType != Remove {
+			flow := ret.GetLoads()[RegionReadBytes]
+			c.Assert(flow, Equals, float64(newFlow/ReadReportInterval))
+		}
+	}
+}
+
 func BenchmarkCheckRegionFlow(b *testing.B) {
 	cache := NewHotPeerCache(Read)
 	region := buildRegion(Read, 3, 10)
@@ -560,7 +599,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 			}
 		}
 		for _, ret := range items {
-			cache.update(ret)
+			cache.updateStat(ret)
 		}
 	}
 }

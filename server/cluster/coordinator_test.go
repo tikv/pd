@@ -239,7 +239,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	waitNoResponse(c, stream)
 }
 
-func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream opt.HeartbeatStream) error {
+func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream.HeartbeatStream) error {
 	co.hbStreams.BindStream(region.GetLeader().GetStoreId(), stream)
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
@@ -1258,12 +1258,18 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetID() && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
+			if res.GetRegionId() == region.GetID() {
+				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
+					if peer.GetStoreId() == storeID {
+						return true
+					}
+				}
+			}
 		}
 		return false
 	})
 	return region.Clone(
-		core.WithLeader(res.GetTransferLeader().GetPeer()),
+		core.WithLeader(region.GetStorePeer(storeID)),
 	)
 }
 
