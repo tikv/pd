@@ -531,14 +531,14 @@ func (t *testHotPeerCache) TestCoolDownTransferLeader(c *C) {
 		checkCoolDown(c, cache, region, false)
 	}
 	cases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
-	for _, scheduleAndCheck := range cases {
+	for _, runCase := range cases {
 		cache = NewHotPeerCache(Read)
 		region = buildRegion(Read, 3, 60)
 		for i := 1; i <= 200; i++ {
 			checkAndUpdate(c, cache, region)
 		}
 		checkCoolDown(c, cache, region, false)
-		scheduleAndCheck()
+		runCase()
 	}
 }
 
