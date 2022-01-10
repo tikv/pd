@@ -121,7 +121,7 @@ func checkFlow(cache *hotPeerCache, region *core.RegionInfo, peers []*metapb.Pee
 
 func updateFlow(cache *hotPeerCache, res []*HotPeerStat) []*HotPeerStat {
 	for _, p := range res {
-		cache.update(p)
+		cache.updateStat(p)
 	}
 	return res
 }
@@ -396,7 +396,7 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 				break
 			}
 			item := cache.updateHotPeerStat(nil, newItem, oldItem, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
-			cache.update(item)
+			cache.updateStat(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
@@ -560,7 +560,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 			}
 		}
 		for _, ret := range items {
-			cache.update(ret)
+			cache.updateStat(ret)
 		}
 	}
 }

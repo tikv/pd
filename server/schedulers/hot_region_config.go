@@ -352,7 +352,7 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 }
 
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
-	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {

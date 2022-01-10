@@ -161,7 +161,7 @@ func (s *testShuffleHotRegionSchedulerSuite) TestBalance(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	c.Assert(err, IsNil)
 
@@ -256,7 +256,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
-	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(1, 1, 2, 3)
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
@@ -264,7 +264,9 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
+	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
+	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
 }
 
 func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
@@ -291,11 +293,11 @@ func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
 	op := sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 3)
+	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
 	op = sl.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
 	c.Assert(sl.Schedule(tc), HasLen, 0)
@@ -339,7 +341,7 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
@@ -407,7 +409,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
@@ -458,7 +460,7 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 4)
 	tc.AddRegionStore(3, 2)
@@ -639,7 +641,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Assert(es.IsScheduleAllowed(tc), IsTrue)
 	// Add evict leader scheduler to store 1
 	op := es.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
+	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
 	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 	// Cannot balance leaders to store 1
 	op = bs.Schedule(tc)
