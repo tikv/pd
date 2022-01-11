@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -44,7 +44,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage storage.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
 
 		var data map[string]interface{}

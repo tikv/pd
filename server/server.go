@@ -711,7 +711,6 @@ func (s *Server) GetMember() *member.Member {
 }
 
 // GetStorage returns the backend storage of server.
-// NOTICE: this method will be removed later.
 func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }

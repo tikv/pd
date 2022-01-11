@@ -1,4 +1,4 @@
-// Copyright 2016 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	base_backend "github.com/tikv/pd/server/storage/base_backend"
-	base_storage "github.com/tikv/pd/server/storage/base_storage"
+	endpoint "github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -150,7 +150,7 @@ func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
 func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
-	serviceSafePoints := []*base_storage.ServiceSafePoint{
+	serviceSafePoints := []*endpoint.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: expireAt, SafePoint: 1},
 		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
 		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
@@ -167,7 +167,7 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 	c.Assert(keys, HasLen, 3)
 	c.Assert(values, HasLen, 3)
 
-	ssp := &base_storage.ServiceSafePoint{}
+	ssp := &endpoint.ServiceSafePoint{}
 	for i, key := range keys {
 		c.Assert(strings.HasSuffix(key, serviceSafePoints[i].ServiceID), IsTrue)
 
@@ -181,7 +181,7 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
-	serviceSafePoints := []*base_storage.ServiceSafePoint{
+	serviceSafePoints := []*endpoint.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},
 		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
 		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
@@ -198,7 +198,7 @@ func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
 
 	// Advance gc_worker's safepoint
-	c.Assert(storage.SaveServiceGCSafePoint(&base_storage.ServiceSafePoint{
+	c.Assert(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
 		ServiceID: "gc_worker",
 		ExpiredAt: math.MaxInt64,
 		SafePoint: 10,
@@ -225,7 +225,7 @@ func (s *testStorageSuite) TestLoadRegions(c *C) {
 	}
 }
 
-func mustSaveRegions(c *C, s base_storage.RegionStorage, n int) []*metapb.Region {
+func mustSaveRegions(c *C, s endpoint.RegionStorage, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
 		region := newTestRegionMeta(uint64(i))

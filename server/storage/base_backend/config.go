@@ -19,11 +19,11 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/errs"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
-var _ storage.ConfigStorage = (*BaseBackend)(nil)
+var _ endpoint.ConfigStorage = (*BaseBackend)(nil)
 
 // LoadConfig loads config from configPath then unmarshal it to cfg.
 func (bb *BaseBackend) LoadConfig(cfg interface{}) (bool, error) {

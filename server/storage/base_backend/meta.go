@@ -26,10 +26,10 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-var _ storage.MetaStorage = (*BaseBackend)(nil)
+var _ endpoint.MetaStorage = (*BaseBackend)(nil)
 
 const (
 	// MaxKVRangeLimit is the max limit of the number of keys in a range.
@@ -193,9 +193,9 @@ func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.Regi
 	}
 }
 
-// LoadRegionsOnce will do a load of all regions from storage only once.
+// LoadRegionsOnce loads all regions from storage to RegionsInfo.
 func (bb *BaseBackend) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	return nil
+	return bb.LoadRegions(ctx, f)
 }
 
 // SaveRegion saves one region to storage.

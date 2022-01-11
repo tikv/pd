@@ -17,11 +17,11 @@ package backend
 import (
 	"strings"
 
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
-var _ storage.RuleStorage = (*BaseBackend)(nil)
+var _ endpoint.RuleStorage = (*BaseBackend)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (bb *BaseBackend) SaveRule(ruleKey string, rule interface{}) error {

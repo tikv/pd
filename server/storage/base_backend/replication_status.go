@@ -18,10 +18,10 @@ import (
 	"encoding/json"
 
 	"github.com/tikv/pd/pkg/errs"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-var _ storage.ReplicationStatusStorage = (*BaseBackend)(nil)
+var _ endpoint.ReplicationStatusStorage = (*BaseBackend)(nil)
 
 // LoadReplicationStatus loads replication status by mode.
 func (bb *BaseBackend) LoadReplicationStatus(mode string, status interface{}) (bool, error) {

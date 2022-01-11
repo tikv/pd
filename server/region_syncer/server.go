@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/storage"
-	base_storage "github.com/tikv/pd/server/storage/base_storage"
+	endpoint "github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -92,7 +92,7 @@ type RegionSyncer struct {
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
 	regionStorageGetter, ok := s.GetStorage().(interface {
-		GetRegionStorage() base_storage.RegionStorage
+		GetRegionStorage() endpoint.RegionStorage
 	})
 	if !ok {
 		return nil

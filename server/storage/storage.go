@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -32,12 +32,12 @@ type Storage interface {
 	// Introducing the kv.Base here is to provide
 	// the basic key-value read/write ability for the Storage.
 	kv.Base
-	storage.ConfigStorage
-	storage.MetaStorage
-	storage.RuleStorage
-	storage.ComponentStorage
-	storage.ReplicationStatusStorage
-	storage.GCSafePointStorage
+	endpoint.ConfigStorage
+	endpoint.MetaStorage
+	endpoint.RuleStorage
+	endpoint.ComponentStorage
+	endpoint.ReplicationStatusStorage
+	endpoint.GCSafePointStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -61,7 +61,7 @@ func NewStorageWithLevelDBBackend(
 
 type pdStorage struct {
 	Storage
-	regionStorage storage.RegionStorage
+	regionStorage endpoint.RegionStorage
 
 	useRegionStorage int32
 	regionLoaded     bool
@@ -71,7 +71,7 @@ type pdStorage struct {
 // NewPDStorage creates a new PD storage with the given storage and region storage.
 // Usually, the defaultStorage is etcd-backend, and the regionStorage is LevelDB-backend.
 // TODO: maybe support other KV storages like BadgerDB in the future.
-func NewPDStorage(defaultStorage Storage, regionStorage storage.RegionStorage) Storage {
+func NewPDStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
 	return &pdStorage{
 		Storage:       defaultStorage,
 		regionStorage: regionStorage,
@@ -79,7 +79,7 @@ func NewPDStorage(defaultStorage Storage, regionStorage storage.RegionStorage) S
 }
 
 // GetRegionStorage gets the region storage.
-func (ps *pdStorage) GetRegionStorage() storage.RegionStorage {
+func (ps *pdStorage) GetRegionStorage() endpoint.RegionStorage {
 	return ps.regionStorage
 }
 
@@ -109,7 +109,8 @@ func (ps *pdStorage) LoadRegions(ctx context.Context, f func(region *core.Region
 	return ps.Storage.LoadRegions(ctx, f)
 }
 
-// LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
+// LoadRegionsOnce loads all regions from storage to RegionsInfo. If the underlying storage is the region storage,
+// it will only load once.
 func (ps *pdStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
 		return ps.Storage.LoadRegions(ctx, f)

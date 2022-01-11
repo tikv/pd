@@ -12,17 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package endpoint
 
-// RuleStorage defines the storage operations on the rule.
-type RuleStorage interface {
-	LoadRules(f func(k, v string)) error
-	SaveRule(ruleKey string, rule interface{}) error
-	DeleteRule(ruleKey string) error
-	LoadRuleGroups(f func(k, v string)) error
-	SaveRuleGroup(groupID string, group interface{}) error
-	DeleteRuleGroup(groupID string) error
-	LoadRegionRules(f func(k, v string)) error
-	SaveRegionRule(ruleKey string, rule interface{}) error
-	DeleteRegionRule(ruleKey string) error
+// ConfigStorage defines the storage operations on the config.
+type ConfigStorage interface {
+	LoadConfig(cfg interface{}) (bool, error)
+	SaveConfig(cfg interface{}) error
+	LoadAllScheduleConfig() ([]string, []string, error)
+	SaveScheduleConfig(scheduleName string, data []byte) error
+	RemoveScheduleConfig(scheduleName string) error
 }

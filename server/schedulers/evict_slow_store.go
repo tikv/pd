@@ -25,7 +25,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -60,7 +60,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage storage.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictSlowStoreSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0)}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -70,7 +70,7 @@ func init() {
 }
 
 type evictSlowStoreSchedulerConfig struct {
-	storage       storage.ConfigStorage
+	storage       endpoint.ConfigStorage
 	EvictedStores []uint64 `json:"evict-stores"`
 }
 

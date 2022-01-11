@@ -20,20 +20,20 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
 // Manager is used to manage components.
 type Manager struct {
 	sync.RWMutex
-	storage storage.ComponentStorage
+	storage endpoint.ComponentStorage
 	// component -> addresses
 	Addresses map[string][]string `json:"address"`
 }
 
 // NewManager creates a new component manager.
-func NewManager(storage storage.ComponentStorage) *Manager {
+func NewManager(storage endpoint.ComponentStorage) *Manager {
 	return &Manager{
 		storage:   storage,
 		Addresses: make(map[string][]string),

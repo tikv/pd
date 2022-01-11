@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -111,7 +111,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage            storage.ConfigStorage
+	storage            endpoint.ConfigStorage
 	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`

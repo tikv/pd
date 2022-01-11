@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/placement"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -38,7 +38,7 @@ var allRoles = []string{roleLeader, roleFollower, roleLearner}
 
 type shuffleRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage storage.ConfigStorage
+	storage endpoint.ConfigStorage
 
 	Ranges []core.KeyRange `json:"ranges"`
 	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.

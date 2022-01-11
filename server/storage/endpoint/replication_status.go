@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package endpoint
 
 // ReplicationStatusStorage defines the storage operations on the replication status.
 type ReplicationStatusStorage interface {

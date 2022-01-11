@@ -19,10 +19,10 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
-	storage "github.com/tikv/pd/server/storage/base_storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-var _ storage.ComponentStorage = (*BaseBackend)(nil)
+var _ endpoint.ComponentStorage = (*BaseBackend)(nil)
 
 // LoadComponent loads components from componentPath then unmarshal it to component.
 func (bb *BaseBackend) LoadComponent(component interface{}) (bool, error) {
