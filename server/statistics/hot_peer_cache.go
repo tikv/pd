@@ -57,7 +57,6 @@ type hotPeerCache struct {
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	inheritItem        map[uint64]*HotPeerStat        // regionID -> HotPeerStat
 	topNTTL            time.Duration
 	reportIntervalSecs int
 	taskQueue          chan flowItemTask
@@ -70,7 +69,6 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 		regionsOfStore: make(map[uint64]map[uint64]struct{}),
-		inheritItem:    make(map[uint64]*HotPeerStat),
 		taskQueue:      make(chan flowItemTask, queueCap),
 	}
 	if kind == Write {
@@ -102,9 +100,6 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	switch item.actionType {
 	case Remove:
-		if item.AntiCount > 0 { // means it's deleted because expired rather than cold
-			f.putInheritItem(item)
-		}
 		f.removeItem(item)
 		item.Log("region heartbeat remove from cache", log.Debug)
 		incMetrics("remove_item", item.StoreID, item.Kind)
@@ -194,17 +189,11 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	}
 
 	if oldItem == nil {
-		inheritItem := f.takeInheritItem(regionID)
-		if inheritItem != nil {
-			oldItem = inheritItem
-			newItem.source = inherit
-		} else {
-			for _, storeID := range f.getAllStoreIDs(region) {
-				oldItem = f.getOldHotPeerStat(regionID, storeID)
-				if oldItem != nil && oldItem.allowAdopt {
-					newItem.source = adopt
-					break
-				}
+		for _, storeID := range f.getAllStoreIDs(region) {
+			oldItem = f.getOldHotPeerStat(regionID, storeID)
+			if oldItem != nil && oldItem.allowInherited {
+				newItem.source = inherit
+				break
 			}
 		}
 	}
@@ -393,14 +382,14 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 		return f.updateNewHotPeerStat(regionStats, newItem, deltaLoads, interval)
 	}
 
-	if newItem.source == adopt {
+	if newItem.source == inherit {
 		for _, dim := range oldItem.rollingLoads {
 			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
 		}
-		newItem.allowAdopt = false
+		newItem.allowInherited = false
 	} else {
 		newItem.rollingLoads = oldItem.rollingLoads
-		newItem.allowAdopt = oldItem.allowAdopt
+		newItem.allowInherited = oldItem.allowInherited
 	}
 
 	if f.justTransferLeader(region) {
@@ -474,22 +463,6 @@ func (f *hotPeerCache) updateNewHotPeerStat(regionStats []RegionStatKind, newIte
 	return newItem
 }
 
-func (f *hotPeerCache) putInheritItem(item *HotPeerStat) {
-	f.inheritItem[item.RegionID] = item
-}
-
-func (f *hotPeerCache) takeInheritItem(regionID uint64) *HotPeerStat {
-	item, ok := f.inheritItem[regionID]
-	if !ok {
-		return nil
-	}
-	if item != nil {
-		delete(f.inheritItem, regionID)
-		return item
-	}
-	return nil
-}
-
 func (f *hotPeerCache) putItem(item *HotPeerStat) {
 	peers, ok := f.peersOfStore[item.StoreID]
 	if !ok {
@@ -529,14 +502,14 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 	if newItem.AntiCount <= 0 {
 		newItem.actionType = Remove
 	} else {
-		newItem.allowAdopt = true
+		newItem.allowInherited = true
 	}
 }
 
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
 	newItem.AntiCount = hotRegionAntiCount
-	newItem.allowAdopt = true
+	newItem.allowInherited = true
 	if newItem.Kind == Read {
 		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
@@ -545,7 +518,7 @@ func hotItem(newItem, oldItem *HotPeerStat) {
 func initItem(item *HotPeerStat) {
 	item.HotDegree = 1
 	item.AntiCount = hotRegionAntiCount
-	item.allowAdopt = true
+	item.allowInherited = true
 	if item.Kind == Read {
 		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}

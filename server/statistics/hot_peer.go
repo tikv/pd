@@ -107,11 +107,11 @@ type HotPeerStat struct {
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
 	// we will handle it as cold peer and mark the inCold flag
 	inCold bool
-	// source represents the statistics item source, such as directly, inherit, adopt.
+	// source represents the statistics item source, such as direct, inherit.
 	source sourceKind
-	// If the item in storeA is just adopted from storeB,
-	// then other store, such as storeC, will be forbidden to adopt from storeA until the item in storeA is hot.
-	allowAdopt bool
+	// If the item in storeA is just inherited from storeB,
+	// then other store, such as storeC, will be forbidden to inherit from storeA until the item in storeA is hot.
+	allowInherited bool
 }
 
 // ID returns region ID. Implementing TopNItem.
@@ -139,7 +139,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Int("hot-anti-count", stat.AntiCount),
 		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.String("source", stat.source.String()),
-		zap.Bool("allow-adopt", stat.allowAdopt),
+		zap.Bool("allow-inherited", stat.allowInherited),
 		zap.String("action-type", stat.actionType.String()),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
 }
