@@ -34,7 +34,7 @@ const (
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreVersion       = "2.1.0"
 	// server
-	defaultLeaderLease                 = 1
+	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
 	defaultTickInterval                = 100 * time.Millisecond
 	defaultElectionInterval            = 3 * time.Second

@@ -93,7 +93,7 @@ func (s *testHotSchedulerSuite) TestGCPendingOpInfos(c *C) {
 		case movePeer:
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
-			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, operator.OpAdmin)
+			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, []uint64{}, operator.OpAdmin)
 		}
 		c.Assert(err, IsNil)
 		c.Assert(op, NotNil)
@@ -162,7 +162,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -339,7 +339,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestByteRateOnlyWithTiFlash(c *C) {
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.RuleManager.SetRules([]*placement.Rule{
 		{
@@ -588,7 +588,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithKeyRate(c *C) {
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -642,7 +642,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestUnhealthyStore(c *C) {
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -689,7 +689,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestCheckHot(c *C) {
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -784,7 +784,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		// 1: key rate
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
-		tc.DisableFeature(versioninfo.JointConsensus)
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 		tc.AddRegionStore(1, 20)
 		tc.AddRegionStore(2, 20)
 		tc.AddRegionStore(3, 20)
@@ -934,7 +934,7 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), core.NewStorage(kv.NewMemoryKV()), nil)
 	c.Assert(err, IsNil)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
@@ -1146,7 +1146,7 @@ func (s *testHotReadRegionSchedulerSuite) TestWithPendingInfluence(c *C) {
 		// 1: key rate
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
-		tc.DisableFeature(versioninfo.JointConsensus)
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 		tc.AddRegionStore(1, 20)
 		tc.AddRegionStore(2, 20)
 		tc.AddRegionStore(3, 20)
@@ -1496,7 +1496,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetMaxReplicas(3)
 		tc.SetLocationLabels([]string{"zone", "host"})
-		tc.DisableFeature(versioninfo.JointConsensus)
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 		sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 		c.Assert(err, IsNil)
 		hb := sche.(*hotScheduler)
@@ -1552,7 +1552,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		c.Check(len(items), Greater, 0)
 		for _, item := range items {
 			if item.StoreID == 3 {
-				c.Check(item.IsNeedDelete(), IsTrue)
+				c.Check(item.GetActionType(), Equals, statistics.Remove)
 				continue
 			}
 			c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader+2)
@@ -1568,7 +1568,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	// some peers are hot, and some are cold #3198
 
 	rate := uint64(512 * KB)
@@ -1586,9 +1586,9 @@ func (s *testHotCacheSuite) TestCheckRegionFlowWithDifferentThreshold(c *C) {
 	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4}, 1)
 	for _, item := range items {
 		if item.StoreID < 4 {
-			c.Check(item.IsNeedDelete(), IsTrue)
+			c.Check(item.GetActionType(), Equals, statistics.Remove)
 		} else {
-			c.Check(item.IsNeedDelete(), IsFalse)
+			c.Check(item.GetActionType(), Equals, statistics.Update)
 		}
 	}
 }
@@ -1599,7 +1599,6 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
-	tc.DisableFeature(versioninfo.JointConsensus)
 	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), core.NewStorage(kv.NewMemoryKV()), schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
 	hb := sche.(*hotScheduler)
@@ -1660,7 +1659,7 @@ func (s *testInfluenceSerialSuite) TestInfluenceByRWType(c *C) {
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -1740,7 +1739,7 @@ func (s *testHotReadRegionSchedulerSuite) TestHotReadPeerSchedule(c *C) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	for id := uint64(1); id <= 6; id++ {
@@ -1773,7 +1772,7 @@ func (s *testHotSchedulerSuite) TestHotScheduleWithPriority(c *C) {
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -1861,7 +1860,7 @@ func (s *testHotWriteRegionSchedulerSuite) TestHotWriteLeaderScheduleWithPriorit
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -1916,7 +1915,7 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// low version
-	tc.DisableFeature(versioninfo.HotScheduleWithQuery)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version5_0))
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -1950,9 +1949,7 @@ func (s *testHotSchedulerSuite) TestCompatibility(c *C) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// test version change
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version5_0))
-	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse)
-	tc.EnableFeature(versioninfo.HotScheduleWithQuery)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.Assert(hb.(*hotScheduler).conf.lastQuerySupported, IsFalse) // it will updated after scheduling
 	checkPriority(c, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},

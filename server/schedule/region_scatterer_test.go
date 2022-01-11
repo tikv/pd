@@ -104,7 +104,7 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numStores; i++ {
@@ -159,7 +159,7 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
 	for i := uint64(1); i <= numOrdinaryStores; i++ {

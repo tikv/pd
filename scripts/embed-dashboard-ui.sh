@@ -35,18 +35,16 @@ go mod tidy
 DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 echo "  - TiDB Dashboard directory: ${DASHBOARD_DIR}"
 
+CACHE_DIR=${BASE_DIR}/.dashboard_download_cache
+echo "+ Create download cache directory: ${CACHE_DIR}"
+mkdir -p "${CACHE_DIR}"
 
 function download_embed_asset {
-  CACHE_DIR=${BASE_DIR}/.dashboard_asset_cache
-
-  echo '+ Create asset cache directory'
-  mkdir -p "${CACHE_DIR}"
-
   echo '+ Discover TiDB Dashboard release version'
   DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
   echo "  - TiDB Dashboard release version: ${DASHBOARD_RELEASE_VERSION}"
 
-  echo '+ Check embedded assets exists in cache'
+  echo '+ Check whether pre-built assets are available'
   CACHE_FILE=${CACHE_DIR}/embedded-assets-golang-${DASHBOARD_RELEASE_VERSION}.zip
   if [[ -f "$CACHE_FILE" ]]; then
     echo "  - Cached archive exists: ${CACHE_FILE}"
@@ -86,7 +84,8 @@ function download_embed_asset {
 function compile_asset {
   BUILD_DIR=${BASE_DIR}/.dashboard_build_temp
 
-  echo '+ Clean up TiDB Dashboard build directory'
+  echo '+ Compiling TiDB Dashboard UI from source code'
+  echo '+ Clean up build directory'
   echo "  - Build directory: ${DASHBOARD_DIR}"
   if [ -d "${BUILD_DIR}/ui/node_modules" ]; then
     echo "  - Build dependency exists, keep dependency cache"
@@ -99,22 +98,47 @@ function compile_asset {
     mkdir -p "${BUILD_DIR}/ui"
   fi
 
-  echo '+ Copy TiDB Dashboard source code to build directory'
-  echo "  - Src:  ${DASHBOARD_DIR}"
+  echo '+ Discover referenced TiDB Dashboard commit'
+  DASHBOARD_SHA=$(echo "${DASHBOARD_DIR}" | awk -F '-' '{print $NF}')
+  CACHE_FILE=${CACHE_DIR}/tidb-dashboard-${DASHBOARD_SHA}.zip
+  echo "  - TiDB Dashboard commit: ${DASHBOARD_SHA}"
+
+  echo '+ Check whether UI source code was downloaded'
+  if [[ -f "$CACHE_FILE" ]]; then
+    echo "  - Source code archive exists: ${CACHE_FILE}"
+  else
+    echo '  - Source code archive does not exist'
+    echo '  - Download source code archive from GitHub'
+
+    DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/archive/${DASHBOARD_SHA}.zip"
+    DOWNLOAD_FILE=${CACHE_DIR}/tidb-dashboard.zip
+    echo "  - Download ${DOWNLOAD_URL}"
+    if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
+      echo
+      echo -e "${RED}Error: Failed to download TiDB Dashboard source code archive.${NC}"
+      exit 1
+    fi
+
+    mv "${DOWNLOAD_FILE}" "${CACHE_FILE}"
+    echo "  - Source code archive downloaded to: ${CACHE_FILE}"
+  fi
+
+  echo '+ Unpack source code archive'
+  DASHBOARD_FULL_SHA=$(unzip -l "${CACHE_FILE}" | sed -n '2p')
+  DASHBOARD_UNZIP_PATH=/tmp/tidb-dashboard-${DASHBOARD_FULL_SHA}
+  unzip -o "${CACHE_FILE}" -d /tmp
+
+  echo '+ Copy unpacked source code to build directory'
+  echo "  - Src:  ${DASHBOARD_UNZIP_PATH}"
   echo "  - Dest: ${BUILD_DIR}"
-  cp -r "${DASHBOARD_DIR}/." "${BUILD_DIR}/"
+  cp -r "${DASHBOARD_UNZIP_PATH}/." "${BUILD_DIR}/"
+
   chmod -R u+w "${BUILD_DIR}"
   chmod u+x "${BUILD_DIR}"/scripts/*.sh
 
   echo '+ Build UI'
   cd "${BUILD_DIR}"
-
-  if [ -n "${DISTRIBUTION_DIR}" ]; then
-    DISTRIBUTION_DIR=${DISTRIBUTION_DIR} scripts/replace_distro_resource.sh
-    DISTRO_BUILD_TAG=1 make ui
-  else
-    make ui
-  fi
+  make ui
 
   echo '+ Generating UI assets'
   echo '  - Generating...'

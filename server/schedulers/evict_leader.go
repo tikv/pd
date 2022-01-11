@@ -279,7 +279,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges 
 	ops := make([]*operator.Operator, 0, len(storeRanges))
 	for id, ranges := range storeRanges {
 		var filters []filter.Filter
-		region := cluster.RandLeaderRegion(id, ranges, opt.IsRegionHealthy)
+		region := cluster.RandLeaderRegion(id, ranges, schedule.IsRegionHealthy)
 		if region == nil {
 			// try to pick unhealthy region
 			region = cluster.RandLeaderRegion(id, ranges)
@@ -299,13 +299,21 @@ func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges 
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), filters...).RandomPick()
+		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster.GetOpts(), filters...)
+		// Compatible with old TiKV transfer leader logic.
+		target := candidates.RandomPick()
+		targets := candidates.PickAll()
+		// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
 		if target == nil {
 			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		targetIDs := make([]uint64, 0, len(targets))
+		for _, t := range targets {
+			targetIDs = append(targetIDs, t.GetID())
+		}
+		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue

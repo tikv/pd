@@ -74,12 +74,6 @@ func main() {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	// The old logger
-	err = logutil.InitLogger(&cfg.Log)
-	if err != nil {
-		log.Fatal("initialize logger error", errs.ZapError(err))
-	}
-
 	server.LogPDInfo()
 
 	for _, msg := range cfg.WarningMsgs {
