@@ -100,7 +100,6 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10))
 	defer cluster.Destroy()
 
-<<<<<<< HEAD
 	// region command
 	args := []string{"-u", pdAddr, "region"}
 	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
@@ -109,50 +108,6 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions := leaderServer.GetRegions()
 	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
-=======
-	var testRegionsCases = []struct {
-		args   []string
-		expect []*core.RegionInfo
-	}{
-		// region command
-		{[]string{"region"}, leaderServer.GetRegions()},
-		// region sibling <region_id> command
-		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
-		// region store <store_id> command
-		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
-		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
-		// region topread [limit] command
-		{[]string{"region", "topread", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
-		// region topwrite [limit] command
-		{[]string{"region", "topwrite", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)},
-		// region topconfver [limit] command
-		{[]string{"region", "topconfver", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
-		}, 2)},
-		// region topversion [limit] command
-		{[]string{"region", "topversion", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
-		}, 2)},
-		// region topsize [limit] command
-		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetApproximateSize() < b.GetApproximateSize()
-		}, 2)},
-		// region check extra-peer command
-		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
-		// region check miss-peer command
-		{[]string{"region", "check", "miss-peer"}, []*core.RegionInfo{r2, r3, r4}},
-		// region check pending-peer command
-		{[]string{"region", "check", "pending-peer"}, []*core.RegionInfo{r3}},
-		// region check down-peer command
-		{[]string{"region", "check", "down-peer"}, []*core.RegionInfo{r3}},
-		// region check learner-peer command
-		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
-		// region startkey --format=raw <key> command
-		{[]string{"region", "startkey", "--format=raw", "b", "2"}, []*core.RegionInfo{r2, r3}},
-		// region startkey --format=hex <key> command
-		{[]string{"region", "startkey", "--format=hex", "63", "2"}, []*core.RegionInfo{r3, r4}},
-	}
->>>>>>> 4252d7efe (server/core: include learners in store region (#3070))
 
 	// region <region_id> command
 	args = []string{"-u", pdAddr, "region", "1"}
@@ -181,6 +136,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	c.Assert(json.Unmarshal(output, &regionsInfo), IsNil)
 	regions = leaderServer.GetStoreRegions(1)
 	pdctl.CheckRegionsInfo(c, regionsInfo, regions)
+	pdctl.CheckRegionsInfo(c, regionsInfo, []*core.RegionInfo{r1, r2, r3, r4})
 
 	// region topread [limit] command
 	args = []string{"-u", pdAddr, "region", "topread", "2"}
