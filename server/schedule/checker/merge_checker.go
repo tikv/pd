@@ -168,9 +168,42 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
-	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
-		AllowMerge(m.cluster, region, adjacent) && checkPeerStore(m.cluster, region, adjacent) &&
-		schedule.IsRegionHealthy(adjacent) && schedule.IsRegionReplicated(m.cluster, adjacent)
+	if adjacent == nil {
+		checkerCounter.WithLabelValues("merge_checker", "adj-not-exist").Inc()
+		return false
+	}
+
+	if m.splitCache.Exists(adjacent.GetID()) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-recently-split").Inc()
+		return false
+	}
+
+	if m.cluster.IsRegionHot(adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-region-hot").Inc()
+		return false
+	}
+
+	if !AllowMerge(m.cluster, region, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-disallow-merge").Inc()
+		return false
+	}
+
+	if !checkPeerStore(m.cluster, region, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-peerstore").Inc()
+		return false
+	}
+
+	if !schedule.IsRegionHealthy(adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-special-peer").Inc()
+		return false
+	}
+
+	if !schedule.IsRegionReplicated(m.cluster, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-replica").Inc()
+		return false
+	}
+
+	return true
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
