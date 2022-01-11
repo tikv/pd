@@ -369,9 +369,13 @@ func (o *Operator) GetAdditionalInfo() string {
 }
 
 // mock region default region size is 96Mb.
-const mockRegionSize = 96 * (1 << 20)
+const (
+	mockRegionSize = 96 * (1 << 20)
+	mockDesc       = "test"
+	mockBrief      = "test"
+)
 
 // NewTestOperator creates a test operator, only used for unit test.
-func NewTestOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator(desc, brief, regionID, regionEpoch, kind, mockRegionSize, steps...)
+func NewTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
+	return NewOperator(mockDesc, mockBrief, regionID, regionEpoch, kind, mockRegionSize, steps...)
 }
