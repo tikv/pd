@@ -29,10 +29,17 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20201126102027-b0a155152ca3
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
+<<<<<<< HEAD
 	github.com/pingcap/kvproto v0.0.0-20211029081837-3c7bd947cf9b
 	github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7
 	github.com/pingcap/sysutil v0.0.0-20210730114356-fcd8a63f68c5
 	github.com/pingcap/tidb-dashboard v0.0.0-20211206031355-bcc43a01d537
+=======
+	github.com/pingcap/kvproto v0.0.0-20211213085605-3329b3c5404c
+	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
+	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
+	github.com/pingcap/tidb-dashboard v0.0.0-20220110095800-367ff3b010e6
+>>>>>>> de9acaba4 (Update TiDB Dashboard to v2022.01.10.1 (#4557))
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.6.0
