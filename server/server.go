@@ -400,9 +400,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	// initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
 	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, encryptionKeyManager, s.handler,
-		s.cfg.Schedule.HotRegionsReservedDays,
-		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
+		ctx, hotRegionPath, encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
