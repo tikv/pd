@@ -32,7 +32,9 @@ import (
 var _ storage.MetaStorage = (*BaseBackend)(nil)
 
 const (
+	// MaxKVRangeLimit is the max limit of the number of keys in a range.
 	MaxKVRangeLimit = 10000
+	// MinKVRangeLimit is the min limit of the number of keys in a range.
 	MinKVRangeLimit = 100
 )
 
@@ -191,6 +193,7 @@ func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.Regi
 	}
 }
 
+// LoadRegionsOnce will do a load of all regions from storage only once.
 func (bb *BaseBackend) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	return nil
 }
@@ -212,3 +215,9 @@ func (bb *BaseBackend) SaveRegion(region *metapb.Region) error {
 func (bb *BaseBackend) DeleteRegion(region *metapb.Region) error {
 	return bb.Remove(RegionPath(region.GetId()))
 }
+
+// Flush flushes the pending data to the underlying storage backend.
+func (bb *BaseBackend) Flush() error { return nil }
+
+// Close closes the underlying storage backend.
+func (bb *BaseBackend) Close() error { return nil }

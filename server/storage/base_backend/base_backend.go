@@ -37,7 +37,3 @@ func NewBaseBackend(
 		encryptionKeyManager,
 	}
 }
-
-func (bb *BaseBackend) Flush() error { return nil }
-
-func (bb *BaseBackend) Close() error { return nil }

@@ -16,7 +16,6 @@ package storage
 
 import (
 	"context"
-	"math"
 	"sync"
 	"time"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 	backend "github.com/tikv/pd/server/storage/base_backend"
@@ -102,57 +100,6 @@ func (lb *levelDBBackend) backgroundFlush() {
 			}
 		case <-lb.regionStorageCtx.Done():
 			return
-		}
-	}
-}
-
-func (lb *levelDBBackend) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	nextID := uint64(0)
-	endKey := backend.RegionPath(math.MaxUint64)
-
-	// Since the region key may be very long, using a larger rangeLimit will cause
-	// the message packet to exceed the grpc message size limit (4MB). Here we use
-	// a variable rangeLimit to work around.
-	rangeLimit := backend.MaxKVRangeLimit
-	for {
-		failpoint.Inject("slowLoadRegion", func() {
-			rangeLimit = 1
-			time.Sleep(time.Second)
-		})
-		startKey := backend.RegionPath(nextID)
-		_, res, err := lb.LoadRange(startKey, endKey, rangeLimit)
-		if err != nil {
-			if rangeLimit /= 2; rangeLimit >= backend.MinKVRangeLimit {
-				continue
-			}
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		for _, s := range res {
-			region := &metapb.Region{}
-			if err := region.Unmarshal([]byte(s)); err != nil {
-				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
-			}
-			if err = encryption.DecryptRegion(region, lb.ekm); err != nil {
-				return err
-			}
-
-			nextID = region.GetId() + 1
-			overlaps := f(core.NewRegionInfo(region, nil))
-			for _, item := range overlaps {
-				if err := lb.DeleteRegion(item.GetMeta()); err != nil {
-					return err
-				}
-			}
-		}
-
-		if len(res) < rangeLimit {
-			return nil
 		}
 	}
 }

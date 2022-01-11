@@ -33,6 +33,7 @@ type MetaStorage interface {
 	RegionStorage
 }
 
+// RegionStorage defines the storage operations on the Region meta info.
 type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
 	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error

@@ -48,8 +48,10 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 	for i := 0; i < 30; i++ {
 		rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
 	}
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/slowLoadRegion", "return(true)"), IsNil)
-	defer func() { c.Assert(failpoint.Disable("github.com/tikv/pd/server/core/slowLoadRegion"), IsNil) }()
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/base_backend/slowLoadRegion", "return(true)"), IsNil)
+	defer func() {
+		c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/base_backend/slowLoadRegion"), IsNil)
+	}()
 
 	rc := NewRegionSyncer(server)
 	start := time.Now()

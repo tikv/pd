@@ -40,14 +40,17 @@ type Storage interface {
 	storage.GCSafePointStorage
 }
 
+// NewStorageWithMemoryBackend creates a new storage with memory backend.
 func NewStorageWithMemoryBackend() Storage {
 	return newMemoryBackend()
 }
 
+// NewStorageWithEtcdBackend creates a new storage with etcd backend.
 func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage {
 	return newEtcdBackend(client, rootPath)
 }
 
+// NewStorageWithLevelDBBackend creates a new storage with LevelDB backend.
 func NewStorageWithLevelDBBackend(
 	ctx context.Context,
 	rootPath string,
@@ -65,6 +68,9 @@ type pdStorage struct {
 	mu               sync.Mutex
 }
 
+// NewPDStorage creates a new PD storage with the given storage and region storage.
+// Usually, the defaultStorage is etcd-backend, and the regionStorage is LevelDB-backend.
+// TODO: maybe support other KV storages like BadgerDB in the future.
 func NewPDStorage(defaultStorage Storage, regionStorage storage.RegionStorage) Storage {
 	return &pdStorage{
 		Storage:       defaultStorage,
@@ -92,7 +98,7 @@ func (ps *pdStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.LoadRegion(regionID, region)
 	}
-	return ps.LoadRegion(regionID, region)
+	return ps.Storage.LoadRegion(regionID, region)
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
@@ -100,13 +106,13 @@ func (ps *pdStorage) LoadRegions(ctx context.Context, f func(region *core.Region
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
-	return ps.LoadRegions(ctx, f)
+	return ps.Storage.LoadRegions(ctx, f)
 }
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo.Only load one time from regionStorage.
 func (ps *pdStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
-		return ps.LoadRegions(ctx, f)
+		return ps.Storage.LoadRegions(ctx, f)
 	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
@@ -124,7 +130,7 @@ func (ps *pdStorage) SaveRegion(region *metapb.Region) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.SaveRegion(region)
 	}
-	return ps.SaveRegion(region)
+	return ps.Storage.SaveRegion(region)
 }
 
 // DeleteRegion deletes one region from storage.
@@ -132,7 +138,7 @@ func (ps *pdStorage) DeleteRegion(region *metapb.Region) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.DeleteRegion(region)
 	}
-	return ps.DeleteRegion(region)
+	return ps.Storage.DeleteRegion(region)
 }
 
 // Flush flushes the dirty region to storage.
