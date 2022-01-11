@@ -98,7 +98,7 @@ func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
 		m.members = nil
-		if err := m.srv.GetPersistOptions().Reload(m.srv.GetNewStorage()); err != nil {
+		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {
 			log.Warn("failed to reload persist options")
 		}
 		return

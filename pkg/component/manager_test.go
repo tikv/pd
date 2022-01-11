@@ -31,7 +31,7 @@ var _ = Suite(&testManagerSuite{})
 type testManagerSuite struct{}
 
 func (s *testManagerSuite) TestManager(c *C) {
-	m := NewManager(storage.NewBuilder().WithMemoryBackend().Build())
+	m := NewManager(storage.NewStorageWithMemoryBackend())
 	// register legal address
 	c.Assert(m.Register("c1", "127.0.0.1:1"), IsNil)
 	c.Assert(m.Register("c1", "127.0.0.1:2"), IsNil)

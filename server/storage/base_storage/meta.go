@@ -27,12 +27,18 @@ type MetaStorage interface {
 	SaveMeta(meta *metapb.Cluster) error
 	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
 	SaveStore(store *metapb.Store) error
-	// TODO: refine this method with a more reasonable way.
 	SaveStoreWeight(storeID uint64, leader, region float64) error
 	LoadStores(f func(store *core.StoreInfo)) error
 	DeleteStore(store *metapb.Store) error
+	RegionStorage
+}
+
+type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
 	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
+	LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
+	Flush() error
+	Close() error
 }

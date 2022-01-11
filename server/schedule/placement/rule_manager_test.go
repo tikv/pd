@@ -33,7 +33,7 @@ type testManagerSuite struct {
 }
 
 func (s *testManagerSuite) SetUpTest(c *C) {
-	s.store = storage.NewBuilder().WithMemoryBackend().Build()
+	s.store = storage.NewStorageWithMemoryBackend()
 	var err error
 	s.manager = NewRuleManager(s.store, nil, nil)
 	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})

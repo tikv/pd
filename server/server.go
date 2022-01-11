@@ -123,8 +123,7 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
-	storage    *core.Storage   /* NOTICE: this field will be removed later. */
-	newStorage storage.Storage /* NOTICE: this field will be renamed to storage. */
+	storage storage.Storage
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -379,31 +378,23 @@ func (s *Server) startServer(ctx context.Context) error {
 			return err
 		}
 	}
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
+	s.encryptionKeyManager, err = encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.encryptionKeyManager = encryptionKeyManager
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
-
-	s.storage = core.NewStorage(
-		kvBase,
-		core.WithRegionStorage(regionStorage),
-		core.WithEncryptionKeyManager(encryptionKeyManager),
-	)
-	s.newStorage = storage.NewBuilder().WithEtcdBackend(s.client).WithKeyRootPath(s.rootPath).Build()
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	s.storage = storage.NewPDStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
 	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, encryptionKeyManager, s.handler,
+		ctx, hotRegionPath, s.encryptionKeyManager, s.handler,
 		s.cfg.Schedule.HotRegionsReservedDays,
 		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
 	if err != nil {
@@ -721,14 +712,8 @@ func (s *Server) GetMember() *member.Member {
 
 // GetStorage returns the backend storage of server.
 // NOTICE: this method will be removed later.
-func (s *Server) GetStorage() *core.Storage {
+func (s *Server) GetStorage() storage.Storage {
 	return s.storage
-}
-
-// GetNewStorage returns the storage of server.
-// NOTICE: this method will be renamed to GetStorage later.
-func (s *Server) GetNewStorage() storage.Storage {
-	return s.newStorage
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
@@ -738,7 +723,7 @@ func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
 
 // SetStorage changes the storage only for test purpose.
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
-func (s *Server) SetStorage(storage *core.Storage) {
+func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
@@ -800,10 +785,10 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	if s.newStorage == nil {
+	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := s.newStorage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllScheduleConfig()
 	if err != nil {
 		return cfg
 	}
@@ -840,7 +825,7 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	old := s.persistOptions.GetScheduleConfig()
 	cfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.newStorage); err != nil {
+	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", cfg),
@@ -920,7 +905,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	}
 
 	s.persistOptions.SetReplicationConfig(&cfg)
-	if err := s.persistOptions.Persist(s.newStorage); err != nil {
+	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationConfig(old)
 		if rule != nil {
 			rule.Count = int(old.MaxReplicas)
@@ -962,7 +947,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 	old := s.persistOptions.GetPDServerConfig()
 	s.persistOptions.SetPDServerConfig(&cfg)
-	if err := s.persistOptions.Persist(s.newStorage); err != nil {
+	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetPDServerConfig(old)
 		log.Error("failed to update PDServer config",
 			zap.Reflect("new", cfg),
@@ -978,7 +963,7 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 	old := s.persistOptions.GetLabelPropertyConfig()
 	s.persistOptions.SetLabelPropertyConfig(cfg)
-	if err := s.persistOptions.Persist(s.newStorage); err != nil {
+	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetLabelPropertyConfig(old)
 		log.Error("failed to update label property config",
 			zap.Reflect("new", cfg),
@@ -993,7 +978,7 @@ func (s *Server) SetLabelPropertyConfig(cfg config.LabelPropertyConfig) error {
 // SetLabelProperty inserts a label property config.
 func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
-	err := s.persistOptions.Persist(s.newStorage)
+	err := s.persistOptions.Persist(s.storage)
 	if err != nil {
 		s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to update label property config",
@@ -1012,7 +997,7 @@ func (s *Server) SetLabelProperty(typ, labelKey, labelValue string) error {
 // DeleteLabelProperty deletes a label property config.
 func (s *Server) DeleteLabelProperty(typ, labelKey, labelValue string) error {
 	s.persistOptions.DeleteLabelProperty(typ, labelKey, labelValue)
-	err := s.persistOptions.Persist(s.newStorage)
+	err := s.persistOptions.Persist(s.storage)
 	if err != nil {
 		s.persistOptions.SetLabelProperty(typ, labelKey, labelValue)
 		log.Error("failed to delete label property config",
@@ -1041,7 +1026,7 @@ func (s *Server) SetClusterVersion(v string) error {
 	}
 	old := s.persistOptions.GetClusterVersion()
 	s.persistOptions.SetClusterVersion(version)
-	err = s.persistOptions.Persist(s.newStorage)
+	err = s.persistOptions.Persist(s.storage)
 	if err != nil {
 		s.persistOptions.SetClusterVersion(old)
 		log.Error("failed to update cluster version",
@@ -1154,7 +1139,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 
 	old := s.persistOptions.GetReplicationModeConfig()
 	s.persistOptions.SetReplicationModeConfig(&cfg)
-	if err := s.persistOptions.Persist(s.newStorage); err != nil {
+	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetReplicationModeConfig(old)
 		log.Error("failed to update replication mode config",
 			zap.Reflect("new", cfg),
@@ -1175,7 +1160,7 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 			// (when below revert fail). They will become the same after PD is
 			// restart or PD leader is changed.
 			s.persistOptions.SetReplicationModeConfig(old)
-			revertErr := s.persistOptions.Persist(s.newStorage)
+			revertErr := s.persistOptions.Persist(s.storage)
 			if revertErr != nil {
 				log.Error("failed to revert replication mode persistent config", errs.ZapError(revertErr))
 			}
@@ -1354,15 +1339,22 @@ func (s *Server) etcdLeaderLoop() {
 }
 
 func (s *Server) reloadConfigFromKV() error {
-	err := s.persistOptions.Reload(s.newStorage)
+	err := s.persistOptions.Reload(s.storage)
 	if err != nil {
 		return err
 	}
+	switchableStorage, ok := s.storage.(interface {
+		SwitchToRegionStorage()
+		SwitchToDefaultStorage()
+	})
+	if !ok {
+		return nil
+	}
 	if s.persistOptions.IsUseRegionStorage() {
-		s.storage.SwitchToRegionStorage()
+		switchableStorage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
-		s.storage.SwitchToDefaultStorage()
+		switchableStorage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
 	return nil

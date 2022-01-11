@@ -1231,7 +1231,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage base_storage.GCSafePointStorage = s.newStorage
+	var storage base_storage.GCSafePointStorage = s.storage
 	safePoint, err := storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
@@ -1276,7 +1276,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage base_storage.GCSafePointStorage = s.newStorage
+	var storage base_storage.GCSafePointStorage = s.storage
 	oldSafePoint, err := storage.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
@@ -1327,7 +1327,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	var storage base_storage.GCSafePointStorage = s.newStorage
+	var storage base_storage.GCSafePointStorage = s.storage
 	if request.TTL <= 0 {
 		if err := storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
 			return nil, err

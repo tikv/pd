@@ -73,14 +73,14 @@ func (bb *BaseBackend) loadRangeByPrefix(prefix string, f func(k, v string)) err
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
-		keys, values, err := bb.LoadRange(nextKey, endKey, minKVRangeLimit)
+		keys, values, err := bb.LoadRange(nextKey, endKey, MinKVRangeLimit)
 		if err != nil {
 			return err
 		}
 		for i := range keys {
 			f(strings.TrimPrefix(keys[i], prefix), values[i])
 		}
-		if len(keys) < minKVRangeLimit {
+		if len(keys) < MinKVRangeLimit {
 			return nil
 		}
 		nextKey = keys[len(keys)-1] + "\x00"

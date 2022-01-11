@@ -29,6 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
+	base_storage "github.com/tikv/pd/server/storage/base_storage"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -60,7 +63,7 @@ type Server interface {
 	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
-	GetStorage() *core.Storage /* NOTICE: this method will be removed later. */
+	GetStorage() storage.Storage
 	Name() string
 	GetRegions() []*core.RegionInfo
 	GetTLSConfig() *grpcutil.TLSConfig
@@ -88,9 +91,15 @@ type RegionSyncer struct {
 // Usually open the region syncer in huge cluster and the server
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
+	regionStorageGetter, ok := s.GetStorage().(interface {
+		GetRegionStorage() base_storage.RegionStorage
+	})
+	if !ok {
+		return nil
+	}
 	syncer := &RegionSyncer{
 		server:    s,
-		history:   newHistoryBuffer(defaultHistoryBufferSize, s.GetStorage().GetRegionStorage()),
+		history:   newHistoryBuffer(defaultHistoryBufferSize, regionStorageGetter.GetRegionStorage().(kv.Base)),
 		limit:     ratelimit.NewBucketWithRate(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}

@@ -15,13 +15,16 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	base_backend "github.com/tikv/pd/server/storage/base_backend"
@@ -29,7 +32,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-func TestCore(t *testing.T) {
+func TestStorage(t *testing.T) {
 	TestingT(t)
 }
 
@@ -39,7 +42,7 @@ type testStorageSuite struct {
 }
 
 func (s *testStorageSuite) TestBasic(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 
 	c.Assert(base_backend.StorePath(123), Equals, "raft/s/00000000000000000123")
 	c.Assert(base_backend.RegionPath(123), Equals, "raft/r/00000000000000000123")
@@ -98,7 +101,7 @@ func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
 }
 
 func (s *testStorageSuite) TestLoadStores(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 	cache := core.NewStoresInfo()
 
 	n := 10
@@ -112,7 +115,7 @@ func (s *testStorageSuite) TestLoadStores(c *C) {
 }
 
 func (s *testStorageSuite) TestStoreWeight(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 	cache := core.NewStoresInfo()
 	const n = 3
 
@@ -129,7 +132,7 @@ func (s *testStorageSuite) TestStoreWeight(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
@@ -145,7 +148,7 @@ func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*base_storage.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: expireAt, SafePoint: 1},
@@ -176,7 +179,7 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
-	storage := NewBuilder().WithMemoryBackend().Build()
+	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
 	serviceSafePoints := []*base_storage.ServiceSafePoint{
 		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},
@@ -206,4 +209,74 @@ func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	c.Assert(ssp.ServiceID, Equals, "2")
 	c.Assert(ssp.ExpiredAt, Equals, expireAt)
 	c.Assert(ssp.SafePoint, Equals, uint64(2))
+}
+
+func (s *testStorageSuite) TestLoadRegions(c *C) {
+	storage := NewStorageWithMemoryBackend()
+	cache := core.NewRegionsInfo()
+
+	n := 10
+	regions := mustSaveRegions(c, storage, n)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
+
+	c.Assert(cache.GetRegionCount(), Equals, n)
+	for _, region := range cache.GetMetaRegions() {
+		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+}
+
+func mustSaveRegions(c *C, s base_storage.RegionStorage, n int) []*metapb.Region {
+	regions := make([]*metapb.Region, 0, n)
+	for i := 0; i < n; i++ {
+		region := newTestRegionMeta(uint64(i))
+		regions = append(regions, region)
+	}
+
+	for _, region := range regions {
+		c.Assert(s.SaveRegion(region), IsNil)
+	}
+
+	return regions
+}
+
+func newTestRegionMeta(regionID uint64) *metapb.Region {
+	return &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
+		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+	}
+}
+
+func (s *testStorageSuite) TestLoadRegionsToCache(c *C) {
+	storage := NewStorageWithMemoryBackend()
+	cache := core.NewRegionsInfo()
+
+	n := 10
+	regions := mustSaveRegions(c, storage, n)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
+
+	c.Assert(cache.GetRegionCount(), Equals, n)
+	for _, region := range cache.GetMetaRegions() {
+		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+
+	n = 20
+	mustSaveRegions(c, storage, n)
+	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
+	c.Assert(cache.GetRegionCount(), Equals, n)
+}
+
+func (s *testStorageSuite) TestLoadRegionsExceedRangeLimit(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/withRangeLimit", "return(500)"), IsNil)
+	storage := NewStorageWithMemoryBackend()
+	cache := core.NewRegionsInfo()
+
+	n := 1000
+	regions := mustSaveRegions(c, storage, n)
+	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
+	c.Assert(cache.GetRegionCount(), Equals, n)
+	for _, region := range cache.GetMetaRegions() {
+		c.Assert(region, DeepEquals, regions[region.GetId()])
+	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/withRangeLimit"), IsNil)
 }

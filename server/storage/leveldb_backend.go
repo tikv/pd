@@ -1,0 +1,232 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package storage
+
+import (
+	"context"
+	"math"
+	"sync"
+	"time"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/encryptionkm"
+	"github.com/tikv/pd/server/kv"
+	backend "github.com/tikv/pd/server/storage/base_backend"
+)
+
+const (
+	// DefaultFlushRegionRate is the ttl to sync the regions to region storage.
+	defaultFlushRegionRate = 3 * time.Second
+	// DefaultBatchSize is the batch size to save the regions to region storage.
+	defaultBatchSize = 100
+)
+
+// levelDBBackend is a storage backend that stores data in LevelDB,
+// which is mainly used by the PD region storage.
+type levelDBBackend struct {
+	*backend.BaseBackend
+	ekm                 *encryptionkm.KeyManager
+	mu                  sync.RWMutex
+	batchRegions        map[string]*metapb.Region
+	batchSize           int
+	cacheSize           int
+	flushRate           time.Duration
+	flushTime           time.Time
+	regionStorageCtx    context.Context
+	regionStorageCancel context.CancelFunc
+}
+
+// newLevelDBBackend is used to create a new LevelDB backend.
+func newLevelDBBackend(ctx context.Context, rootPath string, ekm *encryptionkm.KeyManager) (*levelDBBackend, error) {
+	levelDB, err := kv.NewLeveldbKV(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	regionStorageCtx, regionStorageCancel := context.WithCancel(ctx)
+	lb := &levelDBBackend{
+		BaseBackend:         backend.NewBaseBackend(levelDB, ekm),
+		ekm:                 ekm,
+		batchSize:           defaultBatchSize,
+		flushRate:           defaultFlushRegionRate,
+		batchRegions:        make(map[string]*metapb.Region, defaultBatchSize),
+		flushTime:           time.Now().Add(defaultFlushRegionRate),
+		regionStorageCtx:    regionStorageCtx,
+		regionStorageCancel: regionStorageCancel,
+	}
+	go lb.backgroundFlush()
+	return lb, nil
+}
+
+var dirtyFlushTick = time.Second
+
+func (lb *levelDBBackend) backgroundFlush() {
+	var (
+		isFlush bool
+		err     error
+	)
+	ticker := time.NewTicker(dirtyFlushTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			lb.mu.RLock()
+			isFlush = lb.flushTime.Before(time.Now())
+			failpoint.Inject("regionStorageFastFlush", func() {
+				isFlush = true
+			})
+			lb.mu.RUnlock()
+			if !isFlush {
+				continue
+			}
+			if err = lb.FlushRegion(); err != nil {
+				log.Error("flush regions meet error", errs.ZapError(err))
+			}
+		case <-lb.regionStorageCtx.Done():
+			return
+		}
+	}
+}
+
+func (lb *levelDBBackend) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	nextID := uint64(0)
+	endKey := backend.RegionPath(math.MaxUint64)
+
+	// Since the region key may be very long, using a larger rangeLimit will cause
+	// the message packet to exceed the grpc message size limit (4MB). Here we use
+	// a variable rangeLimit to work around.
+	rangeLimit := backend.MaxKVRangeLimit
+	for {
+		failpoint.Inject("slowLoadRegion", func() {
+			rangeLimit = 1
+			time.Sleep(time.Second)
+		})
+		startKey := backend.RegionPath(nextID)
+		_, res, err := lb.LoadRange(startKey, endKey, rangeLimit)
+		if err != nil {
+			if rangeLimit /= 2; rangeLimit >= backend.MinKVRangeLimit {
+				continue
+			}
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		for _, s := range res {
+			region := &metapb.Region{}
+			if err := region.Unmarshal([]byte(s)); err != nil {
+				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+			}
+			if err = encryption.DecryptRegion(region, lb.ekm); err != nil {
+				return err
+			}
+
+			nextID = region.GetId() + 1
+			overlaps := f(core.NewRegionInfo(region, nil))
+			for _, item := range overlaps {
+				if err := lb.DeleteRegion(item.GetMeta()); err != nil {
+					return err
+				}
+			}
+		}
+
+		if len(res) < rangeLimit {
+			return nil
+		}
+	}
+}
+
+func (lb *levelDBBackend) SaveRegion(region *metapb.Region) error {
+	region, err := encryption.EncryptRegion(region, lb.ekm)
+	if err != nil {
+		return err
+	}
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	if lb.cacheSize < lb.batchSize-1 {
+		lb.batchRegions[backend.RegionPath(region.GetId())] = region
+		lb.cacheSize++
+
+		lb.flushTime = time.Now().Add(lb.flushRate)
+		return nil
+	}
+	lb.batchRegions[backend.RegionPath(region.GetId())] = region
+	err = lb.flush()
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (lb *levelDBBackend) SaveRegions(regions map[string]*metapb.Region) error {
+	batch := new(leveldb.Batch)
+
+	for key, r := range regions {
+		value, err := proto.Marshal(r)
+		if err != nil {
+			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+		}
+		batch.Put([]byte(key), value)
+	}
+
+	if err := lb.Base.(*kv.LeveldbKV).Write(batch, nil); err != nil {
+		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
+	}
+	return nil
+}
+
+func (lb *levelDBBackend) DeleteRegion(region *metapb.Region) error {
+	return lb.Remove(backend.RegionPath(region.GetId()))
+}
+
+// FlushRegion saves the cache region to region storage.
+func (lb *levelDBBackend) FlushRegion() error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.flush()
+}
+
+func (lb *levelDBBackend) flush() error {
+	if err := lb.SaveRegions(lb.batchRegions); err != nil {
+		return err
+	}
+	lb.cacheSize = 0
+	lb.batchRegions = make(map[string]*metapb.Region, lb.batchSize)
+	return nil
+}
+
+// Close closes the kv.
+func (lb *levelDBBackend) Close() error {
+	err := lb.FlushRegion()
+	if err != nil {
+		log.Error("meet error before close the region storage", errs.ZapError(err))
+	}
+	lb.regionStorageCancel()
+	err = lb.Base.(*kv.LeveldbKV).Close()
+	if err != nil {
+		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
+	}
+	return nil
+}

@@ -33,6 +33,11 @@ const (
 	gcWorkerServiceSafePointID = "gc_worker"
 )
 
+// ClusterStatePath returns the path to save an option.
+func ClusterStatePath(option string) string {
+	return path.Join(clusterPath, "status", option)
+}
+
 func scheduleConfigPath(scheduleName string) string {
 	return path.Join(customScheduleConfigPath, scheduleName)
 }

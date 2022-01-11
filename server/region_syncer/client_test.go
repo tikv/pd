@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
 )
 
 var _ = Suite(&testClientSuite{})
@@ -37,12 +37,12 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_load_region")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(tempDir)
-	rs, err := core.NewRegionStorage(context.Background(), tempDir, nil)
+	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	c.Assert(err, IsNil)
 
 	server := &mockServer{
 		ctx:     context.Background(),
-		storage: core.NewStorage(kv.NewMemoryKV(), core.WithRegionStorage(rs)),
+		storage: storage.NewPDStorage(storage.NewStorageWithMemoryBackend(), rs),
 		bc:      core.NewBasicCluster(),
 	}
 	for i := 0; i < 30; i++ {
@@ -63,7 +63,7 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 type mockServer struct {
 	ctx            context.Context
 	member, leader *pdpb.Member
-	storage        *core.Storage
+	storage        storage.Storage
 	bc             *core.BasicCluster
 }
 
@@ -83,7 +83,7 @@ func (s *mockServer) GetLeader() *pdpb.Member {
 	return s.leader
 }
 
-func (s *mockServer) GetStorage() *core.Storage {
+func (s *mockServer) GetStorage() storage.Storage {
 	return s.storage
 }
 

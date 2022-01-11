@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
+	backend "github.com/tikv/pd/server/storage/base_backend"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -70,8 +71,7 @@ type Server interface {
 	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
-	GetStorage() *core.Storage      /* NOTICE: this method will be removed later. */
-	GetNewStorage() storage.Storage /* NOTICE: this method will be renamed to GetStorage later. */
+	GetStorage() storage.Storage /* NOTICE: this method will be renamed to GetStorage later. */
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
@@ -100,13 +100,12 @@ type RaftCluster struct {
 	clusterRoot string
 
 	// cached cluster info
-	core       *core.BasicCluster
-	meta       *metapb.Cluster
-	opt        *config.PersistOptions
-	storage    *core.Storage   /* NOTICE: this field will be removed later. */
-	newStorage storage.Storage /* NOTICE: this field will be renamed to storage later. */
-	id         id.Allocator
-	limiter    *StoreLimiter
+	core    *core.BasicCluster
+	meta    *metapb.Cluster
+	opt     *config.PersistOptions
+	storage storage.Storage
+	id      id.Allocator
+	limiter *StoreLimiter
 
 	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
@@ -198,7 +197,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.newStorage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(backend.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -212,10 +211,9 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt *config.PersistOptions,
-	storage *core.Storage,
-	newStorage storage.Storage,
+	storage storage.Storage,
 	basicCluster *core.BasicCluster) {
-	c.core, c.opt, c.storage, c.newStorage, c.id = basicCluster, opt, storage, newStorage, id
+	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
@@ -236,7 +234,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetNewStorage(), s.GetBasicCluster())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
@@ -246,7 +244,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.ruleManager = placement.NewRuleManager(c.newStorage, c, c.GetOpts())
+	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
 		if err != nil {
@@ -254,18 +252,18 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.newStorage)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
 	if err != nil {
 		return err
 	}
 
-	c.componentManager = component.NewManager(c.newStorage)
-	_, err = c.newStorage.LoadComponent(&c.componentManager)
+	c.componentManager = component.NewManager(c.storage)
+	_, err = c.storage.LoadComponent(&c.componentManager)
 	if err != nil {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.newStorage, cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
 		return err
 	}
@@ -292,7 +290,7 @@ func (c *RaftCluster) Start(s Server) error {
 // LoadClusterInfo loads cluster related info.
 func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	c.meta = &metapb.Cluster{}
-	ok, err := c.newStorage.LoadMeta(c.meta)
+	ok, err := c.storage.LoadMeta(c.meta)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +299,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	}
 
 	start := time.Now()
-	if err := c.newStorage.LoadStores(c.core.PutStore); err != nil {
+	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -485,25 +483,17 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 }
 
 // GetStorage returns the storage.
-func (c *RaftCluster) GetStorage() *core.Storage {
+func (c *RaftCluster) GetStorage() storage.Storage {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storage
 }
 
 // SetStorage set the storage for test purpose.
-func (c *RaftCluster) SetStorage(s *core.Storage) {
+func (c *RaftCluster) SetStorage(s storage.Storage) {
 	c.Lock()
 	defer c.Unlock()
 	c.storage = s
-}
-
-// GetNewStorage returns the new storage.
-// NOTICE: this method will be renamed to GetStorage later. */
-func (c *RaftCluster) GetNewStorage() storage.Storage {
-	c.RLock()
-	defer c.RUnlock()
-	return c.newStorage
 }
 
 // GetOpts returns cluster's configuration.
@@ -589,8 +579,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
-	if newStore.NeedPersist() && c.newStorage != nil {
-		if err := c.newStorage.SaveStore(newStore.GetMeta()); err != nil {
+	if newStore.NeedPersist() && c.storage != nil {
+		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
@@ -780,8 +770,8 @@ func (c *RaftCluster) getClusterID() uint64 {
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
-	if c.newStorage != nil {
-		if err := c.newStorage.SaveMeta(meta); err != nil {
+	if c.storage != nil {
+		if err := c.storage.SaveMeta(meta); err != nil {
 			return err
 		}
 	}
@@ -1196,7 +1186,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if err := c.newStorage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
+	if err := c.storage.SaveStoreWeight(storeID, leaderWeight, regionWeight); err != nil {
 		return err
 	}
 
@@ -1209,8 +1199,8 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 }
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
-	if c.newStorage != nil {
-		if err := c.newStorage.SaveStore(store.GetMeta()); err != nil {
+	if c.storage != nil {
+		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -1290,8 +1280,8 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 }
 
 func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
-	if c.newStorage != nil {
-		if err := c.newStorage.DeleteStore(store.GetMeta()); err != nil {
+	if c.storage != nil {
+		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -1454,7 +1444,7 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
 			log.Error("cluster version changed by API at the same time")
 		}
-		err := c.opt.Persist(c.newStorage)
+		err := c.opt.Persist(c.storage)
 		if err != nil {
 			log.Error("persist cluster version meet error", errs.ZapError(err))
 		}
@@ -1748,7 +1738,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for i := 0; i < persistLimitRetryTimes; i++ {
-		if err = c.opt.Persist(c.newStorage); err == nil {
+		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit added", zap.Uint64("store-id", storeID))
 			return
 		}
@@ -1767,7 +1757,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for i := 0; i < persistLimitRetryTimes; i++ {
-		if err = c.opt.Persist(c.newStorage); err == nil {
+		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
@@ -1783,7 +1773,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
-	if err := c.opt.Persist(c.newStorage); err != nil {
+	if err := c.opt.Persist(c.storage); err != nil {
 		// roll back the store limit
 		c.opt.SetScheduleConfig(old)
 		log.Error("persist store limit meet error", errs.ZapError(err))
@@ -1799,7 +1789,7 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	oldAdd := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 	oldRemove := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
-	if err := c.opt.Persist(c.newStorage); err != nil {
+	if err := c.opt.Persist(c.storage); err != nil {
 		// roll back the store limit
 		c.opt.SetScheduleConfig(old)
 		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)

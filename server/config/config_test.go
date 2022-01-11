@@ -66,7 +66,7 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	storage := storage.NewBuilder().WithMemoryBackend().Build()
+	storage := storage.NewStorageWithMemoryBackend()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
@@ -106,7 +106,7 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 		Schedule:    *opt.GetScheduleConfig(),
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := storage.NewBuilder().WithMemoryBackend().Build()
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -126,7 +126,7 @@ func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := storage.NewBuilder().WithMemoryBackend().Build()
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()

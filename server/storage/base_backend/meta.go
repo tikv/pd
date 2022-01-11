@@ -32,8 +32,8 @@ import (
 var _ storage.MetaStorage = (*BaseBackend)(nil)
 
 const (
-	maxKVRangeLimit = 10000
-	minKVRangeLimit = 100
+	MaxKVRangeLimit = 10000
+	MinKVRangeLimit = 100
 )
 
 // LoadMeta loads cluster meta from the storage. This method will only
@@ -74,7 +74,7 @@ func (bb *BaseBackend) LoadStores(f func(store *core.StoreInfo)) error {
 	endKey := StorePath(math.MaxUint64)
 	for {
 		key := StorePath(nextID)
-		_, res, err := bb.LoadRange(key, endKey, minKVRangeLimit)
+		_, res, err := bb.LoadRange(key, endKey, MinKVRangeLimit)
 		if err != nil {
 			return err
 		}
@@ -96,7 +96,7 @@ func (bb *BaseBackend) LoadStores(f func(store *core.StoreInfo)) error {
 			nextID = store.GetId() + 1
 			f(newStoreInfo)
 		}
-		if len(res) < minKVRangeLimit {
+		if len(res) < MinKVRangeLimit {
 			return nil
 		}
 	}
@@ -147,7 +147,7 @@ func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.Regi
 	// Since the region key may be very long, using a larger rangeLimit will cause
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
 	// a variable rangeLimit to work around.
-	rangeLimit := maxKVRangeLimit
+	rangeLimit := MaxKVRangeLimit
 	for {
 		failpoint.Inject("slowLoadRegion", func() {
 			rangeLimit = 1
@@ -156,7 +156,7 @@ func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.Regi
 		startKey := RegionPath(nextID)
 		_, res, err := bb.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
-			if rangeLimit /= 2; rangeLimit >= minKVRangeLimit {
+			if rangeLimit /= 2; rangeLimit >= MinKVRangeLimit {
 				continue
 			}
 			return err
@@ -189,6 +189,10 @@ func (bb *BaseBackend) LoadRegions(ctx context.Context, f func(region *core.Regi
 			return nil
 		}
 	}
+}
+
+func (bb *BaseBackend) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	return nil
 }
 
 // SaveRegion saves one region to storage.
