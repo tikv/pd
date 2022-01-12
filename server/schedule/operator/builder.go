@@ -439,8 +439,10 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 {
-		// if only one peer changed and the change type is not demote, joint consensus is not used
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
+		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
+		// If only one peer changed and the change type is not demote, joint consensus is not used.
+		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
 	}
 
