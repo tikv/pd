@@ -235,7 +235,7 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 	request.Header.Add(serverapi.AllowFollowerHandle, "true")
 	resp, err := dialClient.Do(request)
 	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(serverapi.FollowerHandle), Equals, "true")
+	c.Assert(resp.Header.Get(serverapi.RedirectorHeader), Equals, "")
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	_, err = io.ReadAll(resp.Body)
