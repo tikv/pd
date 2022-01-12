@@ -49,7 +49,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	backend "github.com/tikv/pd/server/storage/base_backend"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -197,7 +197,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(backend.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(endpoint.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}

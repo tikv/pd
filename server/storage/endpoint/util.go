@@ -12,38 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package backend
+package endpoint
 
 import (
 	"encoding/json"
+	"path"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-var _ endpoint.ReplicationStatusStorage = (*BaseBackend)(nil)
-
-// LoadReplicationStatus loads replication status by mode.
-func (bb *BaseBackend) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
-	v, err := bb.Load(replicationModePath(mode))
+func (se *StorageEndpoint) loadProto(key string, msg proto.Message) (bool, error) {
+	value, err := se.Load(key)
 	if err != nil {
 		return false, err
 	}
-	if v == "" {
+	if value == "" {
 		return false, nil
 	}
-	err = json.Unmarshal([]byte(v), status)
+	err = proto.Unmarshal([]byte(value), msg)
 	if err != nil {
-		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+		return false, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
 }
 
-// SaveReplicationStatus stores replication status by mode.
-func (bb *BaseBackend) SaveReplicationStatus(mode string, status interface{}) error {
-	value, err := json.Marshal(status)
+func (se *StorageEndpoint) saveProto(key string, msg proto.Message) error {
+	value, err := proto.Marshal(msg)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return se.Save(key, string(value))
+}
+
+func (se *StorageEndpoint) saveJSON(prefix, key string, data interface{}) error {
+	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return bb.Save(replicationModePath(mode), string(value))
+	return se.Save(path.Join(prefix, key), string(value))
 }

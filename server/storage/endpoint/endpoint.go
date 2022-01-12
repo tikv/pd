@@ -12,27 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package backend
+package endpoint
 
 import (
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
 )
 
-// BaseBackend is the base underlying storage backend for all other upper specific storage backends.
-// It should define some common storage interfaces and operations, which provides the default
-// implementations for all kinds of storages.
-type BaseBackend struct {
+// StorageEndpoint is the base underlying storage endpoint for all other upper
+// specific storage backends. It should define some common storage interfaces and operations,
+// which provides the default implementations for all kinds of storages.
+type StorageEndpoint struct {
 	kv.Base
 	encryptionKeyManager *encryptionkm.KeyManager
 }
 
-// NewBaseBackend creates a new base storage backend with the given KV and encryption key manager.
-func NewBaseBackend(
+// NewStorageEndpoint creates a new base storage endpoint with the given KV and encryption key manager.
+// It should be embedded inside a storage backend.
+func NewStorageEndpoint(
 	kvBase kv.Base,
 	encryptionKeyManager *encryptionkm.KeyManager,
-) *BaseBackend {
-	return &BaseBackend{
+) *StorageEndpoint {
+	return &StorageEndpoint{
 		kvBase,
 		encryptionKeyManager,
 	}

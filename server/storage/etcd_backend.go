@@ -16,17 +16,17 @@ package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
-	backend "github.com/tikv/pd/server/storage/base_backend"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
 // etcdBackend is a storage backend that stores data in etcd,
 // which is mainly used by the PD server.
 type etcdBackend struct {
-	*backend.BaseBackend
+	*endpoint.StorageEndpoint
 }
 
 // newEtcdBackend is used to create a new etcd backend.
 func newEtcdBackend(client *clientv3.Client, rootPath string) *etcdBackend {
-	return &etcdBackend{backend.NewBaseBackend(kv.NewEtcdKVBase(client, rootPath), nil)}
+	return &etcdBackend{endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client, rootPath), nil)}
 }

@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
-	base_backend "github.com/tikv/pd/server/storage/base_backend"
 	endpoint "github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -44,8 +43,8 @@ type testStorageSuite struct {
 func (s *testStorageSuite) TestBasic(c *C) {
 	storage := NewStorageWithMemoryBackend()
 
-	c.Assert(base_backend.StorePath(123), Equals, "raft/s/00000000000000000123")
-	c.Assert(base_backend.RegionPath(123), Equals, "raft/r/00000000000000000123")
+	c.Assert(endpoint.StorePath(123), Equals, "raft/s/00000000000000000123")
+	c.Assert(endpoint.RegionPath(123), Equals, "raft/r/00000000000000000123")
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := storage.LoadMeta(meta)
@@ -160,7 +159,7 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
 	}
 
-	prefix := base_backend.GCSafePointServicePrefixPath()
+	prefix := endpoint.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	c.Assert(err, IsNil)

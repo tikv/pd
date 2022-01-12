@@ -59,6 +59,8 @@ func NewStorageWithLevelDBBackend(
 	return newLevelDBBackend(ctx, rootPath, ekm)
 }
 
+// TODO: support other KV storage backends like BadgerDB in the future.
+
 type pdStorage struct {
 	Storage
 	regionStorage endpoint.RegionStorage
@@ -70,7 +72,6 @@ type pdStorage struct {
 
 // NewPDStorage creates a new PD storage with the given storage and region storage.
 // Usually, the defaultStorage is etcd-backend, and the regionStorage is LevelDB-backend.
-// TODO: maybe support other KV storages like BadgerDB in the future.
 func NewPDStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
 	return &pdStorage{
 		Storage:       defaultStorage,

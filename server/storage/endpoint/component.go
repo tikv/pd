@@ -14,8 +14,42 @@
 
 package endpoint
 
+import (
+	"encoding/json"
+
+	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
+)
+
 // ComponentStorage defines the storage operations on the component.
 type ComponentStorage interface {
 	LoadComponent(component interface{}) (bool, error)
 	SaveComponent(component interface{}) error
+}
+
+var _ ComponentStorage = (*StorageEndpoint)(nil)
+
+// LoadComponent loads components from componentPath then unmarshal it to component.
+func (se *StorageEndpoint) LoadComponent(component interface{}) (bool, error) {
+	v, err := se.Load(componentPath)
+	if err != nil {
+		return false, err
+	}
+	if v == "" {
+		return false, nil
+	}
+	err = json.Unmarshal([]byte(v), component)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return true, nil
+}
+
+// SaveComponent stores marshallable components to the componentPath.
+func (se *StorageEndpoint) SaveComponent(component interface{}) error {
+	value, err := json.Marshal(component)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return se.Save(componentPath, string(value))
 }

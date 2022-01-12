@@ -16,16 +16,16 @@ package storage
 
 import (
 	"github.com/tikv/pd/server/kv"
-	backend "github.com/tikv/pd/server/storage/base_backend"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 // memoryStorage is a storage that stores data in a memory B-Tree without any locks,
 // which should only be used in tests.
 type memoryStorage struct {
-	*backend.BaseBackend
+	*endpoint.StorageEndpoint
 }
 
 // newMemoryBackend is used to create a new memory storage.
 func newMemoryBackend() *memoryStorage {
-	return &memoryStorage{backend.NewBaseBackend(kv.NewMemoryKV(), nil)}
+	return &memoryStorage{endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}
 }

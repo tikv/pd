@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/kv"
-	backend "github.com/tikv/pd/server/storage/base_backend"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 const (
@@ -41,7 +41,7 @@ const (
 // levelDBBackend is a storage backend that stores data in LevelDB,
 // which is mainly used by the PD region storage.
 type levelDBBackend struct {
-	*backend.BaseBackend
+	*endpoint.StorageEndpoint
 	ekm                 *encryptionkm.KeyManager
 	mu                  sync.RWMutex
 	batchRegions        map[string]*metapb.Region
@@ -61,7 +61,7 @@ func newLevelDBBackend(ctx context.Context, rootPath string, ekm *encryptionkm.K
 	}
 	regionStorageCtx, regionStorageCancel := context.WithCancel(ctx)
 	lb := &levelDBBackend{
-		BaseBackend:         backend.NewBaseBackend(levelDB, ekm),
+		StorageEndpoint:     endpoint.NewStorageEndpoint(levelDB, ekm),
 		ekm:                 ekm,
 		batchSize:           defaultBatchSize,
 		flushRate:           defaultFlushRegionRate,
@@ -112,14 +112,14 @@ func (lb *levelDBBackend) SaveRegion(region *metapb.Region) error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	if lb.cacheSize < lb.batchSize-1 {
-		lb.batchRegions[backend.RegionPath(region.GetId())] = region
+		lb.batchRegions[endpoint.RegionPath(region.GetId())] = region
 		lb.cacheSize++
 
 		lb.flushTime = time.Now().Add(lb.flushRate)
 		return nil
 	}
-	lb.batchRegions[backend.RegionPath(region.GetId())] = region
-	err = lb.flush()
+	lb.batchRegions[endpoint.RegionPath(region.GetId())] = region
+	err = lb.flushLocked()
 
 	if err != nil {
 		return err
@@ -145,17 +145,17 @@ func (lb *levelDBBackend) SaveRegions(regions map[string]*metapb.Region) error {
 }
 
 func (lb *levelDBBackend) DeleteRegion(region *metapb.Region) error {
-	return lb.Remove(backend.RegionPath(region.GetId()))
+	return lb.Remove(endpoint.RegionPath(region.GetId()))
 }
 
 // FlushRegion saves the cache region to region storage.
 func (lb *levelDBBackend) FlushRegion() error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
-	return lb.flush()
+	return lb.flushLocked()
 }
 
-func (lb *levelDBBackend) flush() error {
+func (lb *levelDBBackend) flushLocked() error {
 	if err := lb.SaveRegions(lb.batchRegions); err != nil {
 		return err
 	}
