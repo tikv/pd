@@ -46,12 +46,13 @@ type Builder struct {
 	expectedRoles map[uint64]placement.PeerRoleType
 
 	// operation record
-	originPeers         peersMap
-	unhealthyPeers      peersMap
-	originLeaderStoreID uint64
-	targetPeers         peersMap
-	targetLeaderStoreID uint64
-	err                 error
+	originPeers          peersMap
+	unhealthyPeers       peersMap
+	originLeaderStoreID  uint64
+	targetPeers          peersMap
+	targetLeaderStoreID  uint64
+	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
+	err                  error
 
 	// skip origin check flags
 	skipOriginJointStateCheck bool
@@ -238,6 +239,24 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
+	return b
+}
+
+// SetLeaders records all valid target leaders in Builder.
+func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
+	if b.err != nil {
+		return b
+	}
+	for _, storeID := range storeIDs {
+		peer := b.targetPeers[storeID]
+		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
+			continue
+		}
+		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
+	}
+	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
+	// can be empty if this is not a multi-target evict leader operation. Besides,
+	// `targetLeaderStoreID` must be valid and there must be at least one valid target.
 	return b
 }
 
@@ -447,6 +466,8 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
 		return fmt.Sprintf("demote peer: store %s", b.toDemote)
+	case len(b.targetLeaderStoreIDs) != 0:
+		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:
@@ -492,7 +513,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
 		// target leader is a voter in `originPeers`, transfer leader first.
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 		b.execChangePeerV2(true, false)
@@ -501,7 +522,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		// origin leader is none or a voter in `targetPeers`, change peers first.
 		b.execChangePeerV2(true, false)
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 	} else {
@@ -589,7 +610,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderBeforeAdd != 0 && plan.leaderBeforeAdd != b.currentLeaderStoreID {
-			b.execTransferLeader(plan.leaderBeforeAdd)
+			b.execTransferLeader(plan.leaderBeforeAdd, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 		if plan.add != nil {
@@ -600,7 +621,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execPromoteLearner(plan.promote)
 		}
 		if plan.leaderBeforeRemove != 0 && plan.leaderBeforeRemove != b.currentLeaderStoreID {
-			b.execTransferLeader(plan.leaderBeforeRemove)
+			b.execTransferLeader(plan.leaderBeforeRemove, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 		if plan.remove != nil {
@@ -615,7 +636,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 		b.currentLeaderStoreID != b.targetLeaderStoreID &&
 		b.currentPeers[b.targetLeaderStoreID] != nil {
 		// Transfer only when target leader is legal.
-		b.execTransferLeader(b.targetLeaderStoreID)
+		b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 		kind |= OpLeader
 	}
 
@@ -625,9 +646,9 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 	return kind, nil
 }
 
-func (b *Builder) execTransferLeader(id uint64) {
-	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeaderStoreID, ToStore: id})
-	b.currentLeaderStoreID = id
+func (b *Builder) execTransferLeader(targetStoreID uint64, targetStoreIDs []uint64) {
+	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeaderStoreID, ToStore: targetStoreID, ToStores: targetStoreIDs})
+	b.currentLeaderStoreID = targetStoreID
 }
 
 func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
@@ -668,7 +689,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 		// Transfer Leader
 		if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 		}
 
 		return
@@ -700,7 +721,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 
 	// Transfer Leader
 	if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
-		b.execTransferLeader(b.targetLeaderStoreID)
+		b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 	}
 
 	// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed

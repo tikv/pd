@@ -476,13 +476,13 @@ hot-regions-write-interval= "30m"
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 30*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, int64(30))
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(30))
 	// Verify default value
 	cfg = NewConfig()
 	err = cfg.Adjust(nil, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 10*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, int64(7))
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(7))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {
