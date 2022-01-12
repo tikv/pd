@@ -510,6 +510,22 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 				RemovePeer{FromStore: 2},
 			},
 		},
+		{
+			// issue: https://github.com/tikv/pd/issues/4411
+			// "(enable JointConsensus) remove 1 voter from 2 voter replicas raft group
+			true,
+			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			[]*metapb.Peer{{Id: 2, StoreId: 2}},
+			OpLeader | OpRegion,
+			[]OpStep{
+				TransferLeader{FromStore: 1, ToStore: 2},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{},
+					DemoteVoters:    []DemoteVoter{{ToStore: 1}},
+				},
+				RemovePeer{FromStore: 1},
+			},
+		},
 	}
 
 	for _, tc := range cases {
