@@ -167,6 +167,7 @@ func (s *testBuilderSuite) TestPrepareBuild(c *C) {
 
 func (s *testBuilderSuite) TestBuild(c *C) {
 	type testCase struct {
+		name              string
 		useJointConsensus bool
 		originPeers       []*metapb.Peer // first is leader
 		targetPeers       []*metapb.Peer // first is leader
@@ -175,7 +176,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 	}
 	cases := []testCase{
 		{
-			// (disable JointConsensus) empty step
+			"(disable JointConsensus) empty step",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
@@ -183,7 +184,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]OpStep{},
 		},
 		{
-			// (enable JointConsensus) empty step
+			"(enable JointConsensus) empty step",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
@@ -191,7 +192,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]OpStep{},
 		},
 		{
-			// (disable JointConsensus) no valid leader
+			"(disable JointConsensus) no valid leader",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
@@ -199,7 +200,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]OpStep{},
 		},
 		{
-			// (enable JointConsensus) no valid leader
+			"(enable JointConsensus) no valid leader",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 10, StoreId: 10}},
@@ -207,7 +208,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			[]OpStep{},
 		},
 		{
-			// (disable JointConsensus) promote 1 learner and transfer leader
+			"(disable JointConsensus) promote 1 learner and transfer leader",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
@@ -218,7 +219,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) promote 1 learner and transfer leader
+			"(enable JointConsensus) promote 1 learner and transfer leader",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
@@ -229,7 +230,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) prefer replace
+			"(disable JointConsensus) prefer replace",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
@@ -245,7 +246,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) transfer leader in joint state
+			"(enable JointConsensus) transfer leader in joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
@@ -268,7 +269,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) transfer leader before remove leader
+			"(disable JointConsensus) transfer leader before remove leader",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
@@ -281,7 +282,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) transfer leader in joint state
+			"(enable JointConsensus) transfer leader in joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{StoreId: 2}},
@@ -301,7 +302,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) replace voter with learner
+			"(disable JointConsensus) replace voter with learner",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
@@ -312,7 +313,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) demote 1 peer directly"
+			"(enable JointConsensus) demote 1 peer directly",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
@@ -325,7 +326,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) prefer replace with the nearest peer
+			"(disable JointConsensus) prefer replace with nearest peer",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
 			//             z1,h1                z1,h2                 z2,h1
@@ -351,7 +352,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) promote learner + demote voter + add learner
+			"(disable JointConsensus) promote learner + demote voter + add learner",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -365,7 +366,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) add learner + promote learner + remove voter
+			"(disable JointConsensus) add learner + promote learner + remove voter",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -378,7 +379,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (disable JointConsensus) add voter + demote voter + remove learner
+			"(disable JointConsensus) add voter + demote voter + remove learner",
 			false,
 			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}},
@@ -393,7 +394,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) transfer leader before entering joint state
+			"(enable JointConsensus) transfer leader before entering joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
@@ -412,7 +413,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) transfer leader after leaving joint state
+			"(enable JointConsensus) transfer leader after leaving joint state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 3, StoreId: 3}, {Id: 1, StoreId: 1}},
@@ -431,7 +432,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) add 1 peer(learner) should always build steps without joint consensus state
+			"(enable JointConsensus) add 1 peer(learner) should always build steps without joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -441,7 +442,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) remove 1 peer(learner) should always build steps without joint consensus state
+			"(enable JointConsensus) remove 1 peer(learner) should always build steps without joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 3, StoreId: 3}},
@@ -451,7 +452,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) add 1+ learners should not enter joint consensus state
+			"(enable JointConsensus) add 1+ learners should not enter joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -462,7 +463,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) remove 1+ learners should not enter joint consensus state
+			"(enable JointConsensus) remove 1+ learners should not enter joint consensus state",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
@@ -473,7 +474,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) demote 1 voter should enter JointConsensus, and TiKV will handle the leave step
+			"(enable JointConsensus) demote 1 voter should enter JointConsensus, and TiKV will handle the leave step",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -486,7 +487,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 			},
 		},
 		{
-			// (enable JointConsensus) add 1 learner should goto to buildStepsWithoutJointConsensus
+			"(enable JointConsensus) add 1 learner should goto to buildStepsWithoutJointConsensus",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
@@ -497,7 +498,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		},
 		{
 			// issue: https://github.com/tikv/pd/issues/4411
-			// "(enable JointConsensus) remove 1 voter from 2 voter replicas raft group
+			"(enable JointConsensus) remove 1 voter from 2 voter replicas raft group",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 1, StoreId: 1}},
@@ -512,7 +513,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 		},
 		{
 			// issue: https://github.com/tikv/pd/issues/4411
-			// "(enable JointConsensus) remove 1 voter from 2 voter replicas raft group
+			"(enable JointConsensus) remove 1 voter from 2 voter replicas raft group, with transfer leader",
 			true,
 			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
 			[]*metapb.Peer{{Id: 2, StoreId: 2}},
@@ -529,6 +530,7 @@ func (s *testBuilderSuite) TestBuild(c *C) {
 	}
 
 	for _, tc := range cases {
+		c.Log(tc.name)
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
 		builder := NewBuilder("test", s.cluster, region)
 		builder.useJointConsensus = tc.useJointConsensus
