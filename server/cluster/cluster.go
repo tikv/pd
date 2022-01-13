@@ -1404,8 +1404,6 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 
 // GetAllocator returns cluster's id allocator.
 func (c *RaftCluster) GetAllocator() id.Allocator {
-	c.RLock()
-	defer c.RUnlock()
 	return c.id
 }
 

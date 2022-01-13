@@ -18,7 +18,6 @@ import (
 	"context"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -421,15 +420,6 @@ func (s *testStepSuite) check(c *C, step OpStep, desc string, cases []testCase) 
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		c.Assert(step.ConfVerChanged(region), Equals, tc.ConfVerChanged)
 		c.Assert(step.IsFinish(region), Equals, tc.IsFinish)
-		c.Assert(step.CheckInProgress(func(id uint64) error {
-			store := s.cluster.GetStore(id)
-			if store == nil {
-				return errors.New("target store does not exist")
-			}
-			if store.DownTime() > s.cluster.GetOpts().GetMaxStoreDownTime() {
-				return errors.New("target store is down")
-			}
-			return nil
-		}, region), tc.CheckInProgres)
+		c.Assert(step.CheckInProgress(s.cluster, region), tc.CheckInProgres)
 	}
 }

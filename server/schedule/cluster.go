@@ -29,7 +29,7 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 
-	operator.ClusterInfo
+	operator.ClusterInformer
 
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)

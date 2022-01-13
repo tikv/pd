@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -160,18 +159,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step operator.OpStep, region *core.RegionInfo) bool {
-	checkStoreStateFn := func(id uint64) error {
-		store := oc.cluster.GetStore(id)
-		if store == nil {
-			return errors.New("target store does not exist")
-		}
-		if store.DownTime() > oc.cluster.GetOpts().GetMaxStoreDownTime() {
-			return errors.New("target store is down")
-		}
-		return nil
-	}
-
-	err := step.CheckInProgress(checkStoreStateFn, region)
+	err := step.CheckInProgress(oc.cluster, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()

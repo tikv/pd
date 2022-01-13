@@ -29,8 +29,8 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-// ClusterInfo provides the necessary information for building operator.
-type ClusterInfo interface {
+// ClusterInformer provides the necessary information for building operator.
+type ClusterInformer interface {
 	GetBasicCluster() *core.BasicCluster
 	GetOpts() *config.PersistOptions
 	GetRuleManager() *placement.RuleManager
@@ -47,7 +47,7 @@ type ClusterInfo interface {
 // according to various constraints.
 type Builder struct {
 	// basic info
-	ClusterInfo
+	ClusterInformer
 	desc          string
 	regionID      uint64
 	regionEpoch   *metapb.RegionEpoch
@@ -91,12 +91,12 @@ func SkipOriginJointStateCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, clusterInfo ClusterInfo, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
-		desc:        desc,
-		ClusterInfo: clusterInfo,
-		regionID:    region.GetID(),
-		regionEpoch: region.GetRegionEpoch(),
+		desc:            desc,
+		ClusterInformer: ci,
+		regionID:        region.GetID(),
+		regionEpoch:     region.GetRegionEpoch(),
 	}
 
 	// options
