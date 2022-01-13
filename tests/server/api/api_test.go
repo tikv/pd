@@ -150,7 +150,7 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 
-	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPprofProfile")
+	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPProfProfile")
 	c.Assert(resp.Header.Get("url-param"), Equals, "{\"force\":[\"true\"]}")
 	c.Assert(resp.Header.Get("body-param"), Equals, "{\"testkey\":\"testvalue\"}")
 	c.Assert(resp.Header.Get("method"), Equals, "HTTP/POST:/pd/api/v1/debug/pprof/profile")
@@ -166,15 +166,25 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	resp.Body.Close()
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
-	c.Assert(resp.Header.Get("service-label"), Equals, "ShowStore")
+	c.Assert(resp.Header.Get("service-label"), Equals, "GetStore")
 	c.Assert(resp.Header.Get("method"), Equals, "HTTP/GET:/pd/api/v1/store/7788")
 	c.Assert(resp.Header.Get("component"), Equals, "test")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	leader.GetServer().SetDisabledServiceMiddleware(true)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().GetEnabledServiceMiddleware(), Equals, false)
+
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
-	leader.GetConfig().DisableServiceMiddleware = false
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().GetEnabledServiceMiddleware(), Equals, true)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addSericeInfoMiddleware"), IsNil)
 }
 

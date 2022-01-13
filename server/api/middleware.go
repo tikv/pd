@@ -17,16 +17,16 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 // serviceInfoMiddleware is used to gather info from requsetInfo
@@ -36,19 +36,22 @@ type serviceInfoMiddleware struct {
 }
 
 func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
-	registeredSericeLabel := requestutil.NewRequestSchemaList(5)
+	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
 
-	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "version"}, "GET", "GetPDVersion")
-	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", ""}, "GET", "ShowStore")
-	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "state"}, "POST", "SetStoreState")
-	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "store", "", "label"}, "POST", "SetStoreLabel")
-	registeredSericeLabel.AddServiceLabel([]string{"pd", "api", "v1", "debug", "pprof", "profile"}, "", "DebugPprofProfile")
+	for key, value := range config.HTTPRegisteredSericeLabel {
+		if key[0] != '/' {
+			continue
+		}
+		paths := strings.Split(key, "/")
+		length := len(paths)
+		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
+	}
 	return &serviceInfoMiddleware{s: s, registeredSericeLabel: registeredSericeLabel}
 }
 
 // ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
 func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if s.s.GetDisabledServiceMiddleware() {
+	if !s.s.GetEnabledServiceMiddleware() {
 		next(w, r)
 		return
 	}
@@ -57,7 +60,6 @@ func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {
-		log.Info("failpoint", zap.String("service-label", requestInfo.ServiceLabel))
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
 		w.Header().Add("body-param", requestInfo.BodyParm)
 		w.Header().Add("url-param", requestInfo.URLParam)
@@ -66,8 +68,6 @@ func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request
 		w.Header().Add("ip", requestInfo.IP)
 	})
 
-	// todo: implement getting source info and storing into request.Context
-	// such as real ip and component name
 	next(w, r)
 }
 

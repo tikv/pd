@@ -163,7 +163,7 @@ type Config struct {
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
-	DisableServiceMiddleware bool
+	EnableServiceMiddleware bool
 }
 
 // NewConfig creates a new config.
@@ -197,6 +197,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
 	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "force to create a new one-member cluster")
 
+	cfg.EnableServiceMiddleware = true
 	return cfg
 }
 
