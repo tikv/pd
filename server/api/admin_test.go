@@ -195,8 +195,8 @@ func (s *testServiceSuite) TearDownSuite(c *C) {
 
 func (s *testServiceSuite) TestSwitchServiceMiddleware(c *C) {
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/service-middleware", s.svr.GetAddr(), apiPrefix)
-	disableUrl := fmt.Sprintf("%s?enable=false", urlPrefix)
-	err := postJSON(testDialClient, disableUrl, nil,
+	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
+	err := postJSON(testDialClient, disableURL, nil,
 		func(res []byte, code int) {
 			c.Assert(string(res), Equals, "\"Switching Service middleware is successful.\"\n")
 			c.Assert(code, Equals, http.StatusOK)
@@ -205,8 +205,8 @@ func (s *testServiceSuite) TestSwitchServiceMiddleware(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.GetEnabledServiceMiddleware(), Equals, false)
 
-	enableUrl := fmt.Sprintf("%s?enable=true", urlPrefix)
-	err = postJSON(testDialClient, enableUrl, nil,
+	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
+	err = postJSON(testDialClient, enableURL, nil,
 		func(res []byte, code int) {
 			c.Assert(string(res), Equals, "\"Switching Service middleware is successful.\"\n")
 			c.Assert(code, Equals, http.StatusOK)
