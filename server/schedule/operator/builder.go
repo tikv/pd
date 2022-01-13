@@ -247,6 +247,7 @@ func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
 	if b.err != nil {
 		return b
 	}
+	sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
 	for _, storeID := range storeIDs {
 		peer := b.targetPeers[storeID]
 		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
