@@ -323,6 +323,14 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		scatterWithSameEngine(peers, ctx)
 	}
 
+	// If the number of target peers is too small, change it back to the original.
+	if peers := region.GetPeers(); len(peers) != len(targetPeers) {
+		targetPeers = make(map[uint64]*metapb.Peer, len(peers))
+		for _, peer := range peers {
+			targetPeers[peer.GetStoreId()] = peer
+		}
+	}
+
 	if isSameDistribution(region, targetPeers, targetLeader) {
 		scatterCounter.WithLabelValues("unnecessary", "").Inc()
 		r.Put(targetPeers, targetLeader, group)
