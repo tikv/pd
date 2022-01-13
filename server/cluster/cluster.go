@@ -427,6 +427,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// GetBasicCluster returns the basic cluster.
+func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core
+}
+
 // GetRegionScatter returns the region scatter.
 func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	c.RLock()
@@ -483,28 +490,9 @@ func (c *RaftCluster) SetStorage(s *core.Storage) {
 	c.storage = s
 }
 
-// GetBasicCluster returns the basic cluster.
-// There is no need a lock since it won't changed.
-func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
-	return c.core
-}
-
 // GetOpts returns cluster's configuration.
-// There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
-}
-
-// GetAllocator returns cluster's id allocator.
-// There is no need a lock since it won't changed.
-func (c *RaftCluster) GetAllocator() id.Allocator {
-	return c.id
-}
-
-// GetRuleManager returns the rule manager reference.
-// There is no need a lock since it won't changed.
-func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
-	return c.ruleManager
 }
 
 // AddSuspectRegions adds regions to suspect list.
@@ -1414,6 +1402,13 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 	return stores
 }
 
+// GetAllocator returns cluster's id allocator.
+func (c *RaftCluster) GetAllocator() id.Allocator {
+	c.RLock()
+	defer c.RUnlock()
+	return c.id
+}
+
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
 	c.RLock()
@@ -1534,6 +1529,13 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
+}
+
+// GetRuleManager returns the rule manager reference.
+func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
+	c.RLock()
+	defer c.RUnlock()
+	return c.ruleManager
 }
 
 // GetRegionLabeler returns the region labeler.
