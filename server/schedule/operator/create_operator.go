@@ -59,9 +59,10 @@ func CreateRemovePeerOperator(desc string, cluster opt.Cluster, kind OpKind, reg
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
+		SetLeaders(targetStoreIDs).
 		Build(kind)
 }
 

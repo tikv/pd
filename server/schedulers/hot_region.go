@@ -1092,6 +1092,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 			bs.cur.region,
 			srcStoreID,
 			dstStoreID,
+			[]uint64{},
 			operator.OpHotRegion)
 	}
 

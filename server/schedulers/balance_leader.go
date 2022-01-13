@@ -283,7 +283,7 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 		return nil
 	}
 
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan.cluster, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan.cluster, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		return nil
