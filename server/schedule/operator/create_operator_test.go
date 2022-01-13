@@ -159,8 +159,6 @@ func (s *testCreateOperatorSuite) TestCreateSplitRegionOperator(c *C) {
 }
 
 func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
-	// use joint consensus
-	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.JointConsensus))
 	type testCase struct {
 		sourcePeers   []*metapb.Peer // first is leader
 		targetPeers   []*metapb.Peer // first is leader
@@ -566,8 +564,6 @@ func (s *testCreateOperatorSuite) TestCreateLeaveJointStateOperator(c *C) {
 }
 
 func (s *testCreateOperatorSuite) TestCreateMoveRegionOperator(c *C) {
-	// use joint consensus
-	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.JointConsensus))
 	type testCase struct {
 		name            string
 		originPeers     []*metapb.Peer // first is leader
