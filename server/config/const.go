@@ -175,9 +175,9 @@ const (
 	// GetRegionsByStore is the logic service for HTTP API which url path is `/pd/api/v1/regions/store/{id}` and method is `GetRegionsByStore`
 	GetRegionsByStore = "GetRegionsByStore"
 	// GetTopWriteRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/writeflow` and method is `GET`
-	GetTopWriteFlowRegions = "GetTopWriteRegions"
+	TopWriteRegions = "TopWriteRegions"
 	// GetTopReadRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/readflow` and method is `GET`
-	GetTopReadRegions = "GetTopReadRegions"
+	TopReadRegions = "TopReadRegions"
 	// GetTopConfverRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/confver` and method is `GET`
 	GetTopConfverRegions = "GetTopConfverRegions"
 	// GetTopVersionRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/version` and method is `GET`
@@ -374,8 +374,8 @@ var HTTPRegisteredSericeLabel map[string]string = map[string]string{
 	"/pd/api/v1/regions/key/GET":                               ScanRegions,
 	"/pd/api/v1/regions/count/GET":                             CountRegions,
 	"/pd/api/v1/regions/store//GET":                            GetRegionsByStore,
-	"/pd/api/v1/regions/writeflow/GET":                         GetTopWriteFlowRegions,
-	"/pd/api/v1/regions/readflow/GET":                          GetTopReadRegions,
+	"/pd/api/v1/regions/writeflow/GET":                         TopWriteRegions,
+	"/pd/api/v1/regions/readflow/GET":                          TopReadRegions,
 	"/pd/api/v1/regions/confver/GET":                           GetTopConfverRegions,
 	"/pd/api/v1/regions/version/GET":                           GetTopVersionRegions,
 	"/pd/api/v1/regions/size/GET":                              GetTopSizeRegions,
