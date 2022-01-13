@@ -49,7 +49,7 @@ const (
 	GetDefaultConfig = "GetDefaultConfig"
 	// GetScheduleConfig is the logic service for HTTP API which url path is `/pd/api/v1/config/schedule` and method is `GET`
 	GetScheduleConfig = "GetScheduleConfig"
-	// is the logic service for HTTP API which url path is `/pd/api/v1/config/schedule` and method is `POST`
+	// SetScheduleConfig is the logic service for HTTP API which url path is `/pd/api/v1/config/schedule` and method is `POST`
 	SetScheduleConfig = "SetScheduleConfig"
 	// GetPDServerConfig is the logic service for HTTP API which url path is `/pd/api/v1/config/pd-server` and method is `GET`
 	GetPDServerConfig = "GetPDServerConfig"
@@ -174,9 +174,9 @@ const (
 	CountRegions = "CountRegions"
 	// GetRegionsByStore is the logic service for HTTP API which url path is `/pd/api/v1/regions/store/{id}` and method is `GetRegionsByStore`
 	GetRegionsByStore = "GetRegionsByStore"
-	// GetTopWriteRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/writeflow` and method is `GET`
+	// TopWriteRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/writeflow` and method is `GET`
 	TopWriteRegions = "TopWriteRegions"
-	// GetTopReadRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/readflow` and method is `GET`
+	// TopReadRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/readflow` and method is `GET`
 	TopReadRegions = "TopReadRegions"
 	// GetTopConfverRegions is the logic service for HTTP API which url path is `/pd/api/v1/regions/confver` and method is `GET`
 	GetTopConfverRegions = "GetTopConfverRegions"
@@ -231,7 +231,7 @@ const (
 	GetLeader = "GetLeader"
 	// ResignLeader is the logic service for HTTP API which url path is `/pd/api/v1/leader/resign` and method is `POST`
 	ResignLeader = "ResignLeader"
-	// TransferLeaderis the logic service for HTTP API which url path is `/pd/api/v1/leader/transfer/{next_leader}` and method is `POST`
+	// TransferLeader is the logic service for HTTP API which url path is `/pd/api/v1/leader/transfer/{next_leader}` and method is `POST`
 	TransferLeader = "TransferLeader"
 	// GetRegionStatus is the logic service for HTTP API which url path is `/pd/api/v1/stats/region` and method is `GET`
 	GetRegionStatus = "GetRegionStatus"

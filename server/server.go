@@ -730,12 +730,12 @@ func (s *Server) SetStorage(storage *core.Storage) {
 	s.storage = storage
 }
 
-// SetDisabledServiceMiddleware change DisabledServiceMiddleware
+// SetEnabledServiceMiddleware change DisabledServiceMiddleware
 func (s *Server) SetEnabledServiceMiddleware(status bool) {
 	s.cfg.EnableServiceMiddleware = status
 }
 
-// GetDisabledServiceMiddleware returns DisabledServiceMiddleware status
+// GetEnabledServiceMiddleware returns DisabledServiceMiddleware status
 func (s *Server) GetEnabledServiceMiddleware() bool {
 	return s.cfg.EnableServiceMiddleware
 }
