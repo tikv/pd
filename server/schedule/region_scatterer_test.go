@@ -17,13 +17,13 @@ package schedule
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"math"
 	"math/rand"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
