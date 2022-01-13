@@ -492,6 +492,8 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
 
+// TestSelectedStores tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/4565
 func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -520,11 +522,11 @@ func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
 	for i := uint64(1); i < 20; i++ {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group)
-		c.Assert(checkPeerCountChanged(op), IsFalse)
+		c.Assert(isPeerCountChanged(op), IsFalse)
 	}
 }
 
-func checkPeerCountChanged(op *operator.Operator) bool {
+func isPeerCountChanged(op *operator.Operator) bool {
 	if op == nil {
 		return false
 	}
