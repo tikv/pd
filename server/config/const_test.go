@@ -101,7 +101,7 @@ func (s *testConstSuite) TestServiceLabelConstOnceOnly(c *C) {
 	c.Assert(addKey(labelMap, ScanRegions), Equals, true)
 	c.Assert(addKey(labelMap, CountRegions), Equals, true)
 	c.Assert(addKey(labelMap, GetRegionsByStore), Equals, true)
-	c.Assert(addKey(labelMap, GetTopWriteRegions), Equals, true)
+	c.Assert(addKey(labelMap, GetTopWriteFlowRegions), Equals, true)
 	c.Assert(addKey(labelMap, GetTopReadRegions), Equals, true)
 	c.Assert(addKey(labelMap, GetTopConfverRegions), Equals, true)
 	c.Assert(addKey(labelMap, GetTopVersionRegions), Equals, true)
