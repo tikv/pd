@@ -117,7 +117,7 @@ func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if flag := cmd.Flag("status"); flag != nil && flag.Value.String() != "" {
 		url = fmt.Sprintf("%s?status=%s", url, flag.Value.String())
 	}
-	r, err := doRequest(cmd, url, http.MethodGet)
+	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -168,7 +168,7 @@ func NewEvictLeaderSchedulerCommand() *cobra.Command {
 }
 
 func checkSchedulerExist(cmd *cobra.Command, schedulerName string) (bool, error) {
-	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet)
+	r, err := doRequest(cmd, schedulersPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return false, err
@@ -421,7 +421,7 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		redirectRemoveSchedulerToDeleteConfig(cmd, grantLeaderSchedulerName, args)
 	default:
 		path := schedulersPrefix + "/" + args[0]
-		_, err := doRequest(cmd, path, http.MethodDelete)
+		_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 		if err != nil {
 			cmd.Println(err)
 			return
@@ -552,7 +552,7 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		p = cmd.Parent().Name()
 	}
 	path := path.Join(schedulerConfigPrefix, p, "list")
-	r, err := doRequest(cmd, path, http.MethodGet)
+	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			err = errors.New("[404] scheduler not found")
@@ -584,7 +584,7 @@ func showGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	p := cmd.Name()
 	path := path.Join(schedulerConfigPrefix, p, "list")
-	r, err := doRequest(cmd, path, http.MethodGet)
+	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -654,7 +654,7 @@ func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, ar
 		return
 	}
 	path := path.Join(schedulerConfigPrefix, "/", schedulerName, "delete", args[0])
-	_, err := doRequest(cmd, path, http.MethodDelete)
+	_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -672,7 +672,7 @@ func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []strin
 		p = cmd.Parent().Name()
 	}
 	path := path.Join(schedulerConfigPrefix, p, "roles")
-	r, err := doRequest(cmd, path, http.MethodGet)
+	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -694,8 +694,8 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 	}
 	b, _ := json.Marshal(roles)
 	path := path.Join(schedulerConfigPrefix, cmd.Parent().Name(), "roles")
-	_, err := doRequest(cmd, path, http.MethodPost,
-		WithBody("application/json", bytes.NewBuffer(b)))
+	_, err := doRequest(cmd, path, http.MethodPost, http.Header{"Content-Type": {"application/json"}},
+		WithBody(bytes.NewBuffer(b)))
 	if err != nil {
 		cmd.Println(err)
 		return
