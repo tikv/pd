@@ -47,7 +47,7 @@ func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 }
 
 func showSSPs(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet)
+	r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get service GC safepoint: %s\n", err)
 		return
@@ -62,7 +62,7 @@ func deleteSSP(cmd *cobra.Command, args []string) {
 	}
 	serviceID := args[0]
 	deleteURL := serviceGCSafepointPrefix + "/" + serviceID
-	r, err := doRequest(cmd, deleteURL, http.MethodDelete)
+	r, err := doRequest(cmd, deleteURL, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete service GC safepoint: %s\n", err)
 		return
