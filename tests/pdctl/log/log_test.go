@@ -94,3 +94,60 @@ func (s *logTestSuite) TestLog(c *C) {
 		c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
 	}
 }
+
+func (s *logTestSuite) TestInstanceLog(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddrs := cluster.GetConfig().GetClientURLs()
+	cmd := pdctlCmd.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	svr := leaderServer.GetServer()
+	pdctl.MustPutStore(c, svr, store)
+	defer cluster.Destroy()
+
+	var testCases = []struct {
+		cmd      []string
+		instance string
+		expect   string
+	}{
+		// log [fatal|error|warn|info|debug] [address]
+		{
+			cmd:      []string{"-u", pdAddrs[0], "log", "debug", pdAddrs[0]},
+			instance: pdAddrs[0],
+			expect:   "debug",
+		},
+		{
+			cmd:      []string{"-u", pdAddrs[0], "log", "error", pdAddrs[1]},
+			instance: pdAddrs[1],
+			expect:   "error",
+		},
+		{
+			cmd:      []string{"-u", pdAddrs[0], "log", "warn", pdAddrs[2]},
+			instance: pdAddrs[2],
+			expect:   "warn",
+		},
+	}
+
+	for _, testCase := range testCases {
+		_, err = pdctl.ExecuteCommand(cmd, testCase.cmd...)
+		c.Assert(err, IsNil)
+		svrs := cluster.GetServers()
+		for _, svr := range svrs {
+			if svr.GetAddr() == testCase.instance {
+				c.Assert(svr.GetConfig().Log.Level, Equals, testCase.expect)
+			}
+		}
+	}
+}
