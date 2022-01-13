@@ -17,6 +17,7 @@ package schedule
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"math"
 	"math/rand"
 	"time"
@@ -489,4 +490,53 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 		c.Assert(max-min, LessEqual, uint64(2))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
+}
+
+func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	// Add 4 stores.
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc)
+
+	// Put a lot of regions in Store 1/2/3.
+	for i := uint64(1); i < 100; i++ {
+		region := tc.AddLeaderRegion(i+10, i%3+1, (i+1)%3+1, (i+2)%3+1)
+		peers := make(map[uint64]*metapb.Peer, 3)
+		for _, peer := range region.GetPeers() {
+			peers[peer.GetStoreId()] = peer
+		}
+		scatterer.Put(peers, i%3+1, group)
+	}
+
+	// Try to scatter a region with peer store id 2/3/4
+	for i := uint64(1); i < 20; i++ {
+		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
+		op := scatterer.scatterRegion(region, group)
+		c.Assert(checkPeerCountChanged(op), IsFalse)
+	}
+}
+
+func checkPeerCountChanged(op *operator.Operator) bool {
+	if op == nil {
+		return false
+	}
+	add, remove := 0, 0
+	for i := 0; i < op.Len(); i++ {
+		step := op.Step(i)
+		switch step.(type) {
+		case operator.AddPeer, operator.AddLearner:
+			add++
+		case operator.RemovePeer:
+			remove++
+		}
+	}
+	return add != remove
 }
