@@ -115,18 +115,10 @@ dashboard-replace-distro-info:
 
 .PHONY: swagger-spec dashboard-ui dashboard-replace-distro-info
 
-#### Packages and directories ####
+#### Static tools ####
 
 PD_PKG := github.com/tikv/pd
-
 PACKAGES := $(shell go list ./...)
-PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
-TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
-INTEGRATION_TEST_PKGS := $(filter $(PD_PKG)/tests%,$(TEST_PKGS))
-BASIC_TEST_PKGS := $(filter-out $(INTEGRATION_TEST_PKGS),$(TEST_PKGS))
-
-#### Static tools ####
 
 GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
@@ -215,6 +207,11 @@ failpoint-disable: install-tools
 
 #### Test ####
 
+PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
+TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
+                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
+BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
+
 test: install-tools
 	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
@@ -223,7 +220,7 @@ test: install-tools
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
-basic-test:
+basic-test: install-tools
 	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
