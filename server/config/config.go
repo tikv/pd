@@ -855,7 +855,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("operator-time-factor") {
 		adjustUint64(&c.OperatorTimeFactor, defaultOperatorTimeFactor)
 	}
-	if !meta.IsDefined("operator-time-factor") {
+	if !meta.IsDefined("max-region-size") {
 		adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
