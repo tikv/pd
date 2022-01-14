@@ -117,6 +117,9 @@ func getURLParam(r *http.Request) string {
 }
 
 func getBodyParam(r *http.Request) string {
+	if r.Body == nil {
+		return ""
+	}
 	buf, err := io.ReadAll(r.Body)
 	var bodyParam = ""
 	if err == nil {
