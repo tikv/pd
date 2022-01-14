@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8]
+        worker_id: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/setup-go@v2
         with:
@@ -33,4 +33,4 @@ jobs:
             **/.dashboard_download_cache
           key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
       - name: Make Test
-        run: make ci-test-job JOB_COUNT=8 JOB_INDEX=${{ matrix.worker_id }}
+        run: make ci-test-job JOB_COUNT=6 JOB_INDEX=${{ matrix.worker_id }}
