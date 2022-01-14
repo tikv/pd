@@ -370,8 +370,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		}
 		// For leader, we expect each store have about 20 leader for each group
 		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
-		// For peer, we expect each store have about 50 peers for each group
-		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
+		// For peer, we expect each store have about 60 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 60, 15)
 	}
 }
 
