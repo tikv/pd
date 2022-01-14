@@ -98,6 +98,17 @@ stores-dump:
 
 .PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump
 
+#### Docker image ####
+
+docker-image:
+	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
+	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
+	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
+	fi
+	docker build --no-cache -t tikv/pd .
+
+.PHONY: docker-image
+
 #### Build utils ###
 
 swagger-spec: install-tools
@@ -133,7 +144,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools static tidy check-plugin errdoc check-testing-t docker-build-test
+check: install-tools static tidy check-plugin errdoc check-testing-t
 
 static: install-tools
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
@@ -157,7 +168,7 @@ errdoc: install-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
-docker-build-test:
+docker-image:
 	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
 	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
 	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
