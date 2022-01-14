@@ -233,14 +233,9 @@ basic-test: install-tools
 ci-test-job: install-tools dashboard-ui
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && $(DEADLOCK_DISABLE) && exit 1;}
+	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && $(DEADLOCK_DISABLE) && exit 1;}
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
-
-ci-cover-job: install-tools dashboard-ui
-	@$(FAILPOINT_ENABLE)
-	go test -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && exit 1;}
-	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
