@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
@@ -96,7 +95,7 @@ func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -104,7 +103,7 @@ func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.

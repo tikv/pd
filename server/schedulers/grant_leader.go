@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
@@ -78,7 +77,7 @@ type grantLeaderSchedulerConfig struct {
 	mu                sync.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           opt.Cluster
+	cluster           schedule.Cluster
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -199,7 +198,7 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
+func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -211,7 +210,7 @@ func (s *grantLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
+func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -219,7 +218,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -227,7 +226,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

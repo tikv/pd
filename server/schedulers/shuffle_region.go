@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
@@ -96,7 +95,7 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.EncodeConfig()
 }
 
-func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
@@ -104,7 +103,7 @@ func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {
@@ -128,7 +127,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 	return []*operator.Operator{op}
 }
 
-func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.RegionInfo, *metapb.Peer) {
+func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	candidates := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetOpts(), s.filters...).
 		Shuffle()
@@ -154,12 +153,12 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster opt.Cluster) (*core.
 	return nil, nil
 }
 
-func (s *shuffleRegionScheduler) scheduleAddPeer(cluster opt.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
+func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
 	store := cluster.GetStore(oldPeer.GetStoreId())
 	if store == nil {
 		return nil
 	}
-	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster, region, store)
+	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
 
 	target := filter.NewCandidates(cluster.GetStores()).

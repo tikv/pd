@@ -173,21 +173,21 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	_, err = putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 
-	rc.AllocID()
-	id, err := rc.AllocID()
+	rc.GetAllocator().Alloc()
+	id, err := rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is up will fail.
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, NotNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Offline)
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, NotNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Tombstone)
@@ -195,7 +195,7 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, IsNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.

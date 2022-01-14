@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
@@ -194,11 +193,11 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.config)
 }
 
-func (l *scatterRangeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return l.allowBalanceLeader(cluster) || l.allowBalanceRegion(cluster)
 }
 
-func (l *scatterRangeScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
+func (l *scatterRangeScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -206,7 +205,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (l *scatterRangeScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
+func (l *scatterRangeScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
@@ -214,7 +213,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())

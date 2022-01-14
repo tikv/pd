@@ -19,22 +19,22 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
 	PauseController
-	cluster     opt.Cluster
+	cluster     schedule.Cluster
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler
 }
 
 // NewSplitChecker creates a new SplitChecker.
-func NewSplitChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
+func NewSplitChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
 	return &SplitChecker{
 		cluster:     cluster,
 		ruleManager: ruleManager,

@@ -88,7 +88,7 @@ func removeFailedStoresShowCommandFunc(cmd *cobra.Command, args []string) {
 	var resp string
 	var err error
 	prefix := fmt.Sprintf("%s/remove-failed-stores/show", unsafePrefix)
-	resp, err = doRequest(cmd, prefix, http.MethodGet)
+	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -100,7 +100,7 @@ func removeFailedStoresHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	var resp string
 	var err error
 	prefix := fmt.Sprintf("%s/remove-failed-stores/history", unsafePrefix)
-	resp, err = doRequest(cmd, prefix, http.MethodGet)
+	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return

@@ -21,12 +21,21 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
 )
+
+// ClusterInformer provides the necessary information for building operator.
+type ClusterInformer interface {
+	GetBasicCluster() *core.BasicCluster
+	GetOpts() *config.PersistOptions
+	GetRuleManager() *placement.RuleManager
+	GetAllocator() id.Allocator
+}
 
 // Builder is used to create operators. Usage:
 //     op, err := NewBuilder(desc, cluster, region).
@@ -38,8 +47,8 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
+	ClusterInformer
 	desc          string
-	cluster       opt.Cluster
 	regionID      uint64
 	regionEpoch   *metapb.RegionEpoch
 	rules         []*placement.Rule
@@ -82,12 +91,12 @@ func SkipOriginJointStateCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
-		desc:        desc,
-		cluster:     cluster,
-		regionID:    region.GetID(),
-		regionEpoch: region.GetRegionEpoch(),
+		desc:            desc,
+		ClusterInformer: ci,
+		regionID:        region.GetID(),
+		regionEpoch:     region.GetRegionEpoch(),
 	}
 
 	// options
@@ -124,8 +133,8 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	// placement rules
 	var rules []*placement.Rule
-	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
-		fit := cluster.GetRuleManager().FitRegion(cluster, region)
+	if err == nil && b.GetOpts().IsPlacementRulesEnabled() {
+		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
@@ -140,14 +149,14 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	}
 
 	// build flags
-	supportJointConsensus := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
+	supportJointConsensus := versioninfo.IsFeatureSupported(b.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
 
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.useJointConsensus = supportJointConsensus && cluster.GetOpts().IsUseJointConsensus()
+	b.useJointConsensus = supportJointConsensus && b.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
 }
@@ -411,7 +420,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				id, err := b.cluster.AllocID()
+				id, err := b.GetAllocator().Alloc()
 				if err != nil {
 					return "", err
 				}
@@ -440,8 +449,10 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 {
-		// if only one peer changed and the change type is not demote, joint consensus is not used
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
+		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
+		// If only one peer changed and the change type is not demote, joint consensus is not used.
+		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
 	}
 
@@ -584,7 +595,7 @@ func (b *Builder) preferLeaderRoleAsLeader(targetLeaderStoreID uint64) int {
 }
 
 func (b *Builder) preferUpStoreAsLeader(targetLeaderStoreID uint64) int {
-	store := b.cluster.GetStore(targetLeaderStoreID)
+	store := b.GetBasicCluster().GetStore(targetLeaderStoreID)
 	return typeutil.BoolToInt(store != nil && store.IsUp())
 }
 
@@ -675,9 +686,9 @@ func (b *Builder) execAddPeer(peer *metapb.Peer) {
 func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	removeStoreID := peer.GetStoreId()
 	var isDownStore bool
-	store := b.cluster.GetStore(removeStoreID)
+	store := b.GetBasicCluster().GetStore(removeStoreID)
 	if store != nil {
-		isDownStore = store.DownTime() > b.cluster.GetOpts().GetMaxStoreDownTime()
+		isDownStore = store.DownTime() > b.GetOpts().GetMaxStoreDownTime()
 	}
 	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
 	delete(b.currentPeers, removeStoreID)
@@ -743,7 +754,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	if peer.GetStoreId() == b.currentLeaderStoreID {
 		return true
 	}
-	store := b.cluster.GetStore(peer.GetStoreId())
+	store := b.GetBasicCluster().GetStore(peer.GetStoreId())
 	if store == nil {
 		return false
 	}
@@ -754,7 +765,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
-	if !stateFilter.Target(b.cluster.GetOpts(), store) {
+	if !stateFilter.Target(b.GetOpts(), store) {
 		return false
 	}
 
@@ -984,11 +995,11 @@ func (b *Builder) comparePlan(best, next stepPlan) stepPlan {
 }
 
 func (b *Builder) labelMatch(x, y uint64) int {
-	sx, sy := b.cluster.GetStore(x), b.cluster.GetStore(y)
+	sx, sy := b.GetBasicCluster().GetStore(x), b.GetBasicCluster().GetStore(y)
 	if sx == nil || sy == nil {
 		return 0
 	}
-	labels := b.cluster.GetOpts().GetLocationLabels()
+	labels := b.GetOpts().GetLocationLabels()
 	for i, l := range labels {
 		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
 			return i
@@ -1020,7 +1031,7 @@ func (b *Builder) planPreferReplaceByNearest(p stepPlan) int {
 // Avoid generating snapshots from offline stores.
 func (b *Builder) planPreferUpStoreAsLeader(p stepPlan) int {
 	if p.add != nil {
-		store := b.cluster.GetStore(p.leaderBeforeAdd)
+		store := b.GetBasicCluster().GetStore(p.leaderBeforeAdd)
 		return typeutil.BoolToInt(store != nil && store.IsUp())
 	}
 	return 1
