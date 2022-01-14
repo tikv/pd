@@ -41,6 +41,7 @@ import (
 // It will pull the hot region information according to the pullInterval interval.
 // And delete and save data beyond the remainingDays.
 // Close must be called after use.
+// TODO: move to server/storage package.
 type HotRegionStorage struct {
 	*kv.LeveldbKV
 	encryptionKeyManager    *encryptionkm.KeyManager
