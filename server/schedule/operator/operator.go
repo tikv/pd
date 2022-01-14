@@ -368,8 +368,8 @@ func (o *Operator) GetAdditionalInfo() string {
 	return ""
 }
 
-// mock region default region size is 96Mb.
 const (
+	// mock region default region size is 96MB.
 	mockRegionSize = 96 * (1 << 20)
 	mockDesc       = "test"
 	mockBrief      = "test"
