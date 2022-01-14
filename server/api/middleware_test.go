@@ -16,16 +16,30 @@ package api
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server/config"
 )
 
-func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
+var ra *rand.Rand = rand.New(rand.NewSource(time.Now().Unix()))
+
+func BenchmarkDoServiceLabel(b *testing.B) {
 	b.StopTimer()
 	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
+	for key, value := range config.HTTPRegisteredSericeLabel {
+		if key[0] != '/' {
+			continue
+		}
+		paths := strings.Split(key, "/")
+		length := len(paths)
+		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
+	}
+
 	length := len(config.HTTPRegisteredSericeLabel)
 	reqList := make([]*http.Request, 0, length)
 	for key, _ := range config.HTTPRegisteredSericeLabel {
@@ -39,7 +53,42 @@ func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
 			method = key[pos:]
 		}
 
-		newReq, _ := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1%s", key[:pos-1]), nil)
+		newReq, _ := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1%s", key[:pos-1]), strings.NewReader(randStr()))
+		reqList = append(reqList, newReq)
+	}
+
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		registeredSericeLabel.GetServiceLabel(reqList[i%length])
+	}
+}
+
+func BenchmarkDoRequestInfo(b *testing.B) {
+	b.StopTimer()
+	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
+	for key, value := range config.HTTPRegisteredSericeLabel {
+		if key[0] != '/' {
+			continue
+		}
+		paths := strings.Split(key, "/")
+		length := len(paths)
+		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
+	}
+
+	length := len(config.HTTPRegisteredSericeLabel)
+	reqList := make([]*http.Request, 0, length)
+	for key, _ := range config.HTTPRegisteredSericeLabel {
+		pos := len(key)
+		for ; key[pos-1] != '/'; pos-- {
+		}
+		var method string
+		if pos == len(key) {
+			method = "GET"
+		} else {
+			method = key[pos:]
+		}
+
+		newReq, _ := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1%s", key[:pos-1]), strings.NewReader(randStr()))
 		reqList = append(reqList, newReq)
 	}
 
@@ -47,4 +96,14 @@ func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		registeredSericeLabel.GetRequestInfo(reqList[i%length])
 	}
+}
+
+func randStr() string {
+	length := int(ra.Int31n(80))
+	bytes := make([]byte, length)
+	for i := 0; i < length; i++ {
+		b := ra.Intn(26) + 65
+		bytes[i] = byte(b)
+	}
+	return string(bytes)
 }
