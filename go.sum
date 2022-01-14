@@ -413,8 +413,8 @@ github.com/pingcap/log v0.0.0-20210906054005-afc726e70354 h1:SvWCbCPh1YeHd9yQLks
 github.com/pingcap/log v0.0.0-20210906054005-afc726e70354/go.mod h1:DWQW5jICDR7UJh4HtxXSM20Churx4CQL0fwL/SoOSA4=
 github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d h1:k3/APKZjXOyJrFy8VyYwRlZhMelpD3qBLJNsw3bPl/g=
 github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d/go.mod h1:7j18ezaWTao2LHOyMlsc2Dg1vW+mDY9dEbPzVyOlaeM=
-github.com/pingcap/tidb-dashboard v0.0.0-20220110095800-367ff3b010e6 h1:UpbGmnYwhnBUktHKc3jkh00WcpnCVv65MW3rjY7QDcc=
-github.com/pingcap/tidb-dashboard v0.0.0-20220110095800-367ff3b010e6/go.mod h1:4hk/3owVGWdvI9Kx6yCqqvM1T5PVgwyQNyMQxD3rwfc=
+github.com/pingcap/tidb-dashboard v0.0.0-20220112104621-eef0c13b5546 h1:q5a0GXIDw+lKtLVZAMfc87uqFcSMrhXIMPrPsVSoNBU=
+github.com/pingcap/tidb-dashboard v0.0.0-20220112104621-eef0c13b5546/go.mod h1:4hk/3owVGWdvI9Kx6yCqqvM1T5PVgwyQNyMQxD3rwfc=
 github.com/pkg/errors v0.8.0/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

@@ -138,7 +138,7 @@ func (s *testFiltersSuite) TestRuleFitFilter(c *C) {
 		testCluster.AddLabelsStore(tc.storeID, tc.regionCount, tc.labels)
 	}
 	for _, tc := range testCases {
-		filter := newRuleFitFilter("", testCluster, region, 1)
+		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1)
 		c.Assert(filter.Source(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.sourceRes)
 		c.Assert(filter.Target(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)), Equals, tc.targetRes)
 	}
@@ -279,13 +279,13 @@ func (s *testFiltersSuite) TestPlacementGuard(c *C) {
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 	store := testCluster.GetStore(1)
 
-	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
+	c.Assert(NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store),
 		FitsTypeOf,
 		NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store))
 	testCluster.SetEnablePlacementRules(true)
-	c.Assert(NewPlacementSafeguard("", testCluster, region, store),
+	c.Assert(NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store),
 		FitsTypeOf,
-		newRuleFitFilter("", testCluster, region, 1))
+		newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1))
 }
 
 func BenchmarkCloneRegionTest(b *testing.B) {

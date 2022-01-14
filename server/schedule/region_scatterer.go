@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -118,14 +117,14 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 type RegionScatterer struct {
 	ctx            context.Context
 	name           string
-	cluster        opt.Cluster
+	cluster        Cluster
 	ordinaryEngine engineContext
 	specialEngines map[string]engineContext
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster opt.Cluster) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster Cluster) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:            ctx,
 		name:           regionScatterName,
@@ -365,7 +364,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster, region, sourceStore)
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore)
 	filters = append(filters, context.filters...)
 	filters = append(filters, scoreGuard)
 	stores := r.cluster.GetStores()
