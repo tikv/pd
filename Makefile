@@ -256,6 +256,27 @@ test-tso-consistency: install-tools
 
 .PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
 
+#### Daily CI coverage analyze  ####
+
+TASK_COUNT=1
+TASK_ID=1
+
+# The command should be used in daily CI，it will split some tasks to run parallel.
+# It should retain report.xml,coverage,coverage.xml and package.list to analyze.
+test-with-cover-parallel: install-tools dashboard-ui split
+	@$(FAILPOINT_ENABLE)
+	set -euo pipefail;\
+	CGO_ENABLED=1 GO111MODULE=on gotestsum --junitfile report.xml -- -v --race -covermode=atomic -coverprofile=coverage $(shell cat package.list)  2>&1 || { $(FAILPOINT_DISABLE); }; \
+	gocov convert coverage | gocov-xml >> coverage.xml;\
+	@$(FAILPOINT_DISABLE)
+
+split:
+# todo: it will remove server/api,/tests and tso packages after daily CI integrate all verify CI.
+	go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list;\
+	split packages.list -n r/${TASK_COUNT} packages_unit_ -a 1 --numeric-suffixes=1;\
+	cat packages_unit_${TASK_ID} |tr "\n" " " >package.list;\
+	rm packages*;
+
 #### Clean up ####
 
 clean: failpoint-disable deadlock-disable clean-test clean-build
