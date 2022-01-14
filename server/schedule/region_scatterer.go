@@ -273,7 +273,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
 	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
-	ordinaryPeers := make(map[uint64]*metapb.Peer)
+	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
@@ -292,8 +292,8 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer)                                          // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{})                                           // StoreID set
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // StoreID set
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		for _, peer := range peers {
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
