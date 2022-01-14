@@ -47,22 +47,13 @@ type ClusterInformer interface {
 // according to various constraints.
 type Builder struct {
 	// basic info
-<<<<<<< HEAD
+	ClusterInformer
 	desc            string
-	cluster         opt.Cluster
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
 	rules           []*placement.Rule
 	expectedRoles   map[uint64]placement.PeerRoleType
 	approximateSize int64
-=======
-	ClusterInformer
-	desc          string
-	regionID      uint64
-	regionEpoch   *metapb.RegionEpoch
-	rules         []*placement.Rule
-	expectedRoles map[uint64]placement.PeerRoleType
->>>>>>> master
 
 	// operation record
 	originPeers          peersMap
