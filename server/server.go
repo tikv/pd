@@ -387,7 +387,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
-	s.storage = storage.NewPDStorage(defaultStorage, regionStorage)
+	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)

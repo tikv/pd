@@ -42,7 +42,7 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 
 	server := &mockServer{
 		ctx:     context.Background(),
-		storage: storage.NewPDStorage(storage.NewStorageWithMemoryBackend(), rs),
+		storage: storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
 		bc:      core.NewBasicCluster(),
 	}
 	for i := 0; i < 30; i++ {

@@ -61,7 +61,7 @@ func NewStorageWithLevelDBBackend(
 
 // TODO: support other KV storage backends like BadgerDB in the future.
 
-type pdStorage struct {
+type coreStorage struct {
 	Storage
 	regionStorage endpoint.RegionStorage
 
@@ -70,32 +70,32 @@ type pdStorage struct {
 	mu               sync.Mutex
 }
 
-// NewPDStorage creates a new PD storage with the given storage and region storage.
+// NewCoreStorage creates a new core storage with the given default and region storage.
 // Usually, the defaultStorage is etcd-backend, and the regionStorage is LevelDB-backend.
-func NewPDStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
-	return &pdStorage{
+func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
+	return &coreStorage{
 		Storage:       defaultStorage,
 		regionStorage: regionStorage,
 	}
 }
 
 // GetRegionStorage gets the region storage.
-func (ps *pdStorage) GetRegionStorage() endpoint.RegionStorage {
+func (ps *coreStorage) GetRegionStorage() endpoint.RegionStorage {
 	return ps.regionStorage
 }
 
 // SwitchToRegionStorage switches to the region storage.
-func (ps *pdStorage) SwitchToRegionStorage() {
+func (ps *coreStorage) SwitchToRegionStorage() {
 	atomic.StoreInt32(&ps.useRegionStorage, 1)
 }
 
 // SwitchToDefaultStorage switches to the to default storage.
-func (ps *pdStorage) SwitchToDefaultStorage() {
+func (ps *coreStorage) SwitchToDefaultStorage() {
 	atomic.StoreInt32(&ps.useRegionStorage, 0)
 }
 
 // LoadRegion loads one region from storage.
-func (ps *pdStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
+func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.LoadRegion(regionID, region)
 	}
@@ -103,7 +103,7 @@ func (ps *pdStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (ps *pdStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
@@ -112,7 +112,7 @@ func (ps *pdStorage) LoadRegions(ctx context.Context, f func(region *core.Region
 
 // LoadRegionsOnce loads all regions from storage to RegionsInfo. If the underlying storage is the region storage,
 // it will only load once.
-func (ps *pdStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+func (ps *coreStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
 		return ps.Storage.LoadRegions(ctx, f)
 	}
@@ -128,7 +128,7 @@ func (ps *pdStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.Re
 }
 
 // SaveRegion saves one region to storage.
-func (ps *pdStorage) SaveRegion(region *metapb.Region) error {
+func (ps *coreStorage) SaveRegion(region *metapb.Region) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.SaveRegion(region)
 	}
@@ -136,7 +136,7 @@ func (ps *pdStorage) SaveRegion(region *metapb.Region) error {
 }
 
 // DeleteRegion deletes one region from storage.
-func (ps *pdStorage) DeleteRegion(region *metapb.Region) error {
+func (ps *coreStorage) DeleteRegion(region *metapb.Region) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.DeleteRegion(region)
 	}
@@ -144,7 +144,7 @@ func (ps *pdStorage) DeleteRegion(region *metapb.Region) error {
 }
 
 // Flush flushes the dirty region to storage.
-func (ps *pdStorage) Flush() error {
+func (ps *coreStorage) Flush() error {
 	if flushable, ok := ps.regionStorage.(interface{ FlushRegion() error }); ok {
 		return flushable.FlushRegion()
 	}
@@ -152,7 +152,7 @@ func (ps *pdStorage) Flush() error {
 }
 
 // Close closes the rsm and its region storage.
-func (ps *pdStorage) Close() error {
+func (ps *coreStorage) Close() error {
 	if closableStorage, ok := ps.regionStorage.(interface{ Close() error }); ok {
 		return closableStorage.Close()
 	}
