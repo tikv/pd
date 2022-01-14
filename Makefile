@@ -226,14 +226,16 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover: install-tools dashboard-ui
-	# testing all pkgs (expect TSO consistency test) with converage...
+ci-test-job: install-tools dashboard-ui
+	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	for PKG in $(TEST_PKGS); do\
-		set -euo pipefail;\
-		CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
-		rm coverage.tmp;\
-	done
+	CGO_ENABLED=1 go test -race $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && $(DEADLOCK_DISABLE) && exit 1;}
+	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
+
+ci-cover-job: install-tools dashboard-ui
+	@$(FAILPOINT_ENABLE)
+	go test -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && exit 1;}
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
