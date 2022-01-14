@@ -51,7 +51,7 @@ func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
 func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !s.s.GetEnabledServiceMiddleware() {
+	if !s.s.IsServiceMiddlewareEnabled() {
 		next(w, r)
 		return
 	}

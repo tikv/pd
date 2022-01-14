@@ -203,7 +203,7 @@ func (s *testServiceSuite) TestSwitchServiceMiddleware(c *C) {
 		})
 
 	c.Assert(err, IsNil)
-	c.Assert(s.svr.GetEnabledServiceMiddleware(), Equals, false)
+	c.Assert(s.svr.IsServiceMiddlewareEnabled(), Equals, false)
 
 	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
 	err = postJSON(testDialClient, enableURL, nil,
@@ -213,5 +213,5 @@ func (s *testServiceSuite) TestSwitchServiceMiddleware(c *C) {
 		})
 
 	c.Assert(err, IsNil)
-	c.Assert(s.svr.GetEnabledServiceMiddleware(), Equals, true)
+	c.Assert(s.svr.IsServiceMiddlewareEnabled(), Equals, true)
 }

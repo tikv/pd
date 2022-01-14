@@ -175,7 +175,7 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetEnabledServiceMiddleware(), Equals, false)
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, false)
 
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
@@ -184,7 +184,7 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetEnabledServiceMiddleware(), Equals, true)
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addSericeInfoMiddleware"), IsNil)
 }
 

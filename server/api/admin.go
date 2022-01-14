@@ -157,6 +157,6 @@ func (h *adminHandler) HanldeServiceMiddlewareSwitch(w http.ResponseWriter, r *h
 		h.rd.JSON(w, http.StatusBadRequest, "The input is invalid.")
 		return
 	}
-	h.svr.SetEnabledServiceMiddleware(enable)
+	h.svr.SetServiceMiddleware(enable)
 	h.rd.JSON(w, http.StatusOK, "Switching Service middleware is successful.")
 }
