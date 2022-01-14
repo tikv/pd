@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package opt
+package schedule
 
 import (
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
 )
 
 // Cluster provides an overview of a cluster's regions distribution.
-// TODO: This interface should be moved to a better place.
 type Cluster interface {
 	core.RegionSetInformer
 	core.StoreSetInformer
@@ -31,10 +29,8 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 
-	GetOpts() *config.PersistOptions
-	AllocID() (uint64, error)
-	GetRuleManager() *placement.RuleManager
+	operator.ClusterInformer
+
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
-	GetBasicCluster() *core.BasicCluster
 }

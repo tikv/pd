@@ -312,7 +312,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() {
 				newRegion.StartKey = lastEnd
 				newRegion.EndKey = overlapRegion.StartKey
 				if _, inUse := inUseRegions[region.Id]; inUse {
-					newRegion.Id, _ = u.cluster.AllocID()
+					newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
 					creates = append(creates, newRegion)
 				} else {
 					inUseRegions[region.Id] = true
@@ -337,7 +337,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() {
 			newRegion.StartKey = lastEnd
 			newRegion.EndKey = region.EndKey
 			if _, inUse := inUseRegions[region.Id]; inUse {
-				newRegion.Id, _ = u.cluster.AllocID()
+				newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
 				creates = append(creates, newRegion)
 			} else {
 				inUseRegions[region.Id] = true
@@ -374,7 +374,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() {
 			newRegion := &metapb.Region{}
 			newRegion.StartKey = lastEnd
 			newRegion.EndKey = region.StartKey
-			newRegion.Id, _ = u.cluster.AllocID()
+			newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
 			newRegion.RegionEpoch = &metapb.RegionEpoch{ConfVer: 1, Version: 1}
 			creates = append(creates, newRegion)
 		}
@@ -384,7 +384,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() {
 	if !bytes.Equal(lastEnd, []byte("")) {
 		newRegion := &metapb.Region{}
 		newRegion.StartKey = lastEnd
-		newRegion.Id, _ = u.cluster.AllocID()
+		newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
 		creates = append(creates, newRegion)
 	}
 	var allStores []uint64
@@ -393,7 +393,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() {
 	}
 	for idx, create := range creates {
 		storeID := allStores[idx%len(allStores)]
-		peerID, _ := u.cluster.AllocID()
+		peerID, _ := u.cluster.GetAllocator().Alloc()
 		create.Peers = []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}}
 		storeRecoveryPlan, exists := u.storeRecoveryPlans[storeID]
 		if !exists {

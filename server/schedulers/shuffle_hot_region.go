@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -111,7 +110,7 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
@@ -127,13 +126,13 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool 
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
 	storeInfos := statistics.SummaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
@@ -159,7 +158,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.
 	return nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
 	for _, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 {
 			continue
@@ -180,7 +179,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster opt.Cluster, loadDeta
 		filters := []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
-			filter.NewPlacementSafeguard(s.GetName(), cluster, srcRegion, srcStore),
+			filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore),
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))

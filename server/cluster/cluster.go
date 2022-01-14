@@ -1402,9 +1402,9 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 	return stores
 }
 
-// AllocID allocs ID.
-func (c *RaftCluster) AllocID() (uint64, error) {
-	return c.id.Alloc()
+// GetAllocator returns cluster's id allocator.
+func (c *RaftCluster) GetAllocator() id.Allocator {
+	return c.id
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.

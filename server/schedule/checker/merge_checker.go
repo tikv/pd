@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -45,14 +44,14 @@ const (
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
-	cluster    opt.Cluster
+	cluster    schedule.Cluster
 	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecker {
 	opts := cluster.GetOpts()
 	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
 	return &MergeChecker{
@@ -207,7 +206,7 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
-func AllowMerge(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
+func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -263,7 +262,7 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // Check whether there is a peer of the adjacent region on an offline store,
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
-func checkPeerStore(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
+func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
 	regionStoreIDs := region.GetStoreIds()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()

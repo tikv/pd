@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -39,10 +38,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster opt.Cluster) error
-	Cleanup(cluster opt.Cluster)
-	Schedule(cluster opt.Cluster) []*operator.Operator
-	IsScheduleAllowed(cluster opt.Cluster) bool
+	Prepare(cluster Cluster) error
+	Cleanup(cluster Cluster)
+	Schedule(cluster Cluster) []*operator.Operator
+	IsScheduleAllowed(cluster Cluster) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.

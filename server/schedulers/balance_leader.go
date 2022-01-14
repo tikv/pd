@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -129,7 +128,7 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.conf)
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -137,7 +136,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
@@ -203,19 +202,20 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.cluster.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
+	plan.region = plan.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
 		return nil
 	}
-	targets := plan.cluster.GetFollowerStores(plan.region)
+	targets := plan.GetFollowerStores(plan.region)
 	finalFilters := l.filters
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), plan.cluster, plan.region, plan.source); leaderFilter != nil {
+	opts := plan.GetOpts()
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, plan.cluster.GetOpts())
-	leaderSchedulePolicy := plan.cluster.GetOpts().GetLeaderSchedulePolicy()
+	targets = filter.SelectTargetStores(targets, finalFilters, opts)
+	leaderSchedulePolicy := opts.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(targets[i].GetID())
 		jOp := plan.GetOpInfluence(targets[j].GetID())
@@ -235,14 +235,14 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.cluster.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
+	plan.region = plan.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
 		return nil
 	}
 	leaderStoreID := plan.region.GetLeader().GetStoreId()
-	plan.source = plan.cluster.GetStore(leaderStoreID)
+	plan.source = plan.GetStore(leaderStoreID)
 	if plan.source == nil {
 		log.Debug("region has no leader or leader store cannot be found",
 			zap.String("scheduler", l.GetName()),
@@ -253,11 +253,12 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator
 		return nil
 	}
 	finalFilters := l.filters
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), plan.cluster, plan.region, plan.source); leaderFilter != nil {
+	opts := plan.GetOpts()
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{plan.target}).
-		FilterTarget(plan.cluster.GetOpts(), finalFilters...).
+		FilterTarget(opts, finalFilters...).
 		PickFirst()
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
@@ -272,7 +273,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator
 // no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
 func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.Operator {
-	if plan.cluster.IsRegionHot(plan.region) {
+	if plan.IsRegionHot(plan.region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
 		return nil
@@ -283,7 +284,7 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 		return nil
 	}
 
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan.cluster, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		return nil
