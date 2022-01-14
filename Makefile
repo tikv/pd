@@ -168,13 +168,6 @@ errdoc: install-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
-docker-image:
-	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
-	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
-	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
-	fi
-	docker build --no-cache -t tikv/pd .
-
 check-testing-t:
 	./scripts/check-testing-t.sh
 
