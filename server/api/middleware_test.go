@@ -42,7 +42,7 @@ func BenchmarkDoServiceLabel(b *testing.B) {
 
 	length := len(config.HTTPRegisteredSericeLabel)
 	reqList := make([]*http.Request, 0, length)
-	for key, _ := range config.HTTPRegisteredSericeLabel {
+	for key := range config.HTTPRegisteredSericeLabel {
 		pos := len(key)
 		for ; key[pos-1] != '/'; pos-- {
 		}
@@ -77,7 +77,7 @@ func BenchmarkDoRequestInfo(b *testing.B) {
 
 	length := len(config.HTTPRegisteredSericeLabel)
 	reqList := make([]*http.Request, 0, length)
-	for key, _ := range config.HTTPRegisteredSericeLabel {
+	for key := range config.HTTPRegisteredSericeLabel {
 		pos := len(key)
 		for ; key[pos-1] != '/'; pos-- {
 		}
