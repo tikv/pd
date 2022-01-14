@@ -103,7 +103,7 @@ func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
-		c.Assert(op.Step(i), Equals, steps[i])
+		c.Assert(op.Step(i), DeepEquals, steps[i])
 	}
 }
 

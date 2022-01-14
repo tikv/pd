@@ -47,18 +47,18 @@ type Builder struct {
 	approximateSize int64
 
 	// operation record
-	originPeers         peersMap
-	unhealthyPeers      peersMap
-	originLeaderStoreID uint64
-	targetPeers         peersMap
-	targetLeaderStoreID uint64
-	err                 error
+	originPeers          peersMap
+	unhealthyPeers       peersMap
+	originLeaderStoreID  uint64
+	targetPeers          peersMap
+	targetLeaderStoreID  uint64
+	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
+	err                  error
 
 	// skip origin check flags
 	skipOriginJointStateCheck bool
 
 	// build flags
-	allowDemote       bool
 	useJointConsensus bool
 	lightWeight       bool
 	forceTargetLeader bool
@@ -142,14 +142,13 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 	}
 
 	// build flags
-	supportJointConsensus := cluster.IsFeatureSupported(versioninfo.JointConsensus)
+	supportJointConsensus := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
 
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.allowDemote = supportJointConsensus
 	b.useJointConsensus = supportJointConsensus && cluster.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
@@ -242,6 +241,24 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 	} else {
 		b.targetLeaderStoreID = storeID
 	}
+	return b
+}
+
+// SetLeaders records all valid target leaders in Builder.
+func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
+	if b.err != nil {
+		return b
+	}
+	for _, storeID := range storeIDs {
+		peer := b.targetPeers[storeID]
+		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
+			continue
+		}
+		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
+	}
+	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
+	// can be empty if this is not a multi-target evict leader operation. Besides,
+	// `targetLeaderStoreID` must be valid and there must be at least one valid target.
 	return b
 }
 
@@ -356,7 +373,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	}
 
 	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`.
-	// Note: Use `toDemote` only when `allowDemote` is true. Otherwise use `toAdd`, `toRemove` instead.
+	// Note: Use `toDemote` only when `useJointConsensus` is true. Otherwise use `toAdd`, `toRemove` instead.
 	for _, o := range b.originPeers {
 		n := b.targetPeers[o.GetStoreId()]
 		if n == nil {
@@ -374,27 +391,25 @@ func (b *Builder) prepareBuild() (string, error) {
 			}
 		}
 
-		if core.IsLearner(o) {
-			if !core.IsLearner(n) {
-				// learner -> voter
-				b.toPromote.Set(n)
-			}
-		} else {
-			if core.IsLearner(n) {
-				// voter -> learner
-				if b.allowDemote {
-					b.toDemote.Set(n)
-				} else {
-					b.toRemove.Set(o)
-					// Need to add `b.toAdd.Set(n)` in the later targetPeers loop
-				}
+		isOriginPeerLearner := core.IsLearner(o)
+		isTargetPeerLearner := core.IsLearner(n)
+		if isOriginPeerLearner && !isTargetPeerLearner {
+			// learner -> voter
+			b.toPromote.Set(n)
+		} else if !isOriginPeerLearner && isTargetPeerLearner {
+			// voter -> learner
+			if b.useJointConsensus {
+				b.toDemote.Set(n)
+			} else {
+				b.toRemove.Set(o)
+				// the targetPeers loop below will add `b.toAdd.Set(n)`
 			}
 		}
 	}
 	for _, n := range b.targetPeers {
 		// old peer not exists, or target is learner while old one is voter.
 		o := b.originPeers[n.GetStoreId()]
-		if o == nil || (!b.allowDemote && !core.IsLearner(o) && core.IsLearner(n)) {
+		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
 				id, err := b.cluster.AllocID()
@@ -426,8 +441,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toDemote) <= 1 {
-		// If only one peer changed, joint consensus is not used.
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 {
+		// if only one peer changed and the change type is not demote, joint consensus is not used
 		b.useJointConsensus = false
 	}
 
@@ -453,6 +468,8 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
 		return fmt.Sprintf("demote peer: store %s", b.toDemote)
+	case len(b.targetLeaderStoreIDs) != 0:
+		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:
@@ -498,7 +515,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	if targetLeaderBefore, ok := b.originPeers[b.targetLeaderStoreID]; ok && !core.IsLearner(targetLeaderBefore) {
 		// target leader is a voter in `originPeers`, transfer leader first.
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 		b.execChangePeerV2(true, false)
@@ -507,7 +524,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 		// origin leader is none or a voter in `targetPeers`, change peers first.
 		b.execChangePeerV2(true, false)
 		if b.originLeaderStoreID != b.targetLeaderStoreID {
-			b.execTransferLeader(b.targetLeaderStoreID)
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 	} else {
@@ -595,7 +612,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
 		}
 		if plan.leaderBeforeAdd != 0 && plan.leaderBeforeAdd != b.currentLeaderStoreID {
-			b.execTransferLeader(plan.leaderBeforeAdd)
+			b.execTransferLeader(plan.leaderBeforeAdd, b.targetLeaderStoreIDs)
 			kind |= OpLeader
 		}
 		if plan.add != nil {
@@ -606,11 +623,8 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 			b.execPromoteLearner(plan.promote)
 		}
 		if plan.leaderBeforeRemove != 0 && plan.leaderBeforeRemove != b.currentLeaderStoreID {
-			b.execTransferLeader(plan.leaderBeforeRemove)
+			b.execTransferLeader(plan.leaderBeforeRemove, b.targetLeaderStoreIDs)
 			kind |= OpLeader
-		}
-		if plan.demote != nil {
-			b.execDemoteFollower(plan.demote)
 		}
 		if plan.remove != nil {
 			b.execRemovePeer(plan.remove)
@@ -624,7 +638,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 		b.currentLeaderStoreID != b.targetLeaderStoreID &&
 		b.currentPeers[b.targetLeaderStoreID] != nil {
 		// Transfer only when target leader is legal.
-		b.execTransferLeader(b.targetLeaderStoreID)
+		b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 		kind |= OpLeader
 	}
 
@@ -634,21 +648,15 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 	return kind, nil
 }
 
-func (b *Builder) execTransferLeader(id uint64) {
-	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeaderStoreID, ToStore: id})
-	b.currentLeaderStoreID = id
+func (b *Builder) execTransferLeader(targetStoreID uint64, targetStoreIDs []uint64) {
+	b.steps = append(b.steps, TransferLeader{FromStore: b.currentLeaderStoreID, ToStore: targetStoreID, ToStores: targetStoreIDs})
+	b.currentLeaderStoreID = targetStoreID
 }
 
 func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
 	b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	b.currentPeers.Set(peer)
 	delete(b.toPromote, peer.GetStoreId())
-}
-
-func (b *Builder) execDemoteFollower(peer *metapb.Peer) {
-	b.steps = append(b.steps, DemoteFollower{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
-	b.currentPeers.Set(peer)
-	delete(b.toDemote, peer.GetStoreId())
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
@@ -678,6 +686,17 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 }
 
 func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
+	if len(b.toPromote)+len(b.toDemote) == 0 {
+		// No need to add empty enter / leave joint consensus step if no peer in `toPromote` and `toDemote`
+
+		// Transfer Leader
+		if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
+			b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
+		}
+
+		return
+	}
+
 	// Enter
 	step := ChangePeerV2Enter{
 		PromoteLearners: make([]PromoteLearner, 0, len(b.toPromote)),
@@ -701,12 +720,16 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	if needEnter {
 		b.steps = append(b.steps, step)
 	}
+
 	// Transfer Leader
 	if needTransferLeader && b.originLeaderStoreID != b.targetLeaderStoreID {
-		b.execTransferLeader(b.targetLeaderStoreID)
+		b.execTransferLeader(b.targetLeaderStoreID, b.targetLeaderStoreIDs)
 	}
-	// Leave
-	b.steps = append(b.steps, ChangePeerV2Leave(step))
+
+	// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
+	if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
+		b.steps = append(b.steps, ChangePeerV2Leave(step))
+	}
 }
 
 // check if the peer is allowed to become the leader.

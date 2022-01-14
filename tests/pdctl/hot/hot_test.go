@@ -17,6 +17,7 @@ package hot_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -232,4 +233,115 @@ func (s *hotTestSuite) TestHotWithStoreID(c *C) {
 	c.Assert(hotRegion.AsLeader[2].Count, Equals, 1)
 	c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, float64(200000000))
 	c.Assert(hotRegion.AsLeader[2].TotalBytesRate, Equals, float64(100000000))
+}
+
+func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
+	statistics.Denoising = false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1,
+		func(cfg *config.Config, serverName string) {
+			cfg.Schedule.HotRegionCacheHitsThreshold = 0
+			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
+			cfg.Schedule.HotRegionsReservedDays = 1
+		},
+	)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	}
+	defer cluster.Destroy()
+	startTime := time.Now().UnixNano() / int64(time.Millisecond)
+	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	// wait hot scheduler starts
+	time.Sleep(5000 * time.Millisecond)
+	endTime := time.Now().UnixNano() / int64(time.Millisecond)
+	start := strconv.FormatInt(startTime, 10)
+	end := strconv.FormatInt(endTime, 10)
+	args := []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"hot_region_type", "write",
+		"region_id", "1,2",
+		"store_id", "1,4",
+		"is_learner", "false",
+	}
+	output, e := pdctl.ExecuteCommand(cmd, args...)
+	hotRegions := core.HistoryHotRegions{}
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
+	regions := hotRegions.HistoryHotRegion
+	c.Assert(len(regions), Equals, 1)
+	c.Assert(regions[0].RegionID, Equals, uint64(1))
+	c.Assert(regions[0].StoreID, Equals, uint64(1))
+	c.Assert(regions[0].HotRegionType, Equals, "write")
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"hot_region_type", "write",
+		"region_id", "1,2",
+		"store_id", "1,2",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
+	regions = hotRegions.HistoryHotRegion
+	c.Assert(len(regions), Equals, 2)
+	isSort := regions[0].UpdateTime > regions[1].UpdateTime || regions[0].RegionID < regions[1].RegionID
+	c.Assert(isSort, Equals, true)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"hot_region_type", "read",
+		"is_leader", "false",
+		"peer_id", "12",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
+	c.Assert(len(hotRegions.HistoryHotRegion), Equals, 0)
+	args = []string{"-u", pdAddr, "hot", "history"}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"region_id", "dada",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
+	args = []string{"-u", pdAddr, "hot", "history",
+		start, end,
+		"region_ids", "12323",
+	}
+	output, e = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(e, IsNil)
+	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
 }

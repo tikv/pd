@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 )
@@ -585,74 +584,6 @@ func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
 		c.Assert(controller.GetOperator(1), IsNil)
 		e := stream.Drain(4)
 		c.Assert(e, IsNil)
-	}
-}
-
-func (t *testOperatorControllerSuite) TestStoreLimitWithMerge(c *C) {
-	cfg := config.NewTestOptions()
-	tc := mockcluster.NewCluster(t.ctx, cfg)
-	tc.SetMaxMergeRegionSize(2)
-	tc.SetMaxMergeRegionKeys(2)
-	tc.SetSplitMergeInterval(0)
-	regions := []*core.RegionInfo{
-		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
-		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
-		newRegionInfo(4, "x", "", 10, 10, []uint64{109, 4}, []uint64{109, 4}),
-	}
-
-	for i := uint64(1); i <= 6; i++ {
-		tc.AddLeaderStore(i, 10)
-	}
-
-	for _, region := range regions {
-		tc.PutRegion(region)
-	}
-
-	mc := checker.NewMergeChecker(t.ctx, tc)
-	stream := hbstream.NewTestHeartbeatStreams(t.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(t.ctx, tc, stream)
-
-	regions[2] = regions[2].Clone(
-		core.SetPeers([]*metapb.Peer{
-			{Id: 109, StoreId: 2},
-			{Id: 110, StoreId: 3},
-			{Id: 111, StoreId: 6},
-		}),
-		core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}),
-	)
-
-	// set to a small rate to reduce unstable possibility.
-	tc.SetAllStoresLimit(storelimit.AddPeer, 0.0000001)
-	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
-	tc.PutRegion(regions[2])
-	// The size of Region is less or equal than 1MB.
-	for i := 0; i < 50; i++ {
-		ops := mc.Check(regions[2])
-		c.Assert(ops, NotNil)
-		c.Assert(oc.AddOperator(ops...), IsTrue)
-		for _, op := range ops {
-			oc.RemoveOperator(op)
-		}
-	}
-	regions[2] = regions[2].Clone(
-		core.SetApproximateSize(2),
-		core.SetApproximateKeys(2),
-	)
-	tc.PutRegion(regions[2])
-	// The size of Region is more than 1MB but no more than 20MB.
-	for i := 0; i < 5; i++ {
-		ops := mc.Check(regions[2])
-		c.Assert(ops, NotNil)
-		c.Assert(oc.AddOperator(ops...), IsTrue)
-		for _, op := range ops {
-			oc.RemoveOperator(op)
-		}
-	}
-	{
-		ops := mc.Check(regions[2])
-		c.Assert(ops, NotNil)
-		c.Assert(oc.AddOperator(ops...), IsFalse)
 	}
 }
 

@@ -862,8 +862,8 @@ func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *Region
 		!SortedPeersEqual(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
-// SearchRegion searches RegionInfo from regionTree
-func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
+// GetRegionByKey searches RegionInfo from regionTree
+func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
 	region := r.tree.search(regionKey)
 	if region == nil {
 		return nil
@@ -871,8 +871,8 @@ func (r *RegionsInfo) SearchRegion(regionKey []byte) *RegionInfo {
 	return r.GetRegion(region.GetID())
 }
 
-// SearchPrevRegion searches previous RegionInfo from regionTree
-func (r *RegionsInfo) SearchPrevRegion(regionKey []byte) *RegionInfo {
+// GetPrevRegionByKey searches previous RegionInfo from regionTree
+func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	region := r.tree.searchPrev(regionKey)
 	if region == nil {
 		return nil
@@ -1143,6 +1143,10 @@ func (r *RegionsInfo) GetRangeHoles() [][]string {
 		lastEndKey = region.GetEndKey()
 		return true
 	})
+	// If the last end key is not empty, it means there is a range hole at the end.
+	if len(lastEndKey) > 0 {
+		rangeHoles = append(rangeHoles, []string{HexRegionKeyStr(lastEndKey), ""})
+	}
 	return rangeHoles
 }
 

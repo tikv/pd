@@ -55,7 +55,7 @@ func (s *testReplicaCheckerSuite) TearDownTest(c *C) {
 func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	s.rc = NewReplicaChecker(s.cluster, cache.NewDefaultCache(10))
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
@@ -209,7 +209,7 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetMaxSnapshotCount(2)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	// Add stores 1,2,3,4.
@@ -282,7 +282,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
 
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
@@ -300,7 +300,7 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
@@ -352,7 +352,7 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
@@ -431,7 +431,7 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "host"})
 
@@ -462,7 +462,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
 	tc.SetLocationLabels([]string{"zone"})
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
@@ -497,7 +497,7 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
 	tc.AddRegionStore(1, 100)
@@ -528,7 +528,7 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
@@ -559,7 +559,7 @@ func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
 func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(s.ctx, opt)
-	tc.DisableFeature(versioninfo.JointConsensus)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 

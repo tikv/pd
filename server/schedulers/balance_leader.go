@@ -203,7 +203,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.cluster.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, opt.IsRegionHealthy)
+	plan.region = plan.cluster.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -235,7 +235,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.cluster.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, opt.IsRegionHealthy)
+	plan.region = plan.cluster.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
@@ -283,7 +283,7 @@ func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) []*operator.O
 		return nil
 	}
 
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan.cluster, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, plan.cluster, plan.region, plan.region.GetLeader().GetStoreId(), plan.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		return nil

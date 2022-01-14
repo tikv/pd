@@ -196,7 +196,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
-	case operator.TransferLeader, operator.PromoteLearner, operator.DemoteFollower, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
+	case operator.TransferLeader, operator.PromoteLearner, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
 		nextTime = fastNotifyInterval
 	}
 	return now.Add(nextTime)
@@ -640,9 +640,14 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	var cmd *pdpb.RegionHeartbeatResponse
 	switch st := step.(type) {
 	case operator.TransferLeader:
+		peers := make([]*metapb.Peer, 0, len(st.ToStores))
+		for _, storeID := range st.ToStores {
+			peers = append(peers, region.GetStorePeer(storeID))
+		}
 		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
-				Peer: region.GetStorePeer(st.ToStore),
+				Peer:  region.GetStorePeer(st.ToStore),
+				Peers: peers,
 			},
 		}
 	case operator.AddPeer:
@@ -659,8 +664,6 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.PromoteLearner:
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.DemoteFollower:
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{

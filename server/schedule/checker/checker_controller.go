@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package checker
 
 import (
 	"context"
@@ -21,7 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/opt"
@@ -31,42 +31,42 @@ import (
 // DefaultCacheSize is the default length of waiting list.
 const DefaultCacheSize = 1000
 
-// CheckerController is used to manage all checkers.
-type CheckerController struct {
+// Controller is used to manage all checkers.
+type Controller struct {
 	cluster           opt.Cluster
 	opts              *config.PersistOptions
-	opController      *OperatorController
-	learnerChecker    *checker.LearnerChecker
-	replicaChecker    *checker.ReplicaChecker
-	ruleChecker       *checker.RuleChecker
-	splitChecker      *checker.SplitChecker
-	mergeChecker      *checker.MergeChecker
-	jointStateChecker *checker.JointStateChecker
-	priorityInspector *checker.PriorityInspector
+	opController      *schedule.OperatorController
+	learnerChecker    *LearnerChecker
+	replicaChecker    *ReplicaChecker
+	ruleChecker       *RuleChecker
+	splitChecker      *SplitChecker
+	mergeChecker      *MergeChecker
+	jointStateChecker *JointStateChecker
+	priorityInspector *PriorityInspector
 	regionWaitingList cache.Cache
 }
 
-// NewCheckerController create a new CheckerController.
+// NewController create a new Controller.
 // TODO: isSupportMerge should be removed.
-func NewCheckerController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *OperatorController) *CheckerController {
+func NewController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
-	return &CheckerController{
+	return &Controller{
 		cluster:           cluster,
 		opts:              cluster.GetOpts(),
 		opController:      opController,
-		learnerChecker:    checker.NewLearnerChecker(cluster),
-		replicaChecker:    checker.NewReplicaChecker(cluster, regionWaitingList),
-		ruleChecker:       checker.NewRuleChecker(cluster, ruleManager, regionWaitingList),
-		splitChecker:      checker.NewSplitChecker(cluster, ruleManager, labeler),
-		mergeChecker:      checker.NewMergeChecker(ctx, cluster),
-		jointStateChecker: checker.NewJointStateChecker(cluster),
-		priorityInspector: checker.NewPriorityInspector(cluster),
+		learnerChecker:    NewLearnerChecker(cluster),
+		replicaChecker:    NewReplicaChecker(cluster, regionWaitingList),
+		ruleChecker:       NewRuleChecker(cluster, ruleManager, regionWaitingList),
+		splitChecker:      NewSplitChecker(cluster, ruleManager, labeler),
+		mergeChecker:      NewMergeChecker(ctx, cluster),
+		jointStateChecker: NewJointStateChecker(cluster),
+		priorityInspector: NewPriorityInspector(cluster),
 		regionWaitingList: regionWaitingList,
 	}
 }
 
 // CheckRegion will check the region and add a new operator if needed.
-func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Operator {
+func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
@@ -114,42 +114,42 @@ func (c *CheckerController) CheckRegion(region *core.RegionInfo) []*operator.Ope
 }
 
 // GetMergeChecker returns the merge checker.
-func (c *CheckerController) GetMergeChecker() *checker.MergeChecker {
+func (c *Controller) GetMergeChecker() *MergeChecker {
 	return c.mergeChecker
 }
 
 // GetRuleChecker returns the rule checker.
-func (c *CheckerController) GetRuleChecker() *checker.RuleChecker {
+func (c *Controller) GetRuleChecker() *RuleChecker {
 	return c.ruleChecker
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
-func (c *CheckerController) GetWaitingRegions() []*cache.Item {
+func (c *Controller) GetWaitingRegions() []*cache.Item {
 	return c.regionWaitingList.Elems()
 }
 
 // AddWaitingRegion returns the regions in the waiting list.
-func (c *CheckerController) AddWaitingRegion(region *core.RegionInfo) {
+func (c *Controller) AddWaitingRegion(region *core.RegionInfo) {
 	c.regionWaitingList.Put(region.GetID(), nil)
 }
 
 // RemoveWaitingRegion removes the region from the waiting list.
-func (c *CheckerController) RemoveWaitingRegion(id uint64) {
+func (c *Controller) RemoveWaitingRegion(id uint64) {
 	c.regionWaitingList.Remove(id)
 }
 
 // GetPriorityRegions returns the region in priority queue
-func (c *CheckerController) GetPriorityRegions() []uint64 {
+func (c *Controller) GetPriorityRegions() []uint64 {
 	return c.priorityInspector.GetPriorityRegions()
 }
 
 // RemovePriorityRegions removes priority region from priority queue
-func (c *CheckerController) RemovePriorityRegions(id uint64) {
+func (c *Controller) RemovePriorityRegions(id uint64) {
 	c.priorityInspector.RemovePriorityRegion(id)
 }
 
 // GetPauseController returns pause controller of the checker
-func (c *CheckerController) GetPauseController(name string) (*checker.PauseController, error) {
+func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	switch name {
 	case "learner":
 		return &c.learnerChecker.PauseController, nil

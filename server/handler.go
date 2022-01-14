@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -190,6 +189,16 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	return c.GetHotReadRegions()
+}
+
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
+	return h.opt.GetHotRegionsWriteInterval()
+}
+
+//  GetHotRegionsReservedDays gets days hot region information is kept.
+func (h *Handler) GetHotRegionsReservedDays() uint64 {
+	return h.opt.GetHotRegionsReservedDays()
 }
 
 // GetStoresLoads gets all hot write stores stats.
@@ -520,7 +529,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return err
@@ -717,11 +726,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
+	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
+	if !schedule.IsRegionHealthy(target) || !schedule.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -994,24 +1003,25 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			for _, peer := range meta.Peers {
 				if peer.StoreId == hotPeerStat.StoreID {
 					peerID = peer.Id
-					isLearner = peer.Role == metapb.PeerRole_Learner
+					isLearner = core.IsLearner(peer)
+					break
 				}
 			}
 			stat := core.HistoryHotRegion{
-				// store in  ms.
+				// store in ms.
 				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         peerID,
-				IsLeader:       meta.Id == region.GetLeader().Id,
+				IsLeader:       peerID == region.GetLeader().Id,
 				IsLearner:      isLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
-				StartKey:       meta.StartKey,
-				EndKey:         meta.EndKey,
-				EncryptionMeta: meta.EncryptionMeta,
+				StartKey:       string(region.GetStartKey()),
+				EndKey:         string(region.GetEndKey()),
+				EncryptionMeta: meta.GetEncryptionMeta(),
 				HotRegionType:  hotRegionType,
 			}
 			historyHotRegions = append(historyHotRegions, stat)
