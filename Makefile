@@ -216,7 +216,7 @@ test: install-tools
 	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 o test -tags tso_function_test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -tags tso_function_test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 
