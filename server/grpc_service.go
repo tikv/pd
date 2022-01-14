@@ -1185,12 +1185,10 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		}, nil
 	}
 
-	//nolint
-	region := rc.GetRegion(request.GetRegionId())
+	region := rc.GetRegion(request.GetRegion().GetId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			//nolint
-			return nil, errors.Errorf("region %d not found", request.GetRegionId())
+			return nil, errors.Errorf("region %d not found", request.GetRegion().GetId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
