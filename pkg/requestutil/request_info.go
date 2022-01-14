@@ -62,8 +62,8 @@ func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel
 		&RequestSchema{paths: paths, method: method, serviceLabel: serviceLabel})
 }
 
-// getServiceLabel returns service label which is defined when register router handle
-func (l *RequestSchemaList) getServiceLabel(r *http.Request) string {
+// GetServiceLabel returns service label which is defined when register router handle
+func (l *RequestSchemaList) GetServiceLabel(r *http.Request) string {
 	return l.match(r.URL.Path, r.Method)
 }
 
@@ -96,7 +96,7 @@ func (r *RequestSchema) match(path, method string) bool {
 // GetRequestInfo returns request info needed from http.Request
 func (l *RequestSchemaList) GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
-		ServiceLabel: l.getServiceLabel(r),
+		ServiceLabel: l.GetServiceLabel(r),
 		Method:       fmt.Sprintf("HTTP/%s:%s", r.Method, r.URL.Path),
 		Component:    apiutil.GetComponentNameOnHTTP(r),
 		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
