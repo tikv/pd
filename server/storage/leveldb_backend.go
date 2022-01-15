@@ -54,8 +54,12 @@ type levelDBBackend struct {
 }
 
 // newLevelDBBackend is used to create a new LevelDB backend.
-func newLevelDBBackend(ctx context.Context, rootPath string, ekm *encryptionkm.KeyManager) (*levelDBBackend, error) {
-	levelDB, err := kv.NewLeveldbKV(rootPath)
+func newLevelDBBackend(
+	ctx context.Context,
+	filePath string,
+	ekm *encryptionkm.KeyManager,
+) (*levelDBBackend, error) {
+	levelDB, err := kv.NewLeveldbKV(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +99,7 @@ func (lb *levelDBBackend) backgroundFlush() {
 			if !isFlush {
 				continue
 			}
-			if err = lb.FlushRegion(); err != nil {
+			if err = lb.Flush(); err != nil {
 				log.Error("flush regions meet error", errs.ZapError(err))
 			}
 		case <-lb.regionStorageCtx.Done():
@@ -127,7 +131,27 @@ func (lb *levelDBBackend) SaveRegion(region *metapb.Region) error {
 	return nil
 }
 
-func (lb *levelDBBackend) SaveRegions(regions map[string]*metapb.Region) error {
+func (lb *levelDBBackend) DeleteRegion(region *metapb.Region) error {
+	return lb.Remove(endpoint.RegionPath(region.GetId()))
+}
+
+// Flush saves the cache region to the underlying storage.
+func (lb *levelDBBackend) Flush() error {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+	return lb.flushLocked()
+}
+
+func (lb *levelDBBackend) flushLocked() error {
+	if err := lb.saveRegions(lb.batchRegions); err != nil {
+		return err
+	}
+	lb.cacheSize = 0
+	lb.batchRegions = make(map[string]*metapb.Region, lb.batchSize)
+	return nil
+}
+
+func (lb *levelDBBackend) saveRegions(regions map[string]*metapb.Region) error {
 	batch := new(leveldb.Batch)
 
 	for key, r := range regions {
@@ -144,29 +168,9 @@ func (lb *levelDBBackend) SaveRegions(regions map[string]*metapb.Region) error {
 	return nil
 }
 
-func (lb *levelDBBackend) DeleteRegion(region *metapb.Region) error {
-	return lb.Remove(endpoint.RegionPath(region.GetId()))
-}
-
-// FlushRegion saves the cache region to region storage.
-func (lb *levelDBBackend) FlushRegion() error {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
-	return lb.flushLocked()
-}
-
-func (lb *levelDBBackend) flushLocked() error {
-	if err := lb.SaveRegions(lb.batchRegions); err != nil {
-		return err
-	}
-	lb.cacheSize = 0
-	lb.batchRegions = make(map[string]*metapb.Region, lb.batchSize)
-	return nil
-}
-
-// Close closes the kv.
+// Close closes the LevelDB kv. It will call Flush() once before closing.
 func (lb *levelDBBackend) Close() error {
-	err := lb.FlushRegion()
+	err := lb.Flush()
 	if err != nil {
 		log.Error("meet error before close the region storage", errs.ZapError(err))
 	}

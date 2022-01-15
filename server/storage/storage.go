@@ -53,10 +53,10 @@ func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage
 // NewStorageWithLevelDBBackend creates a new storage with LevelDB backend.
 func NewStorageWithLevelDBBackend(
 	ctx context.Context,
-	rootPath string,
+	filePath string,
 	ekm *encryptionkm.KeyManager,
 ) (*levelDBBackend, error) {
-	return newLevelDBBackend(ctx, rootPath, ekm)
+	return newLevelDBBackend(ctx, filePath, ekm)
 }
 
 // TODO: support other KV storage backends like BadgerDB in the future.
@@ -72,6 +72,8 @@ type coreStorage struct {
 
 // NewCoreStorage creates a new core storage with the given default and region storage.
 // Usually, the defaultStorage is etcd-backend, and the regionStorage is LevelDB-backend.
+// coreStorage can switch between the defaultStorage and regionStorage to read and write
+// the region info, and all other storage interfaces will use the defaultStorage.
 func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage) Storage {
 	return &coreStorage{
 		Storage:       defaultStorage,
@@ -79,17 +81,21 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 	}
 }
 
-// GetRegionStorage gets the region storage.
+// GetRegionStorage gets the internal region storage.
 func (ps *coreStorage) GetRegionStorage() endpoint.RegionStorage {
 	return ps.regionStorage
 }
 
-// SwitchToRegionStorage switches to the region storage.
+// SwitchToRegionStorage switches the region storage to regionStorage,
+// after calling this, all region info will be read/saved by the internal
+// regionStorage, and in most cases it's LevelDB-backend.
 func (ps *coreStorage) SwitchToRegionStorage() {
 	atomic.StoreInt32(&ps.useRegionStorage, 1)
 }
 
-// SwitchToDefaultStorage switches to the to default storage.
+// SwitchToDefaultStorage switches the region storage to defaultStorage,
+// after calling this, all region info will be read/saved by the internal
+// defaultStorage, and in most cases it's etcd-backend.
 func (ps *coreStorage) SwitchToDefaultStorage() {
 	atomic.StoreInt32(&ps.useRegionStorage, 0)
 }
@@ -144,17 +150,19 @@ func (ps *coreStorage) DeleteRegion(region *metapb.Region) error {
 }
 
 // Flush flushes the dirty region to storage.
+// In coreStorage, only the regionStorage is flushed.
 func (ps *coreStorage) Flush() error {
-	if flushable, ok := ps.regionStorage.(interface{ FlushRegion() error }); ok {
-		return flushable.FlushRegion()
+	if ps.regionStorage != nil {
+		return ps.regionStorage.Flush()
 	}
 	return nil
 }
 
-// Close closes the rsm and its region storage.
+// Close closes the region storage.
+// In coreStorage, only the regionStorage is closable.
 func (ps *coreStorage) Close() error {
-	if closableStorage, ok := ps.regionStorage.(interface{ Close() error }); ok {
-		return closableStorage.Close()
+	if ps.regionStorage != nil {
+		return ps.regionStorage.Close()
 	}
 	return nil
 }
