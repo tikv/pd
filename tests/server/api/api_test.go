@@ -164,8 +164,12 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	_, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", errReader(0))
+	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", errReader(0))
 	c.Assert(err, NotNil)
+	c.Assert(resp, IsNil)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	c.Assert(err.Error(), Equals, fmt.Sprintf("Post \"%s/pd/api/v1/debug/pprof/profile?force=true\": test error", leader.GetAddr()))
 
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
