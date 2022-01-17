@@ -607,7 +607,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// PUT GET failed
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`), IsNil)
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -623,15 +623,15 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// DELETE failed
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"), IsNil)
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`), IsNil)
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"), IsNil)
 }
 
 func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {

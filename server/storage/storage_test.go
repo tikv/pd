@@ -266,7 +266,7 @@ func (s *testStorageSuite) TestLoadRegionsToCache(c *C) {
 }
 
 func (s *testStorageSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/withRangeLimit", "return(500)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/withRangeLimit", "return(500)"), IsNil)
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewRegionsInfo()
 
@@ -277,5 +277,5 @@ func (s *testStorageSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 	for _, region := range cache.GetMetaRegions() {
 		c.Assert(region, DeepEquals, regions[region.GetId()])
 	}
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/withRangeLimit"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"), IsNil)
 }
