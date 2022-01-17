@@ -17,49 +17,62 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
 )
 
-// serviceInfoMiddleware is used to gather info from requsetInfo
-type serviceInfoMiddleware struct {
-	s                     *server.Server
-	registeredSericeLabel *requestutil.RequestSchemaList
+// serviceMiddleware is used to
+type middlewareBuilder struct {
+	svr     *server.Server
+	handler http.Handler
 }
 
-func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
-	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredServiceLabel))
-
-	for key, value := range config.HTTPRegisteredServiceLabel {
-		if key[0] != '/' {
-			continue
-		}
-		paths := strings.Split(key, "/")
-		length := len(paths)
-		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
+func newMiddlewareBuilder(s *server.Server) middlewareBuilder {
+	return middlewareBuilder{
+		svr: s,
+		handler: negroni.New(
+			newRequestInfoMiddleware(s),
+			// todo: add audit and rate limit middleware
+		),
 	}
-	return &serviceInfoMiddleware{s: s, registeredSericeLabel: registeredSericeLabel}
 }
 
-// ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
-func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !s.s.IsServiceMiddlewareEnabled() {
+func (s *middlewareBuilder) middleware(handler http.Handler) http.Handler {
+	return negroni.New(negroni.Wrap(s.handler), negroni.Wrap(handler))
+}
+
+func (s *middlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.handler.ServeHTTP(w, r)
+		next(w, r)
+	}
+}
+
+// requestInfoMiddleware is used to gather info from requsetInfo
+type requestInfoMiddleware struct {
+	svr *server.Server
+}
+
+func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
+	return &requestInfoMiddleware{svr: s}
+}
+
+func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !rm.svr.IsServiceMiddlewareEnabled() {
 		next(w, r)
 		return
 	}
 
-	requestInfo := s.registeredSericeLabel.GetRequestInfo(r)
+	requestInfo := requestutil.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
-	failpoint.Inject("addSericeInfoMiddleware", func() {
+	failpoint.Inject("addRequestInfoMiddleware", func() {
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)

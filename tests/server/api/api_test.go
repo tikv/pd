@@ -18,9 +18,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +115,12 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	}
 }
 
+type errReader int
+
+func (errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("test error")
+}
+
 var _ = Suite(&testMiddlewareSuite{})
 
 type testMiddlewareSuite struct {
@@ -125,7 +132,7 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
 	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
@@ -137,8 +144,8 @@ func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 	s.cluster.Destroy()
 }
 
-func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addSericeInfoMiddleware", "return(true)"), IsNil)
+func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
@@ -157,28 +164,11 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	req, err := http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/store/7788", strings.NewReader(""))
-	c.Assert(err, IsNil)
-	req.Header.Set("component", "test")
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusInternalServerError)
-	c.Assert(resp.Header.Get("service-label"), Equals, "GetStore")
-	c.Assert(resp.Header.Get("method"), Equals, "HTTP/GET:/pd/api/v1/store/7788")
-	c.Assert(resp.Header.Get("component"), Equals, "test")
-	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
+	_, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", errReader(0))
+	c.Assert(err, NotNil)
+	c.Assert(err.Error(), Equals, fmt.Sprintf("Post \"%s/pd/api/v1/debug/pprof/profile?force=true\": test error", leader.GetAddr()))
 
-	req, err = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/regions", nil)
-	c.Assert(err, IsNil)
-	req.Header.Set("component", "test")
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
@@ -192,10 +182,10 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addSericeInfoMiddleware"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"), IsNil)
 }
 
-func BenchmarkDoRequestWithServiceInfo(b *testing.B) {
+func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
@@ -214,7 +204,7 @@ func BenchmarkDoRequestWithServiceInfo(b *testing.B) {
 	cluster.Destroy()
 }
 
-func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
+func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
@@ -234,19 +224,9 @@ func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
 }
 
 func doTestRequest(srv *tests.TestServer) {
-	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/stores", nil)
+	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/component/admin/unsafe/remove-failed-stores/history", nil)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-
-	req, _ = http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/regions", nil)
-	req.Header.Set("component", "test")
-	resp, _ = dialClient.Do(req)
-	resp.Body.Close()
-
-	req, _ = http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/component/admin/unsafe/remove-failed-stores/history", nil)
-	req.Header.Set("component", "test")
-	resp, _ = dialClient.Do(req)
 	resp.Body.Close()
 }
 

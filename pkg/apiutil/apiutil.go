@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -189,4 +190,13 @@ func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *ht
 	// Send the request, get the response and the error
 	resp, err = rt.proxied.RoundTrip(req)
 	return
+}
+
+// GetRouteName return mux route name registered
+func GetRouteName(req *http.Request) string {
+	route := mux.CurrentRoute(req)
+	if route != nil {
+		return route.GetName()
+	}
+	return ""
 }

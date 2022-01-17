@@ -17,14 +17,31 @@ package requestutil
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/tikv/pd/pkg/apiutil"
 )
+
+type errReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+type errReader string
+
+func (e errReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New(string(e))
+}
+
+type errCloser struct{}
+
+func (e errCloser) Close() error {
+	return nil
+}
 
 // RequestInfo holds source information from http.Request
 type RequestInfo struct {
@@ -37,62 +54,10 @@ type RequestInfo struct {
 	BodyParam    string
 }
 
-// RequestSchemaList is used to store requestSchemas which have been registered
-type RequestSchemaList struct {
-	requestSchemas []*RequestSchema
-}
-
-// NewRequestSchemaList returns a new RequestSchemaList with given length
-func NewRequestSchemaList(len int) *RequestSchemaList {
-	return &RequestSchemaList{requestSchemas: make([]*RequestSchema, 0, len)}
-}
-
-// AddServiceLabel is used to register requestSchema
-func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel string) {
-	l.requestSchemas = append(l.requestSchemas,
-		&RequestSchema{paths: paths, method: method, serviceLabel: serviceLabel})
-}
-
-// GetServiceLabel returns service label which is defined when register router handle
-func (l *RequestSchemaList) GetServiceLabel(r *http.Request) string {
-	for _, schema := range l.requestSchemas {
-		if schema.match(r.URL.Path, r.Method) {
-			return schema.serviceLabel
-		}
-	}
-	return ""
-}
-
-// RequestSchema identifies http.Reuqest schema info
-type RequestSchema struct {
-	paths        []string
-	method       string
-	serviceLabel string
-}
-
-func (r *RequestSchema) match(path, method string) bool {
-	if len(r.method) > 0 && r.method != method {
-		return false
-	}
-	paths := strings.Split(strings.Trim(path, "/"), "/")
-	if len(r.paths) != len(paths) {
-		return false
-	}
-	for i := 0; i < len(paths); i++ {
-		if len(r.paths[i]) == 0 {
-			continue
-		}
-		if r.paths[i] != paths[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // GetRequestInfo returns request info needed from http.Request
-func (l *RequestSchemaList) GetRequestInfo(r *http.Request) RequestInfo {
+func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
-		ServiceLabel: l.GetServiceLabel(r),
+		ServiceLabel: apiutil.GetRouteName(r),
 		Method:       fmt.Sprintf("HTTP/%s:%s", r.Method, r.URL.Path),
 		Component:    apiutil.GetComponentNameOnHTTP(r),
 		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
@@ -123,7 +88,10 @@ func getBodyParam(r *http.Request) string {
 		bodyParam = string(buf)
 		r.Body = io.NopCloser(bytes.NewBuffer(buf))
 	} else {
-
+		r.Body = errReadCloser{
+			Reader: errReader("12"),
+			Closer: &errCloser{},
+		}
 	}
 
 	return bodyParam
