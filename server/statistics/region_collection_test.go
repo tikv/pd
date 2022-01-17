@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
-	endpoint "github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 func TestStatistics(t *testing.T) {
