@@ -596,7 +596,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set bootstrap time
 	// Because we will write the cluster meta into etcd directly,
 	// so we need to handle the root key path manually here.
-	bootstrapKey := s.appendToRootPath(endpoint.ClusterBootstrapTimeKey())
+	bootstrapKey := endpoint.AppendToRootPath(s.rootPath, endpoint.ClusterBootstrapTimeKey())
 	nano := time.Now().UnixNano()
 
 	timeData := typeutil.Uint64ToBytes(uint64(nano))
@@ -604,7 +604,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := s.appendToRootPath(endpoint.StorePath(storeMeta.GetId()))
+	storePath := endpoint.AppendToRootPath(s.rootPath, endpoint.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -617,7 +617,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := s.appendToRootPath(endpoint.RegionPath(req.GetRegion().GetId()))
+	regionPath := endpoint.AppendToRootPath(s.rootPath, endpoint.RegionPath(req.GetRegion().GetId()))
 	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
@@ -648,10 +648,6 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	return &pdpb.BootstrapResponse{
 		ReplicationStatus: s.cluster.GetReplicationMode().GetReplicationStatus(),
 	}, nil
-}
-
-func (s *Server) appendToRootPath(key string) string {
-	return path.Join(s.rootPath, key)
 }
 
 func (s *Server) createRaftCluster() error {

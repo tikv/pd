@@ -33,9 +33,14 @@ const (
 	gcWorkerServiceSafePointID = "gc_worker"
 )
 
+// AppendToRootPath appends the given key to the rootPath.
+func AppendToRootPath(rootPath string, key string) string {
+	return path.Join(rootPath, key)
+}
+
 // ClusterRootPath appends the `clusterPath` to the rootPath.
 func ClusterRootPath(rootPath string) string {
-	return path.Join(rootPath, clusterPath)
+	return AppendToRootPath(rootPath, clusterPath)
 }
 
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
