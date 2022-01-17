@@ -33,8 +33,8 @@ type middlewareBuilder struct {
 	handler http.Handler
 }
 
-func newMiddlewareBuilder(s *server.Server) middlewareBuilder {
-	return middlewareBuilder{
+func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
+	return &middlewareBuilder{
 		svr: s,
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
