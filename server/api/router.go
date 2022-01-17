@@ -239,6 +239,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
 
 	apiRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
+	// Deprecated: This API is no longer maintained anymore.
 	apiRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	apiRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 	// metric query use to query metric data, the protocol is compatible with prometheus.
