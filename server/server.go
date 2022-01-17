@@ -50,12 +50,13 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/id"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -122,7 +123,7 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
-	storage *core.Storage
+	storage storage.Storage
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -377,30 +378,23 @@ func (s *Server) startServer(ctx context.Context) error {
 			return err
 		}
 	}
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
+	s.encryptionKeyManager, err = encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.encryptionKeyManager = encryptionKeyManager
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
-
-	s.storage = core.NewStorage(
-		kvBase,
-		core.WithRegionStorage(regionStorage),
-		core.WithEncryptionKeyManager(encryptionKeyManager),
-	)
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
 	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, encryptionKeyManager, s.handler)
+		ctx, hotRegionPath, s.encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
@@ -715,7 +709,7 @@ func (s *Server) GetMember() *member.Member {
 }
 
 // GetStorage returns the backend storage of server.
-func (s *Server) GetStorage() *core.Storage {
+func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }
 
@@ -726,7 +720,7 @@ func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
 
 // SetStorage changes the storage only for test purpose.
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
-func (s *Server) SetStorage(storage *core.Storage) {
+func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
@@ -788,11 +782,10 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	storage := s.GetStorage()
-	if storage == nil {
+	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := storage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllScheduleConfig()
 	if err != nil {
 		return cfg
 	}
@@ -1347,11 +1340,18 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	switchableStorage, ok := s.storage.(interface {
+		SwitchToRegionStorage()
+		SwitchToDefaultStorage()
+	})
+	if !ok {
+		return nil
+	}
 	if s.persistOptions.IsUseRegionStorage() {
-		s.storage.SwitchToRegionStorage()
+		switchableStorage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
-		s.storage.SwitchToDefaultStorage()
+		switchableStorage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
 	return nil

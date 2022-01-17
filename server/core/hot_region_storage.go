@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +41,7 @@ import (
 // It will pull the hot region information according to the pullInterval interval.
 // And delete and save data beyond the remainingDays.
 // Close must be called after use.
+// TODO: move to server/storage package.
 type HotRegionStorage struct {
 	*kv.LeveldbKV
 	encryptionKeyManager    *encryptionkm.KeyManager
