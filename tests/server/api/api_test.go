@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -177,8 +176,6 @@ func (s *testMiddlewareSuite) TestServiceInfo(c *C) {
 	req.Header.Set("component", "test")
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
-	content, err := io.ReadAll(resp.Body)
-	fmt.Println(string(content))
 	resp.Body.Close()
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
@@ -203,14 +200,12 @@ func BenchmarkDoRequestWithServiceInfo(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
-	err := cluster.RunInitialServers()
-	fmt.Println(err)
-	fmt.Println(cluster.WaitLeader())
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
-	resp, err := dialClient.Do(req)
+	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
-	fmt.Println("_________", resp, err)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		doTestRequest(leader)
