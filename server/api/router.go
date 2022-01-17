@@ -80,10 +80,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/schedulers/{name}", serviceMiddlewares.middlewareFunc(schedulerHandler.PauseOrResume)).Methods("POST").Name("PauseOrResumeScheduler")
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler).Name("GetSchedulerConfig")
+	apiRouter.PathPrefix("/scheduler-config").Handler(serviceMiddlewares.middleware(schedulerConfigHandler)).Name("GetSchedulerConfig")
 
 	clusterHandler := newClusterHandler(svr, rd)
-	apiRouter.Handle("/cluster", serviceMiddlewares.middleware(clusterHandler)).Methods("GET").Name("GetCluster").Name("GetCluster")
+	apiRouter.Handle("/cluster", serviceMiddlewares.middleware(clusterHandler)).Methods("GET").Name("GetCluster")
 	apiRouter.HandleFunc("/cluster/status", serviceMiddlewares.middlewareFunc(clusterHandler.GetClusterStatus)).Methods("GET").Name("GetClusterStatus")
 
 	confHandler := newConfHandler(svr, rd)
