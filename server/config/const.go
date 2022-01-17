@@ -295,8 +295,8 @@ const (
 	GetHistoryFailedStoresRemoval = "GetHistoryFailedStoresRemoval"
 )
 
-// HTTPRegisteredSericeLabel is the service labels and http api mapping data
-var HTTPRegisteredSericeLabel map[string]string = map[string]string{
+// HTTPRegisteredServiceLabel is the service labels and http api mapping data
+var HTTPRegisteredServiceLabel = map[string]string{
 	"/pd/api/v1/operators/GET":                                 GetOperators,
 	"/pd/api/v1/operators/POST":                                SetOperators,
 	"/pd/api/v1/operators//GET":                                GetRegionOperator,

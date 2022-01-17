@@ -234,7 +234,6 @@ func BenchmarkDoRequestWithoutServiceInfo(b *testing.B) {
 }
 
 func doTestRequest(srv *tests.TestServer) {
-
 	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/stores", nil)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)

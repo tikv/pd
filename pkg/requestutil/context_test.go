@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 			Component:    "pdctl",
 			IP:           "localhost",
 			URLParam:     "{\"id\"=1}",
-			BodyParm:     "{\"state\"=\"Up\"}",
+			BodyParam:    "{\"state\"=\"Up\"}",
 			TimeStamp:    "2022",
 		})
 	result, ok := RequestInfoFrom(ctx)
@@ -52,6 +52,6 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	c.Assert(result.Component, Equals, "pdctl")
 	c.Assert(result.IP, Equals, "localhost")
 	c.Assert(result.URLParam, Equals, "{\"id\"=1}")
-	c.Assert(result.BodyParm, Equals, "{\"state\"=\"Up\"}")
+	c.Assert(result.BodyParam, Equals, "{\"state\"=\"Up\"}")
 	c.Assert(result.TimeStamp, Equals, "2022")
 }

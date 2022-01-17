@@ -30,8 +30,8 @@ var ra *rand.Rand = rand.New(rand.NewSource(time.Now().Unix()))
 
 func BenchmarkDoServiceLabel(b *testing.B) {
 	b.StopTimer()
-	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
-	for key, value := range config.HTTPRegisteredSericeLabel {
+	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredServiceLabel))
+	for key, value := range config.HTTPRegisteredServiceLabel {
 		if key[0] != '/' {
 			continue
 		}
@@ -40,9 +40,9 @@ func BenchmarkDoServiceLabel(b *testing.B) {
 		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
 	}
 
-	length := len(config.HTTPRegisteredSericeLabel)
+	length := len(config.HTTPRegisteredServiceLabel)
 	reqList := make([]*http.Request, 0, length)
-	for key := range config.HTTPRegisteredSericeLabel {
+	for key := range config.HTTPRegisteredServiceLabel {
 		pos := len(key)
 		for ; key[pos-1] != '/'; pos-- {
 		}
@@ -65,8 +65,8 @@ func BenchmarkDoServiceLabel(b *testing.B) {
 
 func BenchmarkDoRequestInfo(b *testing.B) {
 	b.StopTimer()
-	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
-	for key, value := range config.HTTPRegisteredSericeLabel {
+	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredServiceLabel))
+	for key, value := range config.HTTPRegisteredServiceLabel {
 		if key[0] != '/' {
 			continue
 		}
@@ -75,9 +75,9 @@ func BenchmarkDoRequestInfo(b *testing.B) {
 		registeredSericeLabel.AddServiceLabel(paths[1:length-1], paths[length-1], value)
 	}
 
-	length := len(config.HTTPRegisteredSericeLabel)
+	length := len(config.HTTPRegisteredServiceLabel)
 	reqList := make([]*http.Request, 0, length)
-	for key := range config.HTTPRegisteredSericeLabel {
+	for key := range config.HTTPRegisteredServiceLabel {
 		pos := len(key)
 		for ; key[pos-1] != '/'; pos-- {
 		}

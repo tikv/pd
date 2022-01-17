@@ -36,9 +36,9 @@ type serviceInfoMiddleware struct {
 }
 
 func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
-	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredSericeLabel))
+	registeredSericeLabel := requestutil.NewRequestSchemaList(len(config.HTTPRegisteredServiceLabel))
 
-	for key, value := range config.HTTPRegisteredSericeLabel {
+	for key, value := range config.HTTPRegisteredServiceLabel {
 		if key[0] != '/' {
 			continue
 		}
@@ -61,7 +61,7 @@ func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	failpoint.Inject("addSericeInfoMiddleware", func() {
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
-		w.Header().Add("body-param", requestInfo.BodyParm)
+		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
 		w.Header().Add("component", requestInfo.Component)

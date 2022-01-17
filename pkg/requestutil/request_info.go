@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ type RequestInfo struct {
 	IP           string
 	TimeStamp    string
 	URLParam     string
-	BodyParm     string
+	BodyParam    string
 }
 
 // RequestSchemaList is used to store requestSchemas which have been registered
@@ -47,15 +47,6 @@ func NewRequestSchemaList(len int) *RequestSchemaList {
 	return &RequestSchemaList{requestSchemas: make([]*RequestSchema, 0, len)}
 }
 
-func (l *RequestSchemaList) match(path string, method string) string {
-	for _, schema := range l.requestSchemas {
-		if schema.match(path, method) {
-			return schema.serviceLabel
-		}
-	}
-	return ""
-}
-
 // AddServiceLabel is used to register requestSchema
 func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel string) {
 	l.requestSchemas = append(l.requestSchemas,
@@ -64,7 +55,12 @@ func (l *RequestSchemaList) AddServiceLabel(paths []string, method, serviceLabel
 
 // GetServiceLabel returns service label which is defined when register router handle
 func (l *RequestSchemaList) GetServiceLabel(r *http.Request) string {
-	return l.match(r.URL.Path, r.Method)
+	for _, schema := range l.requestSchemas {
+		if schema.match(r.URL.Path, r.Method) {
+			return schema.serviceLabel
+		}
+	}
+	return ""
 }
 
 // RequestSchema identifies http.Reuqest schema info
@@ -102,7 +98,7 @@ func (l *RequestSchemaList) GetRequestInfo(r *http.Request) RequestInfo {
 		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
 		TimeStamp:    time.Now().Local().String(),
 		URLParam:     getURLParam(r),
-		BodyParm:     getBodyParam(r),
+		BodyParam:    getBodyParam(r),
 	}
 }
 
@@ -121,11 +117,14 @@ func getBodyParam(r *http.Request) string {
 		return ""
 	}
 	buf, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	var bodyParam = ""
 	if err == nil {
 		bodyParam = string(buf)
+		r.Body = io.NopCloser(bytes.NewBuffer(buf))
+	} else {
+
 	}
-	r.Body = io.NopCloser(bytes.NewBuffer(buf))
 
 	return bodyParam
 }

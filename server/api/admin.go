@@ -148,12 +148,8 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 // @Router /admin/service-middleware [POST]
 func (h *adminHandler) HanldeServiceMiddlewareSwitch(w http.ResponseWriter, r *http.Request) {
 	enableStr := r.URL.Query().Get("enable")
-	var enable bool
-	if enableStr == "true" {
-		enable = true
-	} else if enableStr == "false" {
-		enable = false
-	} else {
+	enable, err := strconv.ParseBool(enableStr)
+	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, "The input is invalid.")
 		return
 	}
