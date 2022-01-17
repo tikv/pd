@@ -18,18 +18,18 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
 	PauseController
-	cluster opt.Cluster
+	cluster schedule.Cluster
 }
 
 // NewJointStateChecker creates a joint state checker.
-func NewJointStateChecker(cluster opt.Cluster) *JointStateChecker {
+func NewJointStateChecker(cluster schedule.Cluster) *JointStateChecker {
 	return &JointStateChecker{
 		cluster: cluster,
 	}

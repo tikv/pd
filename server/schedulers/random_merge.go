@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 const (
@@ -50,7 +50,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(RandomMergeType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(RandomMergeType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &randomMergeSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -91,7 +91,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
@@ -99,7 +99,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
@@ -138,7 +138,7 @@ func (s *randomMergeScheduler) Schedule(cluster opt.Cluster) []*operator.Operato
 	return ops
 }
 
-func (s *randomMergeScheduler) allowMerge(cluster opt.Cluster, region, target *core.RegionInfo) bool {
+func (s *randomMergeScheduler) allowMerge(cluster schedule.Cluster, region, target *core.RegionInfo) bool {
 	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionHealthy(target) {
 		return false
 	}

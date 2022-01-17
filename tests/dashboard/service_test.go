@@ -84,7 +84,7 @@ func (s *dashboardTestSuite) TestDashboardProxy(c *C) {
 }
 
 func (s *dashboardTestSuite) checkRespCode(c *C, url string, code int) {
-	resp, err := s.httpClient.Get(url) //nolint:gosec
+	resp, err := s.httpClient.Get(url)
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)

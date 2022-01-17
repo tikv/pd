@@ -24,7 +24,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -33,7 +32,7 @@ const DefaultCacheSize = 1000
 
 // Controller is used to manage all checkers.
 type Controller struct {
-	cluster           opt.Cluster
+	cluster           schedule.Cluster
 	opts              *config.PersistOptions
 	opController      *schedule.OperatorController
 	learnerChecker    *LearnerChecker
@@ -48,7 +47,7 @@ type Controller struct {
 
 // NewController create a new Controller.
 // TODO: isSupportMerge should be removed.
-func NewController(ctx context.Context, cluster opt.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
+func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
 		cluster:           cluster,

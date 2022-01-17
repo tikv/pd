@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +59,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictSlowStoreSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0)}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -69,7 +69,7 @@ func init() {
 }
 
 type evictSlowStoreSchedulerConfig struct {
-	storage       *core.Storage
+	storage       endpoint.ConfigStorage
 	EvictedStores []uint64 `json:"evict-stores"`
 }
 
@@ -106,35 +106,35 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) Prepare(cluster opt.Cluster) error {
+func (s *evictSlowStoreScheduler) Prepare(cluster schedule.Cluster) error {
 	if len(s.conf.EvictedStores) != 0 {
 		return s.prepareEvictLeader(cluster)
 	}
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) Cleanup(cluster opt.Cluster) {
+func (s *evictSlowStoreScheduler) Cleanup(cluster schedule.Cluster) {
 	if len(s.conf.EvictedStores) != 0 {
 		s.cleanupEvictLeader(cluster)
 	}
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster opt.Cluster) error {
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster schedule.Cluster) error {
 	return cluster.SlowStoreEvicted(s.conf.EvictedStores[0])
 }
 
-func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster opt.Cluster) {
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 	cluster.SlowStoreRecovered(s.conf.EvictedStores[0])
 }
 
-func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster opt.Cluster) []*operator.Operator {
+func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster schedule.Cluster) []*operator.Operator {
 	storeMap := map[uint64][]core.KeyRange{
 		s.conf.EvictedStores[0]: {core.NewKeyRange("", "")},
 	}
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, storeMap, EvictLeaderBatchSize)
 }
 
-func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	if len(s.conf.EvictedStores) != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 		if !allowed {
@@ -145,7 +145,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
 

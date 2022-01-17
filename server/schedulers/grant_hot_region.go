@@ -33,8 +33,8 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -77,7 +77,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grantHotRegionSchedulerConfig{StoreIDs: make([]uint64, 0), storage: storage}
 		conf.cluster = opController.GetCluster()
 		if err := decoder(conf); err != nil {
@@ -89,8 +89,8 @@ func init() {
 
 type grantHotRegionSchedulerConfig struct {
 	mu          sync.RWMutex
-	storage     *core.Storage
-	cluster     opt.Cluster
+	storage     endpoint.ConfigStorage
+	cluster     schedule.Cluster
 	StoreIDs    []uint64 `json:"store-id"`
 	StoreLeadID uint64   `json:"store-leader-id"`
 }
@@ -193,7 +193,7 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
 // TODO it should check if there is any scheduelr such as evict or hot region scheduler
-func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !regionAllowed {
@@ -267,13 +267,13 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
 	return s.dispatch(s.types[i], cluster)
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
 	storeInfos := statistics.SummaryStoreInfos(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
@@ -307,7 +307,7 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cl
 	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
+func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, infos []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isleader := s.r.Int()%2 == 1
 	for _, detail := range infos {
 		srcStoreID := detail.Info.Store.GetID()
@@ -338,7 +338,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster opt.Cluster, infos []*s
 	return nil
 }
 
-func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
+func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
 	srcRegion := cluster.GetRegion(regionID)
 	if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
 		return nil, errs.ErrRegionRuleNotFound
@@ -349,7 +349,7 @@ func (s *grantHotRegionScheduler) transfer(cluster opt.Cluster, regionID uint64,
 		return nil, errs.ErrStoreNotFound
 	}
 	filters := []filter.Filter{
-		filter.NewPlacementSafeguard(s.GetName(), cluster, srcRegion, srcStore),
+		filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore),
 	}
 
 	destStoreIDs := make([]uint64, 0, len(s.conf.StoreIDs))
