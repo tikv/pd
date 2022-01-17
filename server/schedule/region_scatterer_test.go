@@ -63,28 +63,13 @@ var _ = Suite(&testScatterRegionSuite{})
 
 type testScatterRegionSuite struct{}
 
-func (s *testScatterRegionSuite) TestSixStores(c *C) {
-	s.scatter(c, 6, 100, false)
-	s.scatter(c, 6, 100, true)
-	s.scatter(c, 6, 1000, false)
-	s.scatter(c, 6, 1000, true)
-}
-
-func (s *testScatterRegionSuite) TestFiveStores(c *C) {
-	s.scatter(c, 5, 100, false)
-	s.scatter(c, 5, 100, true)
-	s.scatter(c, 5, 1000, false)
-	s.scatter(c, 5, 1000, true)
-}
-
-func (s *testScatterRegionSuite) TestSixSpecialStores(c *C) {
-	s.scatterSpecial(c, 3, 6, 100)
-	s.scatterSpecial(c, 3, 6, 1000)
-}
-
-func (s *testScatterRegionSuite) TestFiveSpecialStores(c *C) {
-	s.scatterSpecial(c, 5, 5, 100)
-	s.scatterSpecial(c, 5, 5, 1000)
+func (s *testScatterRegionSuite) TestScatterRegions(c *C) {
+	s.scatter(c, 5, 50, true)
+	s.scatter(c, 5, 500, true)
+	s.scatter(c, 6, 50, true)
+	s.scatter(c, 5, 50, false)
+	s.scatterSpecial(c, 3, 6, 50)
+	s.scatterSpecial(c, 5, 5, 50)
 }
 
 func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
@@ -370,8 +355,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		}
 		// For leader, we expect each store have about 20 leader for each group
 		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
-		// For peer, we expect each store have about 50 peers for each group
-		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
+		// For peer, we expect each store have about 60 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 60, 15)
 	}
 }
 

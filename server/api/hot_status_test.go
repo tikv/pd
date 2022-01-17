@@ -24,8 +24,8 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	_ "github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/storage/kv"
 )
 
 var _ = Suite(&testHotStatusSuite{})
