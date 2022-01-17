@@ -46,6 +46,8 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -67,7 +69,7 @@ type Server interface {
 	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
-	GetStorage() *core.Storage
+	GetStorage() storage.Storage
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
@@ -99,7 +101,7 @@ type RaftCluster struct {
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
 	opt     *config.PersistOptions
-	storage *core.Storage
+	storage storage.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
 
@@ -191,7 +193,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(endpoint.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -202,7 +204,11 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
+func (c *RaftCluster) InitCluster(
+	id id.Allocator,
+	opt *config.PersistOptions,
+	storage storage.Storage,
+	basicCluster *core.BasicCluster) {
 	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
@@ -251,7 +257,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
 		return err
 	}
@@ -471,14 +477,14 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 }
 
 // GetStorage returns the storage.
-func (c *RaftCluster) GetStorage() *core.Storage {
+func (c *RaftCluster) GetStorage() storage.Storage {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storage
 }
 
 // SetStorage set the storage for test purpose.
-func (c *RaftCluster) SetStorage(s *core.Storage) {
+func (c *RaftCluster) SetStorage(s storage.Storage) {
 	c.Lock()
 	defer c.Unlock()
 	c.storage = s
@@ -729,7 +735,6 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
-//nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -1489,7 +1494,6 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // TODO: remove me.
 // only used in test.
-//nolint:unused
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()
