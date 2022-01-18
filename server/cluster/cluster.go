@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/keyutil"
@@ -126,9 +125,6 @@ type RaftCluster struct {
 
 	replicationMode *replication.ModeManager
 	traceRegionFlow bool
-
-	// Deprecated: we do not use it anymore. See https://github.com/tikv/tikv/issues/11472.
-	componentManager *component.Manager
 
 	unsafeRecoveryController *unsafeRecoveryController
 }
@@ -250,12 +246,6 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
-	if err != nil {
-		return err
-	}
-
-	c.componentManager = component.NewManager(c.storage)
-	_, err = c.storage.LoadComponent(&c.componentManager)
 	if err != nil {
 		return err
 	}
@@ -1476,13 +1466,6 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.checkers.GetMergeChecker()
-}
-
-// GetComponentManager returns component manager.
-func (c *RaftCluster) GetComponentManager() *component.Manager {
-	c.RLock()
-	defer c.RUnlock()
-	return c.componentManager
 }
 
 // isPrepared if the cluster information is collected

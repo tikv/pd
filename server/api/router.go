@@ -227,13 +227,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	clusterRouter.HandleFunc("/replication_mode/status", replicationModeHandler.GetStatus)
 
-	// Deprecated: component exists for historical compatibility and should not be used anymore. See https://github.com/tikv/tikv/issues/11472.
-	componentHandler := newComponentHandler(svr, rd)
-	clusterRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
-	clusterRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
-	clusterRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
-	clusterRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
-
 	pluginHandler := newPluginHandler(handler, rd)
 	apiRouter.HandleFunc("/plugin", pluginHandler.LoadPlugin).Methods("POST")
 	apiRouter.HandleFunc("/plugin", pluginHandler.UnloadPlugin).Methods("DELETE")
