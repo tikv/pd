@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -356,12 +357,7 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 			log.Info("statistics background jobs has been stopped")
 			return
 		case <-ticker.C:
-			c.RLock()
-			storeIDs, writeBytesRates, writeKeysRates := c.core.GetStoresWriteRate()
-			c.RUnlock()
-			c.Lock()
-			c.hotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
-			c.Unlock()
+			c.hotStat.ObserveRegionsStats(c.core.GetStoresWriteRate())
 		}
 	}
 }
@@ -418,46 +414,89 @@ func (c *RaftCluster) Context() context.Context {
 	return nil
 }
 
-// GetOperatorController returns the operator controller.
-func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.opController
+// GetCoordinator returns the coordinator.
+func (c *RaftCluster) GetCoordinator() *coordinator {
+	return c.coordinator
 }
 
-// GetBasicCluster returns the basic cluster.
-func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
-	c.RLock()
-	defer c.RUnlock()
-	return c.core
+// GetOperatorController returns the operator controller.
+func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
+	return c.coordinator.opController
 }
 
 // GetRegionScatter returns the region scatter.
 func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
-	c.RLock()
-	defer c.RUnlock()
 	return c.coordinator.regionScatterer
 }
 
 // GetRegionSplitter returns the region splitter
 func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
-	c.RLock()
-	defer c.RUnlock()
 	return c.coordinator.regionSplitter
 }
 
-// GetHeartbeatStreams returns the heartbeat streams.
-func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.hbStreams
+// GetMergeChecker returns merge checker.
+func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
+	return c.coordinator.checkers.GetMergeChecker()
 }
 
-// GetCoordinator returns the coordinator.
-func (c *RaftCluster) GetCoordinator() *coordinator {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator
+// GetSchedulers gets all schedulers.
+func (c *RaftCluster) GetSchedulers() []string {
+	return c.coordinator.getSchedulers()
+}
+
+// GetSchedulerHandlers gets all scheduler handlers.
+func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
+	return c.coordinator.getSchedulerHandlers()
+}
+
+// AddScheduler adds a scheduler.
+func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string) error {
+	return c.coordinator.addScheduler(scheduler, args...)
+}
+
+// RemoveScheduler removes a scheduler.
+func (c *RaftCluster) RemoveScheduler(name string) error {
+	return c.coordinator.removeScheduler(name)
+}
+
+// PauseOrResumeScheduler pauses or resumes a scheduler.
+func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
+	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// IsSchedulerPaused checks if a scheduler is paused.
+func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
+	return c.coordinator.isSchedulerPaused(name)
+}
+
+// IsSchedulerDisabled checks if a scheduler is disabled.
+func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
+	return c.coordinator.isSchedulerDisabled(name)
+}
+
+// IsSchedulerExisted checks if a scheduler is existed.
+func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
+	return c.coordinator.isSchedulerExisted(name)
+}
+
+// PauseOrResumeChecker pauses or resumes checker.
+func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
+	return c.coordinator.pauseOrResumeChecker(name, t)
+}
+
+// IsCheckerPaused returns if checker is paused
+func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
+	return c.coordinator.isCheckerPaused(name)
+}
+
+// GetComponentManager returns component manager.
+func (c *RaftCluster) GetComponentManager() *component.Manager {
+	return c.componentManager
+}
+
+// GetAllocator returns cluster's id allocator.
+func (c *RaftCluster) GetAllocator() id.Allocator {
+	return c.id
 }
 
 // GetRegionSyncer returns the region syncer.
@@ -469,9 +508,17 @@ func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
 
 // GetReplicationMode returns the ReplicationMode.
 func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
-	c.RLock()
-	defer c.RUnlock()
 	return c.replicationMode
+}
+
+// GetRuleManager returns the rule manager reference.
+func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
+	return c.ruleManager
+}
+
+// GetRegionLabeler returns the region labeler.
+func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
+	return c.regionLabeler
 }
 
 // GetStorage returns the storage.
@@ -535,10 +582,9 @@ func (c *RaftCluster) ClearSuspectKeyRanges() {
 
 // HandleStoreHeartbeat updates the store status.
 func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
+	storeID := stats.GetStoreId()
 	c.Lock()
 	defer c.Unlock()
-
-	storeID := stats.GetStoreId()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
@@ -639,11 +685,9 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
-	c.RLock()
 	storage := c.storage
 	coreCluster := c.core
 	hotStat := c.hotStat
-	c.RUnlock()
 
 	origin, err := coreCluster.PreCheckPutRegion(region)
 	if err != nil {
@@ -716,7 +760,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	changedRegions := c.changedRegions
-
 	c.Unlock()
 
 	if storage != nil {
@@ -776,6 +819,11 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 	}
 	c.meta = meta
 	return nil
+}
+
+// GetBasicCluster returns the basic cluster.
+func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
+	return c.core
 }
 
 // GetRegionByKey gets regionInfo by region key from cluster.
@@ -869,31 +917,9 @@ func (c *RaftCluster) GetAverageRegionSize() int64 {
 	return c.core.GetAverageRegionSize()
 }
 
-// GetRegionStats returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
-	c.RLock()
-	defer c.RUnlock()
-	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
-}
-
-// GetStoresStats returns stores' statistics from cluster.
-// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
-func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
-	c.RLock()
-	defer c.RUnlock()
-	return c.hotStat.StoresStats
-}
-
 // DropCacheRegion removes a region from the cache.
 func (c *RaftCluster) DropCacheRegion(id uint64) {
 	c.core.RemoveRegionIfExist(id)
-}
-
-// GetCacheCluster gets the cached cluster.
-func (c *RaftCluster) GetCacheCluster() *core.BasicCluster {
-	c.RLock()
-	defer c.RUnlock()
-	return c.core
 }
 
 // GetMetaStores gets stores from cluster.
@@ -914,11 +940,6 @@ func (c *RaftCluster) GetLeaderStoreByRegionID(regionID uint64) *core.StoreInfo 
 // GetStore gets store from cluster.
 func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 	return c.core.GetStore(storeID)
-}
-
-// IsRegionHot checks if a region is in hot state.
-func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
-	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1225,6 +1246,7 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
+
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1266,9 +1288,6 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1430,31 +1449,23 @@ func (c *RaftCluster) resetMetrics() {
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
-	c.RLock()
 	if c.regionStats == nil {
-		c.RUnlock()
 		return
 	}
 	c.regionStats.Collect()
 	c.labelLevelStats.Collect()
-	hotStat := c.hotStat
-	c.RUnlock()
 	// collect hot cache metrics
-	hotStat.CollectMetrics()
+	c.hotStat.CollectMetrics()
 }
 
 func (c *RaftCluster) resetClusterMetrics() {
-	c.RLock()
 	if c.regionStats == nil {
-		c.RUnlock()
 		return
 	}
 	c.regionStats.Reset()
 	c.labelLevelStats.Reset()
-	hotStat := c.hotStat
-	c.RUnlock()
 	// reset hot cache metrics
-	hotStat.ResetMetrics()
+	c.hotStat.ResetMetrics()
 }
 
 func (c *RaftCluster) collectHealthStatus() {
@@ -1484,8 +1495,6 @@ func (c *RaftCluster) resetProgressIndicator() {
 
 // GetRegionStatsByType gets the status of the region by types.
 func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
-	c.RLock()
-	defer c.RUnlock()
 	if c.regionStats == nil {
 		return nil
 	}
@@ -1494,8 +1503,6 @@ func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) [
 
 // GetOfflineRegionStatsByType gets the status of the offline region by types.
 func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
-	c.RLock()
-	defer c.RUnlock()
 	if c.regionStats == nil {
 		return nil
 	}
@@ -1503,8 +1510,6 @@ func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatistic
 }
 
 func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
-	c.Lock()
-	defer c.Unlock()
 	for _, region := range regions {
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
@@ -1530,15 +1535,8 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 	return stores
 }
 
-// GetAllocator returns cluster's id allocator.
-func (c *RaftCluster) GetAllocator() id.Allocator {
-	return c.id
-}
-
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
-	c.RLock()
-	defer c.RUnlock()
 	c.onStoreVersionChangeLocked()
 }
 
@@ -1597,16 +1595,25 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(proto.Clone(meta).(*metapb.Cluster))
 }
 
-// GetMergeChecker returns merge checker.
-func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.checkers.GetMergeChecker()
+// GetRegionStats returns region statistics from cluster.
+func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
+	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
+}
+
+// GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
+func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
+	return c.hotStat.StoresStats
 }
 
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	return c.hotStat.GetStoresLoads()
+}
+
+// IsRegionHot checks if a region is in hot state.
+func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
+	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // RegionReadStats returns hot region's read stats.
@@ -1629,8 +1636,6 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 // TODO: remove me.
 // only used in test.
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
-	c.Lock()
-	defer c.Unlock()
 	if c.storage != nil {
 		if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 			return err
@@ -1638,20 +1643,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
-}
-
-// GetRuleManager returns the rule manager reference.
-func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
-	c.RLock()
-	defer c.RUnlock()
-	return c.ruleManager
-}
-
-// GetRegionLabeler returns the region labeler.
-func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
-	c.RLock()
-	defer c.RUnlock()
-	return c.regionLabeler
 }
 
 // GetHotWriteRegions gets hot write regions' info.
@@ -1683,76 +1674,6 @@ func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeI
 		AsLeader: asLeader,
 		AsPeer:   asPeer,
 	}
-}
-
-// GetSchedulers gets all schedulers.
-func (c *RaftCluster) GetSchedulers() []string {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.getSchedulers()
-}
-
-// GetSchedulerHandlers gets all scheduler handlers.
-func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.getSchedulerHandlers()
-}
-
-// AddScheduler adds a scheduler.
-func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string) error {
-	c.Lock()
-	defer c.Unlock()
-	return c.coordinator.addScheduler(scheduler, args...)
-}
-
-// RemoveScheduler removes a scheduler.
-func (c *RaftCluster) RemoveScheduler(name string) error {
-	c.Lock()
-	defer c.Unlock()
-	return c.coordinator.removeScheduler(name)
-}
-
-// PauseOrResumeScheduler pauses or resumes a scheduler.
-func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.pauseOrResumeScheduler(name, t)
-}
-
-// IsSchedulerPaused checks if a scheduler is paused.
-func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.isSchedulerPaused(name)
-}
-
-// IsSchedulerDisabled checks if a scheduler is disabled.
-func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.isSchedulerDisabled(name)
-}
-
-// IsSchedulerExisted checks if a scheduler is existed.
-func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.isSchedulerExisted(name)
-}
-
-// PauseOrResumeChecker pauses or resumes checker.
-func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.pauseOrResumeChecker(name, t)
-}
-
-// IsCheckerPaused returns if checker is paused
-func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	return c.coordinator.isCheckerPaused(name)
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter
