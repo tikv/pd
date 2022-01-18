@@ -160,7 +160,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPProfProfile")
 	c.Assert(resp.Header.Get("url-param"), Equals, "{\"force\":[\"true\"]}")
 	c.Assert(resp.Header.Get("body-param"), Equals, "{\"testkey\":\"testvalue\"}")
-	c.Assert(resp.Header.Get("method"), Equals, "HTTP/POST:/pd/api/v1/debug/pprof/profile")
+	c.Assert(resp.Header.Get("method"), Equals, "HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile")
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
