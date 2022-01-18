@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build dashboard_distro
-// +build dashboard_distro
-
-package distro
+package storage
 
 import (
-	"github.com/pingcap/tidb-dashboard/pkg/utils/distro"
+	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/kv"
+	"go.etcd.io/etcd/clientv3"
 )
 
-func init() {
-	distro.Replace(Resource)
+// etcdBackend is a storage backend that stores data in etcd,
+// which is mainly used by the PD server.
+type etcdBackend struct {
+	*endpoint.StorageEndpoint
+}
+
+// newEtcdBackend is used to create a new etcd backend.
+func newEtcdBackend(client *clientv3.Client, rootPath string) *etcdBackend {
+	return &etcdBackend{endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client, rootPath), nil)}
 }

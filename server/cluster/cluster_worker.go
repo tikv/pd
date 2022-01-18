@@ -63,7 +63,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
-	if c.IsFeatureSupported(versioninfo.RegionMerge) {
+	if versioninfo.IsFeatureSupported(c.GetOpts().GetClusterVersion(), versioninfo.RegionMerge) {
 		// Disable merge for the 2 regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit([]uint64{reqRegion.GetId(), newRegionID})
 	}
@@ -129,7 +129,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
-	if c.IsFeatureSupported(versioninfo.RegionMerge) {
+	if versioninfo.IsFeatureSupported(c.GetOpts().GetClusterVersion(), versioninfo.RegionMerge) {
 		// Disable merge the regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}

@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ type key int
 
 const (
 	// requestInfoKey is the context key for the request compoenent.
-	requestInfoKey key = iota
+	requestInfoKey key = 1
 )
 
 // WithRequestInfo returns a copy of parent in which the user value is set

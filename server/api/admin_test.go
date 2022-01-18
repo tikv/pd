@@ -173,3 +173,45 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
 }
+
+var _ = Suite(&testServiceSuite{})
+
+type testServiceSuite struct {
+	svr     *server.Server
+	cleanup cleanUpFunc
+}
+
+func (s *testServiceSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	mustBootstrapCluster(c, s.svr)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+}
+
+func (s *testServiceSuite) TearDownSuite(c *C) {
+	s.cleanup()
+}
+
+func (s *testServiceSuite) TestSwitchServiceMiddleware(c *C) {
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/service-middleware", s.svr.GetAddr(), apiPrefix)
+	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
+	err := postJSON(testDialClient, disableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching Service middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.IsServiceMiddlewareEnabled(), Equals, false)
+
+	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
+	err = postJSON(testDialClient, enableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching Service middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.IsServiceMiddlewareEnabled(), Equals, true)
+}

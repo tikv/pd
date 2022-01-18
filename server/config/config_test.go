@@ -26,8 +26,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
 )
 
 func Test(t *testing.T) {
@@ -67,7 +66,7 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
@@ -107,7 +106,7 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 		Schedule:    *opt.GetScheduleConfig(),
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -127,7 +126,7 @@ func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -477,13 +476,13 @@ hot-regions-write-interval= "30m"
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 30*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, int64(30))
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(30))
 	// Verify default value
 	cfg = NewConfig()
 	err = cfg.Adjust(nil, false)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 10*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, int64(7))
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(7))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {

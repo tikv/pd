@@ -29,30 +29,60 @@ import (
 	"go.uber.org/zap"
 )
 
-// requestInfoMiddleware is used to gather info from requsetInfo
-type serviceInfoMiddleware struct {
-	s *server.Server
+// serviceMiddleware is used to
+type middlewareBuilder struct {
+	svr     *server.Server
+	handler http.Handler
 }
 
-func newServiceInfoMiddleware(s *server.Server) negroni.Handler {
-	return &serviceInfoMiddleware{s: s}
+func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
+	return &middlewareBuilder{
+		svr: s,
+		handler: negroni.New(
+			newRequestInfoMiddleware(s),
+			// todo: add audit and rate limit middleware
+		),
+	}
 }
 
-// ServeHTTP is used to implememt negroni.Handler for sericeInfoMiddleware
-func (s *serviceInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if s.s.GetConfig().DisableServiceMiddleware {
+func (s *middlewareBuilder) middleware(handler http.Handler) http.Handler {
+	return negroni.New(negroni.Wrap(s.handler), negroni.Wrap(handler))
+}
+
+func (s *middlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.handler.ServeHTTP(w, r)
 		next(w, r)
+	}
+}
+
+// requestInfoMiddleware is used to gather info from requsetInfo
+type requestInfoMiddleware struct {
+	svr *server.Server
+}
+
+func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
+	return &requestInfoMiddleware{svr: s}
+}
+
+func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !rm.svr.IsServiceMiddlewareEnabled() {
+		next(w, r)
+		return
 	}
 
 	requestInfo := requestutil.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
-	failpoint.Inject("addSericeInfoMiddleware", func() {
+	failpoint.Inject("addRequestInfoMiddleware", func() {
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
+		w.Header().Add("body-param", requestInfo.BodyParam)
+		w.Header().Add("url-param", requestInfo.URLParam)
+		w.Header().Add("method", requestInfo.Method)
+		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("ip", requestInfo.IP)
 	})
 
-	// todo: implement getting source info and storing into request.Context
-	// such as real ip and component name
 	next(w, r)
 }
 
@@ -87,16 +117,16 @@ func getCluster(r *http.Request) *cluster.RaftCluster {
 }
 
 type auditMiddleware struct {
-	srv *server.Server
+	svr *server.Server
 }
 
 func newAuditMiddleware(s *server.Server) negroni.Handler {
-	return &auditMiddleware{srv: s}
+	return &auditMiddleware{svr: s}
 }
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if s.srv.GetConfig().DisableServiceMiddleware {
+	if s.svr.IsServiceMiddlewareEnabled() {
 		next(w, r)
 		return
 	}
@@ -107,12 +137,12 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		next(w, r)
 	}
 
-	config := s.srv.GetServiceAuditConfig(requestInfo.ServiceLabel)
+	config := s.svr.GetServiceAuditConfig(requestInfo.ServiceLabel)
 	if config == nil {
 		next(w, r)
 		return
 	}
-	for _, backend := range s.srv.GetAuditBackend() {
+	for _, backend := range s.svr.GetAuditBackend() {
 		if backend.MatchType(config.Label) {
 			backend.ProcessRequest(requestInfo)
 		}

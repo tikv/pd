@@ -48,6 +48,8 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -69,7 +71,7 @@ type Server interface {
 	GetAllocator() id.Allocator
 	GetConfig() *config.Config
 	GetPersistOptions() *config.PersistOptions
-	GetStorage() *core.Storage
+	GetStorage() storage.Storage
 	GetHBStreams() *hbstream.HeartbeatStreams
 	GetRaftCluster() *RaftCluster
 	GetBasicCluster() *core.BasicCluster
@@ -101,7 +103,7 @@ type RaftCluster struct {
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
 	opt     *config.PersistOptions
-	storage *core.Storage
+	storage storage.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
 
@@ -177,7 +179,7 @@ func (c *RaftCluster) isInitialized() bool {
 	if c.core.GetRegionCount() > 1 {
 		return true
 	}
-	region := c.core.SearchRegion(nil)
+	region := c.core.GetRegionByKey(nil)
 	return region != nil &&
 		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
@@ -195,7 +197,7 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 // yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(c.storage.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(endpoint.ClusterStatePath("raft_bootstrap_time"))
 	if err != nil {
 		return t, err
 	}
@@ -206,7 +208,11 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 }
 
 // InitCluster initializes the raft cluster.
-func (c *RaftCluster) InitCluster(id id.Allocator, opt *config.PersistOptions, storage *core.Storage, basicCluster *core.BasicCluster) {
+func (c *RaftCluster) InitCluster(
+	id id.Allocator,
+	opt *config.PersistOptions,
+	storage storage.Storage,
+	basicCluster *core.BasicCluster) {
 	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
@@ -257,7 +263,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
+	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
 		return err
 	}
@@ -477,14 +483,14 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 }
 
 // GetStorage returns the storage.
-func (c *RaftCluster) GetStorage() *core.Storage {
+func (c *RaftCluster) GetStorage() storage.Storage {
 	c.RLock()
 	defer c.RUnlock()
 	return c.storage
 }
 
 // SetStorage set the storage for test purpose.
-func (c *RaftCluster) SetStorage(s *core.Storage) {
+func (c *RaftCluster) SetStorage(s storage.Storage) {
 	c.Lock()
 	defer c.Unlock()
 	c.storage = s
@@ -624,6 +630,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
+	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
 }
@@ -755,7 +762,6 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
-//nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
 	defer c.RUnlock()
@@ -774,12 +780,12 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 
 // GetRegionByKey gets regionInfo by region key from cluster.
 func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchRegion(regionKey)
+	return c.core.GetRegionByKey(regionKey)
 }
 
 // GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
 func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.SearchPrevRegion(regionKey)
+	return c.core.GetPrevRegionByKey(regionKey)
 }
 
 // ScanRegions scans region with start key, until the region contains endKey, or
@@ -1401,9 +1407,9 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 	return stores
 }
 
-// AllocID allocs ID.
-func (c *RaftCluster) AllocID() (uint64, error) {
-	return c.id.Alloc()
+// GetAllocator returns cluster's id allocator.
+func (c *RaftCluster) GetAllocator() id.Allocator {
+	return c.id
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
@@ -1449,19 +1455,6 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 	return c.changedRegions
-}
-
-// IsFeatureSupported checks if the feature is supported by current cluster.
-func (c *RaftCluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	clusterVersion := *c.opt.GetClusterVersion()
-	minSupportVersion := *versioninfo.MinSupportedVersion(f)
-	// For features before version 5.0 (such as BatchSplit), strict version checks are performed according to the
-	// original logic. But according to Semantic Versioning, specify a version MAJOR.MINOR.PATCH, PATCH is used when you
-	// make backwards compatible bug fixes. In version 5.0 and later, we need to strictly comply.
-	if versioninfo.IsCompatible(minSupportVersion, *versioninfo.MinSupportedVersion(versioninfo.Version4_0)) {
-		return !clusterVersion.LessThan(minSupportVersion)
-	}
-	return versioninfo.IsCompatible(minSupportVersion, clusterVersion)
 }
 
 // GetMetaCluster gets meta cluster.
@@ -1528,7 +1521,6 @@ func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 
 // TODO: remove me.
 // only used in test.
-//nolint:unused
 func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	c.Lock()
 	defer c.Unlock()

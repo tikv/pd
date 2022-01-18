@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -36,13 +35,16 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
-	CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error
+	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
+	// Compatible with old TiKV's TransferLeader.
 	FromStore, ToStore uint64
+	// Multi-target transfer leader.
+	ToStores []uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -56,19 +58,34 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
+	for _, storeID := range tl.ToStores {
+		if region.GetLeader().GetStoreId() == storeID {
+			return true
+		}
+	}
 	return region.GetLeader().GetStoreId() == tl.ToStore
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (tl TransferLeader) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
-	peer := region.GetStorePeer(tl.ToStore)
-	if peer == nil {
-		return errors.New("peer does not existed")
+func (tl TransferLeader) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	errList := make([]error, 0, len(tl.ToStores)+1)
+	for _, storeID := range append(tl.ToStores, tl.ToStore) {
+		peer := region.GetStorePeer(tl.ToStore)
+		if peer == nil {
+			errList = append(errList, errors.New("peer does not existed"))
+			continue
+		}
+		if core.IsLearner(peer) {
+			errList = append(errList, errors.New("peer already is a learner"))
+			continue
+		}
+		if err := validateStore(ci, storeID); err != nil {
+			errList = append(errList, err)
+			continue
+		}
+		return nil
 	}
-	if core.IsLearner(peer) {
-		return errors.New("peer already is a learner")
-	}
-	return validateStore(cluster, tl.ToStore)
+	return errors.Errorf("%v", errList)
 }
 
 // Influence calculates the store difference that current step makes.
@@ -124,8 +141,8 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (ap AddPeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
-	if err := validateStore(cluster, ap.ToStore); err != nil {
+func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, ap.ToStore); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(ap.ToStore)
@@ -164,8 +181,8 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (al AddLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
-	if err := validateStore(cluster, al.ToStore); err != nil {
+func (al AddLearner) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, al.ToStore); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(al.ToStore)
@@ -221,7 +238,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -262,7 +279,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -314,7 +331,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (mr MergeRegion) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (mr MergeRegion) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	return nil
 }
 
@@ -364,50 +381,9 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (sr SplitRegion) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (sr SplitRegion) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	return nil
 }
-
-// DemoteFollower is an OpStep that demotes a region follower peer to learner.
-type DemoteFollower struct {
-	ToStore, PeerID uint64
-}
-
-func (df DemoteFollower) String() string {
-	return fmt.Sprintf("demote follower peer %v on store %v to learner", df.PeerID, df.ToStore)
-}
-
-// ConfVerChanged returns the delta value for version increased by this step.
-func (df DemoteFollower) ConfVerChanged(region *core.RegionInfo) uint64 {
-	peer := region.GetStoreLearner(df.ToStore)
-	return typeutil.BoolToUint64(peer.GetId() == df.PeerID)
-}
-
-// IsFinish checks if current step is finished.
-func (df DemoteFollower) IsFinish(region *core.RegionInfo) bool {
-	if peer := region.GetStoreLearner(df.ToStore); peer != nil {
-		if peer.GetId() != df.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", df.String()), zap.Uint64("obtain-learner", peer.GetId()))
-		}
-		return peer.GetId() == df.PeerID
-	}
-	return false
-}
-
-// CheckInProgress checks if the step is in the progress of advancing.
-func (df DemoteFollower) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
-	peer := region.GetStorePeer(df.ToStore)
-	if peer.GetId() != df.PeerID {
-		return errors.New("peer does not exist")
-	}
-	if peer.GetId() == region.GetLeader().GetId() {
-		return errors.New("cannot demote leader peer")
-	}
-	return nil
-}
-
-// Influence calculates the store difference that current step makes.
-func (df DemoteFollower) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
@@ -495,7 +471,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -635,7 +611,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(cluster opt.Cluster, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -696,12 +672,12 @@ func (cpl ChangePeerV2Leave) CheckInProgress(cluster opt.Cluster, region *core.R
 // Influence calculates the store difference that current step makes.
 func (cpl ChangePeerV2Leave) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
-func validateStore(cluster opt.Cluster, id uint64) error {
-	store := cluster.GetStore(id)
+func validateStore(ci ClusterInformer, id uint64) error {
+	store := ci.GetBasicCluster().GetStore(id)
 	if store == nil {
 		return errors.New("target store does not exist")
 	}
-	if store.DownTime() > cluster.GetOpts().GetMaxStoreDownTime() {
+	if store.DownTime() > ci.GetOpts().GetMaxStoreDownTime() {
 		return errors.New("target store is down")
 	}
 	return nil

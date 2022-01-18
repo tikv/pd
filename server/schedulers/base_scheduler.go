@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/opt"
 )
 
 // options for interval of schedulers
@@ -88,7 +87,7 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 }
 
 // Prepare does some prepare work
-func (s *BaseScheduler) Prepare(cluster opt.Cluster) error { return nil }
+func (s *BaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 
 // Cleanup does some cleanup work
-func (s *BaseScheduler) Cleanup(cluster opt.Cluster) {}
+func (s *BaseScheduler) Cleanup(cluster schedule.Cluster) {}
