@@ -17,7 +17,6 @@ package cluster_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +63,6 @@ func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	ci := &metapb.Cluster{}
-	fmt.Println("_______", string(output))
 	c.Assert(json.Unmarshal(output, ci), IsNil)
 	c.Assert(ci, DeepEquals, cluster.GetCluster())
 

@@ -58,7 +58,7 @@ type RequestInfo struct {
 func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
 		ServiceLabel: apiutil.GetRouteName(r),
-		Method:       fmt.Sprintf("HTTP/%s:%s", r.Method, r.URL.Path),
+		Method:       fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
 		Component:    apiutil.GetComponentNameOnHTTP(r),
 		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
 		TimeStamp:    time.Now().Local().String(),
