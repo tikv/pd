@@ -36,16 +36,16 @@ func (s *testWaitingOperatorSuite) TestRandBuckets(c *C) {
 }
 
 func addOperators(wop WaitingOperator) {
-	op := operator.NewOperator("testOperatorNormal", "test", uint64(1), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
+	op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(1)},
 	}...)
 	wop.PutOperator(op)
-	op = operator.NewOperator("testOperatorHigh", "test", uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
+	op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(2)},
 	}...)
 	op.SetPriorityLevel(core.HighPriority)
 	wop.PutOperator(op)
-	op = operator.NewOperator("testOperatorLow", "test", uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
+	op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(3)},
 	}...)
 	op.SetPriorityLevel(core.LowPriority)
@@ -64,7 +64,7 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 	for j := 0; j < 100; j++ {
 		// adds operators
 		desc := descs[j%3]
-		op := operator.NewOperator(desc, "test", uint64(1), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
+		op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
 			operator.MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
@@ -78,8 +78,9 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 				IsPassive: false,
 			},
 		}...)
+		op.SetDesc(desc)
 		rb.PutOperator(op)
-		op = operator.NewOperator(desc, "test", uint64(2), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
+		op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
 			operator.MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
@@ -93,10 +94,12 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 				IsPassive: true,
 			},
 		}...)
+		op.SetDesc(desc)
 		rb.PutOperator(op)
-		op = operator.NewOperator("testOperatorHigh", "test", uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
+		op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 			operator.RemovePeer{FromStore: uint64(3)},
 		}...)
+		op.SetDesc("testOperatorHigh")
 		op.SetPriorityLevel(core.HighPriority)
 		rb.PutOperator(op)
 

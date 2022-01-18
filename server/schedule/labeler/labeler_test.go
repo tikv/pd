@@ -23,7 +23,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
-	endpoint "github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 func TestT(t *testing.T) {

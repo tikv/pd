@@ -33,9 +33,19 @@ const (
 	gcWorkerServiceSafePointID = "gc_worker"
 )
 
-// ClusterStatePath returns the path to save an option.
-func ClusterStatePath(option string) string {
-	return path.Join(clusterPath, "status", option)
+// AppendToRootPath appends the given key to the rootPath.
+func AppendToRootPath(rootPath string, key string) string {
+	return path.Join(rootPath, key)
+}
+
+// ClusterRootPath appends the `clusterPath` to the rootPath.
+func ClusterRootPath(rootPath string) string {
+	return AppendToRootPath(rootPath, clusterPath)
+}
+
+// ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
+func ClusterBootstrapTimeKey() string {
+	return path.Join(clusterPath, "status", "raft_bootstrap_time")
 }
 
 func scheduleConfigPath(scheduleName string) string {
