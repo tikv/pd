@@ -244,9 +244,9 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	oc := rc.GetOperatorController()
 	rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
+	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
 	oc.AddOperator(op)
 
 	resetStoreState(c, rc, store.GetId(), beforeState)
@@ -922,21 +922,21 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 1)
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	// only can add 5 remove peer operators on store 2
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op := operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
@@ -945,11 +945,11 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 
 	// only can add 5 remove peer operators on store 2
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op := operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
@@ -959,7 +959,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 
 	// can add unlimited remove peer operators on store 1
 	for i := uint64(1); i <= 30; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
@@ -1011,11 +1011,11 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	oc := rc.GetOperatorController()
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 }

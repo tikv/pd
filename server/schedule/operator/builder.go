@@ -48,11 +48,12 @@ type ClusterInformer interface {
 type Builder struct {
 	// basic info
 	ClusterInformer
-	desc          string
-	regionID      uint64
-	regionEpoch   *metapb.RegionEpoch
-	rules         []*placement.Rule
-	expectedRoles map[uint64]placement.PeerRoleType
+	desc            string
+	regionID        uint64
+	regionEpoch     *metapb.RegionEpoch
+	rules           []*placement.Rule
+	expectedRoles   map[uint64]placement.PeerRoleType
+	approximateSize int64
 
 	// operation record
 	originPeers          peersMap
@@ -97,6 +98,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 		ClusterInformer: ci,
 		regionID:        region.GetID(),
 		regionEpoch:     region.GetRegionEpoch(),
+		approximateSize: region.GetApproximateSize(),
 	}
 
 	// options
@@ -359,7 +361,7 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
 }
 
 // Initialize intermediate states.
