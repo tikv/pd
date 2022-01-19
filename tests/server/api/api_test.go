@@ -18,8 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -115,12 +113,6 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	}
 }
 
-type errReader int
-
-func (errReader) Read(p []byte) (n int, err error) {
-	return 0, errors.New("test error")
-}
-
 var _ = Suite(&testMiddlewareSuite{})
 
 type testMiddlewareSuite struct {
@@ -147,10 +139,17 @@ func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
+
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
+
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
 	data, _ := json.Marshal(labels)
-	resp, err := dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -164,15 +163,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", errReader(0))
-	c.Assert(err, NotNil)
-	c.Assert(resp, IsNil)
-	if resp != nil {
-		resp.Body.Close()
-	}
-	c.Assert(err.Error(), Equals, fmt.Sprintf("Post \"%s/pd/api/v1/debug/pprof/profile?force=true\": test error", leader.GetAddr()))
-
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
@@ -181,11 +172,6 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"), IsNil)
 }
 
