@@ -191,6 +191,16 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	return c.GetHotReadRegions()
 }
 
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
+	return h.opt.GetHotRegionsWriteInterval()
+}
+
+//  GetHotRegionsReservedDays gets days hot region information is kept.
+func (h *Handler) GetHotRegionsReservedDays() uint64 {
+	return h.opt.GetHotRegionsReservedDays()
+}
+
 // GetStoresLoads gets all hot write stores stats.
 func (h *Handler) GetStoresLoads() map[uint64][]float64 {
 	rc := h.s.GetRaftCluster()
@@ -519,7 +529,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return err

@@ -65,10 +65,10 @@ func (i *idAllocator) alloc() uint64 {
 }
 
 func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/regionStorageFastFlush", `return(true)`), IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/core/noFastExitSync", `return(true)`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/server/core/regionStorageFastFlush")
-	defer failpoint.Disable("github.com/tikv/pd/server/core/noFastExitSync")
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/regionStorageFastFlush", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/syncer/noFastExitSync", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/storage/regionStorageFastFlush")
+	defer failpoint.Disable("github.com/tikv/pd/server/syncer/noFastExitSync")
 
 	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()

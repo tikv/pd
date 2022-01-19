@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +60,7 @@ var (
 type OperatorController struct {
 	sync.RWMutex
 	ctx             context.Context
-	cluster         opt.Cluster
+	cluster         Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
@@ -74,7 +73,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -97,7 +96,7 @@ func (oc *OperatorController) Ctx() context.Context {
 }
 
 // GetCluster exports cluster to evict-scheduler for check store status.
-func (oc *OperatorController) GetCluster() opt.Cluster {
+func (oc *OperatorController) GetCluster() Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.cluster
@@ -196,7 +195,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
-	case operator.TransferLeader, operator.PromoteLearner, operator.DemoteFollower, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
+	case operator.TransferLeader, operator.PromoteLearner, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
 		nextTime = fastNotifyInterval
 	}
 	return now.Add(nextTime)
@@ -640,9 +639,14 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	var cmd *pdpb.RegionHeartbeatResponse
 	switch st := step.(type) {
 	case operator.TransferLeader:
+		peers := make([]*metapb.Peer, 0, len(st.ToStores))
+		for _, storeID := range st.ToStores {
+			peers = append(peers, region.GetStorePeer(storeID))
+		}
 		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
-				Peer: region.GetStorePeer(st.ToStore),
+				Peer:  region.GetStorePeer(st.ToStore),
+				Peers: peers,
 			},
 		}
 	case operator.AddPeer:
@@ -659,8 +663,6 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.PromoteLearner:
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.DemoteFollower:
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
@@ -783,7 +785,7 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
+func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -801,7 +803,7 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence operator.OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -820,7 +822,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence 
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
+func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}

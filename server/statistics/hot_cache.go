@@ -16,7 +16,9 @@ package statistics
 
 import (
 	"context"
+	"time"
 
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -45,18 +47,6 @@ func NewHotCache(ctx context.Context) *HotCache {
 	return w
 }
 
-// CheckWritePeerSync checks the write status, returns update items.
-// This is used for mockcluster.
-func (w *HotCache) CheckWritePeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	return w.writeCache.checkPeerFlow(peer, region)
-}
-
-// CheckReadPeerSync checks the read status, returns update items.
-// This is used for mockcluster.
-func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	return w.readCache.checkPeerFlow(peer, region)
-}
-
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task flowItemTask) bool {
 	select {
@@ -74,17 +64,6 @@ func (w *HotCache) CheckReadAsync(task flowItemTask) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// Update updates the cache.
-// This is used for mockcluster.
-func (w *HotCache) Update(item *HotPeerStat) {
-	switch item.Kind {
-	case Write:
-		updateStat(w.writeCache, item)
-	case Read:
-		updateStat(w.readCache, item)
 	}
 }
 
@@ -129,18 +108,6 @@ func (w *HotCache) ResetMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-// ExpiredReadItems returns the read items which are already expired.
-// This is used for mockcluster.
-func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.readCache.collectExpiredItems(region)
-}
-
-// ExpiredWriteItems returns the write items which are already expired.
-// This is used for mockcluster.
-func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeCache.collectExpiredItems(region)
-}
-
 func incMetrics(name string, storeID uint64, kind RWType) {
 	store := storeTag(storeID)
 	switch kind {
@@ -149,17 +116,6 @@ func incMetrics(name string, storeID uint64, kind RWType) {
 	case Read:
 		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
 	}
-}
-
-// GetFilledPeriod returns filled period.
-func (w *HotCache) GetFilledPeriod(kind RWType) int {
-	switch kind {
-	case Write:
-		return w.writeCache.getDefaultTimeMedian().GetFilledPeriod()
-	case Read:
-		return w.readCache.getDefaultTimeMedian().GetFilledPeriod()
-	}
-	return 0
 }
 
 func (w *HotCache) updateItems(queue <-chan flowItemTask, runTask func(task flowItemTask)) {
@@ -189,14 +145,50 @@ func (w *HotCache) runWriteTask(task flowItemTask) {
 	}
 }
 
-func updateStat(cache *hotPeerCache, item *HotPeerStat) {
-	cache.update(item)
-	switch item.actionType {
-	case Add:
-		incMetrics("add_item", item.StoreID, item.Kind)
-	case Remove:
-		incMetrics("remove_item", item.StoreID, item.Kind)
-	case Update:
-		incMetrics("update_item", item.StoreID, item.Kind)
+// Update updates the cache.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) Update(item *HotPeerStat) {
+	switch item.Kind {
+	case Write:
+		w.writeCache.updateStat(item)
+	case Read:
+		w.readCache.updateStat(item)
 	}
+}
+
+// CheckWritePeerSync checks the write status, returns update items.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) CheckWritePeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
+	return w.writeCache.checkPeerFlow(peer, region)
+}
+
+// CheckReadPeerSync checks the read status, returns update items.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
+	return w.readCache.checkPeerFlow(peer, region)
+}
+
+// ExpiredReadItems returns the read items which are already expired.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.readCache.collectExpiredItems(region)
+}
+
+// ExpiredWriteItems returns the write items which are already expired.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
+	return w.writeCache.collectExpiredItems(region)
+}
+
+// GetFilledPeriod returns filled period.
+// This is used for mockcluster, for test purpose.
+func (w *HotCache) GetFilledPeriod(kind RWType) int {
+	var reportIntervalSecs int
+	switch kind {
+	case Write:
+		reportIntervalSecs = w.writeCache.reportIntervalSecs
+	case Read:
+		reportIntervalSecs = w.readCache.reportIntervalSecs
+	}
+	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(reportIntervalSecs)*time.Second).GetFilledPeriod()
 }

@@ -1,28 +1,24 @@
-name: PD Tests
+name: PD Test
 on:
   push:
     branches:
       - master
-      - release-4.0
-      - release-5.*
   pull_request:
     branches:
       - master
-      - release-4.0
-      - release-5.*
 jobs:
   chunks:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4]
+        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     outputs:
-      job-total: ${{ strategy.job-total }}
+      job-total: 10
     steps:
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.16
+          go-version: 1.17
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache
@@ -32,33 +28,14 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
             **/.tools
-            **/.dashboard_asset_cache
+            **/.dashboard_download_cache
           key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ matrix.worker_id }}
-            ${{ runner.os }}-go-
-      - name: Dispatch Packages
-        id: packages-units
-        env:
-          WORKER_ID: ${{ matrix.worker_id }}
-        # github.com/tikv/pd/tests/server/tso is the integration test of TSO, which will take a long time,
-        # will be run independently in the TSO Function Test.
-        run: |
-          go list ./... | grep -v -E  "github.com/tikv/pd/server/api|github.com/tikv/pd/tests/client|github.com/tikv/pd/tests/server/tso" > packages.list
-          total=$(expr ${{ strategy.job-total }} - 1)
-          echo  "Dispatched ${total} normal chunks"
-          split packages.list -n r/${total} packages_unit_ -a 1 --numeric-suffixes=1
-          echo  "Dispatched 2 special task to the last chunk (the special tests take a long time)"
-          echo github.com/tikv/pd/server/api > packages_unit_${{ strategy.job-total }}
-          echo github.com/tikv/pd/tests/client >> packages_unit_${{ strategy.job-total }}
-          packages="{$(cat packages_unit_${WORKER_ID} |tr "\n" ",")}"
-          echo "This worker will test the chunk - ${packages}"
-          echo "::set-output name=list::${packages}"
       - name: Make Test
         env:
           WORKER_ID: ${{ matrix.worker_id }}
+          WORKER_COUNT: 10
         run: |
-          make test-with-cover TEST_PKGS="${{ steps.packages-units.outputs.list }}"
+          make ci-test-job JOB_COUNT=$WORKER_COUNT JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
           sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}
@@ -79,10 +56,7 @@ jobs:
       - name: Merge
         env:
           TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
-        run: |
-          echo ${TOTAL_JOBS}
-          for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
-          cat covprofile
+        run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
       - name: Send coverage
         uses: codecov/codecov-action@v1
         with:

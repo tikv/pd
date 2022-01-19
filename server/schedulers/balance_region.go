@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +46,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -130,7 +130,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.opController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
@@ -138,7 +138,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
@@ -219,15 +219,15 @@ func (s *balanceRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Opera
 func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIds()),
-		filter.NewPlacementSafeguard(s.GetName(), plan.cluster, plan.region, plan.source),
-		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.cluster.GetOpts()),
+		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
+		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.GetOpts()),
 		filter.NewSpecialUseFilter(s.GetName()),
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
-	candidates := filter.NewCandidates(plan.cluster.GetStores()).
-		FilterTarget(plan.cluster.GetOpts(), filters...).
-		Sort(filter.RegionScoreComparer(plan.cluster.GetOpts()))
+	candidates := filter.NewCandidates(plan.GetStores()).
+		FilterTarget(plan.GetOpts(), filters...).
+		Sort(filter.RegionScoreComparer(plan.GetOpts()))
 
 	for _, plan.target = range candidates.Stores {
 		regionID := plan.region.GetID()
@@ -242,7 +242,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan.cluster, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
@@ -264,11 +264,11 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 }
 
 // isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
-func isEmptyRegionAllowBalance(cluster opt.Cluster, region *core.RegionInfo) bool {
+func isEmptyRegionAllowBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < balanceEmptyRegionThreshold
 }
 
 // isAllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
-func isAllowBalanceEmptyRegion(cluster opt.Cluster) func(*core.RegionInfo) bool {
+func isAllowBalanceEmptyRegion(cluster schedule.Cluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return isEmptyRegionAllowBalance(cluster, region) }
 }

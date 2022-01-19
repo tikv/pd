@@ -18,9 +18,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -136,6 +139,28 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
+// GetIPAddrFromHTTPRequest returns http client IP from context.
+// Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
+// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// And both of them have the higher priority than `RemoteAddr`
+func GetIPAddrFromHTTPRequest(r *http.Request) string {
+	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if len(strings.Trim(ips[0], " ")) > 0 {
+		return ips[0]
+	}
+
+	ip := r.Header.Get("X-Real-Ip")
+	if ip != "" {
+		return ip
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return ip
+}
+
 // GetComponentNameOnHTTP returns component name from Request Header
 func GetComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(componentSignatureKey)
@@ -165,4 +190,13 @@ func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *ht
 	// Send the request, get the response and the error
 	resp, err = rt.proxied.RoundTrip(req)
 	return
+}
+
+// GetRouteName return mux route name registered
+func GetRouteName(req *http.Request) string {
+	route := mux.CurrentRoute(req)
+	if route != nil {
+		return route.GetName()
+	}
+	return ""
 }
