@@ -174,7 +174,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Summary List the history hot regions.
 // @Accept json
 // @Produce json
-// @Success 200 {object} core.HistoryHotRegions
+// @Success 200 {object} storage.HistoryHotRegions
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /hotspot/regions/history [get]
