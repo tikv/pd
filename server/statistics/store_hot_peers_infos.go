@@ -20,13 +20,6 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-const (
-	// HotReadRegionType is hot read region scheduler type.
-	HotReadRegionType = "hot-read-region"
-	// HotWriteRegionType is hot write region scheduler type.
-	HotWriteRegionType = "hot-write-region"
-)
-
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
 type StoreHotPeersInfos struct {
 	AsPeer   StoreHotPeersStat `json:"as_peer"`
