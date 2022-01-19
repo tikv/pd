@@ -57,7 +57,7 @@ type HotRegionStorage struct {
 }
 
 // HistoryHotRegions wraps historyHotRegion
-// it will returned to TiDB.
+// it will be returned to TiDB.
 type HistoryHotRegions struct {
 	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
 }
