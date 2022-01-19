@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/requestutil"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // BackendLabels is used to store some audit backend labels.
@@ -54,24 +53,17 @@ type Backend interface {
 	BackendMatcher
 }
 
-type MainLogSink struct {
-	TypeMatcher
+type MainLogBackend struct {
+	BackendMatcher
 }
 
-func (l *MainLogSink) ProcessRequest(event requestutil.RequestInfo) bool {
-	fields, _ := convertRequestEventToZapFields(event)
-	log.Info("Audit Log", fields...)
+func NewMainLogBackend(label string) Backend {
+	return &MainLogBackend{
+		BackendMatcher: &LabelMatcher{backendLabel: label},
+	}
+}
+
+func (l *MainLogBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
+	log.Info("Audit Log", zap.String("Service Info", event.String()))
 	return true
-}
-
-func convertRequestEventToZapFields(event requestutil.RequestInfo) ([]zapcore.Field, error) {
-	fields := make([]zapcore.Field, 0, 7)
-	fields = append(fields, zap.String("service-label", event.ServiceLabel))
-	fields = append(fields, zap.String("method", event.Method))
-	fields = append(fields, zap.String("component", event.Component))
-	fields = append(fields, zap.String("ip", event.IP))
-	fields = append(fields, zap.String("ts", event.TimeStamp))
-	fields = append(fields, zap.String("url-param", event.URLParam))
-	fields = append(fields, zap.String("body-param", event.BodyParm))
-	return fields, nil
 }
