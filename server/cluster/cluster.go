@@ -883,9 +883,7 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 
 // DropCacheRegion removes a region from the cache.
 func (c *RaftCluster) DropCacheRegion(id uint64) {
-	if region := c.GetRegion(id); region != nil {
-		c.core.RemoveRegion(region)
-	}
+	c.core.RemoveRegionIfExist(id)
 }
 
 // GetCacheCluster gets the cached cluster.
