@@ -17,7 +17,6 @@ package requestutil
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,23 +24,6 @@ import (
 
 	"github.com/tikv/pd/pkg/apiutil"
 )
-
-type errReadCloser struct {
-	io.Reader
-	io.Closer
-}
-
-type errReader string
-
-func (e errReader) Read(p []byte) (n int, err error) {
-	return 0, errors.New(string(e))
-}
-
-type errCloser struct{}
-
-func (e errCloser) Close() error {
-	return nil
-}
 
 // RequestInfo holds source information from http.Request
 type RequestInfo struct {
@@ -81,18 +63,10 @@ func getBodyParam(r *http.Request) string {
 	if r.Body == nil {
 		return ""
 	}
-	buf, err := io.ReadAll(r.Body)
+	// http request body is a io.Reader between bytes.Reader and strings.Reader, it only has EOF error
+	buf, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	var bodyParam = ""
-	if err == nil {
-		bodyParam = string(buf)
-		r.Body = io.NopCloser(bytes.NewBuffer(buf))
-	} else {
-		r.Body = errReadCloser{
-			Reader: errReader("12"),
-			Closer: &errCloser{},
-		}
-	}
-
+	bodyParam := string(buf)
+	r.Body = io.NopCloser(bytes.NewBuffer(buf))
 	return bodyParam
 }
