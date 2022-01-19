@@ -49,7 +49,7 @@ func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 // Backend defines what function audit backend should hold
 type Backend interface {
 	// ProcessHTTPRequest is used to perform HTTP audit process
-	ProcessHTTPRequest(event requestutil.RequestInfo) bool
+	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
 	// AuditBackendMatcher is used to determine if the backend matches
 	BackendMatcher
 }

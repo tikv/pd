@@ -238,5 +238,4 @@ func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
 
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, false)
-
 }
