@@ -59,7 +59,7 @@ func newLevelDBBackend(
 	filePath string,
 	ekm *encryptionkm.KeyManager,
 ) (*levelDBBackend, error) {
-	levelDB, err := kv.NewLeveldbKV(filePath)
+	levelDB, err := kv.NewLevelDBKV(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (lb *levelDBBackend) saveRegions(regions map[string]*metapb.Region) error {
 		batch.Put([]byte(key), value)
 	}
 
-	if err := lb.Base.(*kv.LeveldbKV).Write(batch, nil); err != nil {
+	if err := lb.Base.(*kv.LevelDBKV).Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	return nil
@@ -175,7 +175,7 @@ func (lb *levelDBBackend) Close() error {
 		log.Error("meet error before close the region storage", errs.ZapError(err))
 	}
 	lb.regionStorageCancel()
-	err = lb.Base.(*kv.LeveldbKV).Close()
+	err = lb.Base.(*kv.LevelDBKV).Close()
 	if err != nil {
 		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
 	}

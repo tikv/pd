@@ -55,7 +55,7 @@ func NewStorageWithLevelDBBackend(
 	ctx context.Context,
 	filePath string,
 	ekm *encryptionkm.KeyManager,
-) (*levelDBBackend, error) {
+) (Storage, error) {
 	return newLevelDBBackend(ctx, filePath, ekm)
 }
 

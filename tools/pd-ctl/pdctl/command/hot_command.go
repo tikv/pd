@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage"
 )
 
 const (
@@ -138,9 +138,9 @@ func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	data, _ := json.Marshal(input)
 	endpoints := getEndpoints(cmd)
-	hotRegions := &core.HistoryHotRegions{}
+	hotRegions := &storage.HistoryHotRegions{}
 	for _, endpoint := range endpoints {
-		tempHotRegions := core.HistoryHotRegions{}
+		tempHotRegions := storage.HistoryHotRegions{}
 		resp, err := doRequestSingleEndpoint(cmd, endpoint, hotRegionsHistoryPrefix,
 			http.MethodGet, http.Header{
 				"Content-Type": {"application/json"},

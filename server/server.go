@@ -145,7 +145,7 @@ type Server struct {
 	serviceSafePointLock sync.Mutex
 
 	// hot region history info storeage
-	hotRegionStorage *core.HotRegionStorage
+	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -393,9 +393,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
-	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
-	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, s.encryptionKeyManager, s.handler)
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
@@ -717,7 +716,7 @@ func (s *Server) GetStorage() storage.Storage {
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
-func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+func (s *Server) GetHistoryHotRegionStorage() *storage.HotRegionStorage {
 	return s.hotRegionStorage
 }
 
