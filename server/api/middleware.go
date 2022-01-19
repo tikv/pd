@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -40,6 +41,7 @@ func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
 		svr: s,
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
+			newAuditMiddleware(s),
 			// todo: add audit and rate limit middleware
 		),
 	}
@@ -126,7 +128,7 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if s.svr.IsServiceMiddlewareEnabled() {
+	if !s.svr.IsServiceMiddlewareEnabled() {
 		next(w, r)
 		return
 	}
@@ -137,14 +139,19 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		next(w, r)
 	}
 
-	config := s.svr.GetServiceAuditConfig(requestInfo.ServiceLabel)
-	if config == nil {
+	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
+	if labels == nil {
 		next(w, r)
 		return
 	}
+
+	failpoint.Inject("addAuditMiddleware", func() {
+		w.Header().Add("audit-label", strings.Join(labels.Labels, ","))
+	})
+
 	for _, backend := range s.svr.GetAuditBackend() {
-		if backend.MatchType(config.Label) {
-			backend.ProcessRequest(requestInfo)
+		if backend.Match(labels) {
+			backend.ProcessHTTPRequest(requestInfo)
 		}
 	}
 

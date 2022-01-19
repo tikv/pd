@@ -152,9 +152,9 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
-	serviceAuditConfig map[string]*audit.AuditConfig
+	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
-	auditBackend []audit.Sink
+	auditBackend []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -1111,15 +1111,15 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
-func (s *Server) GetAuditBackend() []audit.Sink {
+func (s *Server) GetAuditBackend() []audit.Backend {
 	return s.auditBackend
 }
 
-func (s *Server) GetServiceAuditConfig(serviceLabel string) *audit.AuditConfig {
-	if s.serviceAuditConfig == nil {
+func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
+	if s.serviceAuditBackendLabels == nil {
 		return nil
 	}
-	return s.serviceAuditConfig[serviceLabel]
+	return s.serviceAuditBackendLabels[serviceLabel]
 }
 
 // GetClusterStatus gets cluster status.

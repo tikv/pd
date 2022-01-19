@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,27 +18,35 @@ import (
 	"github.com/tikv/pd/pkg/requestutil"
 )
 
-type AuditConfig struct {
-	Label []string
-}
-type TypeMatcher interface {
-	MatchType([]string) bool
+// BackendLabels is used to store some audit backend labels.
+type BackendLabels struct {
+	Labels []string
 }
 
-type SinkTypeMatcher struct {
-	Type string
+// BackendMatcher is used in interface `Backend`.
+type BackendMatcher interface {
+	Match(*BackendLabels) bool
 }
 
-func (m *SinkTypeMatcher) MatchType(types []string) bool {
-	for _, item := range types {
-		if m.Type == item {
+// LabelMatcher implements AuditBackendMatcher
+type LabelMatcher struct {
+	backendLabel string
+}
+
+// Match is used to implement AuditBackendMatcher
+func (m *LabelMatcher) Match(labels *BackendLabels) bool {
+	for _, item := range labels.Labels {
+		if m.backendLabel == item {
 			return true
 		}
 	}
 	return false
 }
 
-type Sink interface {
-	ProcessRequest(event requestutil.RequestInfo) bool
-	TypeMatcher
+// Backend defines what function audit backend should hold
+type Backend interface {
+	// ProcessHTTPRequest is used to perform HTTP audit process
+	ProcessHTTPRequest(event requestutil.RequestInfo) bool
+	// AuditBackendMatcher is used to determine if the backend matches
+	BackendMatcher
 }
