@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package storage
 
 import (
 	"context"
@@ -26,6 +26,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/server/core"
 )
 
 type MockPackHotRegionInfo struct {
@@ -169,8 +170,8 @@ func (t *testHotRegionStorage) TestHotRegionWrite(c *C) {
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
-		copyHotRegionStorages[index].StartKey = HexRegionKeyStr([]byte(copyHotRegionStorages[index].StartKey))
-		copyHotRegionStorages[index].EndKey = HexRegionKeyStr([]byte(copyHotRegionStorages[index].EndKey))
+		copyHotRegionStorages[index].StartKey = core.HexRegionKeyStr([]byte(copyHotRegionStorages[index].StartKey))
+		copyHotRegionStorages[index].EndKey = core.HexRegionKeyStr([]byte(copyHotRegionStorages[index].EndKey))
 		c.Assert(reflect.DeepEqual(&copyHotRegionStorages[index], next), IsTrue)
 		index++
 	}

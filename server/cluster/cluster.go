@@ -94,8 +94,7 @@ type RaftCluster struct {
 
 	running bool
 
-	clusterID   uint64
-	clusterRoot string
+	clusterID uint64
 
 	// cached cluster info
 	core    *core.BasicCluster
@@ -138,12 +137,11 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
 		running:      false,
 		clusterID:    clusterID,
-		clusterRoot:  root,
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
@@ -189,11 +187,10 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 }
 
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
-// value of time.Time when there is error or the cluster is not bootstrapped
-// yet.
+// value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(endpoint.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(endpoint.ClusterBootstrapTimeKey())
 	if err != nil {
 		return t, err
 	}
