@@ -224,11 +224,15 @@ func doTestRequest(srv *tests.TestServer) {
 
 func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
 	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
@@ -240,9 +244,29 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	resp.Body.Close()
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-
-	c.Assert(resp.Header.Get("service-label"), Equals, "failpoint")
 	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, false)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, false)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.Header.Get("audit-label"), Equals, "")
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
 }
 
 var _ = Suite(&testRedirectorSuite{})

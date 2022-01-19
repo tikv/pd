@@ -744,7 +744,7 @@ func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
-// SetServiceMiddleware change EnableServiceMiddleware
+// SetServiceMiddleware changes EnableServiceMiddleware
 func (s *Server) SetServiceMiddleware(status bool) {
 	s.cfg.EnableServiceMiddleware = status
 }
@@ -752,6 +752,16 @@ func (s *Server) SetServiceMiddleware(status bool) {
 // IsServiceMiddlewareEnabled returns EnableServiceMiddleware status
 func (s *Server) IsServiceMiddlewareEnabled() bool {
 	return s.cfg.EnableServiceMiddleware
+}
+
+// SetAuditMiddleware changes EnableAuditMiddleware
+func (s *Server) SetAuditMiddleware(status bool) {
+	s.cfg.EnableAuditMiddleware = status
+}
+
+// IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
+func (s *Server) IsAuditMiddlewareEnabled() bool {
+	return s.cfg.EnableAuditMiddleware
 }
 
 // GetBasicCluster returns the basic cluster of server.

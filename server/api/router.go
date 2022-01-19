@@ -226,6 +226,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter.HandleFunc("/admin/persist-file/{file_name}", mwFunc(adminHandler.persistFile)).Methods("POST").Name("SavePersistFile")
 	clusterRouter.HandleFunc("/admin/replication_mode/wait-async", mwFunc(adminHandler.UpdateWaitAsyncTime)).Methods("POST").Name("SetWaitAsyncTime")
 	apiRouter.HandleFunc("/admin/service-middleware", mwFunc(adminHandler.HanldeServiceMiddlewareSwitch)).Methods("POST").Name("SwitchServiceMiddleware")
+	apiRouter.HandleFunc("/admin/audit-middleware", mwFunc(adminHandler.HanldeAuditMiddlewareSwitch)).Methods("POST").Name("SwitchAuditMiddleware")
 
 	logHandler := newLogHandler(svr, rd)
 	apiRouter.HandleFunc("/admin/log", mwFunc(logHandler.Handle)).Methods("POST").Name("SetLogLevel")
