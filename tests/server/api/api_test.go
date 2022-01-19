@@ -121,6 +121,7 @@ type testMiddlewareSuite struct {
 }
 
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
@@ -132,6 +133,7 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 }
 
 func (s *testMiddlewareSuite) TearDownSuite(c *C) {
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
 	s.cleanup()
 	s.cluster.Destroy()
 }
@@ -221,48 +223,26 @@ func doTestRequest(srv *tests.TestServer) {
 }
 
 func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	labels := make(map[string]interface{})
-	labels["testkey"] = "testvalue"
-	data, _ := json.Marshal(labels)
-	resp, err := dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 
-	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPProfProfile")
-	c.Assert(resp.Header.Get("url-param"), Equals, "{\"force\":[\"true\"]}")
-	c.Assert(resp.Header.Get("body-param"), Equals, "{\"testkey\":\"testvalue\"}")
-	c.Assert(resp.Header.Get("method"), Equals, "HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile")
-	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
-	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
-
-	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", errReader(0))
-	c.Assert(err, NotNil)
-	c.Assert(resp, IsNil)
-	if resp != nil {
-		resp.Body.Close()
-	}
-	c.Assert(err.Error(), Equals, fmt.Sprintf("Post \"%s/pd/api/v1/debug/pprof/profile?force=true\": test error", leader.GetAddr()))
-
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=false", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, false)
-
-	header := mustRequestSuccess(c, leader.GetServer())
-	c.Assert(header.Get("service-label"), Equals, "")
-
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsServiceMiddlewareEnabled(), Equals, true)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"), IsNil)
+	c.Assert(resp.Header.Get("service-label"), Equals, "failpoint")
+	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
 }
 
 var _ = Suite(&testRedirectorSuite{})

@@ -36,12 +36,6 @@ type RequestInfo struct {
 	BodyParam    string
 }
 
-func (info *RequestInfo) String() string {
-
-	s := fmt.Sprintf("")
-	return s
-}
-
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{

@@ -245,6 +245,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 
 	s.handler = newHandler(s)
 
+	// create audit backend
+	s.auditBackend = []audit.Backend{}
+	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
@@ -499,6 +503,16 @@ func (s *Server) Run() error {
 	s.startServerLoop(s.ctx)
 
 	return nil
+}
+
+// RegistService
+func (s *Server) RegistService(route *mux.Route, labels ...string) {
+	if len(route.GetName()) == 0 {
+		return
+	}
+	if len(labels) > 0 {
+		s.SetServiceAuditBackendLabels(route.GetName(), labels)
+	}
 }
 
 // Context returns the context of server.
@@ -1116,10 +1130,11 @@ func (s *Server) GetAuditBackend() []audit.Backend {
 }
 
 func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
-	if s.serviceAuditBackendLabels == nil {
-		return nil
-	}
 	return s.serviceAuditBackendLabels[serviceLabel]
+}
+
+func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
+	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
 }
 
 // GetClusterStatus gets cluster status.

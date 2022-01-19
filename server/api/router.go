@@ -49,6 +49,7 @@ func createIndentRender() *render.Render {
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
+	registService := svr.RegistService
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -282,11 +283,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {
-		apiRouter.PathPrefix("/fail").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registService(apiRouter.PathPrefix("/fail").HandlerFunc(serviceMiddlewares.middlewareFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		})
+		})).Name("failpoint"), "test")
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
@@ -295,6 +296,12 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+
+	rigisterServiceLabels := make([]string, 0)
+	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		rigisterServiceLabels = append(rigisterServiceLabels, route.GetName())
+		return nil
+	})
 
 	return rootRouter
 }
