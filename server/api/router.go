@@ -49,7 +49,7 @@ func createIndentRender() *render.Render {
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
-	registService := svr.RegistService
+	registService := svr.RegistServiceForHTTP
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()

@@ -505,8 +505,9 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// RegistService
-func (s *Server) RegistService(route *mux.Route, labels ...string) {
+// RegistServiceForHTTP is used to regist service config for HTTP.
+// Currently can add audit backend labels. Todo: add rate limit config
+func (s *Server) RegistServiceForHTTP(route *mux.Route, labels ...string) {
 	if len(route.GetName()) == 0 {
 		return
 	}
@@ -1125,14 +1126,17 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
+// GetAuditBackend returns audit backends
 func (s *Server) GetAuditBackend() []audit.Backend {
 	return s.auditBackend
 }
 
+// GetServiceAuditBackendLabels returns audit backend labels by serviceLabel
 func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
 	return s.serviceAuditBackendLabels[serviceLabel]
 }
 
+// SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
 func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
 	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
 }
