@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	// LocalLogLabel is label name of LocalLogBackend
 	LocalLogLabel = "local-log"
 )
 
@@ -57,16 +58,20 @@ type Backend interface {
 	BackendMatcher
 }
 
+// LocalLogBackend is an implementation of audit.Backend
+// and it uses `github.com/pingcap/log` to implement audit
 type LocalLogBackend struct {
 	BackendMatcher
 }
 
+// NewLocalLogBackend returns a LocalLogBackend
 func NewLocalLogBackend() Backend {
 	return &LocalLogBackend{
 		BackendMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
 	}
 }
 
+// ProcessHTTPRequest is used to implement audit.Backend
 func (l *LocalLogBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
 	log.Info("Audit Log", zap.String("Service Info", event.String()))
 	return true
