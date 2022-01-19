@@ -15,9 +15,12 @@
 package audit
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/requestutil"
 )
 
 func Test(t *testing.T) {
@@ -36,4 +39,11 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 
 	labels2 := &BackendLabels{Labels: []string{"testFail"}}
 	c.Assert(matcher.Match(labels2), Equals, false)
+}
+
+func (s *testAuditSuite) TestLocalLogBackend(c *C) {
+	backend := NewLocalLogBackend()
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	info := requestutil.GetRequestInfo(req)
+	c.Assert(backend.ProcessHTTPRequest(&info), Equals, true)
 }

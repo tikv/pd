@@ -246,7 +246,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	s.handler = newHandler(s)
 
 	// create audit backend
-	s.auditBackend = []audit.Backend{}
+	s.auditBackend = []audit.Backend{
+		audit.NewLocalLogBackend(),
+	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
 	// Adjust etcd config.

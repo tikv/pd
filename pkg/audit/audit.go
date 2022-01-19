@@ -20,6 +20,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	LocalLogLabel = "local-log"
+)
+
 // BackendLabels is used to store some audit backend labels.
 type BackendLabels struct {
 	Labels []string
@@ -53,17 +57,17 @@ type Backend interface {
 	BackendMatcher
 }
 
-type MainLogBackend struct {
+type LocalLogBackend struct {
 	BackendMatcher
 }
 
-func NewMainLogBackend(label string) Backend {
-	return &MainLogBackend{
-		BackendMatcher: &LabelMatcher{backendLabel: label},
+func NewLocalLogBackend() Backend {
+	return &LocalLogBackend{
+		BackendMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
 	}
 }
 
-func (l *MainLogBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
+func (l *LocalLogBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
 	log.Info("Audit Log", zap.String("Service Info", event.String()))
 	return true
 }
