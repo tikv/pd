@@ -151,7 +151,7 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 
 	for _, backend := range s.svr.GetAuditBackend() {
 		if backend.Match(labels) {
-			backend.ProcessHTTPRequest(requestInfo)
+			backend.ProcessHTTPRequest(&requestInfo)
 		}
 	}
 
