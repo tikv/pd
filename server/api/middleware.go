@@ -27,7 +27,7 @@ import (
 	"github.com/urfave/negroni"
 )
 
-// serviceMiddleware is used to
+// middlewareBuilder is used to build service middleware for HTTP api
 type middlewareBuilder struct {
 	svr     *server.Server
 	handler http.Handler

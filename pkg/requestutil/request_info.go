@@ -51,12 +51,10 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 
 func getURLParam(r *http.Request) string {
 	buf, err := json.Marshal(r.URL.Query())
-	var param = ""
-	if err == nil {
-		param = string(buf)
+	if err != nil {
+		return ""
 	}
-
-	return param
+	return string(buf)
 }
 
 func getBodyParam(r *http.Request) string {
