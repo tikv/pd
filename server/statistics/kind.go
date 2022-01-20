@@ -64,6 +64,8 @@ const (
 
 	StoreRegionsWriteBytes // Same as StoreWriteBytes, but it is counted by RegionHeartbeat.
 	StoreRegionsWriteKeys  // Same as StoreWriteKeys, but it is counted by RegionHeartbeat.
+	StoreLeadersWriteBytes
+	StoreLeadersWriteKeys
 
 	StoreStatCount
 )
@@ -92,6 +94,10 @@ func (k StoreStatKind) String() string {
 		return "store_regions_write_bytes"
 	case StoreRegionsWriteKeys:
 		return "store_regions_write_keys"
+	case StoreLeadersWriteBytes:
+		return "store_leaders_write_bytes"
+	case StoreLeadersWriteKeys:
+		return "store_leaders_write_keys"
 	}
 
 	return "unknown StoreStatKind"
