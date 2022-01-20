@@ -471,7 +471,7 @@ func (c *coordinator) stop() {
 
 func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
-	storeLoads := c.cluster.GetStoresLoadsLocked()
+	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	switch typ {
 	case statistics.Write:
