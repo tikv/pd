@@ -23,22 +23,22 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-// LeveldbKV is a kv store using leveldb.
-type LeveldbKV struct {
+// LevelDBKV is a kv store using LevelDB.
+type LevelDBKV struct {
 	*leveldb.DB
 }
 
-// NewLeveldbKV is used to store regions information.
-func NewLeveldbKV(path string) (*LeveldbKV, error) {
+// NewLevelDBKV is used to store regions information.
+func NewLevelDBKV(path string) (*LevelDBKV, error) {
 	db, err := leveldb.OpenFile(path, nil)
 	if err != nil {
 		return nil, errs.ErrLevelDBOpen.Wrap(err).GenWithStackByCause()
 	}
-	return &LeveldbKV{db}, nil
+	return &LevelDBKV{db}, nil
 }
 
 // Load gets a value for a given key.
-func (kv *LeveldbKV) Load(key string) (string, error) {
+func (kv *LevelDBKV) Load(key string) (string, error) {
 	v, err := kv.Get([]byte(key), nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
@@ -50,7 +50,7 @@ func (kv *LeveldbKV) Load(key string) (string, error) {
 }
 
 // LoadRange gets a range of value for a given key range.
-func (kv *LeveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
+func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
 	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
@@ -68,17 +68,17 @@ func (kv *LeveldbKV) LoadRange(startKey, endKey string, limit int) ([]string, []
 }
 
 // Save stores a key-value pair.
-func (kv *LeveldbKV) Save(key, value string) error {
+func (kv *LevelDBKV) Save(key, value string) error {
 	return errors.WithStack(kv.Put([]byte(key), []byte(value), nil))
 }
 
 // Remove deletes a key-value pair for a given key.
-func (kv *LeveldbKV) Remove(key string) error {
+func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
 // SaveRegions stores some regions.
-func (kv *LeveldbKV) SaveRegions(regions map[string]*metapb.Region) error {
+func (kv *LevelDBKV) SaveRegions(regions map[string]*metapb.Region) error {
 	batch := new(leveldb.Batch)
 
 	for key, r := range regions {

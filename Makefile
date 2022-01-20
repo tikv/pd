@@ -156,7 +156,6 @@ static: install-tools
 	@revive -formatter friendly -config revive.toml $(PACKAGES)
 
 tidy:
-	@echo "go mod tidy"
 	go mod tidy
 	git diff --quiet go.mod go.sum
 

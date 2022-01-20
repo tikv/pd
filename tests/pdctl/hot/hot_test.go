@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -295,7 +296,7 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 		"is_learner", "false",
 	}
 	output, e := pdctl.ExecuteCommand(cmd, args...)
-	hotRegions := core.HistoryHotRegions{}
+	hotRegions := storage.HistoryHotRegions{}
 	c.Assert(e, IsNil)
 	c.Assert(json.Unmarshal(output, &hotRegions), IsNil)
 	regions := hotRegions.HistoryHotRegion
