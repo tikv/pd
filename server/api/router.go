@@ -43,14 +43,6 @@ func setQueries(pairs ...string) createRouteOption {
 	}
 }
 
-var (
-	getMethod        = setMethods("GET")
-	postMethod       = setMethods("POST")
-	getAndPostMethod = setMethods("GET", "POST")
-	deleteMethod     = setMethods("DELETE")
-	patchMethod      = setMethods("PATCH")
-)
-
 func createStreamingRender() *render.Render {
 	return render.New(render.Options{
 		StreamingJSON: true,
@@ -146,7 +138,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	serviceBuilder := newServiceMiddlewareBuilder(svr)
 	register := serviceBuilder.registerRouteHandler
-	// registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
+	registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
 	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
@@ -167,7 +159,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
 	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
-	// registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
+	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	register(apiRouter, "GetCluster", "/cluster", clusterHandler, setMethods("GET"))
