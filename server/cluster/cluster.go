@@ -29,11 +29,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -96,8 +94,7 @@ type RaftCluster struct {
 
 	running bool
 
-	clusterID   uint64
-	clusterRoot string
+	clusterID uint64
 
 	// cached cluster info
 	core    *core.BasicCluster
@@ -114,9 +111,7 @@ type RaftCluster struct {
 	regionStats     *statistics.RegionStatistics
 	hotStat         *statistics.HotStat
 
-	coordinator      *coordinator
-	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
-	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
+	coordinator *coordinator
 
 	regionSyncer *syncer.RegionSyncer
 
@@ -142,12 +137,11 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, root string, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
 		running:      false,
 		clusterID:    clusterID,
-		clusterRoot:  root,
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
@@ -193,11 +187,10 @@ func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
 }
 
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
-// value of time.Time when there is error or the cluster is not bootstrapped
-// yet.
+// value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(endpoint.ClusterStatePath("raft_bootstrap_time"))
+	data, err := c.storage.Load(endpoint.ClusterBootstrapTimeKey())
 	if err != nil {
 		return t, err
 	}
@@ -219,8 +212,6 @@ func (c *RaftCluster) InitCluster(
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
-	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
 	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
@@ -497,31 +488,24 @@ func (c *RaftCluster) SetStorage(s storage.Storage) {
 }
 
 // GetOpts returns cluster's configuration.
+// There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
 }
 
 // AddSuspectRegions adds regions to suspect list.
 func (c *RaftCluster) AddSuspectRegions(regionIDs ...uint64) {
-	c.Lock()
-	defer c.Unlock()
-	for _, regionID := range regionIDs {
-		c.suspectRegions.Put(regionID, nil)
-	}
+	c.coordinator.checkers.AddSuspectRegions(regionIDs...)
 }
 
 // GetSuspectRegions gets all suspect regions.
 func (c *RaftCluster) GetSuspectRegions() []uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	return c.suspectRegions.GetAllID()
+	return c.coordinator.checkers.GetSuspectRegions()
 }
 
 // RemoveSuspectRegion removes region from suspect list.
 func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectRegions.Remove(id)
+	c.coordinator.checkers.RemoveSuspectRegion(id)
 }
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
@@ -533,33 +517,19 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
 func (c *RaftCluster) AddSuspectKeyRange(start, end []byte) {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectKeyRanges.Put(keyutil.BuildKeyRangeKey(start, end), [2][]byte{start, end})
+	c.coordinator.checkers.AddSuspectKeyRange(start, end)
 }
 
 // PopOneSuspectKeyRange gets one suspect keyRange group.
 // it would return value and true if pop success, or return empty [][2][]byte and false
 // if suspectKeyRanges couldn't pop keyRange group.
 func (c *RaftCluster) PopOneSuspectKeyRange() ([2][]byte, bool) {
-	c.Lock()
-	defer c.Unlock()
-	_, value, success := c.suspectKeyRanges.Pop()
-	if !success {
-		return [2][]byte{}, false
-	}
-	v, ok := value.([2][]byte)
-	if !ok {
-		return [2][]byte{}, false
-	}
-	return v, true
+	return c.coordinator.checkers.PopOneSuspectKeyRange()
 }
 
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
 func (c *RaftCluster) ClearSuspectKeyRanges() {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectKeyRanges.Clear()
+	c.coordinator.checkers.ClearSuspectKeyRanges()
 }
 
 // HandleStoreHeartbeat updates the store status.
