@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
@@ -28,13 +29,13 @@ import (
 )
 
 // middlewareBuilder is used to build service middleware for HTTP api
-type middlewareBuilder struct {
+type serviceMiddlewareBuilder struct {
 	svr     *server.Server
 	handler http.Handler
 }
 
-func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
-	return &middlewareBuilder{
+func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
+	return &serviceMiddlewareBuilder{
 		svr: s,
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
@@ -43,11 +44,41 @@ func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
 	}
 }
 
-func (s *middlewareBuilder) middleware(handler http.Handler) http.Handler {
+// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, serviceLabel, path string,
+	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
+	route := router.HandleFunc(path, s.middlewareFunc(handleFunc)).Name(serviceLabel)
+	for _, opt := range opts {
+		opt(route)
+	}
+	return route
+}
+
+// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serviceLabel, path string,
+	handler http.Handler, opts ...createRouteOption) *mux.Route {
+	route := router.Handle(path, s.middleware(handler)).Name(serviceLabel)
+	for _, opt := range opts {
+		opt(route)
+	}
+	return route
+}
+
+// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
+func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandler(router *mux.Router, serviceLabel, prefix string,
+	handler http.Handler, opts ...createRouteOption) *mux.Route {
+	route := router.PathPrefix(prefix).Handler(s.middleware(handler)).Name(serviceLabel)
+	for _, opt := range opts {
+		opt(route)
+	}
+	return route
+}
+
+func (s *serviceMiddlewareBuilder) middleware(handler http.Handler) http.Handler {
 	return negroni.New(negroni.Wrap(s.handler), negroni.Wrap(handler))
 }
 
-func (s *middlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.handler.ServeHTTP(w, r)
 		next(w, r)
