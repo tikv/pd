@@ -56,13 +56,13 @@ type Backend interface {
 // LocalLogBackend is an implementation of audit.Backend
 // and it uses `github.com/pingcap/log` to implement audit
 type LocalLogBackend struct {
-	BackendMatcher
+	*LabelMatcher
 }
 
 // NewLocalLogBackend returns a LocalLogBackend
 func NewLocalLogBackend() Backend {
 	return &LocalLogBackend{
-		BackendMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
+		LabelMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
 	}
 }
 
