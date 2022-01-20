@@ -373,6 +373,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	newTestStores(4, "2.0.0")
 	peers := []*metapb.Peer{
 		{
@@ -430,6 +431,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	n, np := uint64(3), uint64(3)
 
@@ -643,6 +645,7 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
@@ -663,6 +666,7 @@ func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 	regions = core.SplitRegions(regions)
@@ -774,6 +778,7 @@ func (s *testClusterInfoSuite) TestHeartbeatSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
@@ -813,6 +818,7 @@ func (s *testClusterInfoSuite) TestRegionSplitAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
 
@@ -846,6 +852,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
@@ -906,6 +913,7 @@ func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	tc := newTestCluster(s.ctx, opt)
+	tc.RaftCluster.coordinator = newCoordinator(s.ctx, tc.RaftCluster, nil)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		c.Assert(tc.putStoreLocked(s), IsNil)

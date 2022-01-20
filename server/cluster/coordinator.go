@@ -63,6 +63,7 @@ type coordinator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	cluster         *RaftCluster
+	prepareChecker  *prepareChecker
 	checkers        *checker.Controller
 	regionScatterer *schedule.RegionScatterer
 	regionSplitter  *schedule.RegionSplitter
@@ -80,6 +81,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
+		prepareChecker:  newPrepareChecker(),
 		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
@@ -600,7 +602,7 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
-	return c.cluster.isPrepared()
+	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
 func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
