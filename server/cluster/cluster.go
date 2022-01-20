@@ -104,7 +104,6 @@ type RaftCluster struct {
 	id      id.Allocator
 	limiter *StoreLimiter
 
-	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
 	labelLevelStats *statistics.LabelStatistics
@@ -209,7 +208,6 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
-	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 }
 
@@ -676,7 +674,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if isNew {
-		c.prepareChecker.collect(region)
+		c.coordinator.prepareChecker.collect(region)
 	}
 
 	if c.regionStats != nil {
@@ -1456,13 +1454,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 	return c.componentManager
 }
 
-// isPrepared if the cluster information is collected
-func (c *RaftCluster) isPrepared() bool {
-	c.RLock()
-	defer c.RUnlock()
-	return c.prepareChecker.check(c)
-}
-
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	c.RLock()
@@ -1513,50 +1504,6 @@ func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	c.RLock()
 	defer c.RUnlock()
 	return c.regionLabeler
-}
-
-type prepareChecker struct {
-	reactiveRegions map[uint64]int
-	start           time.Time
-	sum             int
-	isPrepared      bool
-}
-
-func newPrepareChecker() *prepareChecker {
-	return &prepareChecker{
-		start:           time.Now(),
-		reactiveRegions: make(map[uint64]int),
-	}
-}
-
-// Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *RaftCluster) bool {
-	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
-		return true
-	}
-	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.core.GetRegionCount())*collectFactor > float64(checker.sum) {
-		return false
-	}
-	for _, store := range c.GetStores() {
-		if !store.IsUp() {
-			continue
-		}
-		storeID := store.GetID()
-		// For each store, the number of active regions should be more than total region of the store * collectFactor
-		if float64(c.core.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
-			return false
-		}
-	}
-	checker.isPrepared = true
-	return true
-}
-
-func (checker *prepareChecker) collect(region *core.RegionInfo) {
-	for _, p := range region.GetPeers() {
-		checker.reactiveRegions[p.GetStoreId()]++
-	}
-	checker.sum++
 }
 
 // GetHotWriteRegions gets hot write regions' info.
