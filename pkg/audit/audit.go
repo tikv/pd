@@ -23,11 +23,6 @@ type BackendLabels struct {
 	Labels []string
 }
 
-// BackendMatcher is used in interface `Backend`.
-type BackendMatcher interface {
-	Match(*BackendLabels) bool
-}
-
 // LabelMatcher implements AuditBackendMatcher
 type LabelMatcher struct {
 	backendLabel string
@@ -48,5 +43,5 @@ type Backend interface {
 	// ProcessHTTPRequest is used to perform HTTP audit process
 	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
 	// AuditBackendMatcher is used to determine if the backend matches
-	BackendMatcher
+	Match(*BackendLabels) bool
 }
