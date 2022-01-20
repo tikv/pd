@@ -217,7 +217,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 }
 
 func doTestRequest(srv *tests.TestServer) {
-	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/component/admin/unsafe/remove-failed-stores/history", nil)
+	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/trend", nil)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
@@ -290,6 +290,50 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	resp.Body.Close()
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+}
+
+func BenchmarkDoRequestWithLocallogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func BenchmarkDoRequestWithoutLocallogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
 }
 
 var _ = Suite(&testRedirectorSuite{})

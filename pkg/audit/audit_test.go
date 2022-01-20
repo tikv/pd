@@ -15,11 +15,14 @@
 package audit
 
 import (
+	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/requestutil"
 )
 
@@ -41,9 +44,49 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 	c.Assert(matcher.Match(labels2), Equals, false)
 }
 
-func (s *testAuditSuite) TestLocalLogBackend(c *C) {
+func (s *testAuditSuite) TestLocalLogBackendUsingTerminal(c *C) {
 	backend := NewLocalLogBackend()
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	info := requestutil.GetRequestInfo(req)
 	c.Assert(backend.ProcessHTTPRequest(&info), Equals, true)
+}
+
+func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
+	backend := NewLocalLogBackend()
+	initLog()
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	info := requestutil.GetRequestInfo(req)
+	c.Assert(backend.ProcessHTTPRequest(&info), Equals, true)
+}
+
+func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
+	b.StopTimer()
+	backend := NewLocalLogBackend()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+		info := requestutil.GetRequestInfo(req)
+		backend.ProcessHTTPRequest(&info)
+	}
+}
+
+func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
+	b.StopTimer()
+	backend := NewLocalLogBackend()
+	initLog()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+		info := requestutil.GetRequestInfo(req)
+		backend.ProcessHTTPRequest(&info)
+	}
+}
+
+func initLog() {
+	cfg := &log.Config{}
+	home := os.Getenv("HOME")
+	cfg.File.Filename = fmt.Sprintf("%s/tmp/temp_log.txt", home)
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
 }
