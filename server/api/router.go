@@ -133,6 +133,11 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
+	setAudit := func(labels ...string) createRouteOption {
+		return func(route *mux.Route) {
+			svr.RegistServiceForHTTP(route, labels...)
+		}
+	}
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -371,11 +376,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {
-		apiRouter.PathPrefix("/fail").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registerPrefix(apiRouter, "failpoint", "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}).Name("failpoint")
+		}), setAudit("test"))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
