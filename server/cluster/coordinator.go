@@ -145,7 +145,7 @@ func (c *coordinator) patrolRegions() {
 			if !c.opController.ExceedStoreLimit(ops...) {
 				c.opController.AddWaitingOperator(ops...)
 				c.checkers.RemoveWaitingRegion(region.GetID())
-				c.cluster.RemoveSuspectRegion(region.GetID())
+				c.checkers.RemoveSuspectRegion(region.GetID())
 			} else {
 				c.checkers.AddWaitingRegion(region)
 			}
@@ -188,14 +188,14 @@ func (c *coordinator) checkPriorityRegions() {
 }
 
 func (c *coordinator) checkSuspectRegions() {
-	for _, id := range c.cluster.GetSuspectRegions() {
+	for _, id := range c.checkers.GetSuspectRegions() {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
 			// the region could be recent split, continue to wait.
 			continue
 		}
 		if c.opController.GetOperator(id) != nil {
-			c.cluster.RemoveSuspectRegion(id)
+			c.checkers.RemoveSuspectRegion(id)
 			continue
 		}
 		ops := c.checkers.CheckRegion(region)
@@ -205,7 +205,7 @@ func (c *coordinator) checkSuspectRegions() {
 
 		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
-			c.cluster.RemoveSuspectRegion(region.GetID())
+			c.checkers.RemoveSuspectRegion(region.GetID())
 		}
 	}
 }
@@ -224,7 +224,7 @@ func (c *coordinator) checkSuspectRanges() {
 			log.Info("check suspect key ranges has been stopped")
 			return
 		case <-ticker.C:
-			keyRange, success := c.cluster.PopOneSuspectKeyRange()
+			keyRange, success := c.checkers.PopOneSuspectKeyRange()
 			if !success {
 				continue
 			}
@@ -242,9 +242,9 @@ func (c *coordinator) checkSuspectRanges() {
 			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 			lastRegion := regions[len(regions)-1]
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-				c.cluster.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+				c.checkers.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.cluster.AddSuspectRegions(regionIDList...)
+			c.checkers.AddSuspectRegions(regionIDList...)
 		}
 	}
 }
