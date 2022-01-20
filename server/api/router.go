@@ -74,7 +74,8 @@ func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 		svr: s,
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
-			// todo: add audit and rate limit middleware
+			newAuditMiddleware(s),
+			// todo: add rate limit middleware
 		),
 	}
 }
