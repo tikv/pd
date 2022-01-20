@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -64,6 +63,7 @@ type coordinator struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	cluster         *RaftCluster
+	prepareChecker  *prepareChecker
 	checkers        *checker.Controller
 	regionScatterer *schedule.RegionScatterer
 	regionSplitter  *schedule.RegionSplitter
@@ -81,6 +81,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		ctx:             ctx,
 		cancel:          cancel,
 		cluster:         cluster,
+		prepareChecker:  newPrepareChecker(),
 		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
@@ -468,35 +469,18 @@ func (c *coordinator) stop() {
 	c.cancel()
 }
 
-// Hack to retrieve info from scheduler.
-// TODO: remove it.
-type hasHotStatus interface {
-	GetHotStatus(statistics.RWType) *statistics.StoreHotPeersInfos
-	GetPendingInfluence() map[uint64]*statistics.Influence
-}
-
-func (c *coordinator) getHotWriteRegions() *statistics.StoreHotPeersInfos {
-	c.RLock()
-	defer c.RUnlock()
-	s, ok := c.schedulers[schedulers.HotRegionName]
-	if !ok {
-		return nil
-	}
-	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(statistics.Write)
-	}
-	return nil
-}
-
-func (c *coordinator) getHotReadRegions() *statistics.StoreHotPeersInfos {
-	c.RLock()
-	defer c.RUnlock()
-	s, ok := c.schedulers[schedulers.HotRegionName]
-	if !ok {
-		return nil
-	}
-	if h, ok := s.Scheduler.(hasHotStatus); ok {
-		return h.GetHotStatus(statistics.Read)
+func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
+	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
+	storeLoads := c.cluster.GetStoresLoads()
+	stores := c.cluster.GetStores()
+	switch typ {
+	case statistics.Write:
+		regionStats := c.cluster.RegionWriteStats()
+		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+	case statistics.Read:
+		regionStats := c.cluster.RegionReadStats()
+		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+	default:
 	}
 	return nil
 }
@@ -540,36 +524,32 @@ func (c *coordinator) resetSchedulerMetrics() {
 }
 
 func (c *coordinator) collectHotSpotMetrics() {
-	c.RLock()
-	// Collects hot write region metrics.
-	s, ok := c.schedulers[schedulers.HotRegionName]
-	if !ok {
-		c.RUnlock()
-		return
-	}
-	c.RUnlock()
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(s, stores, statistics.Write)
+	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(s, stores, statistics.Read)
+	collectHotMetrics(c.cluster, stores, statistics.Read)
 	// Collects pending influence.
-	collectPendingInfluence(s, stores)
+	collectPendingInfluence(stores)
 }
 
-func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ statistics.RWType) {
-	status := s.Scheduler.(hasHotStatus).GetHotStatus(typ)
+func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
 	var (
 		kind                      string
 		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
+		regionStats               map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
 	case statistics.Read:
+		regionStats = cluster.RegionReadStats()
 		kind, byteTyp, keyTyp, queryTyp = statistics.Read.String(), statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
 	case statistics.Write:
+		regionStats = cluster.RegionWriteStats()
 		kind, byteTyp, keyTyp, queryTyp = statistics.Write.String(), statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
 	}
+	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
+
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -602,8 +582,8 @@ func collectHotMetrics(s *scheduleController, stores []*core.StoreInfo, typ stat
 	}
 }
 
-func collectPendingInfluence(s *scheduleController, stores []*core.StoreInfo) {
-	pendings := s.Scheduler.(hasHotStatus).GetPendingInfluence()
+func collectPendingInfluence(stores []*core.StoreInfo) {
+	pendings := statistics.GetPendingInfluence(stores)
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
@@ -622,7 +602,7 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
-	return c.cluster.isPrepared()
+	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
 func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
