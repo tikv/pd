@@ -30,34 +30,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// middlewareBuilder is used to build service middleware for HTTP api
-type middlewareBuilder struct {
-	svr     *server.Server
-	handler http.Handler
-}
-
-func newMiddlewareBuilder(s *server.Server) *middlewareBuilder {
-	return &middlewareBuilder{
-		svr: s,
-		handler: negroni.New(
-			newRequestInfoMiddleware(s),
-			newAuditMiddleware(s),
-			// todo: add rate limit middleware
-		),
-	}
-}
-
-func (s *middlewareBuilder) middleware(handler http.Handler) http.Handler {
-	return negroni.New(negroni.Wrap(s.handler), negroni.Wrap(handler))
-}
-
-func (s *middlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.handler.ServeHTTP(w, r)
-		next(w, r)
-	}
-}
-
 // requestInfoMiddleware is used to gather info from requsetInfo
 type requestInfoMiddleware struct {
 	svr *server.Server

@@ -25,7 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 )
 
-// RequestInfo holds source information from http.Request
+// RequestInfo holds service information from http.Request
 type RequestInfo struct {
 	ServiceLabel string
 	Method       string

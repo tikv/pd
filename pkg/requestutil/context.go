@@ -18,6 +18,7 @@ import (
 	"context"
 )
 
+// The key type is unexported to prevent collisions
 type key int
 
 const (
@@ -25,7 +26,7 @@ const (
 	requestInfoKey key = iota
 )
 
-// WithRequestInfo returns a copy of parent in which the user value is set
+// WithRequestInfo returns a copy of parent in which the request info value is set
 func WithRequestInfo(parent context.Context, requestInfo RequestInfo) context.Context {
 	return context.WithValue(parent, requestInfoKey, requestInfo)
 }
