@@ -60,7 +60,7 @@ func (s *testKVSuite) TestLevelDB(c *C) {
 	dir, err := os.MkdirTemp("/tmp", "leveldb_kv")
 	c.Assert(err, IsNil)
 	defer os.RemoveAll(dir)
-	kv, err := NewLeveldbKV(dir)
+	kv, err := NewLevelDBKV(dir)
 	c.Assert(err, IsNil)
 
 	s.testReadWrite(c, kv)

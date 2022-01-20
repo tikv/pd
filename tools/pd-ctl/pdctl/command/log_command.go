@@ -29,7 +29,7 @@ var (
 // NewLogCommand New a log subcommand of the rootCmd
 func NewLogCommand() *cobra.Command {
 	conf := &cobra.Command{
-		Use:   "log [fatal|error|warn|info|debug]",
+		Use:   "log [fatal|error|warn|info|debug] [addr]",
 		Short: "set log level",
 		Run:   logCommandFunc,
 	}
@@ -38,7 +38,7 @@ func NewLogCommand() *cobra.Command {
 
 func logCommandFunc(cmd *cobra.Command, args []string) {
 	var err error
-	if len(args) != 1 {
+	if len(args) == 0 || len(args) > 2 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -48,11 +48,26 @@ func logCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to set log level: %s\n", err)
 		return
 	}
-	_, err = doRequest(cmd, logPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}},
-		WithBody(bytes.NewBuffer(data)))
-	if err != nil {
-		cmd.Printf("Failed to set log level: %s\n", err)
-		return
+
+	if len(args) == 2 {
+		url, err := checkURL(args[1])
+		if err != nil {
+			cmd.Printf("Failed to parse address %v: %s\n", args[1], err)
+			return
+		}
+		_, err = doRequestSingleEndpoint(cmd, url, logPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}, "PD-Allow-follower-handle": {"true"}},
+			WithBody(bytes.NewBuffer(data)))
+		if err != nil {
+			cmd.Printf("Failed to set %v log level: %s\n", args[1], err)
+			return
+		}
+	} else {
+		_, err = doRequest(cmd, logPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}},
+			WithBody(bytes.NewBuffer(data)))
+		if err != nil {
+			cmd.Printf("Failed to set log level: %s\n", err)
+			return
+		}
 	}
 	cmd.Println("Success!")
 }

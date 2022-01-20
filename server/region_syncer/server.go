@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
-	endpoint "github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
