@@ -28,5 +28,10 @@ type etcdBackend struct {
 
 // newEtcdBackend is used to create a new etcd backend.
 func newEtcdBackend(client *clientv3.Client, rootPath string) *etcdBackend {
-	return &etcdBackend{endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client, rootPath), nil)}
+	return &etcdBackend{
+		endpoint.NewStorageEndpoint(
+			kv.NewEtcdKVBase(client, rootPath),
+			nil,
+		),
+	}
 }

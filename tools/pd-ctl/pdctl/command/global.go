@@ -162,13 +162,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
-	eps := strings.Split(addrs, ",")
-	for i, ep := range eps {
-		if j := strings.Index(ep, "//"); j == -1 {
-			eps[i] = "//" + ep
-		}
-	}
-	return eps
+	return strings.Split(addrs, ",")
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
@@ -232,6 +226,9 @@ func doGet(endpoint, prefix, method string, resp *string, customHeader http.Head
 }
 
 func checkURL(endpoint string) (string, error) {
+	if j := strings.Index(endpoint, "//"); j == -1 {
+		endpoint = "//" + endpoint
+	}
 	var u *url.URL
 	u, err := url.Parse(endpoint)
 	if err != nil {
