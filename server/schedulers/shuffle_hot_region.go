@@ -133,14 +133,19 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Op
 	return s.dispatch(s.types[i], cluster)
 }
 
+<<<<<<< HEAD
 func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
 	storeInfos := statistics.SummaryStoreInfos(cluster)
+=======
+func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
+>>>>>>> f605a2cb0 (statistics: fix the hot region API cannot work without hot scheduler (#4424))
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	switch typ {
 	case statistics.Read:
-		s.stLoadInfos[readLeader] = summaryStoresLoad(
+		s.stLoadInfos[readLeader] = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
@@ -148,7 +153,7 @@ func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.
 			statistics.Read, core.LeaderKind)
 		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
 	case statistics.Write:
-		s.stLoadInfos[writeLeader] = summaryStoresLoad(
+		s.stLoadInfos[writeLeader] = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),

@@ -273,22 +273,27 @@ func (s *grantHotRegionScheduler) Schedule(cluster opt.Cluster) []*operator.Oper
 	return s.dispatch(s.types[i], cluster)
 }
 
+<<<<<<< HEAD
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
 	storeInfos := statistics.SummaryStoreInfos(cluster)
+=======
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
+>>>>>>> f605a2cb0 (statistics: fix the hot region API cannot work without hot scheduler (#4424))
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	var stLoadInfos map[uint64]*statistics.StoreLoadDetail
 	switch typ {
 	case statistics.Read:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
 			statistics.Read, core.RegionKind)
 	case statistics.Write:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),

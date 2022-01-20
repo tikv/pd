@@ -121,9 +121,14 @@ type StoreSummaryInfo struct {
 	PendingSum *Influence
 }
 
+// Influence records operator influence.
+type Influence struct {
+	Loads []float64
+	Count float64
+}
+
 // SummaryStoreInfos return a mapping from store to summary information.
-func SummaryStoreInfos(cluster core.StoreSetInformer) map[uint64]*StoreSummaryInfo {
-	stores := cluster.GetStores()
+func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
@@ -153,10 +158,16 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 	s.PendingSum.Count += infl.Count * w
 }
 
-// Influence records operator influence.
-type Influence struct {
-	Loads []float64
-	Count float64
+// GetPendingInfluence returns the current pending influence.
+func GetPendingInfluence(stores []*core.StoreInfo) map[uint64]*Influence {
+	stInfos := SummaryStoreInfos(stores)
+	ret := make(map[uint64]*Influence, len(stInfos))
+	for id, info := range stInfos {
+		if info.PendingSum != nil {
+			ret[id] = info.PendingSum
+		}
+	}
+	return ret
 }
 
 // StoreLoad records the current load.
