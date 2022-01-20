@@ -22,7 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
-	endpoint "github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 var _ = Suite(&testManagerSuite{})

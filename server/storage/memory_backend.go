@@ -27,5 +27,10 @@ type memoryStorage struct {
 
 // newMemoryBackend is used to create a new memory storage.
 func newMemoryBackend() *memoryStorage {
-	return &memoryStorage{endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)}
+	return &memoryStorage{
+		endpoint.NewStorageEndpoint(
+			kv.NewMemoryKV(),
+			nil,
+		),
+	}
 }

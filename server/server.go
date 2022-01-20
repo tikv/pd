@@ -57,6 +57,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
@@ -145,7 +146,7 @@ type Server struct {
 	serviceSafePointLock sync.Mutex
 
 	// hot region history info storeage
-	hotRegionStorage *core.HotRegionStorage
+	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -400,12 +401,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
-	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
-	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, s.encryptionKeyManager, s.handler)
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
@@ -609,13 +609,15 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := s.GetClusterRootPath()
+	clusterRootPath := endpoint.ClusterRootPath(s.rootPath)
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
 
 	// Set bootstrap time
-	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	// Because we will write the cluster meta into etcd directly,
+	// so we need to handle the root key path manually here.
+	bootstrapKey := endpoint.AppendToRootPath(s.rootPath, endpoint.ClusterBootstrapTimeKey())
 	nano := time.Now().UnixNano()
 
 	timeData := typeutil.Uint64ToBytes(uint64(nano))
@@ -623,7 +625,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
+	storePath := endpoint.AppendToRootPath(s.rootPath, endpoint.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -636,7 +638,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
+	regionPath := endpoint.AppendToRootPath(s.rootPath, endpoint.RegionPath(req.GetRegion().GetId()))
 	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
@@ -736,7 +738,7 @@ func (s *Server) GetStorage() storage.Storage {
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
-func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+func (s *Server) GetHistoryHotRegionStorage() *storage.HotRegionStorage {
 	return s.hotRegionStorage
 }
 
@@ -1086,16 +1088,6 @@ func (s *Server) GetClusterVersion() semver.Version {
 // GetTLSConfig get the security config.
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
-}
-
-// GetServerRootPath returns the server root path.
-func (s *Server) GetServerRootPath() string {
-	return s.rootPath
-}
-
-// GetClusterRootPath returns the cluster root path.
-func (s *Server) GetClusterRootPath() string {
-	return path.Join(s.rootPath, "raft")
 }
 
 // GetRaftCluster gets Raft cluster.
