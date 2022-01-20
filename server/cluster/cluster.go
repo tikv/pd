@@ -121,7 +121,6 @@ type RaftCluster struct {
 	httpClient    *http.Client
 
 	replicationMode *replication.ModeManager
-	traceRegionFlow bool
 
 	// Deprecated: we do not use it anymore. See https://github.com/tikv/tikv/issues/11472.
 	componentManager *component.Manager
@@ -212,7 +211,6 @@ func (c *RaftCluster) InitCluster(
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
 // Start starts a cluster.
