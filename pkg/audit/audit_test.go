@@ -33,7 +33,7 @@ type testAuditSuite struct {
 }
 
 func (s *testAuditSuite) TestLabelMatcher(c *C) {
-	var matcher BackendMatcher = &LabelMatcher{"testSuccess"}
+	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
 	c.Assert(matcher.Match(labels1), Equals, true)
 
