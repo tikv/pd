@@ -852,11 +852,7 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 
 // DropCacheRegion removes a region from the cache.
 func (c *RaftCluster) DropCacheRegion(id uint64) {
-	c.RLock()
-	defer c.RUnlock()
-	if region := c.GetRegion(id); region != nil {
-		c.core.RemoveRegion(region)
-	}
+	c.core.RemoveRegionIfExist(id)
 }
 
 // GetCacheCluster gets the cached cluster.
@@ -883,10 +879,7 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
-	c.RLock()
-	hotStat := c.hotStat
-	c.RUnlock()
-	return hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1456,8 +1449,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
-	c.RLock()
-	defer c.RUnlock()
 	return c.hotStat.GetStoresLoads()
 }
 
@@ -1508,11 +1499,8 @@ func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 
 // GetHotWriteRegions gets hot write regions' info.
 func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	c.RLock()
-	co := c.coordinator
-	c.RUnlock()
-	hotWriteRegions := co.getHotWriteRegions()
-	if len(storeIDs) > 0 {
+	hotWriteRegions := c.coordinator.getHotRegionsByType(statistics.Write)
+	if len(storeIDs) > 0 && hotWriteRegions != nil {
 		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
 	}
 	return hotWriteRegions
@@ -1520,11 +1508,8 @@ func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHo
 
 // GetHotReadRegions gets hot read regions' info.
 func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	c.RLock()
-	co := c.coordinator
-	c.RUnlock()
-	hotReadRegions := co.getHotReadRegions()
-	if len(storeIDs) > 0 {
+	hotReadRegions := c.coordinator.getHotRegionsByType(statistics.Read)
+	if len(storeIDs) > 0 && hotReadRegions != nil {
 		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
 	}
 	return hotReadRegions
