@@ -158,7 +158,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "PauseOrResumeScheduler", "/schedulers/{name}", schedulerHandler.PauseOrResume, setMethods("POST"))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
 	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
