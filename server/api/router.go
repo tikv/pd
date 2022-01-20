@@ -146,7 +146,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	serviceBuilder := newServiceMiddlewareBuilder(svr)
 	register := serviceBuilder.registerRouteHandler
-	registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
+	//registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
 	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
@@ -166,7 +166,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "PauseOrResumeScheduler", "/schedulers/{name}", schedulerHandler.PauseOrResume, postMethod)
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
+	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
+	//registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	register(apiRouter, "GetCluster", "/cluster", clusterHandler, getMethod)
