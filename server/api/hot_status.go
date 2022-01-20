@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/unrolled/render"
 )
 
@@ -173,7 +174,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Summary List the history hot regions.
 // @Accept json
 // @Produce json
-// @Success 200 {object} core.HistoryHotRegions
+// @Success 200 {object} storage.HistoryHotRegions
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /hotspot/regions/history [get]
@@ -198,13 +199,13 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, results)
 }
 
-func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*core.HistoryHotRegions, error) {
-	var hotRegionTypes = core.HotRegionTypes
+func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
+	var hotRegionTypes = storage.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
 	}
 	iter := handler.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
-	var results []*core.HistoryHotRegion
+	var results []*storage.HistoryHotRegion
 	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
 		make(map[uint64]bool), make(map[uint64]bool),
 		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
@@ -223,7 +224,7 @@ func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 	for _, isLeader := range request.IsLeaders {
 		leaderSet[isLeader] = true
 	}
-	var next *core.HistoryHotRegion
+	var next *storage.HistoryHotRegion
 	var err error
 	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		if len(regionSet) != 0 && !regionSet[next.RegionID] {
@@ -243,7 +244,7 @@ func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotR
 		}
 		results = append(results, next)
 	}
-	return &core.HistoryHotRegions{
+	return &storage.HistoryHotRegions{
 		HistoryHotRegion: results,
 	}, err
 }
