@@ -83,7 +83,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, s
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+// registerRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path
 func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serviceLabel, path string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.Handle(path, s.middleware(handler)).Name(serviceLabel)
@@ -93,7 +93,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serv
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
+// registerPathPrefixRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
 func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandler(router *mux.Router, serviceLabel, prefix string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.PathPrefix(prefix).Handler(s.middleware(handler)).Name(serviceLabel)
@@ -384,12 +384,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
-
-	rigisterServiceLabels := make([]string, 0)
-	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
-		rigisterServiceLabels = append(rigisterServiceLabels, route.GetName())
-		return nil
-	})
 
 	return rootRouter
 }

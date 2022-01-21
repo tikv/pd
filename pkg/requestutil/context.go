@@ -22,8 +22,10 @@ import (
 type key int
 
 const (
-	// requestInfoKey is the context key for the request compoenent.
+	// requestInfoKey is the context key for the request info.
 	requestInfoKey key = iota
+	// executionInfo is the context key for the execution info.
+	executionInfo
 )
 
 // WithRequestInfo returns a copy of parent in which the request info value is set
@@ -35,4 +37,15 @@ func WithRequestInfo(parent context.Context, requestInfo RequestInfo) context.Co
 func RequestInfoFrom(ctx context.Context) (RequestInfo, bool) {
 	requestInfo, ok := ctx.Value(requestInfoKey).(RequestInfo)
 	return requestInfo, ok
+}
+
+// WithExecutionInfo returns a copy of parent in which the execution info value is set
+func WithExecutionInfo(parent context.Context, info ExecutionInfo) context.Context {
+	return context.WithValue(parent, executionInfo, info)
+}
+
+// ExecutionInfoFrom returns the value of the excution info key on the ctx
+func ExecutionInfoFrom(ctx context.Context) (ExecutionInfo, bool) {
+	info, ok := ctx.Value(executionInfo).(ExecutionInfo)
+	return info, ok
 }

@@ -15,8 +15,9 @@
 package audit
 
 import (
+	"net/http"
+
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/requestutil"
 )
 
 const (
@@ -29,12 +30,12 @@ type BackendLabels struct {
 	Labels []string
 }
 
-// LabelMatcher implements AuditBackendMatcher
+// LabelMatcher is used to help backend implement audit.Backend
 type LabelMatcher struct {
 	backendLabel string
 }
 
-// Match is used to implement AuditBackendMatcher
+// Match is used to check whether backendLabel is in the labels
 func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	for _, item := range labels.Labels {
 		if m.backendLabel == item {
@@ -44,29 +45,42 @@ func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	return false
 }
 
+// Sequence is used to help backend implement audit.Backend
+type Sequence struct {
+	before bool
+}
+
+// ProcessBeforeHandler is used to identify whether this backend should execute before handler
+func (s *Sequence) ProcessBeforeHandler() bool {
+	return s.before
+}
+
 // Backend defines what function audit backend should hold
 type Backend interface {
 	// ProcessHTTPRequest is used to perform HTTP audit process
-	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
+	ProcessHTTPRequest(req *http.Request) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
+	ProcessBeforeHandler() bool
 }
 
 type PrometheusHistogramBackend struct {
 	*LabelMatcher
+	*Sequence
 	histogramVec *prometheus.HistogramVec
 }
 
 // NewPrometheusHistogramBackend returns a PrometheusHistogramBackend
-func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec) Backend {
+func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec, before bool) Backend {
 	return &PrometheusHistogramBackend{
 		LabelMatcher: &LabelMatcher{backendLabel: PrometheusHistogram},
+		Sequence:     &Sequence{before: before},
 		histogramVec: histogramVec,
 	}
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (l *PrometheusHistogramBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
+func (l *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
 
 	return true
 }
