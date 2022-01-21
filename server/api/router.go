@@ -167,6 +167,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
+	register(apiRouter, "GetCluster", "/cluster", clusterHandler, setMethods("GET"))
 	registerFunc(apiRouter, "GetClusterStatus", "/cluster/status", clusterHandler.GetClusterStatus)
 
 	confHandler := newConfHandler(svr, rd)
