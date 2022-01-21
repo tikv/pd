@@ -27,25 +27,25 @@ import (
 
 // RequestInfo holds service information from http.Request
 type RequestInfo struct {
-	ServiceLabel string
-	Method       string
-	Component    string
-	IP           string
-	TimeStamp    string
-	URLParam     string
-	BodyParam    string
+	ServiceLabel   string
+	Method         string
+	Component      string
+	IP             string
+	StartTimeStamp int64
+	URLParam       string
+	BodyParam      string
 }
 
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
-		ServiceLabel: apiutil.GetRouteName(r),
-		Method:       fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
-		Component:    apiutil.GetComponentNameOnHTTP(r),
-		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
-		TimeStamp:    time.Now().Local().String(),
-		URLParam:     getURLParam(r),
-		BodyParam:    getBodyParam(r),
+		ServiceLabel:   apiutil.GetRouteName(r),
+		Method:         fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
+		Component:      apiutil.GetComponentNameOnHTTP(r),
+		IP:             apiutil.GetIPAddrFromHTTPRequest(r),
+		StartTimeStamp: time.Now().Unix(),
+		URLParam:       getURLParam(r),
+		BodyParam:      getBodyParam(r),
 	}
 }
 
