@@ -275,6 +275,7 @@ func buildRegion(kind FlowKind, peerCount int, interval uint64) *core.RegionInfo
 			core.SetReportInterval(interval),
 			core.SetReadBytes(10*1024*1024*interval),
 			core.SetReadKeys(10*1024*1024*interval),
+			core.SetReadQuery(1024*interval),
 		)
 	case WriteFlow:
 		return core.NewRegionInfo(
@@ -283,6 +284,7 @@ func buildRegion(kind FlowKind, peerCount int, interval uint64) *core.RegionInfo
 			core.SetReportInterval(interval),
 			core.SetWrittenBytes(10*1024*1024*interval),
 			core.SetWrittenKeys(10*1024*1024*interval),
+			core.SetWrittenQuery(1024*interval),
 		)
 	default:
 		return nil
@@ -423,7 +425,7 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 		// check whether cold cache is cleared
 		var isClear bool
 		intervalSums = make(map[uint64]int)
-		region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0))
+		region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 		for i := 1; i <= 200; i++ {
 			rets := checker(c, cache, region)
 			checkIntervalSumContinuous(c, intervalSums, rets, interval)
@@ -476,7 +478,7 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 				// check whether cold cache is cleared
 				var isClear bool
 				intervalSums = make(map[uint64]int)
-				region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0))
+				region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 				for i := 1; i < 200; i++ {
 					step(i)
 					if len(cache.storesOfRegion[region.GetID()]) == 0 {
