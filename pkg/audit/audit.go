@@ -15,7 +15,7 @@
 package audit
 
 import (
-	"github.com/tikv/pd/pkg/requestutil"
+	"net/http"
 )
 
 // BackendLabels is used to store some audit backend labels.
@@ -23,12 +23,12 @@ type BackendLabels struct {
 	Labels []string
 }
 
-// LabelMatcher implements AuditBackendMatcher
+// LabelMatcher is used to help backend implement audit.Backend
 type LabelMatcher struct {
 	backendLabel string
 }
 
-// Match is used to implement AuditBackendMatcher
+// Match is used to check whether backendLabel is in the labels
 func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	for _, item := range labels.Labels {
 		if m.backendLabel == item {
@@ -38,10 +38,21 @@ func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	return false
 }
 
+// Sequence is used to help backend implement audit.Backend
+type Sequence struct {
+	before bool
+}
+
+// ProcessBeforeHandler is used to identify whether this backend should execute before handler
+func (s *Sequence) ProcessBeforeHandler() bool {
+	return s.before
+}
+
 // Backend defines what function audit backend should hold
 type Backend interface {
 	// ProcessHTTPRequest is used to perform HTTP audit process
-	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
+	ProcessHTTPRequest(req *http.Request) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
+	ProcessBeforeHandler() bool
 }

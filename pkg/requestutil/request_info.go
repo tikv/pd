@@ -31,9 +31,9 @@ type RequestInfo struct {
 	Method         string
 	Component      string
 	IP             string
-	StartTimeStamp int64
 	URLParam       string
 	BodyParam      string
+	StartTimeStamp int64
 }
 
 // GetRequestInfo returns request info needed from http.Request
@@ -43,9 +43,21 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 		Method:         fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
 		Component:      apiutil.GetComponentNameOnHTTP(r),
 		IP:             apiutil.GetIPAddrFromHTTPRequest(r),
-		StartTimeStamp: time.Now().Unix(),
 		URLParam:       getURLParam(r),
 		BodyParam:      getBodyParam(r),
+		StartTimeStamp: time.Now().Unix(),
+	}
+}
+
+// ExecutionInfo holds request execution info
+type ExecutionInfo struct {
+	EndTimeStamp int64
+}
+
+// GetExecutionInfo returns request execution info from http.Request
+func GetExecutionInfo(r *http.Request) ExecutionInfo {
+	return ExecutionInfo{
+		EndTimeStamp: time.Now().Unix(),
 	}
 }
 

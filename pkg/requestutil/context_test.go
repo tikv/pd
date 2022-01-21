@@ -17,6 +17,7 @@ package requestutil
 import (
 	"context"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 )
@@ -34,6 +35,7 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	ctx := context.Background()
 	_, ok := RequestInfoFrom(ctx)
 	c.Assert(ok, Equals, false)
+	timeNow := time.Now().Unix()
 	ctx = WithRequestInfo(ctx,
 		RequestInfo{
 			ServiceLabel:   "test label",
@@ -42,7 +44,7 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 			IP:             "localhost",
 			URLParam:       "{\"id\"=1}",
 			BodyParam:      "{\"state\"=\"Up\"}",
-			StartTimeStamp: 1642740690,
+			StartTimeStamp: timeNow,
 		})
 	result, ok := RequestInfoFrom(ctx)
 	c.Assert(result, NotNil)
@@ -53,5 +55,20 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	c.Assert(result.IP, Equals, "localhost")
 	c.Assert(result.URLParam, Equals, "{\"id\"=1}")
 	c.Assert(result.BodyParam, Equals, "{\"state\"=\"Up\"}")
-	c.Assert(result.StartTimeStamp, Equals, 1642740690)
+	c.Assert(result.StartTimeStamp, Equals, timeNow)
+}
+
+func (s *testRequestContextSuite) TestExcutionInfo(c *C) {
+	ctx := context.Background()
+	_, ok := ExecutionInfoFrom(ctx)
+	c.Assert(ok, Equals, false)
+	timeNow := time.Now().Unix()
+	ctx = WithExecutionInfo(ctx,
+		ExecutionInfo{
+			EndTimeStamp: timeNow,
+		})
+	result, ok := ExecutionInfoFrom(ctx)
+	c.Assert(result, NotNil)
+	c.Assert(ok, Equals, true)
+	c.Assert(result.EndTimeStamp, Equals, timeNow)
 }

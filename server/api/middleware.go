@@ -20,14 +20,13 @@ import (
 	"strings"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 // requestInfoMiddleware is used to gather info from requsetInfo
@@ -107,7 +106,6 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
-		log.Warn("Audit failed", zap.Bool("request-info", ok))
 		next(w, r)
 	}
 
@@ -121,11 +119,26 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		w.Header().Add("audit-label", strings.Join(labels.Labels, ","))
 	})
 
+	beforeNextBackends := make([]audit.Backend, 0)
+	afterNextBackends := make([]audit.Backend, 0)
 	for _, backend := range s.svr.GetAuditBackend() {
 		if backend.Match(labels) {
-			backend.ProcessHTTPRequest(&requestInfo)
+			if backend.ProcessBeforeHandler() {
+				beforeNextBackends = append(beforeNextBackends, backend)
+			} else {
+				afterNextBackends = append(afterNextBackends, backend)
+			}
 		}
+	}
+	for _, backend := range beforeNextBackends {
+		backend.ProcessHTTPRequest(r)
 	}
 
 	next(w, r)
+
+	executionInfo := requestutil.GetExecutionInfo(r)
+	r = r.WithContext(requestutil.WithExecutionInfo(r.Context(), executionInfo))
+	for _, backend := range afterNextBackends {
+		backend.ProcessHTTPRequest(r)
+	}
 }
