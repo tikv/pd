@@ -248,7 +248,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 
 	// create audit backend
 	s.auditBackend = []audit.Backend{
-		audit.NewLocalLogBackend(),
+		audit.NewLocalLogBackend(true),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 

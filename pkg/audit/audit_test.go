@@ -45,40 +45,44 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 }
 
 func (s *testAuditSuite) TestLocalLogBackendUsingTerminal(c *C) {
-	backend := NewLocalLogBackend()
+	backend := NewLocalLogBackend(true)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	info := requestutil.GetRequestInfo(req)
-	c.Assert(backend.ProcessHTTPRequest(&info), Equals, true)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
 }
 
 func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
-	backend := NewLocalLogBackend()
+	backend := NewLocalLogBackend(true)
 	initLog()
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	info := requestutil.GetRequestInfo(req)
-	c.Assert(backend.ProcessHTTPRequest(&info), Equals, true)
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
 }
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	b.StopTimer()
-	backend := NewLocalLogBackend()
+	backend := NewLocalLogBackend(true)
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 		info := requestutil.GetRequestInfo(req)
-		backend.ProcessHTTPRequest(&info)
+		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+		backend.ProcessHTTPRequest(req)
 	}
 }
 
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
-	backend := NewLocalLogBackend()
+	backend := NewLocalLogBackend(true)
 	initLog()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 		info := requestutil.GetRequestInfo(req)
-		backend.ProcessHTTPRequest(&info)
+		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+		backend.ProcessHTTPRequest(req)
 	}
 }
 

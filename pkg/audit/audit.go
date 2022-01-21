@@ -15,6 +15,8 @@
 package audit
 
 import (
+	"net/http"
+
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/requestutil"
 	"go.uber.org/zap"
@@ -30,12 +32,12 @@ type BackendLabels struct {
 	Labels []string
 }
 
-// LabelMatcher implements AuditBackendMatcher
+// LabelMatcher is used to help backend implement audit.Backend
 type LabelMatcher struct {
 	backendLabel string
 }
 
-// Match is used to implement AuditBackendMatcher
+// Match is used to check whether backendLabel is in the labels
 func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	for _, item := range labels.Labels {
 		if m.backendLabel == item {
@@ -45,29 +47,46 @@ func (m *LabelMatcher) Match(labels *BackendLabels) bool {
 	return false
 }
 
+// Sequence is used to help backend implement audit.Backend
+type Sequence struct {
+	before bool
+}
+
+// ProcessBeforeHandler is used to identify whether this backend should execute before handler
+func (s *Sequence) ProcessBeforeHandler() bool {
+	return s.before
+}
+
 // Backend defines what function audit backend should hold
 type Backend interface {
 	// ProcessHTTPRequest is used to perform HTTP audit process
-	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
+	ProcessHTTPRequest(req *http.Request) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
+	ProcessBeforeHandler() bool
 }
 
 // LocalLogBackend is an implementation of audit.Backend
 // and it uses `github.com/pingcap/log` to implement audit
 type LocalLogBackend struct {
 	*LabelMatcher
+	*Sequence
 }
 
 // NewLocalLogBackend returns a LocalLogBackend
-func NewLocalLogBackend() Backend {
+func NewLocalLogBackend(before bool) Backend {
 	return &LocalLogBackend{
 		LabelMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
+		Sequence:     &Sequence{before: before},
 	}
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (l *LocalLogBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
-	log.Info("Audit Log", zap.String("Service Info", event.String()))
+func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		return false
+	}
+	log.Info("Audit Log", zap.String("Service Info", requestInfo.String()))
 	return true
 }
