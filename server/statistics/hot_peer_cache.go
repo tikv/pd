@@ -175,6 +175,7 @@ func (f *hotPeerCache) CheckPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		interval:           interval,
 		peers:              peers,
 		thresholds:         thresholds,
+		source:             direct,
 	}
 
 	if oldItem == nil {
