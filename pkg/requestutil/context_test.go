@@ -36,13 +36,13 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	c.Assert(ok, Equals, false)
 	ctx = WithRequestInfo(ctx,
 		RequestInfo{
-			ServiceLabel: "test label",
-			Method:       "POST",
-			Component:    "pdctl",
-			IP:           "localhost",
-			URLParam:     "{\"id\"=1}",
-			BodyParam:    "{\"state\"=\"Up\"}",
-			TimeStamp:    "2022",
+			ServiceLabel:   "test label",
+			Method:         "POST",
+			Component:      "pdctl",
+			IP:             "localhost",
+			URLParam:       "{\"id\"=1}",
+			BodyParam:      "{\"state\"=\"Up\"}",
+			StartTimeStamp: 1642740690,
 		})
 	result, ok := RequestInfoFrom(ctx)
 	c.Assert(result, NotNil)
@@ -53,5 +53,5 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	c.Assert(result.IP, Equals, "localhost")
 	c.Assert(result.URLParam, Equals, "{\"id\"=1}")
 	c.Assert(result.BodyParam, Equals, "{\"state\"=\"Up\"}")
-	c.Assert(result.TimeStamp, Equals, "2022")
+	c.Assert(result.StartTimeStamp, Equals, 1642740690)
 }

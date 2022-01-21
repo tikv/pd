@@ -83,7 +83,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, s
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+// registerRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path
 func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serviceLabel, path string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.Handle(path, s.middleware(handler)).Name(serviceLabel)
@@ -93,7 +93,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serv
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
+// registerPathPrefixRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
 func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandler(router *mux.Router, serviceLabel, prefix string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.PathPrefix(prefix).Handler(s.middleware(handler)).Name(serviceLabel)
@@ -167,7 +167,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "PauseOrResumeScheduler", "/schedulers/{name}", schedulerHandler.PauseOrResume, setMethods("POST"))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	apiRouter.PathPrefix("/scheduler-config").Handler(schedulerConfigHandler)
 	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
 
 	clusterHandler := newClusterHandler(svr, rd)
@@ -209,7 +208,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(escapeRouter, "DeleteRegionLabelRule", "/config/region-label/rule/{id}", regionLabelHandler.DeleteRule, setMethods("DELETE"), setAudit(localLog))
 	registerFunc(clusterRouter, "SetRegionLabelRule", "/config/region-label/rule", regionLabelHandler.SetRule, setMethods("POST"), setAudit(localLog))
 	registerFunc(clusterRouter, "PatchRegionLabelRules", "/config/region-label/rules", regionLabelHandler.Patch, setMethods("PATCH"), setAudit(localLog))
-
 	registerFunc(clusterRouter, "GetRegionLabelByKey", "/region/id/{id}/label/{key}", regionLabelHandler.GetRegionLabel, setMethods("GET"))
 	registerFunc(clusterRouter, "GetAllRegionLabels", "/region/id/{id}/labels", regionLabelHandler.GetRegionLabels, setMethods("GET"))
 
@@ -316,7 +314,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAudit(localLog))
-
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	registerFunc(clusterRouter, "GetReplicationModeStatus", "/replication_mode/status", replicationModeHandler.GetStatus)
 
@@ -385,12 +382,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
-
-	rigisterServiceLabels := make([]string, 0)
-	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
-		rigisterServiceLabels = append(rigisterServiceLabels, route.GetName())
-		return nil
-	})
 
 	return rootRouter
 }
