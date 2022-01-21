@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -125,11 +126,13 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
+
 	setAudit := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
 			svr.RegistServiceForHTTP(route, labels...)
 		}
 	}
+	prometheus := audit.PrometheusHistogram
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -300,7 +303,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetRegionStatus", "/stats/region", statsHandler.Region, setMethods("GET"))
 
 	trendHandler := newTrendHandler(svr, rd)
-	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"))
+	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"), setAudit(prometheus))
 
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"))

@@ -15,7 +15,13 @@
 package audit
 
 import (
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/requestutil"
+)
+
+const (
+	// PrometheusHistogram is label name of PrometheusCounterBackend
+	PrometheusHistogram = "prometheus-histogram"
 )
 
 // BackendLabels is used to store some audit backend labels.
@@ -44,4 +50,23 @@ type Backend interface {
 	ProcessHTTPRequest(event *requestutil.RequestInfo) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
+}
+
+type PrometheusHistogramBackend struct {
+	*LabelMatcher
+	histogramVec *prometheus.HistogramVec
+}
+
+// NewPrometheusHistogramBackend returns a PrometheusHistogramBackend
+func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec) Backend {
+	return &PrometheusHistogramBackend{
+		LabelMatcher: &LabelMatcher{backendLabel: PrometheusHistogram},
+		histogramVec: histogramVec,
+	}
+}
+
+// ProcessHTTPRequest is used to implement audit.Backend
+func (l *PrometheusHistogramBackend) ProcessHTTPRequest(event *requestutil.RequestInfo) bool {
+
+	return true
 }
