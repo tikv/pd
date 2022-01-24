@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -216,7 +217,8 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 }
 
 func doTestRequest(srv *tests.TestServer) {
-	req, _ := http.NewRequest("GET", srv.GetAddr()+"/pd/api/v1/component/admin/unsafe/remove-failed-stores/history", nil)
+	timeUnix := time.Now().Unix() - 20
+	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
