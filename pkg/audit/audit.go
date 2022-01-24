@@ -65,6 +65,8 @@ type Backend interface {
 	ProcessBeforeHandler() bool
 }
 
+// PrometheusHistogramBackend is an implementation of audit.Backend
+// and it uses Prometheus histogram data type to implement audit
 type PrometheusHistogramBackend struct {
 	*LabelMatcher
 	*Sequence
