@@ -60,15 +60,12 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 
 func (s *testRequestContextSuite) TestExcutionInfo(c *C) {
 	ctx := context.Background()
-	_, ok := ExecutionInfoFrom(ctx)
+	_, ok := EndTimeFrom(ctx)
 	c.Assert(ok, Equals, false)
 	timeNow := time.Now().Unix()
-	ctx = WithExecutionInfo(ctx,
-		ExecutionInfo{
-			EndTimeStamp: timeNow,
-		})
-	result, ok := ExecutionInfoFrom(ctx)
+	ctx = WithEndTime(ctx, timeNow)
+	result, ok := EndTimeFrom(ctx)
 	c.Assert(result, NotNil)
 	c.Assert(ok, Equals, true)
-	c.Assert(result.EndTimeStamp, Equals, timeNow)
+	c.Assert(result, Equals, timeNow)
 }

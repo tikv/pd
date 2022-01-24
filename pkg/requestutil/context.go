@@ -24,8 +24,8 @@ type key int
 const (
 	// requestInfoKey is the context key for the request info.
 	requestInfoKey key = iota
-	// executionInfo is the context key for the execution info.
-	executionInfo
+	// endTimeKey is the context key for the end time.
+	endTimeKey
 )
 
 // WithRequestInfo returns a copy of parent in which the request info value is set
@@ -39,13 +39,13 @@ func RequestInfoFrom(ctx context.Context) (RequestInfo, bool) {
 	return requestInfo, ok
 }
 
-// WithExecutionInfo returns a copy of parent in which the execution info value is set
-func WithExecutionInfo(parent context.Context, info ExecutionInfo) context.Context {
-	return context.WithValue(parent, executionInfo, info)
+// WithEndTime returns a copy of parent in which the end time value is set
+func WithEndTime(parent context.Context, endTime int64) context.Context {
+	return context.WithValue(parent, endTimeKey, endTime)
 }
 
-// ExecutionInfoFrom returns the value of the excution info key on the ctx
-func ExecutionInfoFrom(ctx context.Context) (ExecutionInfo, bool) {
-	info, ok := ctx.Value(executionInfo).(ExecutionInfo)
+// EndTimeFrom returns the value of the excution info key on the ctx
+func EndTimeFrom(ctx context.Context) (int64, bool) {
+	info, ok := ctx.Value(endTimeKey).(int64)
 	return info, ok
 }
