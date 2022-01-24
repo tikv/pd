@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
@@ -54,19 +55,26 @@ func (s *testAuditSuite) TestLocalLogBackendUsingTerminal(c *C) {
 
 func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
 	backend := NewLocalLogBackend(true)
-	initLog()
+	fname := initLog()
+	defer os.Remove(fname)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	b, _ := os.ReadFile(fname)
+	output := strings.SplitN(string(b), "]", 4)
+	c.Assert(string(output[3]), Equals, fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+		"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
+		time.Unix(info.StartTimeStamp, 0).String()))
+	time.Sleep(10 * time.Second)
 }
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -76,21 +84,25 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	initLog()
+	fname := initLog()
+	defer os.Remove(fname)
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
 	}
 }
 
-func initLog() {
+func initLog() string {
 	cfg := &log.Config{}
-	home := os.Getenv("HOME")
-	cfg.File.Filename = fmt.Sprintf("%s/tmp/temp_log.txt", home)
+	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	fname := f.Name()
+	f.Close()
+	cfg.File.Filename = fname
 	cfg.Level = "info"
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
+	return fname
 }
