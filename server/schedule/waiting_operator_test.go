@@ -39,18 +39,15 @@ func addOperators(wop WaitingOperator) {
 	op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(1)},
 	}...)
-	op.SetDesc("testOperatorNormal")
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(2)},
 	}...)
-	op.SetDesc("testOperatorHigh")
 	op.SetPriorityLevel(core.HighPriority)
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(3)},
 	}...)
-	op.SetDesc("testOperatorLow")
 	op.SetPriorityLevel(core.LowPriority)
 	wop.PutOperator(op)
 }
