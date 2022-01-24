@@ -169,7 +169,6 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-
 	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, steps...)
 	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
 		FromRegion: source.GetMeta(),

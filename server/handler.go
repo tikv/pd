@@ -778,6 +778,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 			splitKeys = append(splitKeys, k)
 		}
 	}
+
 	op, err := operator.CreateSplitRegionOperator("admin-split-region", region, operator.OpAdmin, pdpb.CheckPolicy(policy), splitKeys)
 	if err != nil {
 		return err

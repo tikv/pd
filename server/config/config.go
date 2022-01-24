@@ -792,7 +792,6 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
-	defaultOperatorTimeFactor          = 6
 	defaultMaxRegionSize               = 96
 )
 

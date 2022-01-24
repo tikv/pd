@@ -192,7 +192,6 @@ const (
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	enableLocationReplacement      = "schedule.enable-location-replacement"
-	operatorTimeFactorKey          = "schedule.operator-time-factor"
 	maxRegionSizeKey               = "schedule.max-region-size"
 )
 
@@ -249,7 +248,7 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 
 // GetMaxRegionSize returns the max size of regions.
 func (o *PersistOptions) GetMaxRegionSize() uint64 {
-	return o.getTTLUintOr(maxRegionSizeKey, o.GetScheduleConfig().MaxRegionSize)
+	return o.GetScheduleConfig().MaxRegionSize
 }
 
 // SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
