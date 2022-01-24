@@ -45,17 +45,16 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 }
 
 func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
-
-	serviceAuditHistogram := prometheus.NewHistogramVec(
+	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "service",
-			Name:      "audit_handling_seconds",
+			Name:      "audit_handling_seconds_test",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"service", "method", "component"})
 
-	prometheus.MustRegister(serviceAuditHistogram)
+	prometheus.MustRegister(serviceAuditHistogramTest)
 	cfg := &metricutil.MetricConfig{
 		PushJob:     "prometheus",
 		PushAddress: "127.0.0.1:9091",
@@ -65,7 +64,7 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	}
 	metricutil.Push(cfg)
 
-	backend := NewPrometheusHistogramBackend(serviceAuditHistogram, true)
+	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
