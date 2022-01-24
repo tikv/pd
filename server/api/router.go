@@ -310,7 +310,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"))
 	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"))
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"))
-	registerFunc(apiRouter, "SwitchServiceMiddleware", "/admin/service-middleware", adminHandler.HanldeServiceMiddlewareSwitch, setMethods("POST"))
 	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"))
 
 	logHandler := newLogHandler(svr, rd)
