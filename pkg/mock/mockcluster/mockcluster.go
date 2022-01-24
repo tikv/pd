@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -42,7 +43,7 @@ const (
 	mb                   = (1 << 20)       // 1MiB
 )
 
-// Cluster is used to mock clusterInfo for test use.
+// Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
@@ -77,9 +78,9 @@ func (mc *Cluster) GetOpts() *config.PersistOptions {
 	return mc.PersistOptions
 }
 
-// AllocID allocs a new unique ID.
-func (mc *Cluster) AllocID() (uint64, error) {
-	return mc.Alloc()
+// GetAllocator returns the ID allocator.
+func (mc *Cluster) GetAllocator() id.Allocator {
+	return mc.IDAllocator
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
@@ -151,7 +152,7 @@ func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind statistics
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.AllocID()
+	peerID, err := mc.GetAllocator().Alloc()
 	if err != nil {
 		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
@@ -285,7 +286,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 	mc.AddRegionStore(storeID, regionCount)
 	for i := 0; i < leaderCount; i++ {
-		id, _ := mc.AllocID()
+		id, _ := mc.GetAllocator().Alloc()
 		mc.AddLeaderRegion(id, storeID)
 	}
 }

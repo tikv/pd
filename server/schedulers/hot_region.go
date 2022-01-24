@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -139,7 +138,7 @@ func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
-func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
@@ -147,12 +146,12 @@ func (h *hotScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
 	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
 }
 
-func (h *hotScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 
@@ -173,7 +172,7 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster opt.Cluster) []*o
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store
-func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster opt.Cluster) {
+func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule.Cluster) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster)
 	h.summaryPendingInfluence()
 	storesLoads := cluster.GetStoresLoads()
@@ -258,7 +257,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
 	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
@@ -301,7 +300,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster opt.Cluster) []*operator.Op
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
 	switch {
@@ -325,8 +324,8 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster opt.Cluster) []*operator.O
 }
 
 type balanceSolver struct {
+	schedule.Cluster
 	sche         *hotScheduler
-	cluster      opt.Cluster
 	stLoadDetail map[uint64]*statistics.StoreLoadDetail
 	rwTy         statistics.RWType
 	opTy         opType
@@ -411,7 +410,7 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 }
 
 func (bs *balanceSolver) getPriorities() []string {
-	querySupport := bs.sche.conf.checkQuerySupport(bs.cluster)
+	querySupport := bs.sche.conf.checkQuerySupport(bs.Cluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.rwTy {
@@ -429,10 +428,10 @@ func (bs *balanceSolver) getPriorities() []string {
 	return []string{}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster schedule.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
 	solver := &balanceSolver{
+		Cluster: cluster,
 		sche:    sche,
-		cluster: cluster,
 		rwTy:    rwTy,
 		opTy:    opTy,
 	}
@@ -441,7 +440,7 @@ func newBalanceSolver(sche *hotScheduler, cluster opt.Cluster, rwTy statistics.R
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.cluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
+	if bs.Cluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
 	switch bs.rwTy {
@@ -577,7 +576,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
-		minHotDegree := bs.cluster.GetOpts().GetHotRegionCacheHitsThreshold()
+		minHotDegree := bs.GetOpts().GetHotRegionCacheHitsThreshold()
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
 			// no in pending operator and no need cool down after transfer leader
 			items = append(items, item)
@@ -658,7 +657,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if !schedule.IsRegionReplicated(bs.cluster, region) {
+	if !schedule.IsRegionReplicated(bs.Cluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "abnormal-replica").Inc()
 		return false
@@ -668,7 +667,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 }
 
 func (bs *balanceSolver) getRegion() *core.RegionInfo {
-	region := bs.cluster.GetRegion(bs.cur.srcPeerStat.ID())
+	region := bs.GetRegion(bs.cur.srcPeerStat.ID())
 	if !bs.isRegionAvailable(region) {
 		return nil
 	}
@@ -705,7 +704,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore),
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
 
 		for _, detail := range bs.stLoadDetail {
@@ -717,7 +716,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.cluster, bs.cur.region, srcStore); leaderFilter != nil {
+		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
 			filters = append(filters, leaderFilter)
 		}
 
@@ -749,7 +748,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			}
 			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
-		if filter.Target(bs.cluster.GetOpts(), store, filters) {
+		if filter.Target(bs.GetOpts(), store, filters) {
 			id := store.GetID()
 			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
@@ -1061,7 +1060,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 		if bs.rwTy == statistics.Read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
-				bs.cluster,
+				bs,
 				bs.cur.region,
 				operator.OpHotRegion,
 				srcStoreID,
@@ -1072,7 +1071,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 			typ = "move-peer"
 			op, err = operator.CreateMovePeerOperator(
 				desc,
-				bs.cluster,
+				bs,
 				bs.cur.region,
 				operator.OpHotRegion,
 				srcStoreID,
@@ -1088,10 +1087,11 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 		targetLabel = strconv.FormatUint(dstStoreID, 10)
 		op, err = operator.CreateTransferLeaderOperator(
 			desc,
-			bs.cluster,
+			bs,
 			bs.cur.region,
 			srcStoreID,
 			dstStoreID,
+			[]uint64{},
 			operator.OpHotRegion)
 	}
 

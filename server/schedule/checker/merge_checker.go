@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -48,14 +47,14 @@ const (
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
-	cluster    opt.Cluster
+	cluster    schedule.Cluster
 	opts       *config.PersistOptions
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster opt.Cluster) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecker {
 	opts := cluster.GetOpts()
 	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
 	return &MergeChecker{
@@ -175,13 +174,46 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
-	return adjacent != nil && !m.splitCache.Exists(adjacent.GetID()) && !m.cluster.IsRegionHot(adjacent) &&
-		AllowMerge(m.cluster, region, adjacent) && checkPeerStore(m.cluster, region, adjacent) &&
-		schedule.IsRegionHealthy(adjacent) && schedule.IsRegionReplicated(m.cluster, adjacent)
+	if adjacent == nil {
+		checkerCounter.WithLabelValues("merge_checker", "adj-not-exist").Inc()
+		return false
+	}
+
+	if m.splitCache.Exists(adjacent.GetID()) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-recently-split").Inc()
+		return false
+	}
+
+	if m.cluster.IsRegionHot(adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-region-hot").Inc()
+		return false
+	}
+
+	if !AllowMerge(m.cluster, region, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-disallow-merge").Inc()
+		return false
+	}
+
+	if !checkPeerStore(m.cluster, region, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-peerstore").Inc()
+		return false
+	}
+
+	if !schedule.IsRegionHealthy(adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-special-peer").Inc()
+		return false
+	}
+
+	if !schedule.IsRegionReplicated(m.cluster, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-replica").Inc()
+		return false
+	}
+
+	return true
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
-func AllowMerge(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
+func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -237,7 +269,7 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // Check whether there is a peer of the adjacent region on an offline store,
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
-func checkPeerStore(cluster opt.Cluster, region, adjacent *core.RegionInfo) bool {
+func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
 	regionStoreIDs := region.GetStoreIds()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()

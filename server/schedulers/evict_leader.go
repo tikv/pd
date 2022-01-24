@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/unrolled/render"
 )
 
@@ -82,7 +81,7 @@ type evictLeaderSchedulerConfig struct {
 	mu                sync.RWMutex
 	storage           *core.Storage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           opt.Cluster
+	cluster           schedule.Cluster
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -207,7 +206,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -219,7 +218,7 @@ func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -227,7 +226,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -235,7 +234,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -258,7 +257,7 @@ func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) [
 	return dst
 }
 
-func scheduleEvictLeaderBatch(name, typ string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
+func scheduleEvictLeaderBatch(name, typ string, cluster schedule.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		once := scheduleEvictLeaderOnce(name, typ, cluster, storeRanges)
@@ -275,7 +274,7 @@ func scheduleEvictLeaderBatch(name, typ string, cluster opt.Cluster, storeRanges
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
+func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
 	ops := make([]*operator.Operator, 0, len(storeRanges))
 	for id, ranges := range storeRanges {
 		var filters []filter.Filter
@@ -299,13 +298,21 @@ func scheduleEvictLeaderOnce(name, typ string, cluster opt.Cluster, storeRanges 
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), filters...).RandomPick()
+		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			FilterTarget(cluster.GetOpts(), filters...)
+		// Compatible with old TiKV transfer leader logic.
+		target := candidates.RandomPick()
+		targets := candidates.PickAll()
+		// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
 		if target == nil {
 			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
+		targetIDs := make([]uint64, 0, len(targets))
+		for _, t := range targets {
+			targetIDs = append(targetIDs, t.GetID())
+		}
+		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue

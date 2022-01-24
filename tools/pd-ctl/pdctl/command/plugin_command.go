@@ -81,9 +81,9 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 	}
 	switch action {
 	case cluster.PluginLoad:
-		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
+		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
 	case cluster.PluginUnload:
-		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
+		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
 	default:
 		cmd.Printf("Unknown action %s\n", action)
 		return

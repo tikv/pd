@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 )
@@ -46,7 +45,7 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind oper
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.AllocID()
+	id, err := c.GetAllocator().Alloc()
 	if err != nil {
 		return nil, err
 	}
@@ -1095,7 +1094,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 
@@ -1258,12 +1257,18 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.WaitUntil(c, func(c *C) bool {
 		if res = stream.Recv(); res != nil {
-			return res.GetRegionId() == region.GetID() && res.GetTransferLeader().GetPeer().GetStoreId() == storeID
+			if res.GetRegionId() == region.GetID() {
+				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
+					if peer.GetStoreId() == storeID {
+						return true
+					}
+				}
+			}
 		}
 		return false
 	})
 	return region.Clone(
-		core.WithLeader(res.GetTransferLeader().GetPeer()),
+		core.WithLeader(region.GetStorePeer(storeID)),
 	)
 }
 
