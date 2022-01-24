@@ -1070,9 +1070,9 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 	case -3:
 		dim = "all"
 	case -2:
-		dim = dimToString(bs.firstPriority)
-	case -1:
 		dim = dimToString(bs.secondPriority)
+	case -1:
+		dim = dimToString(bs.firstPriority)
 	}
 
 	op.SetPriorityLevel(core.HighPriority)
