@@ -82,8 +82,14 @@ func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec, before
 
 // ProcessHTTPRequest is used to implement audit.Backend
 func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
-	requestInfo := requestutil.GetRequestInfo(req)
-	executionInfo := requestutil.GetExecutionInfo(req)
-	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component).Observe(float64(executionInfo.EndTimeStamp - requestInfo.StartTimeStamp))
+	requestInfo, ok := requestutil.RequestInfoFrom(req.Context())
+	if !ok {
+		return false
+	}
+	endTime, ok := requestutil.EndTimeFrom(req.Context())
+	if !ok {
+		return false
+	}
+	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component).Observe(float64(endTime - requestInfo.StartTimeStamp))
 	return true
 }
