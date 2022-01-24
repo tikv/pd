@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package storage
 
 import (
 	"context"
@@ -32,18 +32,19 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 )
 
-// HotRegionStorage is used to storage hot region info,
-// It will pull the hot region information according to the pullInterval interval.
-// And delete and save data beyond the remainingDays.
-// Close must be called after use.
+// HotRegionStorage is used to store the hot region info.
+// It will pull the hot region info according to the `pullInterval`,
+// and save/delete data beyond the `remainingDays`.
+// Close() must be called after the use.
 type HotRegionStorage struct {
-	*kv.LeveldbKV
-	encryptionKeyManager    *encryptionkm.KeyManager
+	*kv.LevelDBKV
+	ekm                     *encryptionkm.KeyManager
 	hotRegionLoopWg         sync.WaitGroup
 	batchHotInfo            map[string]*HistoryHotRegion
 	hotRegionInfoCtx        context.Context
@@ -56,7 +57,7 @@ type HotRegionStorage struct {
 }
 
 // HistoryHotRegions wraps historyHotRegion
-// it will return to tidb
+// it will be returned to TiDB.
 type HistoryHotRegions struct {
 	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
 }
@@ -132,18 +133,18 @@ func (h HotRegionType) String() string {
 // NewHotRegionsStorage create storage to store hot regions info.
 func NewHotRegionsStorage(
 	ctx context.Context,
-	path string,
-	encryptionKeyManager *encryptionkm.KeyManager,
+	filePath string,
+	ekm *encryptionkm.KeyManager,
 	hotRegionStorageHandler HotRegionStorageHandler,
 ) (*HotRegionStorage, error) {
-	levelDB, err := kv.NewLeveldbKV(path)
+	levelDB, err := kv.NewLevelDBKV(filePath)
 	if err != nil {
 		return nil, err
 	}
 	hotRegionInfoCtx, hotRegionInfoCancle := context.WithCancel(ctx)
 	h := HotRegionStorage{
-		LeveldbKV:               levelDB,
-		encryptionKeyManager:    encryptionKeyManager,
+		LevelDBKV:               levelDB,
+		ekm:                     ekm,
 		batchHotInfo:            make(map[string]*HistoryHotRegion),
 		hotRegionInfoCtx:        hotRegionInfoCtx,
 		hotRegionInfoCancel:     hotRegionInfoCancle,
@@ -157,7 +158,7 @@ func NewHotRegionsStorage(
 	return &h, nil
 }
 
-// delete hot region which update_time is smaller than time.Now() minus remain day in the background.
+// Delete hot region whose update_time is smaller than time.Now() minus remain day in the background.
 func (h *HotRegionStorage) backgroundDelete() {
 	// make delete happened in defaultDeleteTime clock.
 	now := time.Now()
@@ -231,12 +232,12 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 		requireType = strings.ToLower(requireType)
 		startKey := HotRegionStorePath(requireType, startTime, 0)
 		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
-		iter := h.LeveldbKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+		iter := h.LevelDBKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}
 	return HotRegionStorageIterator{
 		iters:                iters,
-		encryptionKeyManager: h.encryptionKeyManager,
+		encryptionKeyManager: h.ekm,
 	}
 }
 
@@ -244,7 +245,7 @@ func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime
 func (h *HotRegionStorage) Close() error {
 	h.hotRegionInfoCancel()
 	h.hotRegionLoopWg.Wait()
-	if err := h.LeveldbKV.Close(); err != nil {
+	if err := h.LevelDBKV.Close(); err != nil {
 		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()
 	}
 	return nil
@@ -270,16 +271,16 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 	for i := range historyHotRegions {
 		region := &metapb.Region{
 			Id:             historyHotRegions[i].RegionID,
-			StartKey:       HexRegionKey([]byte(historyHotRegions[i].StartKey)),
-			EndKey:         HexRegionKey([]byte(historyHotRegions[i].EndKey)),
+			StartKey:       core.HexRegionKey([]byte(historyHotRegions[i].StartKey)),
+			EndKey:         core.HexRegionKey([]byte(historyHotRegions[i].EndKey)),
 			EncryptionMeta: historyHotRegions[i].EncryptionMeta,
 		}
-		region, err := encryption.EncryptRegion(region, h.encryptionKeyManager)
+		region, err := encryption.EncryptRegion(region, h.ekm)
 		if err != nil {
 			return err
 		}
-		historyHotRegions[i].StartKey = String(region.StartKey)
-		historyHotRegions[i].EndKey = String(region.EndKey)
+		historyHotRegions[i].StartKey = core.String(region.StartKey)
+		historyHotRegions[i].EndKey = core.String(region.EndKey)
 		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
@@ -333,7 +334,7 @@ func (h *HotRegionStorage) flush() error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	if err := h.LeveldbKV.Write(batch, nil); err != nil {
+	if err := h.LevelDBKV.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	h.batchHotInfo = make(map[string]*HistoryHotRegion)
@@ -343,7 +344,7 @@ func (h *HotRegionStorage) flush() error {
 func (h *HotRegionStorage) delete(reservedDays int) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	db := h.LeveldbKV
+	db := h.LevelDBKV
 	batch := new(leveldb.Batch)
 	for _, hotRegionType := range HotRegionTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
@@ -397,8 +398,8 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	if err := encryption.DecryptRegion(region, it.encryptionKeyManager); err != nil {
 		return nil, err
 	}
-	message.StartKey = String(region.StartKey)
-	message.EndKey = String(region.EndKey)
+	message.StartKey = core.String(region.StartKey)
+	message.EndKey = core.String(region.EndKey)
 	message.EncryptionMeta = nil
 	return &message, nil
 }

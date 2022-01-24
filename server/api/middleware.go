@@ -18,11 +18,44 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
+	"github.com/urfave/negroni"
 )
+
+// requestInfoMiddleware is used to gather info from requsetInfo
+type requestInfoMiddleware struct {
+	svr *server.Server
+}
+
+func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
+	return &requestInfoMiddleware{svr: s}
+}
+
+func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !rm.svr.IsServiceMiddlewareEnabled() {
+		next(w, r)
+		return
+	}
+
+	requestInfo := requestutil.GetRequestInfo(r)
+	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
+
+	failpoint.Inject("addRequestInfoMiddleware", func() {
+		w.Header().Add("service-label", requestInfo.ServiceLabel)
+		w.Header().Add("body-param", requestInfo.BodyParam)
+		w.Header().Add("url-param", requestInfo.URLParam)
+		w.Header().Add("method", requestInfo.Method)
+		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("ip", requestInfo.IP)
+	})
+
+	next(w, r)
+}
 
 type clusterMiddleware struct {
 	s  *server.Server

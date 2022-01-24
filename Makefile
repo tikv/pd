@@ -98,6 +98,17 @@ stores-dump:
 
 .PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump
 
+#### Docker image ####
+
+docker-image:
+	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
+	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
+	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
+	fi
+	docker build --no-cache -t tikv/pd .
+
+.PHONY: docker-image
+
 #### Build utils ###
 
 swagger-spec: install-tools
@@ -133,7 +144,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools static tidy check-plugin errdoc check-testing-t docker-build-test
+check: install-tools static tidy check-plugin errdoc check-testing-t
 
 static: install-tools
 	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
@@ -145,7 +156,6 @@ static: install-tools
 	@revive -formatter friendly -config revive.toml $(PACKAGES)
 
 tidy:
-	@echo "go mod tidy"
 	go mod tidy
 	git diff --quiet go.mod go.sum
 
@@ -156,13 +166,6 @@ check-plugin:
 errdoc: install-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
-
-docker-build-test:
-	$(eval DOCKER_PS_EXIT_CODE=$(shell docker ps > /dev/null 2>&1 ; echo $$?))
-	@if [ $(DOCKER_PS_EXIT_CODE) -ne 0 ]; then \
-	echo "Encountered problem while invoking docker cli. Is the docker daemon running?"; \
-	fi
-	docker build --no-cache -t tikv/pd .
 
 check-testing-t:
 	./scripts/check-testing-t.sh
@@ -226,15 +229,12 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-test-with-cover: install-tools dashboard-ui
-	# testing all pkgs (expect TSO consistency test) with converage...
+ci-test-job: install-tools dashboard-ui
+	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	for PKG in $(TEST_PKGS); do\
-		set -euo pipefail;\
-		CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
-		rm coverage.tmp;\
-	done
+	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && $(DEADLOCK_DISABLE) && exit 1;}
 	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 

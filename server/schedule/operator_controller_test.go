@@ -443,9 +443,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 		operator.RemovePeer{FromStore: 1},
 	}
 
-	op := operator.NewTestOperator(1,
-		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
-		operator.OpRegion, steps...)
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0}, operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), IsTrue)
 	c.Assert(stream.MsgLength(), Equals, 1)
 
@@ -466,8 +464,7 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(stream.MsgLength(), Equals, 2)
 
 	// add and dispatch op again, the op should be stale
-	op = operator.NewTestOperator(1,
-		&metapb.RegionEpoch{ConfVer: 0, Version: 0},
+	op = operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0},
 		operator.OpRegion, steps...)
 	c.Assert(controller.AddOperator(op), IsTrue)
 	c.Assert(op.ConfVerChanged(region), Equals, uint64(0))

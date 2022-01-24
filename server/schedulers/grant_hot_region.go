@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -76,7 +77,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &grantHotRegionSchedulerConfig{StoreIDs: make([]uint64, 0), storage: storage}
 		conf.cluster = opController.GetCluster()
 		if err := decoder(conf); err != nil {
@@ -88,7 +89,7 @@ func init() {
 
 type grantHotRegionSchedulerConfig struct {
 	mu          sync.RWMutex
-	storage     *core.Storage
+	storage     endpoint.ConfigStorage
 	cluster     schedule.Cluster
 	StoreIDs    []uint64 `json:"store-id"`
 	StoreLeadID uint64   `json:"store-leader-id"`
@@ -273,21 +274,21 @@ func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
-	storeInfos := statistics.SummaryStoreInfos(cluster)
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
 	var stLoadInfos map[uint64]*statistics.StoreLoadDetail
 	switch typ {
 	case statistics.Read:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionReadStats(),
 			isTraceRegionFlow,
 			statistics.Read, core.RegionKind)
 	case statistics.Write:
-		stLoadInfos = summaryStoresLoad(
+		stLoadInfos = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
 			cluster.RegionWriteStats(),

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +43,7 @@ func init() {
 			return nil
 		}
 	})
-	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
 
 		var data map[string]interface{}
@@ -173,7 +174,7 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store
 func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule.Cluster) {
-	h.stInfos = statistics.SummaryStoreInfos(cluster)
+	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
 	h.summaryPendingInfluence()
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
@@ -182,13 +183,13 @@ func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule
 	case statistics.Read:
 		// update read statistics
 		regionRead := cluster.RegionReadStats()
-		h.stLoadInfos[readLeader] = summaryStoresLoad(
+		h.stLoadInfos[readLeader] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionRead,
 			isTraceRegionFlow,
 			statistics.Read, core.LeaderKind)
-		h.stLoadInfos[readPeer] = summaryStoresLoad(
+		h.stLoadInfos[readPeer] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionRead,
@@ -197,13 +198,13 @@ func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule
 	case statistics.Write:
 		// update write statistics
 		regionWrite := cluster.RegionWriteStats()
-		h.stLoadInfos[writeLeader] = summaryStoresLoad(
+		h.stLoadInfos[writeLeader] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionWrite,
 			isTraceRegionFlow,
 			statistics.Write, core.LeaderKind)
-		h.stLoadInfos[writePeer] = summaryStoresLoad(
+		h.stLoadInfos[writePeer] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			storesLoads,
 			regionWrite,
@@ -1124,42 +1125,6 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 		Count: 1,
 	}
 	return op, infl
-}
-
-func (h *hotScheduler) GetHotStatus(typ statistics.RWType) *statistics.StoreHotPeersInfos {
-	h.RLock()
-	defer h.RUnlock()
-	var leaderTyp, peerTyp resourceType
-	switch typ {
-	case statistics.Read:
-		leaderTyp, peerTyp = readLeader, readPeer
-	case statistics.Write:
-		leaderTyp, peerTyp = writeLeader, writePeer
-	}
-	asLeader := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[leaderTyp]))
-	asPeer := make(statistics.StoreHotPeersStat, len(h.stLoadInfos[peerTyp]))
-	for id, detail := range h.stLoadInfos[leaderTyp] {
-		asLeader[id] = detail.ToHotPeersStat()
-	}
-	for id, detail := range h.stLoadInfos[peerTyp] {
-		asPeer[id] = detail.ToHotPeersStat()
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
-}
-
-func (h *hotScheduler) GetPendingInfluence() map[uint64]*statistics.Influence {
-	h.RLock()
-	defer h.RUnlock()
-	ret := make(map[uint64]*statistics.Influence, len(h.stInfos))
-	for id, info := range h.stInfos {
-		if info.PendingSum != nil {
-			ret[id] = info.PendingSum
-		}
-	}
-	return ret
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]

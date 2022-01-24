@@ -29,8 +29,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// revive:disable:unused-parameter
-
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {

@@ -97,6 +97,7 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 				IsPassive: true,
 			},
 		}...)
+		op.SetDesc(desc)
 		rb.PutOperator(op)
 		op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 			operator.RemovePeer{FromStore: uint64(3)},

@@ -32,12 +32,12 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -189,9 +189,9 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
-
+	co.prepareChecker.isPrepared = true
 	// Transfer peer from store 4 to store 1.
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addRegionStore(3, 30), IsNil)
@@ -535,6 +535,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
@@ -574,11 +575,12 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 7)
+	c.Assert(co.prepareChecker.sum, Equals, 7)
 }
 
 func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
@@ -613,7 +615,7 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	nr := &metapb.Region{Id: 8, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 8)
+	c.Assert(co.prepareChecker.sum, Equals, 8)
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	c.Assert(tc.GetRegion(9).GetLeader().GetStoreId(), Equals, uint64(0))
@@ -644,12 +646,12 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
-	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
+	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)
 	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
 
-	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), IsNil)
 
@@ -734,7 +736,6 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	storage = tc.RaftCluster.storage
 	c.Assert(co.schedulers, HasLen, 3)
 	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
@@ -832,11 +833,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	region := tc.GetRegion(1)
-	tc.prepareChecker.collect(region)
+	co.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
-	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 2)
@@ -847,6 +846,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 
 	// Recreate coordinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co.prepareChecker.collect(region)
 	co.run()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
@@ -1105,7 +1105,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
-	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1189,7 +1189,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	_, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, core.NewStorage(kv.NewMemoryKV()), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	sc := newScheduleController(co, lb)
 

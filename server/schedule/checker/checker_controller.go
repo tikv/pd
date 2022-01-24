@@ -16,9 +16,11 @@ package checker
 
 import (
 	"context"
+	"time"
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -43,6 +45,8 @@ type Controller struct {
 	jointStateChecker *JointStateChecker
 	priorityInspector *PriorityInspector
 	regionWaitingList cache.Cache
+	suspectRegions    *cache.TTLUint64 // suspectRegions are regions that may need fix
+	suspectKeyRanges  *cache.TTLString // suspect key-range regions that may need fix
 }
 
 // NewController create a new Controller.
@@ -61,6 +65,8 @@ func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *p
 		jointStateChecker: NewJointStateChecker(cluster),
 		priorityInspector: NewPriorityInspector(cluster),
 		regionWaitingList: regionWaitingList,
+		suspectRegions:    cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
+		suspectKeyRanges:  cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
 	}
 }
 
@@ -145,6 +151,50 @@ func (c *Controller) GetPriorityRegions() []uint64 {
 // RemovePriorityRegions removes priority region from priority queue
 func (c *Controller) RemovePriorityRegions(id uint64) {
 	c.priorityInspector.RemovePriorityRegion(id)
+}
+
+// AddSuspectRegions adds regions to suspect list.
+func (c *Controller) AddSuspectRegions(regionIDs ...uint64) {
+	for _, regionID := range regionIDs {
+		c.suspectRegions.Put(regionID, nil)
+	}
+}
+
+// GetSuspectRegions gets all suspect regions.
+func (c *Controller) GetSuspectRegions() []uint64 {
+	return c.suspectRegions.GetAllID()
+}
+
+// RemoveSuspectRegion removes region from suspect list.
+func (c *Controller) RemoveSuspectRegion(id uint64) {
+	c.suspectRegions.Remove(id)
+}
+
+// AddSuspectKeyRange adds the key range with the its ruleID as the key
+// The instance of each keyRange is like following format:
+// [2][]byte: start key/end key
+func (c *Controller) AddSuspectKeyRange(start, end []byte) {
+	c.suspectKeyRanges.Put(keyutil.BuildKeyRangeKey(start, end), [2][]byte{start, end})
+}
+
+// PopOneSuspectKeyRange gets one suspect keyRange group.
+// it would return value and true if pop success, or return empty [][2][]byte and false
+// if suspectKeyRanges couldn't pop keyRange group.
+func (c *Controller) PopOneSuspectKeyRange() ([2][]byte, bool) {
+	_, value, success := c.suspectKeyRanges.Pop()
+	if !success {
+		return [2][]byte{}, false
+	}
+	v, ok := value.([2][]byte)
+	if !ok {
+		return [2][]byte{}, false
+	}
+	return v, true
+}
+
+// ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
+func (c *Controller) ClearSuspectKeyRanges() {
+	c.suspectKeyRanges.Clear()
 }
 
 // GetPauseController returns pause controller of the checker

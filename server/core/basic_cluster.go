@@ -397,6 +397,15 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.PutRegion(region)
 }
 
+// RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
+func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
+	bc.Lock()
+	defer bc.Unlock()
+	if region := bc.Regions.GetRegion(id); region != nil {
+		bc.Regions.RemoveRegion(region)
+	}
+}
+
 // RemoveRegion removes RegionInfo from regionTree and regionMap.
 func (bc *BasicCluster) RemoveRegion(region *RegionInfo) {
 	bc.Lock()
