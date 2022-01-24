@@ -140,24 +140,6 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 }
 
 // @Tags admin
-// @Summary switch Service Middlewares including ServiceInfo, Audit and rate limit
-// @Param enable query string true "enable" Enums(true, false)
-// @Produce json
-// @Success 200 {string} string "Switching Service middleware is successful."
-// @Failure 400 {string} string "The input is invalid."
-// @Router /admin/service-middleware [POST]
-func (h *adminHandler) HanldeServiceMiddlewareSwitch(w http.ResponseWriter, r *http.Request) {
-	enableStr := r.URL.Query().Get("enable")
-	enable, err := strconv.ParseBool(enableStr)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "The input is invalid.")
-		return
-	}
-	h.svr.SetServiceMiddleware(enable)
-	h.rd.JSON(w, http.StatusOK, "Switching Service middleware is successful.")
-}
-
-// @Tags admin
 // @Summary switch audit middleware
 // @Param enable query string true "enable" Enums(true, false)
 // @Produce json

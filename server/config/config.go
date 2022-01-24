@@ -163,8 +163,7 @@ type Config struct {
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
-	EnableServiceMiddleware bool
-	EnableAuditMiddleware   bool
+	EnableAuditMiddleware bool
 }
 
 // NewConfig creates a new config.
