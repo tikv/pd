@@ -991,6 +991,10 @@ func stepRank(rk0 float64, step float64) func(float64) int64 {
 	}
 }
 
+// Once we are ready to build the operator, we must ensure the following things:
+// 1. the source store and destination store in the current solution are not nil
+// 2. the peer we choose as a source in the current solution is not nil and it belongs to the source store
+// 3. the region which owns the peer in the current solution is not nil and its ID should equal to the peer's region ID
 func (bs *balanceSolver) isReadyToBuild() bool {
 	return bs.cur.srcStore != nil && bs.cur.dstStore != nil &&
 		bs.cur.srcPeerStat != nil && bs.cur.srcPeerStat.StoreID == bs.cur.srcStore.GetID() &&
