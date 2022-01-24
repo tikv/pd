@@ -741,14 +741,10 @@ type ScheduleConfig struct {
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 
-	// OperatorTimeFactor is the time factor for operator.
-	// The max duration of one operator step is: multi(region_size, factor)
-	// Default: 6 s/MB
-	OperatorTimeFactor uint64 `toml:"operator-time-factor" json:"operator-time-factor"`
-
 	// MaxRegionSize is the max size of region.
-	// default: 96MB
-	MaxRegionSize uint64 `toml:"max-region-size" json:"max-region-size"`
+	// It's dangerous to change it.
+	// Default: 96MB
+	MaxRegionSize uint64 `toml:"max-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -852,9 +848,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
-	}
-	if !meta.IsDefined("operator-time-factor") {
-		adjustUint64(&c.OperatorTimeFactor, defaultOperatorTimeFactor)
 	}
 	if !meta.IsDefined("max-region-size") {
 		adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
@@ -37,6 +38,7 @@ type OpStep interface {
 	IsFinish(region *core.RegionInfo) bool
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
+	TimeOut(start time.Time) bool
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -99,6 +101,11 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	to.LeaderCount++
 }
 
+// TimeOut returns true if the step is timeout.
+func (tl TransferLeader) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64
@@ -152,10 +159,17 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 	return nil
 }
 
+// TimeOut returns true if the step is timeout.
+func (ap AddPeer) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	regionSize      int64
+	rate            float64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -211,6 +225,11 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
+// TimeOut returns true if the step is timeout.
+func (al AddLearner) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
 type PromoteLearner struct {
 	ToStore, PeerID uint64
@@ -248,6 +267,11 @@ func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionI
 
 // Influence calculates the store difference that current step makes.
 func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+
+// TimeOut returns true if the step is timeout.
+func (pl PromoteLearner) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
 
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
@@ -300,6 +324,11 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
+// TimeOut returns true if the step is timeout.
+func (rp RemovePeer) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // MergeRegion is an OpStep that merge two regions.
 type MergeRegion struct {
 	FromRegion *metapb.Region
@@ -348,6 +377,11 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 	}
 }
 
+// TimeOut returns true if the step is timeout.
+func (mr MergeRegion) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // SplitRegion is an OpStep that splits a region.
 type SplitRegion struct {
 	StartKey, EndKey []byte
@@ -385,6 +419,11 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, region *core.RegionInfo
 	return nil
 }
 
+// TimeOut returns true if the step is timeout.
+func (sr SplitRegion) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
@@ -410,6 +449,11 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 		return peer.GetId() == dv.PeerID
 	}
 	return false
+}
+
+// TimeOut returns true if the step is timeout.
+func (dv DemoteVoter) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -553,6 +597,11 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 	}
 }
 
+// TimeOut returns true if the step is timeout.
+func (cpe ChangePeerV2Enter) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
+
 // ChangePeerV2Leave is an OpStep that leaves the joint state.
 type ChangePeerV2Leave struct {
 	PromoteLearners []PromoteLearner
@@ -671,6 +720,11 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.Reg
 
 // Influence calculates the store difference that current step makes.
 func (cpl ChangePeerV2Leave) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
+
+// TimeOut returns true if the step is timeout.
+func (cpl ChangePeerV2Leave) TimeOut(start time.Time) bool {
+	return time.Since(start) > FastOperatorWaitTime
+}
 
 func validateStore(ci ClusterInformer, id uint64) error {
 	store := ci.GetBasicCluster().GetStore(id)

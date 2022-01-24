@@ -34,7 +34,7 @@ import (
 
 const (
 	maxTargetRegionSize = 500
-	maxRegionFactor     = 5
+	maxRegionSizeFactor = 5
 )
 
 // When a region has label `merge_option=deny`, skip merging the region.
@@ -148,7 +148,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	maxSize := int64(maxRegionFactor * m.cluster.GetOpts().GetMaxRegionSize())
+	maxSize := int64(maxRegionSizeFactor * m.cluster.GetOpts().GetMaxRegionSize())
 	if maxSize < maxTargetRegionSize {
 		maxSize = maxTargetRegionSize
 	}

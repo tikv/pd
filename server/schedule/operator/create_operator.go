@@ -114,7 +114,7 @@ func CreateMoveLeaderOperator(desc string, ci ClusterInformer, region *core.Regi
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte, factor uint64) (*Operator, error) {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) (*Operator, error) {
 	if core.IsInJointState(region.GetPeers()...) {
 		return nil, errors.Errorf("cannot split region which is in joint state")
 	}
@@ -133,7 +133,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), factor, step), nil
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, step), nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
@@ -169,9 +169,9 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-	factor := cluster.GetOpts().GetOperatorTimeFactor()
-	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, source.GetApproximateSize(), factor, steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, target.GetApproximateSize(), factor, MergeRegion{
+
+	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, steps...)
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -275,5 +275,5 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 	}
 
 	b.execChangePeerV2(false, true)
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), cluster.GetOpts().GetOperatorTimeFactor(), b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.steps...), nil
 }

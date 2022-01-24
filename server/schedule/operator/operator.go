@@ -54,12 +54,10 @@ type Operator struct {
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
-	ApproximateSize  int64
-	TimeFactor       uint64
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, factor uint64, steps ...OpStep) *Operator {
+func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
 	level := core.NormalPriority
 	if kind&OpAdmin != 0 {
 		level = core.HighPriority
@@ -75,8 +73,6 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		status:          NewOpStatusTracker(),
 		level:           level,
 		AdditionalInfos: make(map[string]string),
-		ApproximateSize: approximateSize,
-		TimeFactor:      factor,
 	}
 }
 
@@ -85,9 +81,9 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, size:%v，steps:[%s])",
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v，steps:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
-		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "))
+		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), strings.Join(stepStrs, ", "))
 	if o.CheckSuccess() {
 		s += " finished"
 	}
@@ -230,10 +226,15 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	if o.kind&OpRegion != 0 {
-		return o.status.CheckTimeout(SlowOperatorWaitTime)
+	currentStep := int(atomic.LoadInt32(&o.currentStep))
+	var startTime time.Time
+	if currentStep == 0 {
+		startTime = o.GetStartTime()
+	} else {
+		startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
 	}
-	return o.status.CheckTimeout(FastOperatorWaitTime)
+	step := o.steps[currentStep]
+	return o.status.CheckStepTimeout(startTime, step)
 }
 
 // Len returns the operator's steps count.
@@ -370,13 +371,7 @@ func (o *Operator) GetAdditionalInfo() string {
 	return ""
 }
 
-// mock region default region size is 96Mb.
-const (
-	mockRegionSize = 96 * (1 << 20)
-	mockFactor     = 6
-)
-
 // NewTestOperator creates a test operator.
 func NewTestOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator(desc, brief, regionID, regionEpoch, kind, mockRegionSize, mockFactor, steps...)
+	return NewOperator(desc, brief, regionID, regionEpoch, kind, steps...)
 }

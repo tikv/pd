@@ -247,11 +247,6 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 	return o.GetScheduleConfig().SplitMergeInterval.Duration
 }
 
-// GetOperatorTimeFactor returns the operator time factor.
-func (o *PersistOptions) GetOperatorTimeFactor() uint64 {
-	return o.getTTLUintOr(operatorTimeFactorKey, o.GetScheduleConfig().OperatorTimeFactor)
-}
-
 // GetMaxRegionSize returns the max size of regions.
 func (o *PersistOptions) GetMaxRegionSize() uint64 {
 	return o.getTTLUintOr(maxRegionSizeKey, o.GetScheduleConfig().MaxRegionSize)

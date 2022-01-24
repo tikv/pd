@@ -42,33 +42,37 @@ const (
 	EngineTiFlash = "tiflash"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
+
+	OperatorExecutorRate = 6.0
 )
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	leaderCount         int
-	regionCount         int
-	leaderSize          int64
-	regionSize          int64
-	pendingPeerCount    int
-	lastPersistTime     time.Time
-	leaderWeight        float64
-	regionWeight        float64
-	limiter             map[storelimit.Type]*storelimit.StoreLimit
+	pauseLeaderTransfer  bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted     bool // this store has been evicted as a slow store, should not transfer leader to it
+	leaderCount          int
+	regionCount          int
+	leaderSize           int64
+	regionSize           int64
+	pendingPeerCount     int
+	lastPersistTime      time.Time
+	leaderWeight         float64
+	regionWeight         float64
+	limiter              map[storelimit.Type]*storelimit.StoreLimit
+	operatorExecutorRate float64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:         store,
-		storeStats:   newStoreStats(),
-		leaderWeight: 1.0,
-		regionWeight: 1.0,
-		limiter:      make(map[storelimit.Type]*storelimit.StoreLimit),
+		meta:                 store,
+		storeStats:           newStoreStats(),
+		leaderWeight:         1.0,
+		regionWeight:         1.0,
+		limiter:              make(map[storelimit.Type]*storelimit.StoreLimit),
+		operatorExecutorRate: OperatorExecutorRate,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -265,6 +269,12 @@ func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLi
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.limiter[limitType]
+}
+
+func (s *StoreInfo) GetOperatorExecutorRate() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.operatorExecutorRate
 }
 
 const minWeight = 1e-6
