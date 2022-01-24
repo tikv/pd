@@ -49,18 +49,6 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 	}
 }
 
-// ExecutionInfo holds request execution info
-type ExecutionInfo struct {
-	EndTimeStamp int64
-}
-
-// GetExecutionInfo returns request execution info from http.Request
-func GetExecutionInfo(r *http.Request) ExecutionInfo {
-	return ExecutionInfo{
-		EndTimeStamp: time.Now().Unix(),
-	}
-}
-
 func getURLParam(r *http.Request) string {
 	buf, err := json.Marshal(r.URL.Query())
 	if err != nil {
