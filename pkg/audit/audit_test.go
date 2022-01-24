@@ -15,9 +15,15 @@
 package audit
 
 import (
+	"net/http"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/requestutil"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
 func Test(t *testing.T) {
@@ -36,4 +42,37 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 
 	labels2 := &BackendLabels{Labels: []string{"testFail"}}
 	c.Assert(matcher.Match(labels2), Equals, false)
+}
+
+func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
+
+	serviceAuditHistogram := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_handling_seconds",
+			Help:      "PD server service handling audit",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"service", "method", "component"})
+
+	prometheus.MustRegister(serviceAuditHistogram)
+	cfg := &metricutil.MetricConfig{
+		PushJob:     "prometheus",
+		PushAddress: "127.0.0.1:9091",
+		PushInterval: typeutil.Duration{
+			Duration: time.Second,
+		},
+	}
+	metricutil.Push(cfg)
+
+	backend := NewPrometheusHistogramBackend(serviceAuditHistogram, true)
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
+	info := requestutil.GetRequestInfo(req)
+	info.ServiceLabel = "test"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	executionInfo := requestutil.GetExecutionInfo(req)
+	req = req.WithContext(requestutil.WithExecutionInfo(req.Context(), executionInfo))
+
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	time.Sleep(10 * time.Second)
 }

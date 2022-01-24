@@ -110,6 +110,15 @@ var (
 			Name:      "info",
 			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
+
+	serviceAuditHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_handling_seconds",
+			Help:      "PD server service handling audit",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"service", "method", "component"})
 )
 
 func init() {
@@ -124,4 +133,5 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(serverInfo)
+	prometheus.MustRegister(serviceAuditHistogram)
 }

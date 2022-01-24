@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/requestutil"
 )
 
 const (
@@ -80,7 +81,9 @@ func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec, before
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (l *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
-
+func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
+	requestInfo := requestutil.GetRequestInfo(req)
+	executionInfo := requestutil.GetExecutionInfo(req)
+	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component).Observe(float64(executionInfo.EndTimeStamp - requestInfo.StartTimeStamp))
 	return true
 }
