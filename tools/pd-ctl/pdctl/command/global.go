@@ -57,6 +57,8 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	return nil
 }
 
+type convertOutputFunc func(string) string
+
 type bodyOption struct {
 	body io.Reader
 }
