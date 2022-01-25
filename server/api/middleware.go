@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
@@ -107,6 +108,7 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
+		log.Error("failed to get request info when auditing")
 		next(w, r)
 	}
 

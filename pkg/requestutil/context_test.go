@@ -58,7 +58,7 @@ func (s *testRequestContextSuite) TestRequestInfo(c *C) {
 	c.Assert(result.StartTimeStamp, Equals, timeNow)
 }
 
-func (s *testRequestContextSuite) TestExcutionInfo(c *C) {
+func (s *testRequestContextSuite) TestEndTime(c *C) {
 	ctx := context.Background()
 	_, ok := EndTimeFrom(ctx)
 	c.Assert(ok, Equals, false)
