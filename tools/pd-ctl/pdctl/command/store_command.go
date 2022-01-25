@@ -251,7 +251,7 @@ func convertToStoreInfo(content string) string {
 		return content
 	}
 	store.Store.State = 0
-	byteArr, err := json.Marshal(store)
+	byteArr, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
 		return content
 	}
@@ -267,7 +267,7 @@ func convertToStoresInfo(content string) string {
 	for _, store := range stores.Stores {
 		store.Store.State = 0
 	}
-	byteArr, err := json.Marshal(stores)
+	byteArr, err := json.MarshalIndent(stores, "", "  ")
 	if err != nil {
 		return content
 	}
