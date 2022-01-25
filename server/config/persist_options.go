@@ -193,7 +193,6 @@ const (
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	enableLocationReplacement      = "schedule.enable-location-replacement"
-	maxRegionSizeKey               = "schedule.max-region-size"
 )
 
 var supportedTTLConfigs = []string{
