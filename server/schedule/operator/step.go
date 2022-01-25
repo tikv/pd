@@ -38,7 +38,7 @@ type OpStep interface {
 	IsFinish(region *core.RegionInfo) bool
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
-	TimeOut(start time.Time) bool
+	Timeout(start time.Time) bool
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -102,7 +102,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 }
 
 // TimeOut returns true if the step is timeout.
-func (tl TransferLeader) TimeOut(start time.Time) bool {
+func (tl TransferLeader) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -160,7 +160,7 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 }
 
 // TimeOut returns true if the step is timeout.
-func (ap AddPeer) TimeOut(start time.Time) bool {
+func (ap AddPeer) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -226,7 +226,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // TimeOut returns true if the step is timeout.
-func (al AddLearner) TimeOut(start time.Time) bool {
+func (al AddLearner) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -269,7 +269,7 @@ func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionI
 func (pl PromoteLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // TimeOut returns true if the step is timeout.
-func (pl PromoteLearner) TimeOut(start time.Time) bool {
+func (pl PromoteLearner) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -325,7 +325,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // TimeOut returns true if the step is timeout.
-func (rp RemovePeer) TimeOut(start time.Time) bool {
+func (rp RemovePeer) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -378,7 +378,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // TimeOut returns true if the step is timeout.
-func (mr MergeRegion) TimeOut(start time.Time) bool {
+func (mr MergeRegion) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -420,7 +420,7 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, region *core.RegionInfo
 }
 
 // TimeOut returns true if the step is timeout.
-func (sr SplitRegion) TimeOut(start time.Time) bool {
+func (sr SplitRegion) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -598,7 +598,7 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 }
 
 // TimeOut returns true if the step is timeout.
-func (cpe ChangePeerV2Enter) TimeOut(start time.Time) bool {
+func (cpe ChangePeerV2Enter) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -722,7 +722,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.Reg
 func (cpl ChangePeerV2Leave) Influence(opInfluence OpInfluence, region *core.RegionInfo) {}
 
 // TimeOut returns true if the step is timeout.
-func (cpl ChangePeerV2Leave) TimeOut(start time.Time) bool {
+func (cpl ChangePeerV2Leave) Timeout(start time.Time) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 

@@ -133,7 +133,7 @@ func (trk *OpStatusTracker) CheckStepTimeout(start time.Time, step OpStep) bool 
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
 	if trk.current == STARTED {
-		if !step.TimeOut(start) {
+		if !step.Timeout(start) {
 			return false
 		}
 		_ = trk.toLocked(TIMEOUT)
