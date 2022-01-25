@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 // requestInfoMiddleware is used to gather info from requsetInfo
@@ -109,7 +108,7 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
-		log.Error("can not get request info when auditing", zap.Bool("request info from request context", ok))
+		log.Error("failed to get request info when auditing")
 		next(w, r)
 	}
 
