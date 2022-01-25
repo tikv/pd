@@ -68,9 +68,17 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
+	info.Component = "user1"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	endTime := time.Now().Unix()
+	endTime := time.Now().Unix() + 20
 	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
 
 	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+
+	info.Component = "user2"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	// For test, sleep time needs longer than the push interval
+	time.Sleep(2 * time.Second)
 }
