@@ -124,7 +124,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OpStep{
-		AddPeer{ToStore: 1, PeerID: 1},
+		AddPeer{ToStore: 1, PeerID: 1, regionSize: 10, executorRate: 6},
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
@@ -136,6 +136,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.CheckTimeout(), IsFalse)
 	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
+	op.stepsTime[op.currentStep-1] = op.GetReachTimeOf(STARTED).Unix()
 	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 	res, err := json.Marshal(op)
@@ -361,7 +362,7 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, STARTED)
-		op.status.setTime(STARTED, time.Now().Add(-SlowOperatorWaitTime))
+		op.stepsTime[op.currentStep-1] = time.Now().Add(-SlowOperatorWaitTime).Unix()
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, TIMEOUT)
 	}
@@ -416,5 +417,57 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 	}
 	for _, v := range testdata {
 		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
+	}
+}
+
+func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
+	testdata := []struct {
+		step   []OpStep
+		start  time.Time
+		expect bool
+	}{{
+		// case1: 10GB region will have 60,000s to executor.
+		step:   []OpStep{AddLearner{executorRate: 6, regionSize: 10 * 1000}, AddPeer{executorRate: 6, regionSize: 10 * 1000}},
+		start:  time.Now().Add(-time.Second * (6*10*1000 + 20)),
+		expect: true,
+	}, {
+		step:   []OpStep{AddLearner{executorRate: 6, regionSize: 10 * 1000}, AddPeer{executorRate: 6, regionSize: 10 * 1000}},
+		start:  time.Now().Add(-time.Second * (6*10*1000 - 20)),
+		expect: false,
+	}, {
+		// case2: 10MB region will have at least SlowOperatorWaitTime(10min) to executor.
+		step:   []OpStep{AddLearner{executorRate: 6, regionSize: 10}, AddPeer{executorRate: 6, regionSize: 10}},
+		start:  time.Now().Add(-(SlowOperatorWaitTime + time.Second*20)),
+		expect: true,
+	}, {
+		step:   []OpStep{AddLearner{executorRate: 6, regionSize: 10}, AddPeer{executorRate: 6, regionSize: 10}},
+		start:  time.Now().Add(-time.Second * (6*10 + 20)),
+		expect: false,
+	}, {
+		// case3: RemovePeer, TransferLeader, SplitRegion, MergeRegion, PromoteLearner will have  FastOperatorWaitTime(10s) to executor.
+		step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, MergeRegion{}, PromoteLearner{}},
+		start:  time.Now().Add(-(FastOperatorWaitTime + time.Second)),
+		expect: true,
+	}, {
+		step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, MergeRegion{}, PromoteLearner{}},
+		start:  time.Now().Add(-(FastOperatorWaitTime - time.Second)),
+		expect: false,
+	}, {
+		// case4: ChangePeerV2Enter, ChangePeerV2Leave has FastOperatorWaitTime times than FastOperatorWaitTime
+		step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
+			ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
+		start:  time.Now().Add(-(FastOperatorWaitTime*(2+1) + time.Second)),
+		expect: true,
+	}, {
+		step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
+			ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
+		start:  time.Now().Add(-(FastOperatorWaitTime*(2+1) - time.Second)),
+		expect: false,
+	},
+	}
+	for _, v := range testdata {
+		for _, step := range v.step {
+			c.Assert(v.expect, Equals, step.Timeout(v.start))
+		}
 	}
 }

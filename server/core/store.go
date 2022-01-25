@@ -42,7 +42,7 @@ const (
 	EngineTiFlash = "tiflash"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
-
+	// OperatorExecutorRate is the rate of the store operator executor.
 	OperatorExecutorRate = 6.0
 )
 
@@ -271,6 +271,7 @@ func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLi
 	return s.limiter[limitType]
 }
 
+// GetOperatorExecutorRate returns the operator executor rate of the store.
 func (s *StoreInfo) GetOperatorExecutorRate() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

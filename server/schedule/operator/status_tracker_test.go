@@ -114,6 +114,29 @@ func (s *testOpStatusTrackerSuite) TestCheckExpired(c *C) {
 	}
 }
 
+func (s *testOpStatusTrackerSuite) TestCheckStepTimeout(c *C) {
+	testdata := []struct {
+		step   OpStep
+		start  time.Time
+		status OpStatus
+	}{{
+		step:   AddLearner{},
+		start:  time.Now().Add(-(SlowOperatorWaitTime - 1*time.Second)),
+		status: STARTED,
+	}, {
+		step:   AddLearner{},
+		start:  time.Now().Add(-(SlowOperatorWaitTime + 1*time.Second)),
+		status: TIMEOUT,
+	}}
+
+	for _, v := range testdata {
+		trk := NewOpStatusTracker()
+		trk.To(STARTED)
+		c.Assert(trk.CheckStepTimeout(v.start, v.step), Equals, v.status == TIMEOUT)
+		c.Assert(trk.Status(), Equals, v.status)
+	}
+}
+
 func (s *testOpStatusTrackerSuite) TestCheckTimeout(c *C) {
 	{
 		// Not timeout
