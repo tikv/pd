@@ -43,6 +43,7 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 }
 
 // CheckStoresInfo is used to check the test results.
+// CheckStoresInfo will deassign Store.State from Store.StateName for testing pdctl output
 func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) {
 	c.Assert(len(stores), check.Equals, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
@@ -53,6 +54,7 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 	}
 	for _, s := range stores {
 		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		obtained.State = metapb.StoreState(metapb.StoreState_value[s.Store.StateName])
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0

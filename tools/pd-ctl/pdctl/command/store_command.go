@@ -280,14 +280,14 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	var cFunc convertOutputFunc = convertToStoreInfo
+	var cFunc convertOutputFunc = convertToStoresInfo
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("store_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
-		cFunc = convertToStoresInfo
+		cFunc = convertToStoreInfo
 	} else {
 		flags := cmd.Flags()
 		states, err := flags.GetStringSlice("state")
