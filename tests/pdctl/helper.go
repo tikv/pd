@@ -33,15 +33,6 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-// StoreState_value is used for store state in PD definition
-var StoreState_value = map[string]int32{
-	"Up":           0,
-	"Disconnected": 0,
-	"Down":         0,
-	"Offline":      1,
-	"Tombstone":    2,
-}
-
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
