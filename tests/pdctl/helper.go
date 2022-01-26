@@ -33,6 +33,15 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
+// StoreState_value is used for store state in PD definition
+var StoreState_value = map[string]int32{
+	"Up":           0,
+	"Disconnected": 0,
+	"Down":         0,
+	"Offline":      1,
+	"Tombstone":    2,
+}
+
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
@@ -54,7 +63,7 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) 
 	}
 	for _, s := range stores {
 		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
-		obtained.State = metapb.StoreState(metapb.StoreState_value[s.Store.StateName])
+		obtained.State = metapb.StoreState(StoreState_value[s.Store.StateName])
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
