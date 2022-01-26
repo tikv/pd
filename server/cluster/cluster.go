@@ -501,8 +501,6 @@ func (c *RaftCluster) GetAllocator() id.Allocator {
 
 // GetRegionSyncer returns the region syncer.
 func (c *RaftCluster) GetRegionSyncer() *syncer.RegionSyncer {
-	c.RLock()
-	defer c.RUnlock()
 	return c.regionSyncer
 }
 
