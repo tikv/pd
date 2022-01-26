@@ -611,7 +611,7 @@ func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]stri
 	for _, dcLocation := range dcLocations {
 		wg.Add(1)
 		go func(dc string) {
-			testutil.WaitUntil(testC, func(testC *check.C) bool {
+			testutil.WaitUntil(testC, func() bool {
 				leaderName := c.WaitAllocatorLeader(dc)
 				return leaderName != ""
 			})
