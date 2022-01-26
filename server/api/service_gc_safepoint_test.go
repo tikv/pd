@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 var _ = Suite(&testServiceGCSafepointSuite{})
@@ -54,7 +54,7 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 
 	storage := s.svr.GetStorage()
 	list := &listServiceGCSafepoint{
-		ServiceGCSafepoints: []*core.ServiceSafePoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "a",
 				ExpiredAt: time.Now().Unix() + 10,
@@ -91,7 +91,7 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(statusCode, Equals, http.StatusOK)
 
-	left, err := storage.GetAllServiceGCSafePoints()
+	left, err := storage.LoadAllServiceGCSafePoints()
 	c.Assert(err, IsNil)
 	c.Assert(left, DeepEquals, list.ServiceGCSafepoints[1:])
 }

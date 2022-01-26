@@ -27,10 +27,9 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -80,6 +79,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
+		ForbidRWType:           "none",
 	}
 	cfg.apply(defaultConfig)
 	return cfg
@@ -110,7 +110,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 
 type hotRegionSchedulerConfig struct {
 	sync.RWMutex
-	storage            *core.Storage
+	storage            endpoint.ConfigStorage
 	lastQuerySupported bool
 
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
@@ -138,6 +138,8 @@ type hotRegionSchedulerConfig struct {
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
+	// forbid read or write scheduler, only for test
+	ForbidRWType string `json:"forbid-rw-type,omitempty"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -278,6 +280,12 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	return conf.StrictPickingStore
 }
 
+func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return rw.String() == conf.ForbidRWType
+}
+
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
@@ -342,8 +350,8 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster opt.Cluster) bool {
-	querySupport := cluster.IsFeatureSupported(versioninfo.HotScheduleWithQuery)
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster schedule.Cluster) bool {
+	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {

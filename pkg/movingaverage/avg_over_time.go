@@ -117,3 +117,8 @@ func (aot *AvgOverTime) Clone() *AvgOverTime {
 		avgInterval: aot.avgInterval,
 	}
 }
+
+// GetIntervalSum returns the sum of interval
+func (aot *AvgOverTime) GetIntervalSum() time.Duration {
+	return aot.intervalSum
+}

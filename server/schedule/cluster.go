@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package opt
+package schedule
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 // Cluster provides an overview of a cluster's regions distribution.
-// TODO: This interface should be moved to a better place.
 type Cluster interface {
 	core.RegionSetInformer
 	core.StoreSetInformer
@@ -33,16 +29,8 @@ type Cluster interface {
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 
-	GetOpts() *config.PersistOptions
-	AllocID() (uint64, error)
-	GetRuleManager() *placement.RuleManager
-	RemoveScheduler(name string) error
-	IsFeatureSupported(f versioninfo.Feature) bool
-	AddSuspectRegions(ids ...uint64)
-	GetBasicCluster() *core.BasicCluster
-}
+	operator.ClusterInformer
 
-// HeartbeatStream is an interface.
-type HeartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
+	RemoveScheduler(name string) error
+	AddSuspectRegions(ids ...uint64)
 }

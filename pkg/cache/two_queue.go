@@ -137,13 +137,13 @@ func (c *TwoQueue) Peek(key uint64) (interface{}, bool) {
 
 // Remove eliminates an item from cache.
 func (c *TwoQueue) Remove(key uint64) {
-	if c.frequent.remove(key) {
+	if c.frequent.removeIfExist(key) {
 		return
 	}
-	if c.recent.remove(key) {
+	if c.recent.removeIfExist(key) {
 		return
 	}
-	if c.ghost.remove(key) {
+	if c.ghost.removeIfExist(key) {
 		return
 	}
 }

@@ -214,7 +214,7 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 		if len(args) == 1 {
 			prefix += fmt.Sprintf("?type=%v", args[0])
 		}
-		resp, err = doRequest(cmd, prefix, http.MethodGet)
+		resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
 		if err != nil {
 			cmd.Println(err)
 			return
@@ -274,7 +274,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 			prefix = fmt.Sprintf("%v?%v", storesPrefix, strings.Join(stateValues, "&"))
 		}
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
@@ -296,7 +296,7 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(storePrefix, args[0])
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
 		return
@@ -312,7 +312,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	addr := args[0]
 
 	// fetch all the stores
-	r, err := doRequest(cmd, storesPrefix, http.MethodGet)
+	r, err := doRequest(cmd, storesPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
@@ -347,7 +347,7 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 
 	// delete store by its ID
 	prefix := fmt.Sprintf(storePrefix, id)
-	_, err = doRequest(cmd, prefix, http.MethodDelete)
+	_, err = doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
 		return
@@ -407,7 +407,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		if argsCount == 1 {
 			prefix += fmt.Sprintf("?type=%s", args[0])
 		}
-		r, err := doRequest(cmd, prefix, http.MethodGet)
+		r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 		if err != nil {
 			cmd.Printf("Failed to get store limit: %s\n", err)
 			return
@@ -482,7 +482,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	prefix := fmt.Sprintf("%s?state=%d", storesPrefix, stateValue)
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
@@ -492,7 +492,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 
 func showStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
@@ -513,7 +513,7 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		prefix += fmt.Sprintf("?type=%s", args[0])
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get all stores' limit: %s\n", err)
 		return
@@ -523,7 +523,7 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 
 func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := path.Join(storesPrefix, "remove-tombstone")
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to remove tombstone store %s \n", err)
 		return

@@ -123,7 +123,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix = regionIDPrefix + "/" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
@@ -141,7 +141,7 @@ func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
 	var key []byte
 	for {
 		uri := fmt.Sprintf("%s?key=%s&limit=%d", regionsKeyPrefix, url.QueryEscape(string(key)), limit)
-		r, err := doRequest(cmd, uri, http.MethodGet)
+		r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 		if err != nil {
 			cmd.Printf("Failed to scan regions: %s\n", err)
 			return
@@ -191,7 +191,7 @@ func showRegionTopWriteCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "?limit=" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
@@ -212,7 +212,7 @@ func showRegionTopReadCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "?limit=" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
@@ -233,7 +233,7 @@ func showRegionTopConfVerCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "?limit=" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
@@ -254,7 +254,7 @@ func showRegionTopVersionCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "?limit=" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
@@ -275,7 +275,7 @@ func showRegionTopSizeCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "?limit=" + args[0]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions: %s\n", err)
 		return
@@ -310,7 +310,7 @@ func showRegionWithTableCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	key = url.QueryEscape(key)
 	prefix := regionKeyPrefix + "/" + key
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
@@ -415,7 +415,7 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 		}
 		prefix += "&limit=" + args[2]
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
@@ -461,7 +461,7 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 			prefix += "?bound=10000"
 		}
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
@@ -486,7 +486,7 @@ func showRegionWithSiblingCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	regionID := args[0]
 	prefix := regionsSiblingPrefix + "/" + regionID
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region sibling: %s\n", err)
 		return
@@ -511,7 +511,7 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	storeID := args[0]
 	prefix := regionsStorePrefix + "/" + storeID
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)
 		return
@@ -519,18 +519,39 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
+const (
+	rangeHolesLongDesc = `There are some cases that the region range is not continuous, for example, the region doesn't send the heartbeat to PD after a splitting.
+This command will output all empty ranges without any region info.`
+	rangeHolesExample = `
+  If PD now holds the region ranges info like ["", "a"], ["b", "x"], ["x", "z"]. The the output will be like:
+
+  [
+    [
+      "a",
+      "b"
+    ],
+    [
+      "z",
+      ""
+    ],
+  ]
+`
+)
+
 // NewRangesWithRangeHolesCommand returns ranges with range-holes subcommand of regionCmd
 func NewRangesWithRangeHolesCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "range-holes",
-		Short: "show all empty ranges without any region info",
-		Run:   showRangesWithRangeHolesCommandFunc,
+		Use:     "range-holes",
+		Short:   "show all empty ranges without any region info.",
+		Long:    rangeHolesLongDesc,
+		Example: rangeHolesExample,
+		Run:     showRangesWithRangeHolesCommandFunc,
 	}
 	return r
 }
 
 func showRangesWithRangeHolesCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, regionsRangeHolesPrefix, http.MethodGet)
+	r, err := doRequest(cmd, regionsRangeHolesPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get range holes: %s\n", err)
 		return

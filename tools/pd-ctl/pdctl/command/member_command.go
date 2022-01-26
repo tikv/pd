@@ -90,7 +90,7 @@ func NewLeaderMemberCommand() *cobra.Command {
 }
 
 func showMemberCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, membersPrefix, http.MethodGet)
+	r, err := doRequest(cmd, membersPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get pd members: %s\n", err)
 		return
@@ -104,7 +104,7 @@ func deleteMemberByNameCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := membersPrefix + "/name/" + args[0]
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete member %s: %s\n", args[0], err)
 		return
@@ -118,7 +118,7 @@ func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := membersPrefix + "/id/" + args[0]
-	_, err := doRequest(cmd, prefix, http.MethodDelete)
+	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete member %s: %s\n", args[0], err)
 		return
@@ -127,7 +127,7 @@ func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet)
+	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
 		return
@@ -137,7 +137,7 @@ func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
 
 func resignLeaderCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := leaderMemberPrefix + "/resign"
-	_, err := doRequest(cmd, prefix, http.MethodPost)
+	_, err := doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to resign: %s\n", err)
 		return
@@ -151,7 +151,7 @@ func transferPDLeaderCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := leaderMemberPrefix + "/transfer/" + args[0]
-	_, err := doRequest(cmd, prefix, http.MethodPost)
+	_, err := doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to transfer leadership: %s\n", err)
 		return
@@ -172,7 +172,7 @@ func setLeaderPriorityFunc(cmd *cobra.Command, args []string) {
 	}
 	data := map[string]interface{}{"leader-priority": priority}
 	reqData, _ := json.Marshal(data)
-	_, err = doRequest(cmd, prefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
+	_, err = doRequest(cmd, prefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
 	if err != nil {
 		cmd.Printf("failed to set leader priority: %v\n", err)
 		return

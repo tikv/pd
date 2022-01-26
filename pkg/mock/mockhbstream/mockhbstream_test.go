@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package hbstream
+package mockhbstream
 
 import (
 	"context"
@@ -24,9 +24,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/hbstream"
 )
 
 func TestHeaertbeatStreams(t *testing.T) {
@@ -61,18 +61,18 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 		ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode},
 	}
 
-	hbs := NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true)
-	stream1, stream2 := mockhbstream.NewHeartbeatStream(), mockhbstream.NewHeartbeatStream()
+	hbs := hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true)
+	stream1, stream2 := NewHeartbeatStream(), NewHeartbeatStream()
 
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
@@ -83,7 +83,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	c.Assert(res.GetHeader().GetError(), NotNil)
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})

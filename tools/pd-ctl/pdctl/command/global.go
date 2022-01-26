@@ -25,11 +25,15 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/apiutil"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
-	dialClient = &http.Client{}
+	pdControllerComponentName = "pdctl"
+	dialClient                = &http.Client{
+		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, pdControllerComponentName),
+	}
 	pingPrefix = "pd/api/v1/ping"
 )
 
@@ -46,31 +50,28 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 
 	dialClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
+		Transport: apiutil.NewComponentSignatureRoundTripper(
+			&http.Transport{TLSClientConfig: tlsConfig}, pdControllerComponentName),
 	}
 
 	return nil
 }
 
 type bodyOption struct {
-	contentType string
-	body        io.Reader
+	body io.Reader
 }
 
 // BodyOption sets the type and content of the body
 type BodyOption func(*bodyOption)
 
 // WithBody returns a BodyOption
-func WithBody(contentType string, body io.Reader) BodyOption {
+func WithBody(body io.Reader) BodyOption {
 	return func(bo *bodyOption) {
-		bo.contentType = contentType
 		bo.body = body
 	}
 }
 
-func doRequest(cmd *cobra.Command, prefix string, method string,
+func doRequest(cmd *cobra.Command, prefix string, method string, customHeader http.Header,
 	opts ...BodyOption) (string, error) {
 	b := &bodyOption{}
 	for _, o := range opts {
@@ -80,26 +81,21 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		var err error
-		url := endpoint + "/" + prefix
-		if method == "" {
-			method = http.MethodGet
-		}
-		var req *http.Request
+		return doGet(endpoint, prefix, method, &resp, customHeader, b)
+	})
+	return resp, err
+}
 
-		req, err = http.NewRequest(method, url, b.body)
-		if err != nil {
-			return err
-		}
-		if b.contentType != "" {
-			req.Header.Set("Content-Type", b.contentType)
-		}
-		// the resp would be returned by the outer function
-		resp, err = dial(req)
-		if err != nil {
-			return err
-		}
-		return nil
+func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string, customHeader http.Header,
+	opts ...BodyOption) (string, error) {
+	b := &bodyOption{}
+	for _, o := range opts {
+		o(b)
+	}
+	var resp string
+
+	err := requestURL(cmd, endpoint, func(endpoint string) error {
+		return doGet(endpoint, prefix, method, &resp, customHeader, b)
 	})
 	return resp, err
 }
@@ -134,20 +130,11 @@ type DoFunc func(endpoint string) error
 func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 	var err error
 	for _, endpoint := range endpoints {
-		var u *url.URL
-		u, err = url.Parse(endpoint)
+		endpoint, err = checkURL(endpoint)
 		if err != nil {
-			cmd.Println("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+			cmd.Println(err.Error())
 			os.Exit(1)
 		}
-		// tolerate some schemes that will be used by users, the TiKV SDK
-		// use 'tikv' as the scheme, it is really confused if we do not
-		// support it by pd-ctl
-		if u.Scheme == "" || u.Scheme == "pd" || u.Scheme == "tikv" {
-			u.Scheme = "http"
-		}
-
-		endpoint = u.String()
 		err = f(endpoint)
 		if err != nil {
 			continue
@@ -160,19 +147,22 @@ func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 	return err
 }
 
+func requestURL(cmd *cobra.Command, endpoint string, f DoFunc) error {
+	endpoint, err := checkURL(endpoint)
+	if err != nil {
+		cmd.Println(err.Error())
+		os.Exit(1)
+	}
+	return f(endpoint)
+}
+
 func getEndpoints(cmd *cobra.Command) []string {
 	addrs, err := cmd.Flags().GetString("pd")
 	if err != nil {
 		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
-	eps := strings.Split(addrs, ",")
-	for i, ep := range eps {
-		if j := strings.Index(ep, "//"); j == -1 {
-			eps[i] = "//" + ep
-		}
-	}
-	return eps
+	return strings.Split(addrs, ",")
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
@@ -206,4 +196,50 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 		return
 	}
 	cmd.Println("Success!")
+}
+
+// doGet send a get request to server.
+func doGet(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
+	var err error
+	url := endpoint + "/" + prefix
+	if method == "" {
+		method = http.MethodGet
+	}
+	var req *http.Request
+
+	req, err = http.NewRequest(method, url, b.body)
+	if err != nil {
+		return err
+	}
+
+	for key, values := range customHeader {
+		for _, v := range values {
+			req.Header.Add(key, v)
+		}
+	}
+	// the resp would be returned by the outer function
+	*resp, err = dial(req)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkURL(endpoint string) (string, error) {
+	if j := strings.Index(endpoint, "//"); j == -1 {
+		endpoint = "//" + endpoint
+	}
+	var u *url.URL
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return "", errors.Errorf("address format is wrong, should like 'http://127.0.0.1:2379' or '127.0.0.1:2379'")
+	}
+	// tolerate some schemes that will be used by users, the TiKV SDK
+	// use 'tikv' as the scheme, it is really confused if we do not
+	// support it by pd-ctl
+	if u.Scheme == "" || u.Scheme == "pd" || u.Scheme == "tikv" {
+		u.Scheme = "http"
+	}
+
+	return u.String(), nil
 }

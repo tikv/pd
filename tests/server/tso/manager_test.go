@@ -190,7 +190,7 @@ func (s *testManagerSuite) TestNextLeaderKey(c *C) {
 		}
 		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
 		c.Assert(err, IsNil)
-		testutil.WaitUntil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func() bool {
 			cluster.CheckClusterDCLocation()
 			currName := cluster.WaitAllocatorLeader("dc-1")
 			return currName == name
