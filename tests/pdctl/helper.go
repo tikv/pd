@@ -52,22 +52,27 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 }
 
 // CheckStoresInfo is used to check the test results.
-// CheckStoresInfo will deassign Store.State from Store.StateName for testing pdctl output
-func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) {
+// CheckStoresInfo will not check Store.State because this feild has been omitted pdctl output
+func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*api.StoreInfo) {
 	c.Assert(len(stores), check.Equals, len(want))
-	mapWant := make(map[uint64]*metapb.Store)
+	mapWant := make(map[uint64]*api.StoreInfo)
 	for _, s := range want {
-		if _, ok := mapWant[s.Id]; !ok {
-			mapWant[s.Id] = s
+		if _, ok := mapWant[s.Store.Id]; !ok {
+			mapWant[s.Store.Id] = s
 		}
 	}
 	for _, s := range stores {
 		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
-		obtained.State = metapb.StoreState(StoreState_value[s.Store.StateName])
-		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
+		expected := proto.Clone(mapWant[obtained.Id].Store.Store).(*metapb.Store)
+		// Ignore state
+		obtained.State, expected.State = 0, 0
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
 		c.Assert(obtained, check.DeepEquals, expected)
+
+		obtainedStateName := s.Store.StateName
+		expectedStateName := mapWant[obtained.Id].Store.StateName
+		c.Assert(obtainedStateName, check.Equals, expectedStateName)
 	}
 }
 

@@ -54,21 +54,36 @@ func (s *storeTestSuite) TestStore(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := cmd.GetRootCmd()
 
-	stores := []*metapb.Store{
+	stores := []*api.StoreInfo{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            1,
+					State:         metapb.StoreState_Up,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            3,
+					State:         metapb.StoreState_Up,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Tombstone,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            2,
+					State:         metapb.StoreState_Tombstone,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Tombstone.String(),
+			},
 		},
 	}
 
@@ -76,7 +91,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Store.Store)
 	}
 	defer cluster.Destroy()
 
