@@ -894,7 +894,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 }
 
 func waitOperator(c *C, co *coordinator, regionID uint64) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		return co.opController.GetOperator(regionID) != nil
 	})
 }
@@ -1206,7 +1206,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 
 func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
@@ -1222,7 +1222,7 @@ func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 
 func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
@@ -1239,7 +1239,7 @@ func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.
 
 func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
@@ -1255,7 +1255,7 @@ func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 
 func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
@@ -1273,7 +1273,7 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 }
 
 func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		res := stream.Recv()
 		return res == nil
 	})

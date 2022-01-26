@@ -123,7 +123,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 }
 
 func mustWaitLeader(c *C, svrs []*server.Server) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		var leader *pdpb.Member
 		for _, svr := range svrs {
 			l := svr.GetLeader()
