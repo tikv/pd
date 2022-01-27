@@ -127,7 +127,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
 	setAudit := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.RegistServiceForHTTP(route, labels...)
+			svr.SetServiceAuditBackendForHTTP(route, labels...)
 		}
 	}
 
