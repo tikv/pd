@@ -43,7 +43,7 @@ type Sequence struct {
 	before bool
 }
 
-// ProcessBeforeHandler is used to identify whether this backend should execute before handler
+// ProcessBeforeHandler is used to help backend implement audit.Backend
 func (s *Sequence) ProcessBeforeHandler() bool {
 	return s.before
 }
@@ -54,5 +54,6 @@ type Backend interface {
 	ProcessHTTPRequest(req *http.Request) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
+	// ProcessBeforeHandler is used to identify whether this backend should execute before handler
 	ProcessBeforeHandler() bool
 }
