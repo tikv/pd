@@ -336,6 +336,10 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	op3 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(603)
 	// At least one operator used to scatter region
 	c.Assert(op1 != nil || op2 != nil || op3 != nil, IsTrue)
+
+	body = `{"regions_id": [601, 602, 603]}`
+	err = postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))
+	c.Assert(err, IsNil)
 }
 
 func (s *testRegionSuite) TestSplitRegions(c *C) {
@@ -344,7 +348,7 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
 	newRegionID := uint64(11)
-	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 0,
+	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))

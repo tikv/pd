@@ -805,9 +805,9 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		group = ""
 	}
-	retryLimit, ok := input["retry_limit"].(int)
-	if !ok {
-		retryLimit = 5
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
 	}
 	var ops []*operator.Operator
 	var failures map[uint64]error
@@ -829,8 +829,13 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	} else {
-		regionsID := input["regions_id"].([]uint64)
-		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+		regionIDs := input["regions_id"].([]interface{})
+		ids, ok := toUint64Slice(regionIDs)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
+			return
+		}
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -884,9 +889,9 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
 	}
-	retryLimit, ok := input["retry_limit"].(int)
-	if !ok {
-		retryLimit = 5
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
 	}
 	splitKeys := make([][]byte, 0, len(rawSplitKeys))
 	for _, rawKey := range rawSplitKeys {

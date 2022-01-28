@@ -174,3 +174,19 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 	}
 	return nil
 }
+
+func toUint64Slice(from interface{}) ([]uint64, bool) {
+	items, ok := from.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	to := make([]uint64, 0, len(items))
+	for _, item := range items {
+		id, ok := item.(float64)
+		if !ok {
+			return nil, false
+		}
+		to = append(to, uint64(id))
+	}
+	return to, true
+}
