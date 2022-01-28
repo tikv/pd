@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/config"
@@ -53,6 +54,7 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
+	pinnedRegions  *cache.TTLUint64
 }
 
 // NewCluster creates a new Cluster
@@ -63,6 +65,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:        statistics.NewHotStat(ctx),
 		PersistOptions: opts,
 		suspectRegions: map[uint64]struct{}{},
+		pinnedRegions:  cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -728,6 +731,18 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	}
 	newStore := store.Clone(core.SetStoreLabels(newLabels))
 	mc.PutStore(newStore)
+}
+
+// PinRegions pause scheduling on specific regions for a duration.
+func (mc *Cluster) PinRegions(regionIDs []uint64, duration time.Duration) {
+	for _, regionID := range regionIDs {
+		mc.pinnedRegions.PutWithTTL(regionID, nil, duration)
+	}
+}
+
+// IsRegionPinned check if region is pinned.
+func (mc *Cluster) IsRegionPinned(region *core.RegionInfo) bool {
+	return mc.pinnedRegions.Exists(region.GetID())
 }
 
 // AddSuspectRegions mock method

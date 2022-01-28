@@ -148,5 +148,8 @@ func (s *randomMergeScheduler) allowMerge(cluster schedule.Cluster, region, targ
 	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {
 		return false
 	}
+	if cluster.IsRegionPinned(region) || cluster.IsRegionPinned(target) {
+		return false
+	}
 	return checker.AllowMerge(cluster, region, target)
 }

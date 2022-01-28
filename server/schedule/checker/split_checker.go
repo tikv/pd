@@ -56,6 +56,11 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 		return nil
 	}
 
+	if c.cluster.IsRegionPinned(region) {
+		checkerCounter.WithLabelValues("split_checker", "pinned").Inc()
+		return nil
+	}
+
 	start, end := region.GetStartKey(), region.GetEndKey()
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,

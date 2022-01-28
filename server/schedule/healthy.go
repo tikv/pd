@@ -44,3 +44,8 @@ func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 func ReplicatedRegion(cluster Cluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return IsRegionReplicated(cluster, region) }
 }
+
+// NonPinnedRegion returns a function that checks if a region is not pinned.
+func NonPinnedRegion(cluster Cluster) func(*core.RegionInfo) bool {
+	return func(region *core.RegionInfo) bool { return !cluster.IsRegionPinned(region) }
+}

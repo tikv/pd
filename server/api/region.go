@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
@@ -505,6 +506,18 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+// @Tags region
+// @Summary List all pinned regions.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Router /regions/check/pinned-region [get]
+func (h *regionsHandler) GetPinnedRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	regions := rc.GetPinnedRegions()
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
 type histItem struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
@@ -912,6 +925,58 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 	h.rd.JSON(w, http.StatusOK, &s)
+}
+
+// @Tags region
+// @Summary Pin regions by given key range or regions id with given duration.
+// @Accept json
+// @Param body body object true "json params"
+// @Produce json
+// @Success 200 {string} string "Pin regions successfully."
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/pin [post]
+func (h *regionsHandler) PinRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input struct {
+		StartKey  *string   `json:"start_key"`
+		EndKey    *string   `json:"end_key"`
+		RegionsID *[]uint64 `json:"regions_id"`
+		Duration  *uint64   `json:"duration"`
+	}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if input.Duration == nil {
+		h.rd.JSON(w, http.StatusBadRequest, "missing pin duration")
+		return
+	}
+	duration := time.Second * time.Duration(*input.Duration)
+	if input.StartKey != nil && input.EndKey != nil {
+		startKey, err := hex.DecodeString(*input.StartKey)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, "start_key is not in hex format")
+			return
+		}
+		endKey, err := hex.DecodeString(*input.EndKey)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, "end_key is not in hex format")
+			return
+		}
+		regions := rc.ScanRegions(startKey, endKey, -1)
+		regionsID := make([]uint64, len(regions))
+		for i, region := range regions {
+			regionsID[i] = region.GetID()
+		}
+		rc.PinRegions(regionsID, duration)
+	} else {
+		if input.RegionsID == nil {
+			h.rd.JSON(w, http.StatusBadRequest, "missing key range or regions id")
+			return
+		}
+		rc.PinRegions(*input.RegionsID, duration)
+	}
+	h.rd.JSON(w, http.StatusOK, "Pin regions successfully.")
 }
 
 // RegionHeap implements heap.Interface, used for selecting top n regions.

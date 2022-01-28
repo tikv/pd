@@ -165,6 +165,12 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
 
+	// Test pin region.
+	s.cluster.PinRegions([]uint64{s.regions[2].GetID()}, time.Minute)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	s.cluster.PinRegions([]uint64{s.regions[2].GetID()}, 0)
+
 	// Enable one way merge
 	s.cluster.SetEnableOneWayMerge(true)
 	ops = s.mc.Check(s.regions[2])
@@ -179,6 +185,15 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	// Now it merges to next region.
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
 	c.Assert(ops[1].RegionID(), Equals, s.regions[3].GetID())
+
+	// Test pin next region.
+	s.cluster.PinRegions([]uint64{s.regions[3].GetID()}, time.Minute)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	// Now it merges to prev region.
+	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[1].GetID())
+	s.cluster.PinRegions([]uint64{s.regions[3].GetID()}, 0)
 
 	// merge cannot across rule key.
 	s.cluster.SetEnablePlacementRules(true)

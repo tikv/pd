@@ -169,7 +169,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
-				if ops := l.transferLeaderOut(plan); len(ops) > 0 {
+				if ops := l.transferLeaderOut(cluster, plan); len(ops) > 0 {
 					l.retryQuota.ResetLimit(plan.source)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
 					return ops
@@ -185,7 +185,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
-				if ops := l.transferLeaderIn(plan); len(ops) > 0 {
+				if ops := l.transferLeaderIn(cluster, plan); len(ops) > 0 {
 					l.retryQuota.ResetLimit(plan.target)
 					ops[0].Counters = append(ops[0].Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
 					return ops
@@ -202,8 +202,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
+func (l *balanceLeaderScheduler) transferLeaderOut(cluster schedule.Cluster, plan *balancePlan) []*operator.Operator {
+	plan.region = plan.RandLeaderRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy, schedule.NonPinnedRegion(cluster))
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -235,8 +235,8 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) []*operato
 // transferLeaderIn transfers leader to the target store.
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) []*operator.Operator {
-	plan.region = plan.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
+func (l *balanceLeaderScheduler) transferLeaderIn(cluster schedule.Cluster, plan *balancePlan) []*operator.Operator {
+	plan.region = plan.RandFollowerRegion(plan.TargetStoreID(), l.conf.Ranges, schedule.IsRegionHealthy, schedule.NonPinnedRegion(cluster))
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()

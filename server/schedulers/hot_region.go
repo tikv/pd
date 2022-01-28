@@ -664,6 +664,11 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
+	if bs.IsRegionPinned(region) {
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "pinned-region").Inc()
+		return false
+	}
+
 	return true
 }
 

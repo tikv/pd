@@ -171,6 +171,9 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 		if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
 			continue
 		}
+		if cluster.IsRegionPinned(srcRegion) {
+			continue
+		}
 		srcStoreID := srcRegion.GetLeader().GetStoreId()
 		srcStore := cluster.GetStore(srcStoreID)
 		if srcStore == nil {

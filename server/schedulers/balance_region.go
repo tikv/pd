@@ -171,18 +171,22 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthyAllowPending, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthyAllowPending,
+				schedule.ReplicatedRegion(cluster), schedule.NonPinnedRegion(cluster), allowBalanceEmptyRegion)
 			if plan.region == nil {
 				// Then pick the region that has a follower in the source store.
-				plan.region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy,
+					schedule.ReplicatedRegion(cluster), schedule.NonPinnedRegion(cluster), allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				// Then pick the region has the leader in the source store.
-				plan.region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy,
+					schedule.ReplicatedRegion(cluster), schedule.NonPinnedRegion(cluster), allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				// Finally pick learner.
-				plan.region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy,
+					schedule.ReplicatedRegion(cluster), schedule.NonPinnedRegion(cluster), allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -109,6 +110,8 @@ type RaftCluster struct {
 	labelLevelStats *statistics.LabelStatistics
 	regionStats     *statistics.RegionStatistics
 	hotStat         *statistics.HotStat
+
+	pinnedRegions *cache.TTLUint64
 
 	coordinator *coordinator
 
@@ -209,6 +212,7 @@ func (c *RaftCluster) InitCluster(
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	c.pinnedRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
 }
 
 // Start starts a cluster.
@@ -487,6 +491,39 @@ func (c *RaftCluster) SetStorage(s storage.Storage) {
 // There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
+}
+
+// PinRegions pause scheduling on specific regions for a duration.
+func (c *RaftCluster) PinRegions(regionIDs []uint64, duration time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	if duration > 0 {
+		for _, regionID := range regionIDs {
+			c.pinnedRegions.PutWithTTL(regionID, nil, duration)
+		}
+	} else {
+		for _, regionID := range regionIDs {
+			c.pinnedRegions.Remove(regionID)
+		}
+	}
+}
+
+// IsRegionPinned check if region is pinned.
+func (c *RaftCluster) IsRegionPinned(region *core.RegionInfo) bool {
+	return c.pinnedRegions.Exists(region.GetID())
+}
+
+// GetPinnedRegions returns all pinned regions' information in detail.
+func (c *RaftCluster) GetPinnedRegions() []*core.RegionInfo {
+	regionIds := c.pinnedRegions.GetAllID()
+	regions := make([]*core.RegionInfo, 0, len(regionIds))
+	for _, regionID := range regionIds {
+		region := c.GetRegion(regionID)
+		if region != nil {
+			regions = append(regions, region)
+		}
+	}
+	return regions
 }
 
 // AddSuspectRegions adds regions to suspect list.

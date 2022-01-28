@@ -115,7 +115,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil
 	}
-	region := cluster.RandFollowerRegion(targetStore.GetID(), s.conf.Ranges, schedule.IsRegionHealthy)
+	region := cluster.RandFollowerRegion(targetStore.GetID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.NonPinnedRegion(cluster))
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil

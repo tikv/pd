@@ -84,6 +84,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	if m.cluster.IsRegionPinned(region) {
+		checkerCounter.WithLabelValues("merge_checker", "pinned").Inc()
+		return nil
+	}
+
 	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
@@ -169,6 +174,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	if adjacent == nil {
 		checkerCounter.WithLabelValues("merge_checker", "adj-not-exist").Inc()
+		return false
+	}
+
+	if m.cluster.IsRegionPinned(adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-pinned").Inc()
 		return false
 	}
 

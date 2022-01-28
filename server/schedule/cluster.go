@@ -33,4 +33,5 @@ type Cluster interface {
 
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
+	IsRegionPinned(region *core.RegionInfo) bool
 }

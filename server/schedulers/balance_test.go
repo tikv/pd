@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -490,6 +491,22 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	testutil.CheckTransferLeader(c, s.schedule()[0], operator.OpKind(0), 4, 3)
 }
 
+func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelectorWithPinnedRegion(c *C) {
+	// Stores:     1    2    3    4
+	// Leaders:    1    2    3    16
+	// Region1:    -    F    F    L
+	// Region2:    -    F    F    L
+	s.tc.AddLeaderStore(1, 1)
+	s.tc.AddLeaderStore(2, 2)
+	s.tc.AddLeaderStore(3, 3)
+	s.tc.AddLeaderStore(4, 16)
+	s.tc.AddLeaderRegion(1, 4, 2, 3)
+	s.tc.PinRegions([]uint64{1}, 5*time.Minute)
+	c.Check(s.schedule(), IsNil)
+	s.tc.AddLeaderRegion(2, 4, 2, 3)
+	c.Assert(s.schedule()[0].RegionID(), Not(Equals), 1)
+}
+
 var _ = Suite(&testBalanceLeaderRangeSchedulerSuite{})
 
 type testBalanceLeaderRangeSchedulerSuite struct {
@@ -631,6 +648,37 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 
 	opt.SetMaxReplicas(1)
 	c.Assert(sb.Schedule(tc), NotNil)
+}
+
+func (s *testBalanceRegionSchedulerSuite) TestBalanceWithPinnedRegion(c *C) {
+	opt := config.NewTestOptions()
+	// TODO: enable placementrules
+	opt.SetPlacementRuleEnabled(false)
+	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	oc := schedule.NewOperatorController(s.ctx, nil, nil)
+
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	c.Assert(err, IsNil)
+
+	opt.SetMaxReplicas(1)
+
+	tc.AddRegionStore(1, 6)
+	tc.AddRegionStore(2, 8)
+	tc.AddRegionStore(3, 8)
+	tc.AddRegionStore(4, 16)
+
+	tc.AddLeaderRegion(1, 4)
+	tc.AddLeaderRegion(2, 3)
+	tc.AddLeaderRegion(3, 3)
+	tc.PinRegions([]uint64{1, 2}, 5*time.Minute)
+
+	c.Check(sb.Schedule(tc), IsNil)
+
+	tc.UpdateRegionCount(3, 16)
+	tc.UpdateRegionCount(4, 8)
+
+	c.Check(sb.Schedule(tc)[0].RegionID(), Not(Equals), 2)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
