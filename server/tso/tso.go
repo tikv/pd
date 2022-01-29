@@ -83,7 +83,8 @@ func (t *timestampOracle) setTSOPhysical(next time.Time) {
 
 func (t *timestampOracle) setTSOUpdateTimeLocked(updateTime time.Time) {
 	t.tsoMux.updateTime = updateTime
-	//	tsoGauge.WithLabelValues("tso_update_time", t.dcLocation).Set(float64(updateTime.UnixNano() / int64(time.Millisecond)))
+	// try to remove the dynamic label. TODO: consider other DC?
+	tsoGuageGlobal.Set(float64(updateTime.UnixNano() / int64(time.Millisecond)))
 }
 
 func (t *timestampOracle) getTSO() (time.Time, int64) {

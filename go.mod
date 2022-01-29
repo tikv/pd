@@ -16,6 +16,7 @@ require (
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
+	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/influxdata/tdigest v0.0.1
 	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.12
@@ -55,3 +56,7 @@ require (
 	google.golang.org/grpc v1.26.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+// Temporarily remove withlabels：
+//	//r.metrics.serverStreamMsgReceived.WithLabelValues(string(r.rpcType), r.serviceName, r.methodName).Inc()
+replace github.com/grpc-ecosystem/go-grpc-prometheust-go => github.com/nolouch/go-grpc-prometheus v1.2.1-0.20220129123102-d256a08b3048

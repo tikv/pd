@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
@@ -86,7 +87,7 @@ func main() {
 	}
 
 	// TODO: Make it configurable if it has big impact on performance.
-	// grpcprometheus.EnableHandlingTimeHistogram()
+	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
 

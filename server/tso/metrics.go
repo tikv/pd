@@ -53,6 +53,8 @@ var (
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
 		}, []string{dcLabel})
+
+	tsoGuageGlobal = tsoGauge.WithLabelValues("tso_update_time", "global")
 )
 
 func init() {
