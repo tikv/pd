@@ -345,7 +345,7 @@ func (s *testTSOConsistencySuite) TestLocalTSOAfterMemberChanged(c *C) {
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		leaderName := cluster.WaitAllocatorLeader("dc-4")
 		return leaderName != ""
 	})

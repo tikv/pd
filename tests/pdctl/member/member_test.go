@@ -74,7 +74,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	args = []string{"-u", pdAddr, "member", "leader", "transfer", "pd2"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		return c.Check("pd2", Equals, svr.GetLeader().GetName())
 	})
 
@@ -84,7 +84,7 @@ func (s *memberTestSuite) TestMember(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(strings.Contains(string(output), "Success"), IsTrue)
 	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		return c.Check("pd2", Not(Equals), svr.GetLeader().GetName())
 	})
 
