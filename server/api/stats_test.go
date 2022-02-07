@@ -142,6 +142,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	}
 	res, err := testDialClient.Get(statsURL)
 	c.Assert(err, IsNil)
+	defer res.Body.Close()
 	stats := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
@@ -150,6 +151,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
 	res, err = testDialClient.Get(statsURL + args)
 	c.Assert(err, IsNil)
+	defer res.Body.Close()
 	stats = &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
@@ -171,6 +173,7 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	args = fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("a"), url.QueryEscape("x"))
 	res, err = testDialClient.Get(statsURL + args)
 	c.Assert(err, IsNil)
+	defer res.Body.Close()
 	stats = &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
