@@ -107,6 +107,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "\"state\":"), Equals, false)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores)
