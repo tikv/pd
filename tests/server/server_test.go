@@ -138,7 +138,7 @@ func (s *serverTestSuite) TestLeader(c *C) {
 
 	err = cluster.GetServer(leader1).Stop()
 	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		leader := cluster.GetLeader()
 		return leader != leader1
 	})
