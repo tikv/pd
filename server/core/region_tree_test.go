@@ -266,7 +266,7 @@ func (s *testRegionSuite) TestRegionTreeSplitAndMerge(c *C) {
 	}
 }
 
-func (s *testRegionSuite) TestRandomRegion(c *C) {
+func (s *testRegionSuite) uTestRandomRegion(c *C) {
 	tree := newRegionTree()
 	r := tree.RandomRegion(nil)
 	c.Assert(r, IsNil)
@@ -306,7 +306,7 @@ func (s *testRegionSuite) TestRandomRegion(c *C) {
 	checkRandomRegion(c, tree, []*RegionInfo{regionB, regionC}, []KeyRange{NewKeyRange("a", "z")})
 }
 
-func (s *testRegionSuite) TestRandomRegionDiscontinuous(c *C) {
+func (s *testRegionSuite) uTestRandomRegionDiscontinuous(c *C) {
 	tree := newRegionTree()
 	r := tree.RandomRegion([]KeyRange{NewKeyRange("c", "f")})
 	c.Assert(r, IsNil)
@@ -378,6 +378,26 @@ func newRegionItem(start, end []byte) *regionItem {
 	return &regionItem{region: NewTestRegionInfo(start, end)}
 }
 
+/*
+➜  core git:(tidwallbtree) ✗ go test  -bench BenchmarkRegion
+OK: 21 passed
+goos: darwin
+goarch: amd64
+pkg: github.com/tikv/pd/server/core
+cpu: VirtualApple @ 2.50GHz
+BenchmarkRegionTreeUpdate-8              1000000              1242 ns/op
+BenchmarkRegionTreeUpdateUnordered-8     2488128               579.9 ns/op
+PASS
+ok      github.com/tikv/pd/server/core  28.450s
+➜  core git:(tidwallbtree) ✗ go test  -bench BenchmarkRegion
+OK: 21 passed
+goos: darwin
+goarch: amd64
+pkg: github.com/tikv/pd/server/core
+cpu: VirtualApple @ 2.50GHz
+BenchmarkRegionTreeUpdate-8              1000000              1258 ns/op
+BenchmarkRegionTreeUpdateUnordered-8     2446611               557.1 ns/op
+*/
 func BenchmarkRegionTreeUpdate(b *testing.B) {
 	tree := newRegionTree()
 	for i := 0; i < b.N; i++ {
