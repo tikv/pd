@@ -624,26 +624,14 @@ func (rm regionMap) Delete(id uint64) {
 	delete(rm, id)
 }
 
-//storeID-> sub regionTree
-type storePeers map[uint64]*regionTree
-
-func (s storePeers) setRegion(storeID uint64, item *regionItem) {
-	store, ok := s[storeID]
-	if !ok {
-		store = newRegionTree()
-		s[storeID] = store
-	}
-	store.update(item)
-}
-
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      regionMap  // regionID -> regionInfo
-	leaders      storePeers // storeID -> sub regionTree
-	followers    storePeers // storeID -> sub regionTree
-	learners     storePeers // storeID -> sub regionTree
-	pendingPeers storePeers // storeID -> sub regionTree
+	regions      regionMap              // regionID -> regionInfo
+	leaders      map[uint64]*regionTree // storeID -> sub regionTree
+	followers    map[uint64]*regionTree // storeID -> sub regionTree
+	learners     map[uint64]*regionTree // storeID -> sub regionTree
+	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -710,28 +698,39 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	}
 
 	// It has been removed and all information needs to be updated again.
+	// Set peers then.
+
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+		store, ok := peersMap[storeID]
+		if !ok {
+			store = newRegionTree()
+			peersMap[storeID] = store
+		}
+		store.update(item)
+	}
 
 	// Add to leaders and followers.
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			r.leaders.setRegion(storeID, item)
+			setPeer(r.leaders, storeID, item)
 		} else {
 			// Add follower peer to followers.
-			r.followers.setRegion(storeID, item)
+			setPeer(r.followers, storeID, item)
+		}
+	}
+
+	setPeers := func(peersMap map[uint64]*regionTree, peers func() []*metapb.Peer) {
+		for _, peer := range peers() {
+			storeID := peer.GetStoreId()
+			setPeer(peersMap, storeID, item)
 		}
 	}
 	// Add to learners.
-	for _, peer := range region.GetLearners() {
-		storeID := peer.GetStoreId()
-		r.learners.setRegion(storeID, item)
-	}
+	setPeers(r.learners, region.GetLearners)
 	// Add to PendingPeers
-	for _, peer := range region.GetPendingPeers() {
-		storeID := peer.GetStoreId()
-		r.pendingPeers.setRegion(storeID, item)
-	}
+	setPeers(r.pendingPeers, region.GetPendingPeers)
 
 	return
 }
