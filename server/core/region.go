@@ -90,6 +90,20 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.voters = voters
 }
 
+// peersEqual returns true when the peers are not changed, which may caused by: the region leader not changed,
+// peer transferred, new peer was created, learners changed, pendingPeers changed.
+func (r *RegionInfo) peersEqual(region *RegionInfo) bool {
+	return r.leader.GetId() == region.leader.GetId() &&
+		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
+		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
+		SortedPeersEqual(r.GetPendingPeers(), region.GetPendingPeers())
+}
+
+// rangeEqualsTo returns true when the start_key and end_key are the same.
+func (r *RegionInfo) rangeEqualsTo(region *RegionInfo) bool {
+	return bytes.Equal(r.GetStartKey(), region.GetStartKey()) && bytes.Equal(r.GetEndKey(), region.GetEndKey())
+}
+
 const (
 	// EmptyRegionApproximateSize is the region approximate size of an empty region
 	// (heartbeat size <= 1MB).
@@ -610,14 +624,26 @@ func (rm regionMap) Delete(id uint64) {
 	delete(rm, id)
 }
 
+//storeID-> sub regionTree
+type storePeers map[uint64]*regionTree
+
+func (s storePeers) setRegion(storeID uint64, item *regionItem) {
+	store, ok := s[storeID]
+	if !ok {
+		store = newRegionTree()
+		s[storeID] = store
+	}
+	store.update(item)
+}
+
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      regionMap              // regionID -> regionInfo
-	leaders      map[uint64]*regionTree // storeID -> sub regionTree
-	followers    map[uint64]*regionTree // storeID -> sub regionTree
-	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	regions      regionMap  // regionID -> regionInfo
+	leaders      storePeers // storeID -> sub regionTree
+	followers    storePeers // storeID -> sub regionTree
+	learners     storePeers // storeID -> sub regionTree
+	pendingPeers storePeers // storeID -> sub regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -643,43 +669,39 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // SetRegion sets the RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
 // overlaps: Other regions that overlap with the specified region, excluding itself.
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
-	var item *regionItem   // Pointer to the *RegionInfo of this ID.
-	var origin *RegionInfo // This is the original region information of this ID.
-	var rangeChanged bool  // This Region is new, or its range has changed.
-	var peersChanged bool  // This Region is new, or its peers have changed, including leader-change/pending/down.
-
+	var item *regionItem // Pointer to the *RegionInfo of this ID.
+	//var origin *RegionInfo // This is the original region information of this ID.
+	rangeChanged := true // This Region is new, or its range has changed.
 	if item = r.regions.Get(region.GetID()); item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin = item.region
-		rangeChanged = !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) ||
-			!bytes.Equal(origin.GetEndKey(), region.GetEndKey())
+		origin := item.region
+		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
 			// Because the regionItem is reused, there is no need to delete it in the regionMap.
 			r.tree.remove(origin)
-			// A change in the range is equivalent to a change in all peers.
-			peersChanged = true
 		} else {
-			peersChanged = r.shouldRemoveFromSubTree(region, origin)
+			// If the range is not changed, only the statistical on the regionTree needs to be updated.
+			r.tree.updateStat(origin, region)
+		}
+
+		if !rangeChanged && origin.peersEqual(region) {
+			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
+			r.updateSubTreeStat(origin, region)
+			return
 		}
 		// If the peers have changed, the sub regionTree needs to be cleaned up.
-		if peersChanged {
-			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTree(origin)
-		}
+		// TODO: Improve performance by deleting only the different peers.
+		r.removeRegionFromSubTree(origin)
+
 		// Update the RegionInfo in the regionItem.
 		item.region = region
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
-		rangeChanged = true
-		peersChanged = true
 		item = r.regions.AddNew(region)
 	}
 
-	if !rangeChanged {
-		// If the range is not changed, only the statistical on the regionTree needs to be updated.
-		r.tree.updateStat(origin, region)
-	} else {
+	if rangeChanged {
 		// It has been removed and all information needs to be updated again.
 		overlaps = r.tree.update(item)
 		for _, old := range overlaps {
@@ -687,53 +709,28 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		}
 	}
 
-	if !peersChanged {
-		// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
-		r.updateSubTreeStat(origin, region)
-	} else {
-		// It has been removed and all information needs to be updated again.
+	// It has been removed and all information needs to be updated again.
 
-		// Add to leaders and followers.
-		for _, peer := range region.GetVoters() {
-			storeID := peer.GetStoreId()
-			if peer.GetId() == region.leader.GetId() {
-				// Add leader peer to leaders.
-				store, ok := r.leaders[storeID]
-				if !ok {
-					store = newRegionTree()
-					r.leaders[storeID] = store
-				}
-				store.update(item)
-			} else {
-				// Add follower peer to followers.
-				store, ok := r.followers[storeID]
-				if !ok {
-					store = newRegionTree()
-					r.followers[storeID] = store
-				}
-				store.update(item)
-			}
+	// Add to leaders and followers.
+	for _, peer := range region.GetVoters() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.leader.GetId() {
+			// Add leader peer to leaders.
+			r.leaders.setRegion(storeID, item)
+		} else {
+			// Add follower peer to followers.
+			r.followers.setRegion(storeID, item)
 		}
-		// Add to learners.
-		for _, peer := range region.GetLearners() {
-			storeID := peer.GetStoreId()
-			store, ok := r.learners[storeID]
-			if !ok {
-				store = newRegionTree()
-				r.learners[storeID] = store
-			}
-			store.update(item)
-		}
-		// Add to PendingPeers
-		for _, peer := range region.GetPendingPeers() {
-			storeID := peer.GetStoreId()
-			store, ok := r.pendingPeers[storeID]
-			if !ok {
-				store = newRegionTree()
-				r.pendingPeers[storeID] = store
-			}
-			store.update(item)
-		}
+	}
+	// Add to learners.
+	for _, peer := range region.GetLearners() {
+		storeID := peer.GetStoreId()
+		r.learners.setRegion(storeID, item)
+	}
+	// Add to PendingPeers
+	for _, peer := range region.GetPendingPeers() {
+		storeID := peer.GetStoreId()
+		r.pendingPeers.setRegion(storeID, item)
 	}
 
 	return
@@ -851,15 +848,6 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 		}
 	}
 	return true
-}
-
-// shouldRemoveFromSubTree return true when the region leader changed, peer transferred,
-// new peer was created, learners changed, pendingPeers changed, and so on.
-func (r *RegionsInfo) shouldRemoveFromSubTree(region *RegionInfo, origin *RegionInfo) bool {
-	return origin.leader.GetId() != region.leader.GetId() ||
-		!SortedPeersEqual(origin.GetVoters(), region.GetVoters()) ||
-		!SortedPeersEqual(origin.GetLearners(), region.GetLearners()) ||
-		!SortedPeersEqual(origin.GetPendingPeers(), region.GetPendingPeers())
 }
 
 // GetRegionByKey searches RegionInfo from regionTree
