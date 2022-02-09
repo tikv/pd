@@ -40,6 +40,7 @@ import (
 	"fmt"
 
 	"github.com/pingcap/errors"
+	"github.com/tikv/pd/client/errs"
 )
 
 // TLSInfo stores tls configuration to connect to etcd.
@@ -163,4 +164,75 @@ func (info TLSInfo) cafiles() []string {
 		cs = append(cs, info.TrustedCAFile)
 	}
 	return cs
+}
+
+// TLSConfig is the configuration for supporting tls.
+type TLSConfig struct {
+	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
+	CAPath string `toml:"cacert-path" json:"cacert-path"`
+	// CertPath is the path of file that contains X509 certificate in PEM format.
+	CertPath string `toml:"cert-path" json:"cert-path"`
+	// KeyPath is the path of file that contains X509 key in PEM format.
+	KeyPath string `toml:"key-path" json:"key-path"`
+	// CertAllowedCN is a CN which must be provided by a client
+	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+
+	SSLCABytes   []byte
+	SSLCertBytes []byte
+	SSLKEYBytes  []byte
+}
+
+// ToTLSConfig generates tls config.
+func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
+	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
+		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
+		if err != nil {
+			return nil, errs.ErrCryptoX509KeyPair.GenWithStackByCause()
+		}
+		certificates := []tls.Certificate{cert}
+		// Create a certificate pool from CA
+		certPool := x509.NewCertPool()
+		// Append the certificates from the CA
+		if !certPool.AppendCertsFromPEM(s.SSLCABytes) {
+			return nil, errs.ErrCryptoAppendCertsFromPEM.GenWithStackByCause()
+		}
+		return &tls.Config{
+			Certificates: certificates,
+			RootCAs:      certPool,
+			NextProtos:   []string{"h2", "http/1.1"}, // specify `h2` to let Go use HTTP/2.
+		}, nil
+	}
+
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	allowedCN, err := s.GetOneAllowedCN()
+	if err != nil {
+		return nil, err
+	}
+
+	tlsInfo := TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCN:     allowedCN,
+	}
+
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	return tlsConfig, nil
+}
+
+// GetOneAllowedCN only gets the first one CN.
+func (s TLSConfig) GetOneAllowedCN() (string, error) {
+	switch len(s.CertAllowedCN) {
+	case 1:
+		return s.CertAllowedCN[0], nil
+	case 0:
+		return "", nil
+	default:
+		return "", errs.ErrSecurityConfig.FastGenByArgs("only supports one CN")
+	}
 }
