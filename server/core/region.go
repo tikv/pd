@@ -675,12 +675,13 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		if !rangeChanged && origin.peersEqual(region) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
+			// Update the RegionInfo in the regionItem.
+			item.region = region
 			return
 		}
 		// If the peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
-
 		// Update the RegionInfo in the regionItem.
 		item.region = region
 	} else {
@@ -720,16 +721,16 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		}
 	}
 
-	setPeers := func(peersMap map[uint64]*regionTree, peers func() []*metapb.Peer) {
-		for _, peer := range peers() {
+	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
+		for _, peer := range peers {
 			storeID := peer.GetStoreId()
 			setPeer(peersMap, storeID, item)
 		}
 	}
 	// Add to learners.
-	setPeers(r.learners, region.GetLearners)
+	setPeers(r.learners, region.GetLearners())
 	// Add to PendingPeers
-	setPeers(r.pendingPeers, region.GetPendingPeers)
+	setPeers(r.pendingPeers, region.GetPendingPeers())
 
 	return
 }
@@ -745,28 +746,27 @@ func (r *RegionsInfo) TreeLen() int {
 }
 
 func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
+	updatePeerStat := func(peersMap map[uint64]*regionTree, storeID uint64) {
+		if tree, ok := peersMap[storeID]; ok {
+			tree.updateStat(origin, region)
+		}
+	}
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
-			if tree, ok := r.leaders[storeID]; ok {
-				tree.updateStat(origin, region)
-			}
+			updatePeerStat(r.leaders, storeID)
 		} else {
-			if tree, ok := r.followers[storeID]; ok {
-				tree.updateStat(origin, region)
-			}
+			updatePeerStat(r.followers, storeID)
 		}
 	}
-	for _, peer := range region.GetLearners() {
-		if tree, ok := r.learners[peer.GetStoreId()]; ok {
-			tree.updateStat(origin, region)
+
+	updatePeersStat := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
+		for _, peer := range peers {
+			updatePeerStat(peersMap, peer.GetStoreId())
 		}
 	}
-	for _, peer := range region.GetPendingPeers() {
-		if tree, ok := r.pendingPeers[peer.GetStoreId()]; ok {
-			tree.updateStat(origin, region)
-		}
-	}
+	updatePeersStat(r.learners, region.GetLearners())
+	updatePeersStat(r.pendingPeers, region.GetPendingPeers())
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
