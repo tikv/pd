@@ -40,9 +40,11 @@ install-tools:
 
 enable-codegen:
 	cd ../../ && $(MAKE) failpoint-enable && $(MAKE) deadlock-enable
+	go mod tidy
 
 disable-codegen:
 	cd ../../ && $(MAKE) failpoint-disable && $(MAKE) deadlock-disable
+	go mod tidy
 
 dashboard-ui:
 	cd ../../ && $(MAKE) dashboard-ui
