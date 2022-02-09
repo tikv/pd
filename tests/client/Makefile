@@ -32,7 +32,7 @@ test: enable-codegen dashboard-ui
 basic-test:
 	# skip
 
-ci-test-job:
+ci-test-job: enable-codegen
 	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=../../covprofile -coverpkg=../../...
 
 install-tools:
