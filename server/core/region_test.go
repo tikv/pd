@@ -504,25 +504,25 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	c.Assert(region.peersEqual(origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsTrue)
 
 	region.leader = peer2
-	c.Assert(region.peersEqual(origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	c.Assert(region.peersEqual(origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	c.Assert(region.peersEqual(origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	c.Assert(region.peersEqual(origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsTrue)
 
 	region.voters[2].StoreId = 4
-	c.Assert(region.peersEqual(origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 }
 
 func checkRegions(c *C, regions *RegionsInfo) {

@@ -90,9 +90,9 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.voters = voters
 }
 
-// peersEqual returns true when the peers are not changed, which may caused by: the region leader not changed,
+// peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
 // peer transferred, new peer was created, learners changed, pendingPeers changed.
-func (r *RegionInfo) peersEqual(region *RegionInfo) bool {
+func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
 	return r.leader.GetId() == region.leader.GetId() &&
 		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
 		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
@@ -672,14 +672,14 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 			r.tree.updateStat(origin, region)
 		}
 
-		if !rangeChanged && origin.peersEqual(region) {
+		if !rangeChanged && origin.peersEqualTo(region) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.region = region
 			return
 		}
-		// If the peers have changed, the sub regionTree needs to be cleaned up.
+		// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
 		// Update the RegionInfo in the regionItem.
