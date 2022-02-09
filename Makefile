@@ -243,7 +243,7 @@ ci-test-job: install-tools dashboard-ui
 ci-test-job-submod: install-tools dashboard-ui
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd - > /dev/null; done
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd - > /dev/null && cat $$mod/covprofile >> covprofile; done
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 

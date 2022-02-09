@@ -33,7 +33,7 @@ basic-test:
 	# skip
 
 ci-test-job: enable-codegen
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=../../covprofile -coverpkg=../../...
+	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../...
 
 install-tools:
 	cd ../../ && $(MAKE) install-tools

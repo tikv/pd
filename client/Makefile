@@ -23,7 +23,7 @@ basic-test:
 	CGO_ENABLE=1 go test
 
 ci-test-job:
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=../covprofile -coverpkg=../...
+	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 install-tools:
 	cd .. && $(MAKE) install-tools
