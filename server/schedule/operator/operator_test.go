@@ -418,3 +418,41 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
 	}
 }
+
+func (s *testOperatorSuite) TestRecord(c *C) {
+	operator := s.newTestOperator(1, OpLeader, AddPeer{ToStore: 1, PeerID: 1})
+	testdata := []struct {
+		op     *Operator
+		status OpStatus
+		expect OpRecord
+	}{{
+		op:     operator,
+		status: TIMEOUT,
+		expect: OpRecord{Status: TIMEOUT, Des: operator.Desc(), LastStep: 0},
+	}, {
+		op:     operator,
+		status: SUCCESS,
+		expect: OpRecord{Status: SUCCESS, Des: operator.Desc(), LastStep: 0},
+	}, {
+		op:     operator,
+		status: REPLACED,
+		expect: OpRecord{Status: REPLACED, Des: operator.Desc(), LastStep: 0},
+	}, {
+		op:     operator,
+		status: CANCELED,
+		expect: OpRecord{Status: CANCELED, Des: operator.Desc(), LastStep: 0},
+	},
+	}
+	time.Sleep(time.Second)
+	for _, v := range testdata {
+		ob := v.op.Record(v.status)
+		c.Assert(v.expect.Status, Equals, ob.Status)
+		c.Assert(v.expect.Des, Equals, ob.Des)
+		c.Assert(v.expect.LastStep, Equals, ob.LastStep)
+		if ob.Status != SUCCESS {
+			c.Assert(ob.LastCost.Seconds(), Greater, time.Second.Seconds())
+		} else {
+			c.Assert(ob.LastCost.Seconds(), Less, time.Second.Seconds())
+		}
+	}
+}

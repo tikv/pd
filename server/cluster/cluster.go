@@ -328,6 +328,7 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 			c.checkStores()
 			c.collectMetrics()
 			c.coordinator.opController.PruneHistory()
+			c.coordinator.opController.PruneRecord()
 		}
 	}
 }

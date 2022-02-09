@@ -65,6 +65,7 @@ type OperatorController struct {
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
 	histories       *list.List
+	records         *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
 	wop             WaitingOperator
@@ -80,6 +81,7 @@ func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbst
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
 		histories:       list.New(),
+		records:         list.New(),
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
@@ -124,6 +126,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
 			oc.pushHistory(op)
+			oc.pushRecord(op, op.Status())
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -133,11 +136,16 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				oc.pushFastOperator(op)
 			}
 		case operator.TIMEOUT:
+			oc.pushRecord(op, op.Status())
 			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-timeout").Inc()
 				oc.PromoteWaitingOperator()
 			}
 		default:
+			// EXPIRED, EXPIRED,REPLACED should be recorded
+			if op.Status() != operator.STARTED {
+				oc.pushRecord(op, op.Status())
+			}
 			if oc.removeOperatorWithoutBury(op) {
 				// CREATED, EXPIRED must not appear.
 				// CANCELED, REPLACED must remove before transition.
@@ -733,6 +741,39 @@ func (oc *OperatorController) pushHistory(op *operator.Operator) {
 	for _, h := range op.History() {
 		oc.histories.PushFront(h)
 	}
+}
+
+func (oc *OperatorController) pushRecord(op *operator.Operator, status operator.OpStatus) {
+	oc.Lock()
+	defer oc.Unlock()
+	oc.records.PushFront(op.Record(status))
+}
+
+// PruneRecord prunes a part of operators' history.
+func (oc *OperatorController) PruneRecord() {
+	oc.Lock()
+	defer oc.Unlock()
+	p := oc.records.Back()
+	for p != nil && time.Since(p.Value.(operator.OpRecord).FinishTime) > historyKeepTime {
+		prev := p.Prev()
+		oc.records.Remove(p)
+		p = prev
+	}
+}
+
+// GetRecords gets operators' records.
+func (oc *OperatorController) GetRecords(start time.Time) []operator.OpRecord {
+	oc.RLock()
+	defer oc.RUnlock()
+	records := make([]operator.OpRecord, 0, oc.records.Len())
+	for p := oc.records.Front(); p != nil; p = p.Next() {
+		history := p.Value.(operator.OpRecord)
+		if history.FinishTime.Before(start) {
+			break
+		}
+		records = append(records, history)
+	}
+	return records
 }
 
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {

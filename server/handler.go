@@ -448,13 +448,22 @@ func (h *Handler) GetOperatorsOfKind(mask operator.OpKind) ([]*operator.Operator
 	return results, nil
 }
 
-// GetHistory returns finished operators' history since start.
+// GetHistory returns successful operators' history since start.
 func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
 	return c.GetHistory(start), nil
+}
+
+// GetRecords returns finished operators since start.
+func (h *Handler) GetRecords(start time.Time) ([]operator.OpRecord, error) {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetRecords(start), nil
 }
 
 // SetAllStoresLimit is used to set limit of all stores.

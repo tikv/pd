@@ -146,6 +146,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "SetOperators", "/operators", operatorHandler.Post, setMethods("POST"))
 	registerFunc(apiRouter, "GetRegionOperator", "/operators/{region_id}", operatorHandler.Get, setMethods("GET"))
 	registerFunc(apiRouter, "DeleteRegionOperator", "/operators/{region_id}", operatorHandler.Delete, setMethods("DELETE"))
+	registerFunc(apiRouter, "GetOperatorRecords", "/operators/records", operatorHandler.Record, setMethods(http.MethodGet))
 
 	checkerHandler := newCheckerHandler(svr, rd)
 	registerFunc(apiRouter, "SetChecker", "/checker/{name}", checkerHandler.PauseOrResume, setMethods("POST"))
