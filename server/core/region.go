@@ -658,7 +658,6 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 // overlaps: Other regions that overlap with the specified region, excluding itself.
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	var item *regionItem // Pointer to the *RegionInfo of this ID.
-	//var origin *RegionInfo // This is the original region information of this ID.
 	rangeChanged := true // This Region is new, or its range has changed.
 	if item = r.regions.Get(region.GetID()); item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
