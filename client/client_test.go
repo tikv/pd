@@ -22,7 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/client/testutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
