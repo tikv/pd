@@ -64,7 +64,6 @@ type OperatorController struct {
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
-	histories       *list.List
 	records         *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
@@ -80,7 +79,6 @@ func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbst
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
-		histories:       list.New(),
 		records:         list.New(),
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
@@ -116,7 +114,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
-
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
@@ -125,8 +122,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
-			oc.pushHistory(op)
-			oc.pushRecord(op, op.Status())
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -136,16 +131,11 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				oc.pushFastOperator(op)
 			}
 		case operator.TIMEOUT:
-			oc.pushRecord(op, op.Status())
 			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-timeout").Inc()
 				oc.PromoteWaitingOperator()
 			}
 		default:
-			// EXPIRED, EXPIRED, REPLACED should be recorded
-			if op.Status() != operator.STARTED {
-				oc.pushRecord(op, op.Status())
-			}
 			if oc.removeOperatorWithoutBury(op) {
 				// CREATED, EXPIRED must not appear.
 				// CANCELED, REPLACED must remove before transition.
@@ -529,6 +519,7 @@ func (oc *OperatorController) removeOperatorWithoutBury(op *operator.Operator) b
 }
 
 func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
+	oc.pushRecord(op, op.Status())
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
@@ -735,18 +726,16 @@ func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 	}
 }
 
-func (oc *OperatorController) pushHistory(op *operator.Operator) {
-	oc.Lock()
-	defer oc.Unlock()
-	for _, h := range op.History() {
-		oc.histories.PushFront(h)
-	}
+func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
+	oc.fastOperators.Put(op.RegionID(), op)
 }
 
 func (oc *OperatorController) pushRecord(op *operator.Operator, status operator.OpStatus) {
 	oc.Lock()
 	defer oc.Unlock()
-	oc.records.PushFront(op.Record(status))
+	if operator.IsEndStatus(op.Status()) {
+		oc.records.PushFront(op.Record(status))
+	}
 }
 
 // PruneRecord prunes a part of operators' history.
@@ -776,33 +765,17 @@ func (oc *OperatorController) GetRecords(start time.Time) []operator.OpRecord {
 	return records
 }
 
-func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
-	oc.fastOperators.Put(op.RegionID(), op)
-}
-
-// PruneHistory prunes a part of operators' history.
-func (oc *OperatorController) PruneHistory() {
-	oc.Lock()
-	defer oc.Unlock()
-	p := oc.histories.Back()
-	for p != nil && time.Since(p.Value.(operator.OpHistory).FinishTime) > historyKeepTime {
-		prev := p.Prev()
-		oc.histories.Remove(p)
-		p = prev
-	}
-}
-
 // GetHistory gets operators' history.
 func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
 	oc.RLock()
 	defer oc.RUnlock()
-	histories := make([]operator.OpHistory, 0, oc.histories.Len())
-	for p := oc.histories.Front(); p != nil; p = p.Next() {
-		history := p.Value.(operator.OpHistory)
-		if history.FinishTime.Before(start) {
+	histories := make([]operator.OpHistory, 0, oc.records.Len())
+	for p := oc.records.Front(); p != nil; p = p.Next() {
+		record := p.Value.(operator.OpRecord)
+		if record.FinishTime.Before(start) {
 			break
 		}
-		histories = append(histories, history)
+		histories = append(histories, record.Histories...)
 	}
 	return histories
 }

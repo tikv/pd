@@ -43,6 +43,7 @@ func NewOperatorCommand() *cobra.Command {
 	c.AddCommand(NewCheckOperatorCommand())
 	c.AddCommand(NewAddOperatorCommand())
 	c.AddCommand(NewRemoveOperatorCommand())
+	c.AddCommand(NewHistoryOperatorCommand())
 	return c
 }
 
@@ -420,6 +421,28 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 
 	path := operatorsPrefix + "/" + args[0]
 	_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func NewHistoryOperatorCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "history <start>",
+		Short: "list all finished operators since start",
+		Run:   historyOperatorCommandFunc,
+	}
+	return c
+}
+
+func historyOperatorCommandFunc(cmd *cobra.Command, args []string) {
+	path := operatorsPrefix + "/" + "records"
+	if len(args) == 1 {
+		path += "?start=" + args[0]
+	}
+	_, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return

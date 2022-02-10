@@ -366,6 +366,7 @@ type OpRecord struct {
 	LastCost   time.Duration
 	Kind       string
 	Steps      string
+	Histories  []OpHistory
 }
 
 // Record transfers the operator to OpRecord.
@@ -383,16 +384,15 @@ func (o *Operator) Record(status OpStatus) OpRecord {
 		LastStep:   step,
 		Steps:      strings.Join(steps, ","),
 		Kind:       o.kind.String(),
+		Histories:  o.History(),
 	}
+	start := o.GetStartTime()
 	if status != SUCCESS {
-		var start time.Time
-		if step == 0 {
-			start = o.GetStartTime()
-		} else {
+		if step > 0 {
 			start = time.Unix(0, o.stepsTime[int(step-1)])
 		}
-		record.LastCost = now.Sub(start)
 	}
+	record.LastCost = now.Sub(start)
 	return record
 }
 

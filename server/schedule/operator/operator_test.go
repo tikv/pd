@@ -420,7 +420,7 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 }
 
 func (s *testOperatorSuite) TestRecord(c *C) {
-	operator := s.newTestOperator(1, OpLeader, AddPeer{ToStore: 1, PeerID: 1})
+	operator := s.newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	testdata := []struct {
 		op     *Operator
 		status OpStatus
@@ -449,10 +449,7 @@ func (s *testOperatorSuite) TestRecord(c *C) {
 		c.Assert(v.expect.Status, Equals, ob.Status)
 		c.Assert(v.expect.Des, Equals, ob.Des)
 		c.Assert(v.expect.LastStep, Equals, ob.LastStep)
-		if ob.Status != SUCCESS {
-			c.Assert(ob.LastCost.Seconds(), Greater, time.Second.Seconds())
-		} else {
-			c.Assert(ob.LastCost.Seconds(), Less, time.Second.Seconds())
-		}
+		c.Assert(ob.Histories, HasLen, 1)
+		c.Assert(ob.LastCost.Seconds(), Greater, time.Second.Seconds())
 	}
 }
