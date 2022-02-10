@@ -344,7 +344,7 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Summary lists the finished operators in the given time.
 // @Param from query integer false "From Unix timestamp"
 // @Produce json
-// @Success 200 {object} Trend
+// @Success 200 {object} operator.OpRecord
 // @Failure 400 {string} string "The request is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/record [get]

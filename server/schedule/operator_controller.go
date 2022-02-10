@@ -142,7 +142,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 				oc.PromoteWaitingOperator()
 			}
 		default:
-			// EXPIRED, EXPIRED,REPLACED should be recorded
+			// EXPIRED, EXPIRED, REPLACED should be recorded
 			if op.Status() != operator.STARTED {
 				oc.pushRecord(op, op.Status())
 			}
