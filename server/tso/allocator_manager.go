@@ -35,7 +35,7 @@ import (
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
 	"github.com/tikv/pd/server/storage/kv"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
