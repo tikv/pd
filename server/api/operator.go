@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -286,8 +287,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		// support both receiving key ranges or regionIDs
 		startKey, _ := input["start_key"].(string)
 		endKey, _ := input["end_key"].(string)
-		regionIDs, _ := input["region_ids"].([]interface{})
-		ids, ok := toUint64Slice(regionIDs)
+		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "region_ids is invalid")
 			return

@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -829,8 +830,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	} else {
-		regionIDs := input["regions_id"].([]interface{})
-		ids, ok := toUint64Slice(regionIDs)
+		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
 		if !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
 			return
