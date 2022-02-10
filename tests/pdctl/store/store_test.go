@@ -54,21 +54,36 @@ func (s *storeTestSuite) TestStore(c *C) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := cmd.GetRootCmd()
 
-	stores := []*metapb.Store{
+	stores := []*api.StoreInfo{
 		{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            1,
+					State:         metapb.StoreState_Up,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
 		},
 		{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            3,
+					State:         metapb.StoreState_Up,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
 		},
 		{
-			Id:            2,
-			State:         metapb.StoreState_Tombstone,
-			LastHeartbeat: time.Now().UnixNano(),
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            2,
+					State:         metapb.StoreState_Tombstone,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Tombstone.String(),
+			},
 		},
 	}
 
@@ -76,7 +91,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Store.Store)
 	}
 	defer cluster.Destroy()
 
@@ -92,6 +107,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "\"state\":"), Equals, false)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	pdctl.CheckStoresInfo(c, storesInfo.Stores, stores)
@@ -248,6 +264,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(ok, IsFalse)
 
 	// store delete <store_id> command
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
 	args = []string{"-u", pdAddr, "store", "delete", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
@@ -256,6 +273,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store check status
@@ -285,6 +303,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store remove-tombstone
