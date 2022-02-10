@@ -382,7 +382,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 
 // Timeout returns true if the step is timeout.
 func (mr MergeRegion) Timeout(start time.Time) bool {
-	return time.Since(start) > FastOperatorWaitTime
+	return time.Since(start) > FastOperatorWaitTime*20
 }
 
 // SplitRegion is an OpStep that splits a region.
