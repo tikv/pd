@@ -18,6 +18,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,10 +34,6 @@ import (
 	pdoperator "github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
-	"io"
-	"strconv"
-	"strings"
-	"time"
 )
 
 var _ = Suite(&testOperatorSuite{})

@@ -741,8 +741,6 @@ func (oc *OperatorController) GetRecords(start time.Time) []*operator.OpRecord {
 
 // GetHistory gets operators' history.
 func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
-	oc.RLock()
-	defer oc.RUnlock()
 	history := make([]operator.OpHistory, 0, oc.opRecords.ttl.Len())
 	for _, id := range oc.opRecords.ttl.GetAllID() {
 		op := oc.opRecords.Get(id)

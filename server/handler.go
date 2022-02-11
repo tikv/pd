@@ -448,7 +448,7 @@ func (h *Handler) GetOperatorsOfKind(mask operator.OpKind) ([]*operator.Operator
 	return results, nil
 }
 
-// GetHistory returns successful operators' history since start.
+// GetHistory returns finished operators' history since start.
 func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
