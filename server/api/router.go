@@ -126,13 +126,13 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
-
-	localLog := audit.LocalLogLabel
 	setAudit := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.RegistServiceForHTTP(route, labels...)
+			svr.SetServiceAuditBackendForHTTP(route, labels...)
 		}
 	}
+
+	localLog := audit.LocalLogLabel
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()

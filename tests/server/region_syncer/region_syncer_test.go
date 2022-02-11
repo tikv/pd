@@ -140,7 +140,7 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 	c.Assert(followerServer, NotNil)
 	cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
 	c.Assert(cacheRegions, HasLen, regionLen)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		for _, region := range cacheRegions {
 			r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
 			if !(c.Check(r.GetMeta(), DeepEquals, region.GetMeta()) &&

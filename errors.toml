@@ -48,7 +48,7 @@ checker not found
 
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
-create TSO stream failed
+create TSO stream failed, %s
 '''
 
 ["PD:client:ErrClientGetLeader"]

@@ -48,7 +48,7 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTsoSuite) TestTransferAllocator(c *C) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		s.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
 		_, err := s.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
 		return err == nil

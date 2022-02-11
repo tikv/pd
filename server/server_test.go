@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 
 func mustWaitLeader(c *C, svrs []*Server) *Server {
 	var leader *Server
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		for _, s := range svrs {
 			if !s.IsClosed() && s.member.IsLeader() {
 				leader = s

@@ -507,9 +507,8 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// RegistServiceForHTTP is used to regist service config for HTTP.
-// Currently can add audit backend labels. Todo: add rate limit config
-func (s *Server) RegistServiceForHTTP(route *mux.Route, labels ...string) {
+// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
 	if len(route.GetName()) == 0 {
 		return
 	}
