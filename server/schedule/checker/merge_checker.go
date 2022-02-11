@@ -202,6 +202,11 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 		return false
 	}
 
+	if !checkTargetPeerStoreAvailable(m.cluster, region, adjacent) {
+		checkerCounter.WithLabelValues("merge_checker", "adj-unavailable-peerstore").Inc()
+		return false
+	}
+
 	return true
 }
 
@@ -271,6 +276,28 @@ func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo)
 			if _, ok := regionStoreIDs[storeID]; !ok {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// checkTargetPeerStoreAvailable is used to consider the free space of the target store
+// if target stores don't have enough available space, it returns false
+func checkTargetPeerStoreAvailable(cluster schedule.Cluster, region, target *core.RegionInfo) bool {
+	stores := make(map[uint64]bool)
+	for _, p := range region.GetPeers() {
+		stores[p.GetStoreId()] = true
+	}
+	for _, p := range target.GetPeers() {
+		storeID := p.StoreId
+		if _, ok := stores[storeID]; ok {
+			continue
+		}
+		storeInfo := cluster.GetStore(storeID)
+		availableMiB := storeInfo.GetAvailable() / (1 << 20)
+		// because it is rounded down when the approximateSize of region obtained and converted to Mib, so plus 1 MiB
+		if availableMiB < uint64(region.GetApproximateSize()+1) {
+			return false
 		}
 	}
 	return true

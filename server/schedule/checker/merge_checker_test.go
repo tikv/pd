@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -79,11 +80,21 @@ func (s *testMergeCheckerSuite) SetUpTest(c *C) {
 	for storeID, labels := range stores {
 		s.cluster.PutStoreWithLabels(storeID, labels...)
 	}
+	s.cluster.AddLabelsStore(9, 0, make(map[string]string))
+	s.cluster.AddLabelsStore(10, 0, make(map[string]string))
+	s.cluster.AddLabelsStore(11, 0, make(map[string]string))
+	s.cluster.UpdateStorageRatio(uint64(9), 1, 0)
+	s.cluster.UpdateStorageRatio(uint64(10), 1, 0)
+	s.cluster.UpdateStorageRatio(uint64(11), 1, 0)
+
 	s.regions = []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
 		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
-		newRegionInfo(4, "x", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
+		newRegionInfo(4, "x", "zz", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
+		newRegionInfo(5, "zz", "zzz", 1, 1, []uint64{114, 9}, []uint64{114, 9}, []uint64{115, 10}, []uint64{116, 11}),
+		newRegionInfo(6, "zzz", "zzzz", 0, 0, []uint64{111, 9}, []uint64{111, 9}, []uint64{112, 10}, []uint64{113, 11}),
+		newRegionInfo(7, "zzzz", "", 1, 1, []uint64{117, 2}, []uint64{117, 2}, []uint64{118, 10}, []uint64{119, 1}),
 	}
 
 	for _, region := range s.regions {
@@ -227,6 +238,16 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, IsNil)
 	ops = s.mc.Check(s.regions[3])
 	c.Assert(ops, IsNil)
+
+	// Test low available store
+	ops = s.mc.Check(s.regions[6])
+	fmt.Println(ops)
+	c.Assert(ops, IsNil)
+	// Test source region and targe region are in same store
+	ops = s.mc.Check(s.regions[4])
+	c.Assert(len(ops), Equals, 2)
+	c.Assert(ops[0].RegionID(), Equals, s.regions[4].GetID())
+	c.Assert(ops[1].RegionID(), Equals, s.regions[5].GetID())
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []operator.OpStep) {
