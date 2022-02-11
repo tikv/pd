@@ -11,10 +11,26 @@ You can use it with query parameters: https://github.com/tikv/pd/compare/master.
 -->
 
 ### What problem does this PR solve?
+<!--
 
-<!-- Add the issue link with a summary if it exists. -->
+Please create an issue first to describe the problem.
+There MUST be one line starting with "Issue Number:  " and 
+linking the relevant issues via the "close" or "ref".
+For more info, check https://github.com/tikv/pd/blob/master/CONTRIBUTING.md#linking-issues.
+
+-->
+Issue Number: Close #xxx
 
 ### What is changed and how it works?
+<!--
+
+You could use "commit message" code block to add more description to the final commit message.
+For more info, check https://github.com/tikv/pd/blob/master/CONTRIBUTING.md#format-of-the-commit-message.
+
+-->
+
+```commit-message
+```
 
 ### Check List
 
