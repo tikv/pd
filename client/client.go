@@ -750,8 +750,13 @@ tsoBatchLoop:
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
-			// This error will only be returned when the dispatcherCtx is done.
-			log.Info("[pd] stop fetching the pending tso requests", zap.String("dc-location", dc))
+			if err == context.Canceled {
+				log.Info("[pd] stop fetching the pending tso requests due to context canceled",
+					zap.String("dc-location", dc))
+			} else {
+				log.Error("[pd] fetch pending tso requests error",
+					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			}
 			return
 		}
 		if maxBatchWaitInterval >= 0 {
