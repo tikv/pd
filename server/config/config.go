@@ -742,11 +742,6 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
-
-	// MaxRegionSize is the max size of region.
-	// It's dangerous to change it.
-	// Default: 96MB
-	MaxRegionSize uint64 `toml:"max-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -794,7 +789,6 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
-	defaultMaxRegionSize               = 96
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -849,9 +843,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
-	}
-	if !meta.IsDefined("max-region-size") {
-		adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

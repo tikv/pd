@@ -239,7 +239,6 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 		h.r.JSON(w, http.StatusBadRequest, "missing store id")
 		return
 	}
-	log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
 	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())

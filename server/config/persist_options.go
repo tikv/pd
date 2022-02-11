@@ -246,11 +246,6 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 	return o.GetScheduleConfig().SplitMergeInterval.Duration
 }
 
-// GetMaxRegionSize returns the max size of regions.
-func (o *PersistOptions) GetMaxRegionSize() uint64 {
-	return o.GetScheduleConfig().MaxRegionSize
-}
-
 // SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	v := o.GetScheduleConfig().Clone()
