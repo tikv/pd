@@ -90,6 +90,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	m.splitCache.UpdateTTL(m.opts.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-split").Inc()
 		return nil
