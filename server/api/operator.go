@@ -344,11 +344,11 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Summary lists the finished operators in the given time.
 // @Param from query integer false "From Unix timestamp"
 // @Produce json
-// @Success 200 {object} operator.OpRecord
+// @Success 200 {object} []operator.OpRecord
 // @Failure 400 {string} string "The request is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /operators/record [get]
-func (h *operatorHandler) Record(w http.ResponseWriter, r *http.Request) {
+// @Router /operators/records [get]
+func (h *operatorHandler) Records(w http.ResponseWriter, r *http.Request) {
 	var from time.Time
 	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
 		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)

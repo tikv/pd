@@ -421,35 +421,9 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 
 func (s *testOperatorSuite) TestRecord(c *C) {
 	operator := s.newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
-	testdata := []struct {
-		op     *Operator
-		status OpStatus
-		expect OpRecord
-	}{{
-		op:     operator,
-		status: TIMEOUT,
-		expect: OpRecord{Status: TIMEOUT, Des: operator.Desc(), LastStep: 0},
-	}, {
-		op:     operator,
-		status: SUCCESS,
-		expect: OpRecord{Status: SUCCESS, Des: operator.Desc(), LastStep: 0},
-	}, {
-		op:     operator,
-		status: REPLACED,
-		expect: OpRecord{Status: REPLACED, Des: operator.Desc(), LastStep: 0},
-	}, {
-		op:     operator,
-		status: CANCELED,
-		expect: OpRecord{Status: CANCELED, Des: operator.Desc(), LastStep: 0},
-	},
-	}
+	now := time.Now()
 	time.Sleep(time.Second)
-	for _, v := range testdata {
-		ob := v.op.Record(v.status)
-		c.Assert(v.expect.Status, Equals, ob.Status)
-		c.Assert(v.expect.Des, Equals, ob.Des)
-		c.Assert(v.expect.LastStep, Equals, ob.LastStep)
-		c.Assert(ob.Histories, HasLen, 1)
-		c.Assert(ob.LastCost.Seconds(), Greater, time.Second.Seconds())
-	}
+	ob := operator.Record(now)
+	c.Assert(ob.FinishTime, Equals, now)
+	c.Assert(ob.duration.Seconds(), Greater, time.Second.Seconds())
 }

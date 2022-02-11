@@ -359,40 +359,32 @@ func (o *Operator) History() []OpHistory {
 
 // OpRecord is used to log and visualize completed operators.
 type OpRecord struct {
+	Operator
 	FinishTime time.Time
-	Status     OpStatus
-	Des        string
-	LastStep   int32
-	LastCost   time.Duration
-	Kind       string
-	Steps      string
-	Histories  []OpHistory
+	duration   time.Duration
+}
+
+func (o *OpRecord) String() string {
+	return fmt.Sprintf("%s (finishAt:%v, duration:%v)", o.Operator.String(), o.FinishTime, o.duration)
+}
+
+// MarshalJSON returns the status of operator as a JSON string
+func (o *OpRecord) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + o.String() + `"`), nil
 }
 
 // Record transfers the operator to OpRecord.
-func (o *Operator) Record(status OpStatus) OpRecord {
-	steps := make([]string, len(o.steps))
-	for i := range o.steps {
-		steps[i] = o.steps[i].String()
-	}
+func (o *Operator) Record(finishTime time.Time) *OpRecord {
 	step := atomic.LoadInt32(&o.currentStep)
-	now := time.Now()
-	record := OpRecord{
-		FinishTime: now,
-		Status:     status,
-		Des:        o.desc,
-		LastStep:   step,
-		Steps:      strings.Join(steps, ","),
-		Kind:       o.kind.String(),
-		Histories:  o.History(),
+	record := &OpRecord{
+		Operator:   *o,
+		FinishTime: finishTime,
 	}
 	start := o.GetStartTime()
-	if status != SUCCESS {
-		if step > 0 {
-			start = time.Unix(0, o.stepsTime[int(step-1)])
-		}
+	if o.Status() != SUCCESS && step > 0 {
+		start = time.Unix(0, o.stepsTime[int(step-1)])
 	}
-	record.LastCost = now.Sub(start)
+	record.duration = finishTime.Sub(start)
 	return record
 }
 

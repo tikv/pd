@@ -458,12 +458,16 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // GetRecords returns finished operators since start.
-func (h *Handler) GetRecords(start time.Time) ([]operator.OpRecord, error) {
+func (h *Handler) GetRecords(start time.Time) ([]*operator.OpRecord, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	return c.GetRecords(start), nil
+	records := c.GetRecords(start)
+	if len(records) == 0 {
+		return nil, ErrOperatorNotFound
+	}
+	return records, nil
 }
 
 // SetAllStoresLimit is used to set limit of all stores.

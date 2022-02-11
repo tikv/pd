@@ -16,7 +16,6 @@ package schedule
 
 import (
 	"container/heap"
-	"container/list"
 	"context"
 	"fmt"
 	"strconv"
@@ -64,7 +63,6 @@ type OperatorController struct {
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
-	records         *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
 	wop             WaitingOperator
@@ -79,7 +77,6 @@ func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbst
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
-		records:         list.New(),
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
@@ -519,7 +516,6 @@ func (oc *OperatorController) removeOperatorWithoutBury(op *operator.Operator) b
 }
 
 func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
-	oc.pushRecord(op, op.Status())
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
@@ -730,37 +726,15 @@ func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 	oc.fastOperators.Put(op.RegionID(), op)
 }
 
-func (oc *OperatorController) pushRecord(op *operator.Operator, status operator.OpStatus) {
-	oc.Lock()
-	defer oc.Unlock()
-	if operator.IsEndStatus(op.Status()) {
-		oc.records.PushFront(op.Record(status))
-	}
-}
-
-// PruneRecord prunes a part of operators' history.
-func (oc *OperatorController) PruneRecord() {
-	oc.Lock()
-	defer oc.Unlock()
-	p := oc.records.Back()
-	for p != nil && time.Since(p.Value.(operator.OpRecord).FinishTime) > historyKeepTime {
-		prev := p.Prev()
-		oc.records.Remove(p)
-		p = prev
-	}
-}
-
 // GetRecords gets operators' records.
-func (oc *OperatorController) GetRecords(start time.Time) []operator.OpRecord {
-	oc.RLock()
-	defer oc.RUnlock()
-	records := make([]operator.OpRecord, 0, oc.records.Len())
-	for p := oc.records.Front(); p != nil; p = p.Next() {
-		history := p.Value.(operator.OpRecord)
-		if history.FinishTime.Before(start) {
-			break
+func (oc *OperatorController) GetRecords(start time.Time) []*operator.OpRecord {
+	records := make([]*operator.OpRecord, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(start) {
+			continue
 		}
-		records = append(records, history)
+		records = append(records, op.Op.Record(op.FinishTime))
 	}
 	return records
 }
@@ -769,15 +743,15 @@ func (oc *OperatorController) GetRecords(start time.Time) []operator.OpRecord {
 func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
 	oc.RLock()
 	defer oc.RUnlock()
-	histories := make([]operator.OpHistory, 0, oc.records.Len())
-	for p := oc.records.Front(); p != nil; p = p.Next() {
-		record := p.Value.(operator.OpRecord)
-		if record.FinishTime.Before(start) {
-			break
+	history := make([]operator.OpHistory, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(start) {
+			continue
 		}
-		histories = append(histories, record.Histories...)
+		history = append(history, op.Op.History()...)
 	}
-	return histories
+	return history
 }
 
 // updateCounts updates resource counts using current pending operators.
@@ -861,15 +835,17 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 
 // OperatorWithStatus records the operator and its status.
 type OperatorWithStatus struct {
-	Op     *operator.Operator
-	Status pdpb.OperatorStatus
+	Op         *operator.Operator
+	Status     pdpb.OperatorStatus
+	FinishTime time.Time
 }
 
 // NewOperatorWithStatus creates an OperatorStatus from an operator.
 func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 	return &OperatorWithStatus{
-		Op:     op,
-		Status: operator.OpStatusToPDPB(op.Status()),
+		Op:         op,
+		Status:     operator.OpStatusToPDPB(op.Status()),
+		FinishTime: time.Now(),
 	}
 }
 
