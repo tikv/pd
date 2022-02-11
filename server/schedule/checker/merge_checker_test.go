@@ -238,6 +238,18 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[3])
 	c.Assert(ops, IsNil)
 
+	s.cluster.SetSplitMergeInterval(500 * time.Millisecond)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, IsNil)
+
+	time.Sleep(500 * time.Millisecond)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, NotNil)
+
 	// Test source region and targe region are in same store
 	ops = s.mc.Check(s.regions[4])
 	c.Assert(ops, HasLen, 2)
@@ -252,18 +264,6 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	s.cluster.UpdateStorageRatio(uint64(11), 0.99984375, 0.00015625)
 	ops = s.mc.Check(s.regions[6])
 	c.Assert(ops, HasLen, 2)
-
-	s.cluster.SetSplitMergeInterval(500 * time.Millisecond)
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, IsNil)
-	ops = s.mc.Check(s.regions[3])
-	c.Assert(ops, IsNil)
-
-	time.Sleep(500 * time.Millisecond)
-	ops = s.mc.Check(s.regions[2])
-	c.Assert(ops, NotNil)
-	ops = s.mc.Check(s.regions[3])
-	c.Assert(ops, NotNil)
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []operator.OpStep) {
