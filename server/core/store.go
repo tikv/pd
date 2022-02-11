@@ -84,19 +84,20 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:                meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
+		meta:                 meta,
+		storeStats:           s.storeStats,
+		pauseLeaderTransfer:  s.pauseLeaderTransfer,
+		slowStoreEvicted:     s.slowStoreEvicted,
+		leaderCount:          s.leaderCount,
+		regionCount:          s.regionCount,
+		leaderSize:           s.leaderSize,
+		regionSize:           s.regionSize,
+		pendingPeerCount:     s.pendingPeerCount,
+		lastPersistTime:      s.lastPersistTime,
+		leaderWeight:         s.leaderWeight,
+		regionWeight:         s.regionWeight,
+		limiter:              s.limiter,
+		operatorExecutorRate: s.operatorExecutorRate,
 	}
 
 	for _, opt := range opts {
@@ -108,19 +109,20 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:                s.meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
+		meta:                 s.meta,
+		storeStats:           s.storeStats,
+		pauseLeaderTransfer:  s.pauseLeaderTransfer,
+		slowStoreEvicted:     s.slowStoreEvicted,
+		leaderCount:          s.leaderCount,
+		regionCount:          s.regionCount,
+		leaderSize:           s.leaderSize,
+		regionSize:           s.regionSize,
+		pendingPeerCount:     s.pendingPeerCount,
+		lastPersistTime:      s.lastPersistTime,
+		leaderWeight:         s.leaderWeight,
+		regionWeight:         s.regionWeight,
+		limiter:              s.limiter,
+		operatorExecutorRate: s.operatorExecutorRate,
 	}
 
 	for _, opt := range opts {
