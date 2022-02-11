@@ -23,7 +23,7 @@
 
 ## Join to an existing cluster. The value should be cluster's ${advertise-client-urls}
 # join = ""
-
+# max-region-size = 96
 [security]
 ## Path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
 # cacert-path = ""

@@ -164,6 +164,8 @@ type Config struct {
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
 	EnableServiceMiddleware bool
+
+	MaxRegionSize uint64 `toml:"max-region-size" json:"max-region-size"`
 }
 
 // NewConfig creates a new config.
@@ -250,6 +252,8 @@ const (
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+
+	defaultMaxRegionSize = 96
 )
 
 // Special keys for Labels
@@ -592,6 +596,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Security.Encryption.Adjust()
+
+	adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
 
 	return nil
 }

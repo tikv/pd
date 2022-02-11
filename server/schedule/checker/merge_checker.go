@@ -32,7 +32,10 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
-const maxTargetRegionSize = 500
+const (
+	maxTargetRegionSize = 500
+	maxRegionSizeFactor = 5
+)
 
 // When a region has label `merge_option=deny`, skip merging the region.
 // If label value is `allow` or other value, it will be treated as `allow`.
@@ -144,8 +147,11 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
 		return nil
 	}
-
-	if target.GetApproximateSize() > maxTargetRegionSize {
+	maxSize := int64(maxRegionSizeFactor * m.opts.GetCfg().MaxRegionSize)
+	if maxSize < maxTargetRegionSize {
+		maxSize = maxTargetRegionSize
+	}
+	if target.GetApproximateSize() > maxSize {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
 		return nil
 	}
