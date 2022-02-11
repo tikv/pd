@@ -88,7 +88,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(e, IsNil)
 				defer res.Body.Close()
@@ -104,7 +104,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Request will fail with no leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
 				defer res.Body.Close()
