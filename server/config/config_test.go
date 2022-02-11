@@ -91,6 +91,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	}
 	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(newOpt.GetCfg().MaxRegionSize, Equals, uint64(defaultMaxRegionSize))
 }
 
 func (s *testConfigSuite) TestReloadUpgrade(c *C) {
@@ -166,6 +167,7 @@ func (s *testConfigSuite) TestAdjust(c *C) {
 name = ""
 lease = 0
 max-request-bytes = 20000000
+max-region-size = 10000
 
 [pd-server]
 metric-storage = "http://127.0.0.1:9090"
@@ -187,6 +189,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.Name, Equals, fmt.Sprintf("%s-%s", defaultName, host))
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
+	c.Assert(cfg.MaxRegionSize, Equals, uint64(10000))
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
 	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)

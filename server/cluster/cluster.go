@@ -100,7 +100,6 @@ type RaftCluster struct {
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
 	opt     *config.PersistOptions
-	cfg     *config.Config
 	storage storage.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
