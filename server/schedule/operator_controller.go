@@ -44,7 +44,6 @@ const (
 )
 
 var (
-	historyKeepTime    = 5 * time.Minute
 	slowNotifyInterval = 5 * time.Second
 	fastNotifyInterval = 2 * time.Second
 	// PushOperatorTickInterval is the interval try to push the operator.

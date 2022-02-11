@@ -114,7 +114,6 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "add learner peer 2 on store 4"), IsTrue)
-	records = mustReadURL(c, recordURL)
 
 	// Fail to add peer to tombstone store.
 	err = s.svr.GetRaftCluster().RemoveStore(3, true)

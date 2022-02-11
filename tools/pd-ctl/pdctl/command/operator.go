@@ -428,6 +428,7 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
+// NewHistoryOperatorCommand returns a command to history finished operators.
 func NewHistoryOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "history <start>",
@@ -440,14 +441,14 @@ func NewHistoryOperatorCommand() *cobra.Command {
 func historyOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	path := operatorsPrefix + "/" + "records"
 	if len(args) == 1 {
-		path += "?start=" + args[0]
+		path += "?from=" + args[0]
 	}
-	_, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	records, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	cmd.Println("Success!")
+	cmd.Println(records)
 }
 
 func parseUint64s(args []string) ([]uint64, error) {

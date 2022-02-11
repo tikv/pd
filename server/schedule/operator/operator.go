@@ -359,7 +359,7 @@ func (o *Operator) History() []OpHistory {
 
 // OpRecord is used to log and visualize completed operators.
 type OpRecord struct {
-	Operator
+	*Operator
 	FinishTime time.Time
 	duration   time.Duration
 }
@@ -377,7 +377,7 @@ func (o *OpRecord) MarshalJSON() ([]byte, error) {
 func (o *Operator) Record(finishTime time.Time) *OpRecord {
 	step := atomic.LoadInt32(&o.currentStep)
 	record := &OpRecord{
-		Operator:   *o,
+		Operator:   o,
 		FinishTime: finishTime,
 	}
 	start := o.GetStartTime()
