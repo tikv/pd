@@ -225,14 +225,12 @@ func (o *Operator) CheckExpired() bool {
 
 // CheckTimeout checks if the operator is timeout, and update the status.
 func (o *Operator) CheckTimeout() bool {
-	if o.CheckSuccess() {
+	if o.CheckSuccess() || len(o.steps) == 0 {
 		return false
 	}
 	currentStep := int(atomic.LoadInt32(&o.currentStep))
-	var startTime time.Time
-	if currentStep == 0 {
-		startTime = o.GetStartTime()
-	} else {
+	startTime := o.GetStartTime()
+	if currentStep > 0 {
 		startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
 	}
 	step := o.steps[currentStep]
