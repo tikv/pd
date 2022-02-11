@@ -164,6 +164,8 @@ type Config struct {
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
 	EnableServiceMiddleware bool
+	
+	EnableAuditMiddleware bool
 
 	MaxRegionSize uint64 `toml:"max-region-size" json:"max-region-size"`
 }
