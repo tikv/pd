@@ -66,7 +66,6 @@ func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
 	c.Assert(output[3], Equals, fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
 		"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 		time.Unix(info.StartTimeStamp, 0).String()))
-	time.Sleep(10 * time.Second)
 }
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {

@@ -28,6 +28,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -122,14 +123,11 @@ type testMiddlewareSuite struct {
 	cleanup        func()
 	cluster        *tests.TestCluster
 	tempStdoutFile *os.File
-	initStdoutFile *os.File
 }
 
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
-	s.initStdoutFile = os.Stdout
 	s.tempStdoutFile, _ = os.CreateTemp("/tmp", "pd_tests")
-	os.Stdout = s.tempStdoutFile
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
@@ -142,11 +140,9 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 
 func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
-	os.Stdout = s.initStdoutFile
-	s.tempStdoutFile.Close()
-	os.Remove(s.tempStdoutFile.Name())
 	s.cleanup()
 	s.cluster.Destroy()
+	os.Remove(s.tempStdoutFile.Name())
 }
 
 func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
@@ -272,6 +268,11 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
+	cfg := &log.Config{}
+	cfg.File.Filename = s.tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
 	resp, err := dialClient.Do(req)
