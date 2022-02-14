@@ -68,3 +68,20 @@ func JSONToUint64Slice(from interface{}) ([]uint64, bool) {
 	}
 	return to, true
 }
+
+// JSONToStringSlice converts JSON slice to string slice.
+func JSONToStringSlice(from interface{}) ([]string, bool) {
+	items, ok := from.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	to := make([]string, 0, len(items))
+	for _, item := range items {
+		v, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		to = append(to, v)
+	}
+	return to, true
+}

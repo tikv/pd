@@ -24,6 +24,7 @@ import (
 	"net/url"
 
 	"github.com/pingcap/errors"
+	"github.com/unrolled/render"
 )
 
 var (
@@ -173,4 +174,12 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 		opt(res, resp.StatusCode)
 	}
 	return nil
+}
+
+func respWithMissParam(w http.ResponseWriter, r *render.Render, pName string) {
+	r.JSON(w, http.StatusBadRequest, fmt.Sprintf("missing %s", pName))
+}
+
+func respWithInvalidParam(w http.ResponseWriter, r *render.Render, pName string) {
+	r.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid %s", pName))
 }

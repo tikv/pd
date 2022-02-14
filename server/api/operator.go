@@ -15,6 +15,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -40,8 +41,8 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 }
 
 const (
-	PRegionID = "region_id"
-	PKind     = "kind"
+	pRegionID = "region_id"
+	pKind     = "kind"
 )
 
 // @Tags operator
@@ -53,7 +54,7 @@ const (
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [get]
 func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)[PRegionID]
+	id := mux.Vars(r)[pRegionID]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
@@ -91,7 +92,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 		err     error
 	)
 
-	kinds, ok := r.URL.Query()[PKind]
+	kinds, ok := r.URL.Query()[pKind]
 	if !ok {
 		results, err = h.GetOperators()
 		if err != nil {
@@ -135,8 +136,21 @@ const (
 )
 
 const (
-	pName      = "name"
-	pToStoreID = "to_store_id"
+	pName           = "name"
+	pToStoreID      = "to_store_id"
+	pToStoreIDs     = "to_store_ids"
+	pPeerRoles      = "peer_roles"
+	pFromStoreID    = "from_store_id"
+	pStoreID        = "store_id"
+	pSourceRegionID = "source_region_id"
+	pTargetRegionID = "target_region_id"
+	pPolicy         = "policy"
+	pGroup          = "group"
+	pStartKey       = "start_key"
+	pEndKey         = "end_key"
+	pRegionIDs      = "region_ids"
+	pRetryLimit     = "retry_limit"
+	pKeys           = "keys"
 )
 
 // FIXME: details of input json body params
@@ -157,175 +171,166 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 	name, ok := input[pName].(string)
 	if !ok {
-		h.r.JSON(w, http.StatusBadRequest, "missing operator name")
+		respWithMissParam(w, h.r, pName)
 		return
+	}
+
+	parseUInt64Param := func(name string) (uint64, bool) {
+		v, ok := input[name].(float64)
+		if !ok {
+			respWithMissParam(w, h.r, name)
+			return 0, ok
+		}
+		return uint64(v), ok
 	}
 
 	switch name {
 	case opTransferLeader:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input[pToStoreID].(float64)
+
+		storeID, ok := parseUInt64Param(pToStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id to transfer leader to")
 			return
 		}
-		if err := h.AddTransferLeaderOperator(uint64(regionID), uint64(storeID)); err != nil {
+		if err := h.AddTransferLeaderOperator(regionID, storeID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opTransferRegion:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeIDs, ok := parseStoreIDsAndPeerRole(input["to_store_ids"], input["peer_roles"])
+		storeIDs, ok := parseStoreIDsAndPeerRole(input[pToStoreIDs], input[pPeerRoles])
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
+			respWithInvalidParam(w, h.r, fmt.Sprintf("%s(store ids to transfer region to)", pToStoreIDs))
 			return
 		}
 		if len(storeIDs) == 0 {
-			h.r.JSON(w, http.StatusBadRequest, "missing store ids to transfer region to")
+			respWithMissParam(w, h.r, fmt.Sprintf("%s(store ids to transfer region to)", pToStoreIDs))
 			return
 		}
-		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDs); err != nil {
+		if err := h.AddTransferRegionOperator(regionID, storeIDs); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opTransferPeer:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		fromID, ok := input["from_store_id"].(float64)
+		fromID, ok := parseUInt64Param(pFromStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer from")
 			return
 		}
-		toID, ok := input["to_store_id"].(float64)
+
+		toID, ok := parseUInt64Param(pToStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
 			return
 		}
-		if err := h.AddTransferPeerOperator(uint64(regionID), uint64(fromID), uint64(toID)); err != nil {
+
+		if err := h.AddTransferPeerOperator(regionID, fromID, toID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opAddPeer:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input["store_id"].(float64)
+		storeID, ok := parseUInt64Param(pStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
 			return
 		}
-		if err := h.AddAddPeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+		if err := h.AddAddPeerOperator(regionID, storeID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opAddLearner:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input["store_id"].(float64)
+		storeID, ok := parseUInt64Param(pStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
 			return
 		}
-		if err := h.AddAddLearnerOperator(uint64(regionID), uint64(storeID)); err != nil {
+		if err := h.AddAddLearnerOperator(regionID, storeID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opRemovePeer:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input["store_id"].(float64)
+		storeID, ok := parseUInt64Param(pStoreID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
 			return
 		}
-		if err := h.AddRemovePeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+		if err := h.AddRemovePeerOperator(regionID, storeID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opMergeRegion:
-		regionID, ok := input["source_region_id"].(float64)
+		regionID, ok := parseUInt64Param(pSourceRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		targetID, ok := input["target_region_id"].(float64)
+		targetID, ok := parseUInt64Param(pTargetRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid target region id to merge to")
 			return
 		}
-		if err := h.AddMergeRegionOperator(uint64(regionID), uint64(targetID)); err != nil {
+		if err := h.AddMergeRegionOperator(regionID, targetID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opSplitRegion:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		policy, ok := input["policy"].(string)
+		policy, ok := input[pPolicy].(string)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing split policy")
+			respWithMissParam(w, h.r, pPolicy)
 			return
 		}
-		var keys []string
-		if ks, ok := input["keys"]; ok {
-			for _, k := range ks.([]interface{}) {
-				key, ok := k.(string)
-				if !ok {
-					h.r.JSON(w, http.StatusBadRequest, "bad format keys")
-					return
-				}
-				keys = append(keys, key)
-			}
+		keys, ok := typeutil.JSONToStringSlice(input[pKeys])
+		if !ok {
+			respWithInvalidParam(w, h.r, pKeys)
+			return
 		}
-		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
+		if err := h.AddSplitRegionOperator(regionID, policy, keys); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opScatterRegion:
-		regionID, ok := input[PRegionID].(float64)
+		regionID, ok := parseUInt64Param(pRegionID)
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		group, _ := input["group"].(string)
-		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
+		group, _ := input[pGroup].(string)
+		if err := h.AddScatterRegionOperator(regionID, group); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case opScatterRegions:
 		// support both receiving key ranges or regionIDs
-		startKey, _ := input["start_key"].(string)
-		endKey, _ := input["end_key"].(string)
-		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
+		startKey, _ := input[pStartKey].(string)
+		endKey, _ := input[pEndKey].(string)
+
+		ids, ok := typeutil.JSONToUint64Slice(input[pRegionIDs])
 		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "region_ids is invalid")
+			respWithInvalidParam(w, h.r, pRegionIDs)
 			return
 		}
-		group, _ := input["group"].(string)
+		group, _ := input[pGroup].(string)
 		// retry 5 times if retryLimit not defined
 		retryLimit := 5
-		if rl, ok := input["retry_limit"].(float64); ok {
+		if rl, ok := input[pRetryLimit].(float64); ok {
 			retryLimit = int(rl)
 		}
 		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
@@ -358,7 +363,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [delete]
 func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)[PRegionID]
+	id := mux.Vars(r)[pRegionID]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
