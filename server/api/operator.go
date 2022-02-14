@@ -38,6 +38,11 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 	}
 }
 
+const (
+	PRegionID = "region_id"
+	PKind     = "kind"
+)
+
 // @Tags operator
 // @Summary Get a Region's pending operator.
 // @Param region_id path int true "A Region's Id"
@@ -47,7 +52,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [get]
 func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["region_id"]
+	id := mux.Vars(r)[PRegionID]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
@@ -64,6 +69,13 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, op)
 }
 
+const (
+	kindAdmin   = "admin"
+	kindLeader  = "leader"
+	kingRegion  = "region"
+	kindWaiting = "waiting"
+)
+
 // @Tags operator
 // @Summary List pending operators.
 // @Param kind query string false "Specify the operator kind." Enums(admin, leader, region)
@@ -78,7 +90,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 		err     error
 	)
 
-	kinds, ok := r.URL.Query()["kind"]
+	kinds, ok := r.URL.Query()[PKind]
 	if !ok {
 		results, err = h.GetOperators()
 		if err != nil {
@@ -88,13 +100,13 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 	} else {
 		for _, kind := range kinds {
 			switch kind {
-			case "admin":
+			case kindAdmin:
 				ops, err = h.GetAdminOperators()
-			case "leader":
+			case kindLeader:
 				ops, err = h.GetLeaderOperators()
-			case "region":
+			case kingRegion:
 				ops, err = h.GetRegionOperators()
-			case "waiting":
+			case kindWaiting:
 				ops, err = h.GetWaitingOperators()
 			}
 			if err != nil {
@@ -107,6 +119,24 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	h.r.JSON(w, http.StatusOK, results)
 }
+
+const (
+	opTransferLeader = "transfer-leader"
+	opTransferRegion = "transfer-region"
+	opTransferPeer   = "transfer-peer"
+	opAddPeer        = "add-peer"
+	opAddLearner     = "add-learner"
+	opRemovePeer     = "remove-peer"
+	opMergeRegion    = "merge-region"
+	opSplitRegion    = "split-region"
+	opScatterRegion  = "scatter-region"
+	opScatterRegions = "scatter-regions"
+)
+
+const (
+	pName      = "name"
+	pToStoreID = "to_store_id"
+)
 
 // FIXME: details of input json body params
 // @Tags operator
@@ -124,20 +154,20 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name, ok := input["name"].(string)
+	name, ok := input[pName].(string)
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing operator name")
 		return
 	}
 
 	switch name {
-	case "transfer-leader":
-		regionID, ok := input["region_id"].(float64)
+	case opTransferLeader:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
 		}
-		storeID, ok := input["to_store_id"].(float64)
+		storeID, ok := input[pToStoreID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id to transfer leader to")
 			return
@@ -146,8 +176,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "transfer-region":
-		regionID, ok := input["region_id"].(float64)
+	case opTransferRegion:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -165,8 +195,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "transfer-peer":
-		regionID, ok := input["region_id"].(float64)
+	case opTransferPeer:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -185,8 +215,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "add-peer":
-		regionID, ok := input["region_id"].(float64)
+	case opAddPeer:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -200,8 +230,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "add-learner":
-		regionID, ok := input["region_id"].(float64)
+	case opAddLearner:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -215,8 +245,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "remove-peer":
-		regionID, ok := input["region_id"].(float64)
+	case opRemovePeer:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -230,7 +260,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "merge-region":
+	case opMergeRegion:
 		regionID, ok := input["source_region_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
@@ -245,8 +275,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "split-region":
-		regionID, ok := input["region_id"].(float64)
+	case opSplitRegion:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -271,8 +301,8 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "scatter-region":
-		regionID, ok := input["region_id"].(float64)
+	case opScatterRegion:
+		regionID, ok := input[PRegionID].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing region id")
 			return
@@ -282,7 +312,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case "scatter-regions":
+	case opScatterRegions:
 		// support both receiving key ranges or regionIDs
 		startKey, _ := input["start_key"].(string)
 		endKey, _ := input["end_key"].(string)
@@ -323,7 +353,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [delete]
 func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	id := mux.Vars(r)["region_id"]
+	id := mux.Vars(r)[PRegionID]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
