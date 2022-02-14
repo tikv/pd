@@ -381,7 +381,7 @@ func (o *Operator) Record(finishTime time.Time) *OpRecord {
 		FinishTime: finishTime,
 	}
 	start := o.GetStartTime()
-	if o.Status() != SUCCESS && step > 0 {
+	if o.Status() != SUCCESS && 0 < step && int(step-1) < len(o.stepsTime) {
 		start = time.Unix(0, o.stepsTime[int(step-1)])
 	}
 	record.duration = finishTime.Sub(start)

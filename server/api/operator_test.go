@@ -106,7 +106,6 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	_, err = doDelete(testDialClient, regionURL)
 	c.Assert(err, IsNil)
 	records = mustReadURL(c, recordURL)
-	fmt.Printf("data:%s\n", records)
 	c.Assert(strings.Contains(records, "admin-remove-peer {rm peer: store [2]}"), IsTrue)
 
 	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, nil)
