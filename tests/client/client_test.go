@@ -360,7 +360,7 @@ func requestGlobalAndLocalTSO(c *C, wg *sync.WaitGroup, dcLocationConfig map[str
 					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
 					c.Assert(err, IsNil)
 					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
-					c.Assert(lastTS, Less, globalTS1)
+					c.Assert(lastTS, Greater, globalTS1)
 					c.Assert(globalTS1, Less, localTS)
 					c.Assert(localTS, Less, globalTS2)
 					lastTS = globalTS2
