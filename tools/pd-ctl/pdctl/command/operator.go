@@ -432,7 +432,7 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 func NewHistoryOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "history <start>",
-		Short: "list all finished operators since start",
+		Short: "list all finished operators since start, start is a timestamp",
 		Run:   historyOperatorCommandFunc,
 	}
 	return c
