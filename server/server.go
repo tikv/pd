@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -151,6 +152,10 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	serviceAuditBackendLabels map[string]*audit.BackendLabels
+
+	auditBackend []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -240,6 +245,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 
 	s.handler = newHandler(s)
+
+	// create audit backend
+	s.auditBackend = []audit.Backend{}
+	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -496,6 +505,16 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
+	if len(route.GetName()) == 0 {
+		return
+	}
+	if len(labels) > 0 {
+		s.SetServiceAuditBackendLabels(route.GetName(), labels)
+	}
+}
+
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
@@ -726,14 +745,14 @@ func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
-// SetServiceMiddleware change EnableServiceMiddleware
-func (s *Server) SetServiceMiddleware(status bool) {
-	s.cfg.EnableServiceMiddleware = status
+// SetAuditMiddleware changes EnableAuditMiddleware
+func (s *Server) SetAuditMiddleware(status bool) {
+	s.cfg.EnableAuditMiddleware = status
 }
 
-// IsServiceMiddlewareEnabled returns EnableServiceMiddleware status
-func (s *Server) IsServiceMiddlewareEnabled() bool {
-	return s.cfg.EnableServiceMiddleware
+// IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
+func (s *Server) IsAuditMiddlewareEnabled() bool {
+	return s.cfg.EnableAuditMiddleware
 }
 
 // GetBasicCluster returns the basic cluster of server.
@@ -1096,6 +1115,21 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return cluster.GetRegions()
 	}
 	return nil
+}
+
+// GetAuditBackend returns audit backends
+func (s *Server) GetAuditBackend() []audit.Backend {
+	return s.auditBackend
+}
+
+// GetServiceAuditBackendLabels returns audit backend labels by serviceLabel
+func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
+	return s.serviceAuditBackendLabels[serviceLabel]
+}
+
+// SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
+func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
+	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
 }
 
 // GetClusterStatus gets cluster status.
