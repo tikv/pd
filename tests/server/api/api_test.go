@@ -128,8 +128,7 @@ type testMiddlewareSuite struct {
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
 	s.initStdoutFile = os.Stdout
-	//s.tempStdoutFile, _ = os.CreateTemp("/tmp", "pd_tests")
-	s.tempStdoutFile, _ = os.Create("/Users/jiangyongbo/tempLog/std.txt")
+	s.tempStdoutFile, _ = os.CreateTemp("/tmp", "pd_tests")
 	os.Stdout = s.tempStdoutFile
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
@@ -145,7 +144,7 @@ func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
 	os.Stdout = s.initStdoutFile
 	s.tempStdoutFile.Close()
-	//os.Remove(s.tempStdoutFile.Name())
+	os.Remove(s.tempStdoutFile.Name())
 	s.cleanup()
 	s.cluster.Destroy()
 }
