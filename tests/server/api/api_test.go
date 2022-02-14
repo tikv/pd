@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -118,12 +119,18 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 var _ = Suite(&testMiddlewareSuite{})
 
 type testMiddlewareSuite struct {
-	cleanup func()
-	cluster *tests.TestCluster
+	cleanup        func()
+	cluster        *tests.TestCluster
+	tempStdoutFile *os.File
+	initStdoutFile *os.File
 }
 
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
+	s.initStdoutFile = os.Stdout
+	//s.tempStdoutFile, _ = os.CreateTemp("/tmp", "pd_tests")
+	s.tempStdoutFile, _ = os.Create("/Users/jiangyongbo/tempLog/std.txt")
+	os.Stdout = s.tempStdoutFile
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
@@ -136,6 +143,9 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 
 func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
+	os.Stdout = s.initStdoutFile
+	s.tempStdoutFile.Close()
+	//os.Remove(s.tempStdoutFile.Name())
 	s.cleanup()
 	s.cluster.Destroy()
 }
@@ -275,6 +285,8 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
+	b, _ := os.ReadFile(s.tempStdoutFile.Name())
+	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, true)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 }
