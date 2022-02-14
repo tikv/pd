@@ -90,6 +90,13 @@ func NewTestOptions() *PersistOptions {
 	return NewPersistOptions(c)
 }
 
+// NewTestImmutableOptions creates default immutable options for testing.
+func NewTestImmutableOptions() *ImmutableConfig {
+	c := NewConfig()
+	c.Adjust(nil, false)
+	return NewImmutableConfig(c)
+}
+
 // parseUrls parse a string into multiple urls.
 func parseUrls(s string) ([]url.URL, error) {
 	items := strings.Split(s, ",")

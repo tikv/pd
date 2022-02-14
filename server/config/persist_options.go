@@ -50,12 +50,11 @@ type PersistOptions struct {
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
 	clusterVersion  unsafe.Pointer
-	cfg             *Config
 }
 
 // NewPersistOptions creates a new PersistOptions instance.
 func NewPersistOptions(cfg *Config) *PersistOptions {
-	o := &PersistOptions{cfg: cfg}
+	o := &PersistOptions{}
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
@@ -64,11 +63,6 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
 	return o
-}
-
-// GetCfg returns config
-func (o *PersistOptions) GetCfg() *Config {
-	return o.cfg
 }
 
 // GetScheduleConfig returns scheduling configurations.

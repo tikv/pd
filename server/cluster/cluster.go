@@ -100,6 +100,7 @@ type RaftCluster struct {
 	core    *core.BasicCluster
 	meta    *metapb.Cluster
 	opt     *config.PersistOptions
+	cfg     *config.ImmutableConfig
 	storage storage.Storage
 	id      id.Allocator
 	limiter *StoreLimiter
@@ -487,6 +488,11 @@ func (c *RaftCluster) SetStorage(s storage.Storage) {
 // There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
+}
+
+// GetConfig gets the cluster configuration.
+func (c *RaftCluster) GetConfig() *config.ImmutableConfig {
+	return c.cfg
 }
 
 // AddSuspectRegions adds regions to suspect list.

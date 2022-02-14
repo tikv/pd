@@ -40,7 +40,7 @@ import (
 const (
 	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
 	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
-	mb                   = (1 << 20)       // 1MiB
+	mb                   = 1 << 20         // 1MiB
 )
 
 // Cluster is used to mock a cluster for test purpose.
@@ -51,6 +51,7 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
+	*config.ImmutableConfig
 	ID             uint64
 	suspectRegions map[uint64]struct{}
 }
@@ -58,11 +59,12 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
+		BasicCluster:    core.NewBasicCluster(),
+		IDAllocator:     mockid.NewIDAllocator(),
+		HotStat:         statistics.NewHotStat(ctx),
+		PersistOptions:  opts,
+		ImmutableConfig: config.NewTestImmutableOptions(),
+		suspectRegions:  map[uint64]struct{}{},
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -76,6 +78,11 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 // GetOpts returns the cluster configuration.
 func (mc *Cluster) GetOpts() *config.PersistOptions {
 	return mc.PersistOptions
+}
+
+// GetConfig returns the cluster immutable configuration.
+func (mc *Cluster) GetConfig() *config.ImmutableConfig {
+	return mc.ImmutableConfig
 }
 
 // GetAllocator returns the ID allocator.

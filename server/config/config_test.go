@@ -91,7 +91,6 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	}
 	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(newOpt.GetCfg().MaxRegionSize, Equals, uint64(defaultMaxRegionSize))
 }
 
 func (s *testConfigSuite) TestReloadUpgrade(c *C) {
@@ -510,4 +509,13 @@ func (s *testConfigSuite) TestConfigClone(c *C) {
 	replicationMode := &ReplicationModeConfig{}
 	replicationMode.adjust(emptyConfigMetaData)
 	c.Assert(replicationMode.Clone(), DeepEquals, replicationMode)
+}
+
+func (s *testConfigSuite) TestImmutableConfig(c *C) {
+	config := NewConfig()
+	config.Adjust(nil, false)
+	iconfig := NewImmutableConfig(config)
+	c.Assert(iconfig.maxRegionSize, Equals, defaultMaxRegionSize)
+	iconfig = NewImmutableConfig(config, WithMaxRegionSize(200))
+	c.Assert(iconfig.GetMaxRegionSize(), Equals, 200)
 }

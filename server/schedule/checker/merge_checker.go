@@ -49,6 +49,7 @@ type MergeChecker struct {
 	PauseController
 	cluster    schedule.Cluster
 	opts       *config.PersistOptions
+	config     *config.ImmutableConfig
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
@@ -60,6 +61,7 @@ func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecke
 	return &MergeChecker{
 		cluster:    cluster,
 		opts:       opts,
+		config:     cluster.GetConfig(),
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
@@ -147,7 +149,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
 		return nil
 	}
-	maxSize := int64(maxRegionSizeFactor * m.opts.GetCfg().MaxRegionSize)
+	maxSize := int64(maxRegionSizeFactor * m.config.GetMaxRegionSize())
 	if maxSize < maxTargetRegionSize {
 		maxSize = maxTargetRegionSize
 	}
