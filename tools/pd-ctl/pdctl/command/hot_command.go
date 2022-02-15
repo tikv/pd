@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage"
 )
 
 const (
@@ -63,7 +63,7 @@ func showHotWriteRegionsCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get write hotspot: %s\n", err)
 		return
@@ -87,7 +87,7 @@ func showHotReadRegionsCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	}
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get read hotspot: %s\n", err)
 		return
@@ -106,7 +106,7 @@ func NewHotStoreCommand() *cobra.Command {
 }
 
 func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, hotStoresPrefix, http.MethodGet)
+	r, err := doRequest(cmd, hotStoresPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store hotspot: %s\n", err)
 		return
@@ -138,11 +138,13 @@ func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	data, _ := json.Marshal(input)
 	endpoints := getEndpoints(cmd)
-	hotRegions := &core.HistoryHotRegions{}
+	hotRegions := &storage.HistoryHotRegions{}
 	for _, endpoint := range endpoints {
-		tempHotRegions := core.HistoryHotRegions{}
+		tempHotRegions := storage.HistoryHotRegions{}
 		resp, err := doRequestSingleEndpoint(cmd, endpoint, hotRegionsHistoryPrefix,
-			http.MethodGet, WithBody("application/json", bytes.NewBuffer(data)))
+			http.MethodGet, http.Header{
+				"Content-Type": {"application/json"},
+			}, WithBody(bytes.NewBuffer(data)))
 		if err != nil {
 			cmd.Printf("Failed to get history hotspot: %s\n", err)
 			return

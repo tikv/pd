@@ -122,9 +122,8 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 	return cfgs, svrs, clean
 }
 
-func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
-	var leaderServer *server.Server
-	testutil.WaitUntil(c, func(c *C) bool {
+func mustWaitLeader(c *C, svrs []*server.Server) {
+	testutil.WaitUntil(c, func() bool {
 		var leader *pdpb.Member
 		for _, svr := range svrs {
 			l := svr.GetLeader()
@@ -135,13 +134,9 @@ func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
 			if leader == nil {
 				leader = l
 			}
-			if leader.GetMemberId() == svr.GetMember().ID() {
-				leaderServer = svr
-			}
 		}
 		return true
 	})
-	return leaderServer
 }
 
 func mustBootstrapCluster(c *C, s *server.Server) {

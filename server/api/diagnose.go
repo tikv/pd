@@ -74,6 +74,7 @@ var (
 	}
 )
 
+// Deprecated: we do not use it anymore.
 type diagnoseHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -161,6 +162,7 @@ func (d *diagnoseHandler) membersDiagnose(rdd *[]*Recommendation) error {
 // @Success 200 {array} Recommendation
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /diagnose [get]
+// @Deprecated
 func (d *diagnoseHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rdd := []*Recommendation{}
 	if err := d.membersDiagnose(&rdd); err != nil {

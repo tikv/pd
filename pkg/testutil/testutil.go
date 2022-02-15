@@ -31,7 +31,7 @@ const (
 
 // CheckFunc is a condition checker that passed to WaitUntil. Its implementation
 // may call c.Fatal() to abort the test, or c.Log() to add more information.
-type CheckFunc func(c *check.C) bool
+type CheckFunc func() bool
 
 // WaitOp represents available options when execute WaitUntil
 type WaitOp struct {
@@ -63,7 +63,7 @@ func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 		opt(option)
 	}
 	for i := 0; i < option.retryTimes; i++ {
-		if f(c) {
+		if f() {
 			return
 		}
 		time.Sleep(option.sleepInterval)

@@ -156,7 +156,7 @@ func (s *testAllocatorSuite) TestPriorityAndDifferentLocalTSO(c *C) {
 	c.Assert(err, IsNil)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		leaderName := cluster.WaitAllocatorLeader("dc-4")
 		return leaderName != ""
 	})
@@ -180,7 +180,7 @@ func (s *testAllocatorSuite) TestPriorityAndDifferentLocalTSO(c *C) {
 	for serverName, dcLocation := range dcLocationConfig {
 		go func(serName, dc string) {
 			defer wg.Done()
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				leaderName := cluster.WaitAllocatorLeader(dc)
 				return leaderName == serName
 			}, testutil.WithRetryTimes(12), testutil.WithSleepInterval(5*time.Second))
@@ -231,7 +231,7 @@ func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am 
 	allocator, err := am.GetAllocator(dcLocation)
 	c.Assert(err, IsNil)
 	var tso pdpb.Timestamp
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		tso, err = allocator.GenerateTSO(1)
 		c.Assert(err, IsNil)
 		return tso.GetPhysical() != 0

@@ -77,7 +77,7 @@ func showOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, path, http.MethodGet)
+	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -96,7 +96,7 @@ func checkOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, path, http.MethodGet)
+	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -419,7 +419,7 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	path := operatorsPrefix + "/" + args[0]
-	_, err := doRequest(cmd, path, http.MethodDelete)
+	_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return

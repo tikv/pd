@@ -35,9 +35,9 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
 )
 
@@ -173,21 +173,21 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	_, err = putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
 
-	rc.AllocID()
-	id, err := rc.AllocID()
+	rc.GetAllocator().Alloc()
+	id, err := rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is up will fail.
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, NotNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Offline)
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, NotNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Tombstone)
@@ -195,7 +195,7 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, IsNil)
 
-	id, err = rc.AllocID()
+	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
@@ -244,9 +244,9 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 	oc := rc.GetOperatorController()
 	rc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	rc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
+	op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: storeID, PeerID: 3})
 	oc.AddOperator(op)
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: storeID})
 	oc.AddOperator(op)
 
 	resetStoreState(c, rc, store.GetId(), beforeState)
@@ -459,7 +459,7 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -607,7 +607,7 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// PUT GET failed
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`), IsNil)
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -623,15 +623,15 @@ func (s *clusterTestSuite) TestSetScheduleOpt(c *C) {
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ], HasLen, 0)
 
 	// DELETE failed
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"), IsNil)
 	c.Assert(svr.SetReplicationConfig(*replicationCfg), IsNil)
 
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/kv/etcdSaveFailed", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`), IsNil)
 	c.Assert(svr.DeleteLabelProperty(typ, labelKey, labelValue), NotNil)
 
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Key, Equals, "testKey")
 	c.Assert(persistOptions.GetLabelPropertyConfig()[typ][0].Value, Equals, "testValue")
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/kv/etcdSaveFailed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"), IsNil)
 }
 
 func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
@@ -645,7 +645,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
@@ -686,7 +686,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 	c.Assert(storage.Flush(), IsNil)
 
-	raftCluster = cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	raftCluster = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
@@ -891,7 +891,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -922,21 +922,21 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 1)
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
 	// only can add 5 remove peer operators on store 2
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op := operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
@@ -945,11 +945,11 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 
 	// only can add 5 remove peer operators on store 2
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op := operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op = operator.NewOperator("test", "test", 2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = operator.NewTestOperator(2, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 
@@ -959,7 +959,7 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 
 	// can add unlimited remove peer operators on store 1
 	for i := uint64(1); i <= 30; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
@@ -978,7 +978,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	_, err = putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
@@ -1011,11 +1011,11 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	oc := rc.GetOperatorController()
 	// only can add 5 remove peer operators on store 1
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+		op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 		c.Assert(oc.AddOperator(op), IsTrue)
 		c.Assert(oc.RemoveOperator(op), IsTrue)
 	}
-	op := operator.NewOperator("test", "test", 1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 1, Version: 1}, operator.OpRegion, operator.RemovePeer{FromStore: 1})
 	c.Assert(oc.AddOperator(op), IsFalse)
 	c.Assert(oc.RemoveOperator(op), IsFalse)
 }
@@ -1036,7 +1036,7 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	rc.SetStorage(core.NewStorage(kv.NewMemoryKV()))
+	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {

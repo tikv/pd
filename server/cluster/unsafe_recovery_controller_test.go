@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
 )
 
 var _ = Suite(&testUnsafeRecoverSuite{})
@@ -45,7 +45,7 @@ func (s *testUnsafeRecoverSuite) SetUpTest(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationOneHealthyRegion(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		3: "",
@@ -79,7 +79,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationOneHealthyRegion(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationOneUnhealthyRegion(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		2: "",
@@ -111,7 +111,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationOneUnhealthyRegion(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationEmptyRange(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		3: "",
@@ -155,7 +155,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationEmptyRange(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationEmptyRangeAtTheEnd(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		3: "",
@@ -201,7 +201,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationEmptyRangeAtTheEnd(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationUseNewestRanges(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		3: "",
@@ -294,7 +294,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationUseNewestRanges(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationMembershipChange(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		4: "",
@@ -381,7 +381,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationMembershipChange(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationPromotingLearner(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		2: "",
@@ -414,7 +414,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationPromotingLearner(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanGenerationKeepingOneReplica(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.failedStores = map[uint64]string{
 		3: "",
@@ -465,7 +465,7 @@ func (s *testUnsafeRecoverSuite) TestPlanGenerationKeepingOneReplica(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestReportCollection(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.stage = collectingClusterInfo
 	recoveryController.failedStores = map[uint64]string{
@@ -515,7 +515,7 @@ func (s *testUnsafeRecoverSuite) TestReportCollection(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.stage = recovering
 	recoveryController.failedStores = map[uint64]string{
@@ -621,7 +621,7 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 
 func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {

@@ -92,3 +92,8 @@ func (c *StoreCandidates) RandomPick() *core.StoreInfo {
 	}
 	return c.Stores[rand.Intn(len(c.Stores))]
 }
+
+// PickAll return all stores in candidate list.
+func (c *StoreCandidates) PickAll() []*core.StoreInfo {
+	return c.Stores
+}

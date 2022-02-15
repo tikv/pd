@@ -54,7 +54,7 @@ func (s *testRuleCheckerSerialSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	cfg.SetPlacementRulesCacheEnabled(true)
 	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))
@@ -79,7 +79,7 @@ func (s *testRuleCheckerSuite) TearDownTest(c *C) {
 func (s *testRuleCheckerSuite) SetUpTest(c *C) {
 	cfg := config.NewTestOptions()
 	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
-	s.cluster.DisableFeature(versioninfo.JointConsensus)
+	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	s.cluster.SetEnablePlacementRules(true)
 	s.ruleManager = s.cluster.RuleManager
 	s.rc = NewRuleChecker(s.cluster, s.ruleManager, cache.NewDefaultCache(10))

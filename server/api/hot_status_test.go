@@ -23,9 +23,9 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
 	_ "github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/kv"
 )
 
 var _ = Suite(&testHotStatusSuite{})
@@ -71,9 +71,9 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
-	storage := s.svr.GetHistoryHotRegionStorage()
+	hotRegionStorage := s.svr.GetHistoryHotRegionStorage()
 	now := time.Now()
-	hotRegions := []*core.HistoryHotRegion{
+	hotRegions := []*storage.HistoryHotRegion{
 		{
 			RegionID:   1,
 			UpdateTime: now.UnixNano() / int64(time.Millisecond),
@@ -89,14 +89,14 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	}
 	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
-		historyHotRegions := &core.HistoryHotRegions{}
+		historyHotRegions := &storage.HistoryHotRegions{}
 		json.Unmarshal(res, historyHotRegions)
 		for _, region := range historyHotRegions.HistoryHotRegion {
 			c.Assert(region.UpdateTime, GreaterEqual, request.StartTime)
 			c.Assert(region.UpdateTime, LessEqual, request.EndTime)
 		}
 	}
-	err := writeToDB(storage.LeveldbKV, hotRegions)
+	err := writeToDB(hotRegionStorage.LevelDBKV, hotRegions)
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
@@ -105,9 +105,9 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
-	storage := s.svr.GetHistoryHotRegionStorage()
+	hotRegionStorage := s.svr.GetHistoryHotRegionStorage()
 	now := time.Now()
-	hotRegions := []*core.HistoryHotRegion{
+	hotRegions := []*storage.HistoryHotRegion{
 		{
 			RegionID:      1,
 			StoreID:       1,
@@ -174,12 +174,12 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	}
 	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
-		historyHotRegions := &core.HistoryHotRegions{}
+		historyHotRegions := &storage.HistoryHotRegions{}
 		json.Unmarshal(res, historyHotRegions)
 		c.Assert(historyHotRegions.HistoryHotRegion, HasLen, 1)
 		c.Assert(reflect.DeepEqual(historyHotRegions.HistoryHotRegion[0], hotRegions[0]), IsTrue)
 	}
-	err := writeToDB(storage.LeveldbKV, hotRegions)
+	err := writeToDB(hotRegionStorage.LevelDBKV, hotRegions)
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
@@ -187,10 +187,10 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func writeToDB(kv *kv.LeveldbKV, hotRegions []*core.HistoryHotRegion) error {
+func writeToDB(kv *kv.LevelDBKV, hotRegions []*storage.HistoryHotRegion) error {
 	batch := new(leveldb.Batch)
 	for _, region := range hotRegions {
-		key := core.HotRegionStorePath(region.HotRegionType, region.UpdateTime, region.RegionID)
+		key := storage.HotRegionStorePath(region.HotRegionType, region.UpdateTime, region.RegionID)
 		value, err := json.Marshal(region)
 		if err != nil {
 			return err

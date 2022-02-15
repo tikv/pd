@@ -29,10 +29,11 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -42,7 +43,7 @@ const (
 	mb                   = (1 << 20)       // 1MiB
 )
 
-// Cluster is used to mock clusterInfo for test use.
+// Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
@@ -50,25 +51,25 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID               uint64
-	suspectRegions   map[uint64]struct{}
-	disabledFeatures map[versioninfo.Feature]struct{}
+	ID             uint64
+	suspectRegions map[uint64]struct{}
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:     core.NewBasicCluster(),
-		IDAllocator:      mockid.NewIDAllocator(),
-		HotStat:          statistics.NewHotStat(ctx),
-		PersistOptions:   opts,
-		suspectRegions:   map[uint64]struct{}{},
-		disabledFeatures: make(map[versioninfo.Feature]struct{}),
+		BasicCluster:   core.NewBasicCluster(),
+		IDAllocator:    mockid.NewIDAllocator(),
+		HotStat:        statistics.NewHotStat(ctx),
+		PersistOptions: opts,
+		suspectRegions: map[uint64]struct{}{},
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(core.NewStorage(kv.NewMemoryKV()))
+	// It should be updated to the latest feature version.
+	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewStorageWithMemoryBackend())
 	return clus
 }
 
@@ -77,9 +78,9 @@ func (mc *Cluster) GetOpts() *config.PersistOptions {
 	return mc.PersistOptions
 }
 
-// AllocID allocs a new unique ID.
-func (mc *Cluster) AllocID() (uint64, error) {
-	return mc.Alloc()
+// GetAllocator returns the ID allocator.
+func (mc *Cluster) GetAllocator() id.Allocator {
+	return mc.IDAllocator
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
@@ -151,7 +152,7 @@ func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind statistics
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.AllocID()
+	peerID, err := mc.GetAllocator().Alloc()
 	if err != nil {
 		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
@@ -165,7 +166,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(core.NewStorage(kv.NewMemoryKV()), mc, mc.GetOpts())
+		mc.RuleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), mc, mc.GetOpts())
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }
@@ -285,7 +286,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 	mc.AddRegionStore(storeID, regionCount)
 	for i := 0; i < leaderCount; i++ {
-		id, _ := mc.AllocID()
+		id, _ := mc.GetAllocator().Alloc()
 		mc.AddLeaderRegion(id, storeID)
 	}
 }
@@ -729,26 +730,6 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
-// DisableFeature marks that these features are not supported in the cluster.
-func (mc *Cluster) DisableFeature(fs ...versioninfo.Feature) {
-	for _, f := range fs {
-		mc.disabledFeatures[f] = struct{}{}
-	}
-}
-
-// EnableFeature marks that these features are supported in the cluster.
-func (mc *Cluster) EnableFeature(fs ...versioninfo.Feature) {
-	for _, f := range fs {
-		delete(mc.disabledFeatures, f)
-	}
-}
-
-// IsFeatureSupported checks if the feature is supported by current cluster.
-func (mc *Cluster) IsFeatureSupported(f versioninfo.Feature) bool {
-	_, ok := mc.disabledFeatures[f]
-	return !ok
-}
-
 // AddSuspectRegions mock method
 func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	for _, id := range ids {
@@ -774,7 +755,7 @@ func (mc *Cluster) ResetSuspectRegions() {
 
 // GetRegionByKey get region by key
 func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return mc.SearchRegion(regionKey)
+	return mc.BasicCluster.GetRegionByKey(regionKey)
 }
 
 // SetStoreLastHeartbeatInterval set the last heartbeat to the target store
