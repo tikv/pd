@@ -58,7 +58,7 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
-	ExecutorRate     float64
+	ExecuteRate      float64
 }
 
 // NewOperator creates a new operator.
@@ -79,7 +79,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
-		ExecutorRate:    OperatorExecutorRate,
+		ExecuteRate:     OperatorExecutorRate,
 	}
 }
 
@@ -117,7 +117,7 @@ func (o *Operator) SetDesc(desc string) {
 
 // SetExecutorRate sets the executor rate of the operator.
 func (o *Operator) SetExecutorRate(rate float64) {
-	o.ExecutorRate = rate
+	o.ExecuteRate = rate
 }
 
 // AttachKind attaches an operator kind for the operator.
@@ -244,7 +244,7 @@ func (o *Operator) CheckTimeout() bool {
 		startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
 	}
 	step := o.steps[currentStep]
-	return o.status.CheckStepTimeout(startTime, step, o.ExecutorRate)
+	return o.status.CheckStepTimeout(startTime, step, o.ExecuteRate)
 }
 
 // Len returns the operator's steps count.

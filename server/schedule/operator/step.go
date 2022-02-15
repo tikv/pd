@@ -112,7 +112,6 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
 	regionSize      int64
-	executorRate    float64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -172,7 +171,6 @@ type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
 	regionSize      int64
-	executorRate    float64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.

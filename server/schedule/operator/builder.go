@@ -48,13 +48,12 @@ type ClusterInformer interface {
 type Builder struct {
 	// basic info
 	ClusterInformer
-	desc                 string
-	regionID             uint64
-	regionEpoch          *metapb.RegionEpoch
-	rules                []*placement.Rule
-	expectedRoles        map[uint64]placement.PeerRoleType
-	approximateSize      int64
-	operatorExecutorRate float64
+	desc            string
+	regionID        uint64
+	regionEpoch     *metapb.RegionEpoch
+	rules           []*placement.Rule
+	expectedRoles   map[uint64]placement.PeerRoleType
+	approximateSize int64
 
 	// operation record
 	originPeers          peersMap
@@ -161,9 +160,6 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 	b.targetPeers = originPeers.Copy()
 	b.useJointConsensus = supportJointConsensus && b.GetOpts().IsUseJointConsensus()
 	b.err = err
-	if originLeaderStore := b.GetBasicCluster().GetStore(b.originLeaderStoreID); originLeaderStore != nil {
-		b.operatorExecutorRate = originLeaderStore.GetOperatorExecutorRate()
-	}
 	return b
 }
 
@@ -677,8 +673,7 @@ func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.lightWeight {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(),
-			IsLightWeight: b.lightWeight, regionSize: b.approximateSize, executorRate: b.operatorExecutorRate})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, regionSize: b.approximateSize})
 	} else {
 		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
 	}

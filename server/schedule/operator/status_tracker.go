@@ -129,11 +129,11 @@ func (trk *OpStatusTracker) CheckTimeout(wait time.Duration) bool {
 }
 
 // CheckStepTimeout checks if timeout, and update the current status.
-func (trk *OpStatusTracker) CheckStepTimeout(start time.Time, step OpStep, executerRate float64) bool {
+func (trk *OpStatusTracker) CheckStepTimeout(start time.Time, step OpStep, executeRate float64) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
 	if trk.current == STARTED {
-		if !step.Timeout(start, executerRate) {
+		if !step.Timeout(start, executeRate) {
 			return false
 		}
 		_ = trk.toLocked(TIMEOUT)
