@@ -233,6 +233,18 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, IsNil)
 	ops = s.mc.Check(s.regions[3])
 	c.Assert(ops, IsNil)
+
+	s.cluster.SetSplitMergeInterval(500 * time.Millisecond)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, IsNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, IsNil)
+
+	time.Sleep(500 * time.Millisecond)
+	ops = s.mc.Check(s.regions[2])
+	c.Assert(ops, NotNil)
+	ops = s.mc.Check(s.regions[3])
+	c.Assert(ops, NotNil)
 }
 
 func (s *testMergeCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []operator.OpStep) {
