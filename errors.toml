@@ -276,6 +276,11 @@ error = '''
 etcd member list failed
 '''
 
+["PD:etcd:ErrEtcdMemberRemove"]
+error = '''
+etcd remove member failed
+'''
+
 ["PD:etcd:ErrEtcdMoveLeader"]
 error = '''
 etcd move leader error
@@ -319,6 +324,11 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:gin:ErrBindJSON"]
+error = '''
+bind JSON error
 '''
 
 ["PD:grpc:ErrCloseGRPCConn"]
@@ -591,9 +601,19 @@ error = '''
 leader is nil
 '''
 
+["PD:server:ErrServerNotStarted"]
+error = '''
+server not started
+'''
+
 ["PD:server:ErrServiceRegistered"]
 error = '''
 service with path [%s] already registered
+'''
+
+["PD:strconv:ErrStrconvParseBool"]
+error = '''
+parse bool error
 '''
 
 ["PD:strconv:ErrStrconvParseFloat"]
