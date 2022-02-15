@@ -733,7 +733,7 @@ func (oc *OperatorController) GetRecords(start time.Time) []*operator.OpRecord {
 		if op == nil || op.FinishTime.Before(start) {
 			continue
 		}
-		records = append(records, op.Op.Record(op.FinishTime))
+		records = append(records, op.Record(op.FinishTime))
 	}
 	return records
 }
@@ -746,7 +746,7 @@ func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
 		if op == nil || op.FinishTime.Before(start) {
 			continue
 		}
-		history = append(history, op.Op.History()...)
+		history = append(history, op.History()...)
 	}
 	return history
 }
@@ -832,7 +832,7 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 
 // OperatorWithStatus records the operator and its status.
 type OperatorWithStatus struct {
-	Op         *operator.Operator
+	*operator.Operator
 	Status     pdpb.OperatorStatus
 	FinishTime time.Time
 }
@@ -840,7 +840,7 @@ type OperatorWithStatus struct {
 // NewOperatorWithStatus creates an OperatorStatus from an operator.
 func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 	return &OperatorWithStatus{
-		Op:         op,
+		Operator:   op,
 		Status:     operator.OpStatusToPDPB(op.Status()),
 		FinishTime: time.Now(),
 	}
@@ -848,7 +848,7 @@ func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 
 // MarshalJSON returns the status of operator as a JSON string
 func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Operator.String()) + `"`), nil
 }
 
 // OperatorRecords remains the operator and its status for a while.

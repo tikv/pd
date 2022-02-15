@@ -33,6 +33,19 @@ var (
 	}
 )
 
+const (
+	// HistoryExample history command example.
+	HistoryExample = `
+  If the timestamp is right, the the output will be like:
+
+  [
+    "admin-remove-peer {rm peer: store [2]} (kind:admin,region, region:1(1,1), createAt:2022-02-15 15:11:14.974435 +0800 
+	CST m=+0.663988396, startAt:2022-02-15 15:11:14.974485 +0800 CST m=+0.664038719, currentStep:0, size:1, steps:[remove peer on store 2]) 
+	(finishAt:2022-02-15 15:11:14.975531 +0800 CST m=+0.665084434, duration:1.045715ms)"
+  ]
+`
+)
+
 // NewOperatorCommand returns a operator command.
 func NewOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -431,9 +444,10 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 // NewHistoryOperatorCommand returns a command to history finished operators.
 func NewHistoryOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "history <start>",
-		Short: "list all finished operators since start, start is a timestamp",
-		Run:   historyOperatorCommandFunc,
+		Use:     "history <start>",
+		Short:   "list all finished operators since start, start is a timestamp",
+		Run:     historyOperatorCommandFunc,
+		Example: HistoryExample,
 	}
 	return c
 }
