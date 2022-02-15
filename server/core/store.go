@@ -42,37 +42,33 @@ const (
 	EngineTiFlash = "tiflash"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
-	// OperatorExecutorRate is the rate of the store operator executor.
-	OperatorExecutorRate = 6.0
 )
 
 // StoreInfo contains information about a store.
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer  bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted     bool // this store has been evicted as a slow store, should not transfer leader to it
-	leaderCount          int
-	regionCount          int
-	leaderSize           int64
-	regionSize           int64
-	pendingPeerCount     int
-	lastPersistTime      time.Time
-	leaderWeight         float64
-	regionWeight         float64
-	limiter              map[storelimit.Type]*storelimit.StoreLimit
-	operatorExecutorRate float64
+	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
+	leaderCount         int
+	regionCount         int
+	leaderSize          int64
+	regionSize          int64
+	pendingPeerCount    int
+	lastPersistTime     time.Time
+	leaderWeight        float64
+	regionWeight        float64
+	limiter             map[storelimit.Type]*storelimit.StoreLimit
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:                 store,
-		storeStats:           newStoreStats(),
-		leaderWeight:         1.0,
-		regionWeight:         1.0,
-		limiter:              make(map[storelimit.Type]*storelimit.StoreLimit),
-		operatorExecutorRate: OperatorExecutorRate,
+		meta:         store,
+		storeStats:   newStoreStats(),
+		leaderWeight: 1.0,
+		regionWeight: 1.0,
+		limiter:      make(map[storelimit.Type]*storelimit.StoreLimit),
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -84,20 +80,19 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:                 meta,
-		storeStats:           s.storeStats,
-		pauseLeaderTransfer:  s.pauseLeaderTransfer,
-		slowStoreEvicted:     s.slowStoreEvicted,
-		leaderCount:          s.leaderCount,
-		regionCount:          s.regionCount,
-		leaderSize:           s.leaderSize,
-		regionSize:           s.regionSize,
-		pendingPeerCount:     s.pendingPeerCount,
-		lastPersistTime:      s.lastPersistTime,
-		leaderWeight:         s.leaderWeight,
-		regionWeight:         s.regionWeight,
-		limiter:              s.limiter,
-		operatorExecutorRate: s.operatorExecutorRate,
+		meta:                meta,
+		storeStats:          s.storeStats,
+		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
 	}
 
 	for _, opt := range opts {
@@ -109,20 +104,19 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:                 s.meta,
-		storeStats:           s.storeStats,
-		pauseLeaderTransfer:  s.pauseLeaderTransfer,
-		slowStoreEvicted:     s.slowStoreEvicted,
-		leaderCount:          s.leaderCount,
-		regionCount:          s.regionCount,
-		leaderSize:           s.leaderSize,
-		regionSize:           s.regionSize,
-		pendingPeerCount:     s.pendingPeerCount,
-		lastPersistTime:      s.lastPersistTime,
-		leaderWeight:         s.leaderWeight,
-		regionWeight:         s.regionWeight,
-		limiter:              s.limiter,
-		operatorExecutorRate: s.operatorExecutorRate,
+		meta:                s.meta,
+		storeStats:          s.storeStats,
+		pauseLeaderTransfer: s.pauseLeaderTransfer,
+		slowStoreEvicted:    s.slowStoreEvicted,
+		leaderCount:         s.leaderCount,
+		regionCount:         s.regionCount,
+		leaderSize:          s.leaderSize,
+		regionSize:          s.regionSize,
+		pendingPeerCount:    s.pendingPeerCount,
+		lastPersistTime:     s.lastPersistTime,
+		leaderWeight:        s.leaderWeight,
+		regionWeight:        s.regionWeight,
+		limiter:             s.limiter,
 	}
 
 	for _, opt := range opts {
@@ -271,13 +265,6 @@ func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLi
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.limiter[limitType]
-}
-
-// GetOperatorExecutorRate returns the operator executor rate of the store.
-func (s *StoreInfo) GetOperatorExecutorRate() float64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.operatorExecutorRate
 }
 
 const minWeight = 1e-6

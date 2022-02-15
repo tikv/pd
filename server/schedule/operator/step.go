@@ -39,7 +39,7 @@ type OpStep interface {
 	IsFinish(region *core.RegionInfo) bool
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
-	Timeout(start time.Time) bool
+	Timeout(start time.Time, executorRate float64) bool
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -103,7 +103,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 }
 
 // Timeout returns true if the step is timeout.
-func (tl TransferLeader) Timeout(start time.Time) bool {
+func (tl TransferLeader) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -163,8 +163,8 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 }
 
 // Timeout returns true if the step is timeout.
-func (ap AddPeer) Timeout(start time.Time) bool {
-	return time.Since(start) > maxWaitTime(ap.executorRate, ap.regionSize)
+func (ap AddPeer) Timeout(start time.Time, executorRate float64) bool {
+	return time.Since(start) > maxWaitTime(executorRate, ap.regionSize)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -229,8 +229,8 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns true if the step is timeout.
-func (al AddLearner) Timeout(start time.Time) bool {
-	return time.Since(start) > maxWaitTime(al.executorRate, al.regionSize)
+func (al AddLearner) Timeout(start time.Time, executorRate float64) bool {
+	return time.Since(start) > maxWaitTime(executorRate, al.regionSize)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -272,7 +272,7 @@ func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionI
 func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
-func (pl PromoteLearner) Timeout(start time.Time) bool {
+func (pl PromoteLearner) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -328,7 +328,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns true if the step is timeout.
-func (rp RemovePeer) Timeout(start time.Time) bool {
+func (rp RemovePeer) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -381,7 +381,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // Timeout returns true if the step is timeout.
-func (mr MergeRegion) Timeout(start time.Time) bool {
+func (mr MergeRegion) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime*20
 }
 
@@ -423,7 +423,7 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, _ *core.RegionInfo) err
 }
 
 // Timeout returns true if the step is timeout.
-func (sr SplitRegion) Timeout(start time.Time) bool {
+func (sr SplitRegion) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -455,7 +455,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Timeout returns true if the step is timeout.
-func (dv DemoteVoter) Timeout(start time.Time) bool {
+func (dv DemoteVoter) Timeout(start time.Time, _ float64) bool {
 	return time.Since(start) > FastOperatorWaitTime
 }
 
@@ -601,7 +601,7 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 }
 
 // Timeout returns true if the step is timeout.
-func (cpe ChangePeerV2Enter) Timeout(start time.Time) bool {
+func (cpe ChangePeerV2Enter) Timeout(start time.Time, _ float64) bool {
 	count := uint64(len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) + 1
 	return time.Since(start) > FastOperatorWaitTime*time.Duration(count)
 }
@@ -726,7 +726,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.Reg
 func (cpl ChangePeerV2Leave) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
-func (cpl ChangePeerV2Leave) Timeout(start time.Time) bool {
+func (cpl ChangePeerV2Leave) Timeout(start time.Time, _ float64) bool {
 	count := uint64(len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) + 1
 	return time.Since(start) > FastOperatorWaitTime*time.Duration(count)
 }

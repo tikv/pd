@@ -467,7 +467,7 @@ func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
 	}
 	for _, v := range testdata {
 		for _, step := range v.step {
-			c.Assert(v.expect, Equals, step.Timeout(v.start))
+			c.Assert(v.expect, Equals, step.Timeout(v.start, 6.0))
 		}
 	}
 }

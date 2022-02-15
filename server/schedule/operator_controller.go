@@ -54,6 +54,9 @@ var (
 	StoreBalanceBaseTime float64 = 60
 	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
 	FastOperatorFinishTime = 10 * time.Second
+	// DefaultOperatorExecutorRate executor rate of the operator.
+	// unit: s/MB
+	DefaultOperatorExecutorRate = 6.0
 )
 
 // OperatorController is used to limit the speed of scheduling.
@@ -70,6 +73,7 @@ type OperatorController struct {
 	wop             WaitingOperator
 	wopStatus       *WaitingOperatorStatus
 	opNotifierQueue operatorQueue
+	executerRate    float64
 }
 
 // NewOperatorController creates a OperatorController.
@@ -86,6 +90,7 @@ func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbst
 		wop:             NewRandBuckets(),
 		wopStatus:       NewWaitingOperatorStatus(),
 		opNotifierQueue: make(operatorQueue, 0),
+		executerRate:    DefaultOperatorExecutorRate,
 	}
 }
 
@@ -432,7 +437,7 @@ func isHigherPriorityOperator(new, old *operator.Operator) bool {
 
 func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	regionID := op.RegionID()
-
+	op.SetExecutorRate(oc.executerRate)
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
