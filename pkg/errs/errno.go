@@ -208,6 +208,7 @@ var (
 
 // strconv errors
 var (
+	ErrStrconvParseBool  = errors.Normalize("parse bool error", errors.RFCCodeText("PD:strconv:ErrStrconvParseBool"))
 	ErrStrconvParseInt   = errors.Normalize("parse int error", errors.RFCCodeText("PD:strconv:ErrStrconvParseInt"))
 	ErrStrconvParseUint  = errors.Normalize("parse uint error", errors.RFCCodeText("PD:strconv:ErrStrconvParseUint"))
 	ErrStrconvParseFloat = errors.Normalize("parse float error", errors.RFCCodeText("PD:strconv:ErrStrconvParseFloat"))

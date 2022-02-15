@@ -166,7 +166,6 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		return
 	}
-
 	http.Error(w, errRedirectFailed, http.StatusInternalServerError)
 }
 

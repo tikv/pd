@@ -596,6 +596,11 @@ error = '''
 service with path [%s] already registered
 '''
 
+["PD:strconv:ErrStrconvParseBool"]
+error = '''
+parse bool error
+'''
+
 ["PD:strconv:ErrStrconvParseFloat"]
 error = '''
 parse float error
