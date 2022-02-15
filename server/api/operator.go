@@ -298,11 +298,15 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 			respWithMissParam(w, h.r, pPolicy)
 			return
 		}
-		keys, ok := typeutil.JSONToStringSlice(input[pKeys])
-		if !ok {
-			respWithInvalidParam(w, h.r, pKeys)
-			return
+		var keys []string
+		if ks, ok := input[pKeys]; ok {
+			keys, ok = typeutil.JSONToStringSlice(ks)
+			if !ok {
+				respWithInvalidParam(w, h.r, pKeys)
+				return
+			}
 		}
+
 		if err := h.AddSplitRegionOperator(regionID, policy, keys); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
