@@ -62,7 +62,6 @@ func Redirector() gin.HandlerFunc {
 
 			urls = append(urls, *u)
 		}
-
 		client := svr.GetHTTPClient()
 		serverapi.NewCustomReverseProxies(client, urls).ServeHTTP(c.Writer, c.Request)
 		c.Abort()
