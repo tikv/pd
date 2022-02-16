@@ -656,6 +656,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)
+	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
 
 	// no space left, new operator can not be added.
 	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
