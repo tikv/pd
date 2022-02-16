@@ -23,7 +23,7 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
-	@ git diff --quiet go.mod go.sum
+	git diff --quiet go.mod go.sum
 
 test: enable-codegen dashboard-ui
 	CGO_ENABLED=1 go test -race -cover || { $(MAKE) disable-codegen && exit 1; }

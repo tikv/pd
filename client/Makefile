@@ -35,5 +35,5 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
-	@ git diff --quiet go.mod go.sum
+	git diff --quiet go.mod go.sum
 
