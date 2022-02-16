@@ -15,6 +15,9 @@
 package typeutil
 
 import (
+	"encoding/json"
+	"reflect"
+
 	. "github.com/pingcap/check"
 )
 
@@ -34,4 +37,43 @@ func (s *testUint64BytesSuite) TestUint64ToBytes(c *C) {
 	b := Uint64ToBytes(a)
 	str := "\x00\x00\x00\x00\x00\x00\x03\xe8"
 	c.Assert(b, DeepEquals, []byte(str))
+}
+
+var _ = Suite(&testJSONSuite{})
+
+type testJSONSuite struct{}
+
+func (s *testJSONSuite) TestJSONToUint64Slice(c *C) {
+	type testArray struct {
+		Array []uint64 `json:"array"`
+	}
+	a := testArray{
+		Array: []uint64{1, 2, 3},
+	}
+	bytes, _ := json.Marshal(a)
+	var t map[string]interface{}
+	err := json.Unmarshal(bytes, &t)
+	c.Assert(err, IsNil)
+	// valid case
+	res, ok := JSONToUint64Slice(t["array"])
+	c.Assert(ok, IsTrue)
+	c.Assert(reflect.TypeOf(res[0]).Kind(), Equals, reflect.Uint64)
+	// invalid case
+	_, ok = t["array"].([]uint64)
+	c.Assert(ok, IsFalse)
+
+	// invalid type
+	type testArray1 struct {
+		Array []string `json:"array"`
+	}
+	a1 := testArray1{
+		Array: []string{"1", "2", "3"},
+	}
+	bytes, _ = json.Marshal(a1)
+	var t1 map[string]interface{}
+	err = json.Unmarshal(bytes, &t1)
+	c.Assert(err, IsNil)
+	res, ok = JSONToUint64Slice(t1["array"])
+	c.Assert(ok, IsFalse)
+	c.Assert(res, IsNil)
 }

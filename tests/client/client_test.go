@@ -90,7 +90,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	cli := setupCli(c, s.ctx, endpoints)
 
 	var ts1, ts2 uint64
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		p1, l1, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts1 = tsoutil.ComposeTS(p1, l1)
@@ -111,7 +111,7 @@ func (s *clientTestSuite) TestClientLeaderChange(c *C) {
 	waitLeader(c, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		p2, l2, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts2 = tsoutil.ComposeTS(p2, l2)
@@ -140,7 +140,7 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	cli := setupCli(c, s.ctx, endpoints)
 
 	var lastTS uint64
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -217,7 +217,7 @@ func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	var allocatorLeaderMap = make(map[string]string)
 	for _, dcLocation := range dcLocationConfig {
 		var pdName string
-		testutil.WaitUntil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func() bool {
 			pdName = cluster.WaitAllocatorLeader(dcLocation)
 			return len(pdName) > 0
 		})
@@ -423,7 +423,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -451,7 +451,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 	var lastTS uint64
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -506,7 +506,7 @@ func setupCli(c *C, ctx context.Context, endpoints []string, opts ...pd.ClientOp
 }
 
 func waitLeader(c *C, cli client, leader string) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
@@ -721,7 +721,7 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		r, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
 		if r == nil {
@@ -759,7 +759,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	}
 	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
-		testutil.WaitUntil(c, func(c *C) bool {
+		testutil.WaitUntil(c, func() bool {
 			r, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			c.Assert(err, IsNil)
 			if i > 0 && i < regionLen {
@@ -798,7 +798,7 @@ func (s *testClientSuite) TestScanRegions(c *C) {
 	}
 
 	// Wait for region heartbeats.
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		scanRegions, err := s.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
@@ -865,7 +865,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
 
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		r, err := s.client.GetRegionByID(context.Background(), regionID)
 		c.Assert(err, IsNil)
 		if r == nil {
@@ -1146,7 +1146,7 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
 			return false
