@@ -236,12 +236,6 @@ func (s *GlobalConfigTestSuite) TestClientWatch(c *C) {
 	}
 }
 
-func (s *GlobalConfigTestSuite) TestClientWatchCloseReceiverExternally(c *C) {
-	wc, err := s.watchGlobalConfig(s.server.Context())
-	c.Assert(err, IsNil)
-	close(wc)
-}
-
 func (s *GlobalConfigTestSuite) TestClientWatchTimeout(c *C) {
 	ctx, cancel := context.WithCancel(s.server.Context())
 	wc, _ := s.watchGlobalConfig(ctx)
