@@ -66,13 +66,13 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
@@ -83,7 +83,7 @@ func (s *testHeartbeatStreamSuite) TestActivity(c *C) {
 	c.Assert(res.GetHeader().GetError(), NotNil)
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})

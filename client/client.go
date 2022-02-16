@@ -750,7 +750,13 @@ tsoBatchLoop:
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
-			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			if err == context.Canceled {
+				log.Info("[pd] stop fetching the pending tso requests due to context canceled",
+					zap.String("dc-location", dc))
+			} else {
+				log.Error("[pd] fetch pending tso requests error",
+					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			}
 			return
 		}
 		if maxBatchWaitInterval >= 0 {
@@ -768,7 +774,7 @@ tsoBatchLoop:
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				if retryTimeConsuming >= c.option.timeout {
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))

@@ -1,4 +1,4 @@
-// Copyright 2019 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package id
+package audit
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"testing"
 
-var (
-	idGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "id",
-			Help:      "Record of id allocator.",
-		}, []string{"type"})
-
-	idallocGauge = idGauge.WithLabelValues("idalloc")
+	. "github.com/pingcap/check"
 )
 
-func init() {
-	prometheus.MustRegister(idGauge)
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&testAuditSuite{})
+
+type testAuditSuite struct {
+}
+
+func (s *testAuditSuite) TestLabelMatcher(c *C) {
+	matcher := &LabelMatcher{"testSuccess"}
+	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
+	c.Assert(matcher.Match(labels1), Equals, true)
+
+	labels2 := &BackendLabels{Labels: []string{"testFail"}}
+	c.Assert(matcher.Match(labels2), Equals, false)
 }

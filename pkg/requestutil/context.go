@@ -22,8 +22,10 @@ import (
 type key int
 
 const (
-	// requestInfoKey is the context key for the request compoenent.
+	// requestInfoKey is the context key for the request info.
 	requestInfoKey key = iota
+	// endTimeKey is the context key for the end time.
+	endTimeKey
 )
 
 // WithRequestInfo returns a copy of parent in which the request info value is set
@@ -35,4 +37,15 @@ func WithRequestInfo(parent context.Context, requestInfo RequestInfo) context.Co
 func RequestInfoFrom(ctx context.Context) (RequestInfo, bool) {
 	requestInfo, ok := ctx.Value(requestInfoKey).(RequestInfo)
 	return requestInfo, ok
+}
+
+// WithEndTime returns a copy of parent in which the end time value is set
+func WithEndTime(parent context.Context, endTime int64) context.Context {
+	return context.WithValue(parent, endTimeKey, endTime)
+}
+
+// EndTimeFrom returns the value of the excution info key on the ctx
+func EndTimeFrom(ctx context.Context) (int64, bool) {
+	info, ok := ctx.Value(endTimeKey).(int64)
+	return info, ok
 }

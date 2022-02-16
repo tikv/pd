@@ -487,7 +487,6 @@ func (*testRegionKey) TestSetRegion(c *C) {
 }
 
 func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
-	regions := NewRegionsInfo()
 	peer1 := &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
 	peer2 := &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
 	peer3 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
@@ -505,25 +504,25 @@ func (*testRegionKey) TestShouldRemoveFromSubTree(c *C) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsTrue)
 
 	region.leader = peer2
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsFalse)
+	c.Assert(region.peersEqualTo(origin), IsTrue)
 
 	region.voters[2].StoreId = 4
-	c.Assert(regions.shouldRemoveFromSubTree(region, origin), IsTrue)
+	c.Assert(region.peersEqualTo(origin), IsFalse)
 }
 
 func checkRegions(c *C, regions *RegionsInfo) {
