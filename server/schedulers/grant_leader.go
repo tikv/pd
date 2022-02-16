@@ -198,7 +198,6 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-// Prepare run it after adding new scheduler.
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

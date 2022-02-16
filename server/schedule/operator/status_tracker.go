@@ -114,26 +114,12 @@ func (trk *OpStatusTracker) CheckExpired(exp time.Duration) bool {
 	return trk.current == EXPIRED
 }
 
-// CheckTimeout checks if timeout, and update the current status.
-func (trk *OpStatusTracker) CheckTimeout(wait time.Duration) bool {
-	trk.rw.Lock()
-	defer trk.rw.Unlock()
-	if trk.current == STARTED {
-		if time.Since(trk.reachTimes[STARTED]) < wait {
-			return false
-		}
-		_ = trk.toLocked(TIMEOUT)
-		return true
-	}
-	return trk.current == TIMEOUT
-}
-
 // CheckStepTimeout checks if timeout, and update the current status.
-func (trk *OpStatusTracker) CheckStepTimeout(start time.Time, step OpStep, executeRate float64) bool {
+func (trk *OpStatusTracker) CheckStepTimeout(start time.Time, step OpStep) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
 	if trk.current == STARTED {
-		if !step.Timeout(start, executeRate) {
+		if !step.Timeout(start) {
 			return false
 		}
 		_ = trk.toLocked(TIMEOUT)

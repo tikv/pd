@@ -17,7 +17,6 @@ package operator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -470,11 +469,9 @@ func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
 			expect: false,
 		},
 	}
-	for i, v := range testdata {
-		fmt.Printf("case:%d ,data:%v\n", i, v)
+	for _, v := range testdata {
 		for _, step := range v.step {
-			fmt.Printf("step:%v\n", step)
-			c.Assert(v.expect, Equals, step.Timeout(v.start, 6.0))
+			c.Assert(v.expect, Equals, step.Timeout(v.start))
 		}
 	}
 }
