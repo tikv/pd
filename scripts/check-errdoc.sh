@@ -22,6 +22,6 @@ set -euo pipefail
 cd -P .
 
 cp errors.toml errors.toml.before
-errdoc-gen --source . --module github.com/tikv/pd --output errors.toml
+errdoc-gen --source . --module github.com/tikv/pd --output errors.toml --ignore ./client/errs
 diff -q errors.toml errors.toml.before
 rm errors.toml.before
