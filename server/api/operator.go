@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -286,14 +287,18 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		// support both receiving key ranges or regionIDs
 		startKey, _ := input["start_key"].(string)
 		endKey, _ := input["end_key"].(string)
-		regionIDs, _ := input["region_ids"].([]uint64)
-		group, _ := input["group"].(string)
-		retryLimit, ok := input["retry_limit"].(int)
+		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
 		if !ok {
-			// retry 5 times if retryLimit not defined
-			retryLimit = 5
+			h.r.JSON(w, http.StatusBadRequest, "region_ids is invalid")
+			return
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(regionIDs, startKey, endKey, group, retryLimit)
+		group, _ := input["group"].(string)
+		// retry 5 times if retryLimit not defined
+		retryLimit := 5
+		if rl, ok := input["retry_limit"].(float64); ok {
+			retryLimit = int(rl)
+		}
+		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()
