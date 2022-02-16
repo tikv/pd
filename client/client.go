@@ -44,6 +44,7 @@ type Region struct {
 	Leader       *metapb.Peer
 	DownPeers    []*metapb.Peer
 	PendingPeers []*metapb.Peer
+	Buckets      *metapb.Buckets
 }
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
@@ -76,11 +77,11 @@ type Client interface {
 	// taking care of region change.
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
-	GetRegion(ctx context.Context, key []byte) (*Region, error)
+	GetRegion(ctx context.Context, key []byte, needBuckets bool) (*Region, error)
 	// GetRegionFromMember gets a region from certain members.
 	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
-	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
+	GetPrevRegion(ctx context.Context, key []byte, needBuckets bool) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64) (*Region, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
@@ -352,6 +353,8 @@ func WithMaxErrorRetry(count int) ClientOption {
 		c.option.maxRetryTimes = count
 	}
 }
+
+var _ Client = &client{}
 
 type client struct {
 	*baseClient
@@ -1317,6 +1320,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 		Meta:         res.Region,
 		Leader:       res.Leader,
 		PendingPeers: res.PendingPeers,
+		Buckets:      res.Buckets,
 	}
 	for _, s := range res.DownPeers {
 		r.DownPeers = append(r.DownPeers, s.Peer)
@@ -1324,7 +1328,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetRegion(ctx context.Context, key []byte, needBuckets bool) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1334,8 +1338,9 @@ func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegion(ctx, req)
@@ -1391,7 +1396,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	return handleRegionResponse(resp), nil
 }
 
-func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetPrevRegion(ctx context.Context, key []byte, needBuckets bool) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1401,8 +1406,9 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetPrevRegion(ctx, req)

@@ -28,7 +28,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20211213085605-3329b3c5404c
+	github.com/pingcap/kvproto v0.0.0-20220302110454-c696585a961b
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20220117082709-e8076b5c79ba
