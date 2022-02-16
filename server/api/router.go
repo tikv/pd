@@ -66,7 +66,8 @@ func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 		svr: s,
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
-			// todo: add audit and rate limit middleware
+			newAuditMiddleware(s),
+			// todo: add rate limit middleware
 		),
 	}
 }
@@ -81,7 +82,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, s
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+// registerRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path
 func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serviceLabel, path string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.Handle(path, s.middleware(handler)).Name(serviceLabel)
@@ -91,7 +92,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serv
 	return route
 }
 
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
+// registerPathPrefixRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
 func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandler(router *mux.Router, serviceLabel, prefix string,
 	handler http.Handler, opts ...createRouteOption) *mux.Route {
 	route := router.PathPrefix(prefix).Handler(s.middleware(handler)).Name(serviceLabel)
@@ -124,6 +125,11 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
+	setAudit := func(labels ...string) createRouteOption {
+		return func(route *mux.Route) {
+			svr.SetServiceAuditBackendForHTTP(route, labels...)
+		}
+	}
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -302,7 +308,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"))
 	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"))
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"))
-	registerFunc(apiRouter, "SwitchServiceMiddleware", "/admin/service-middleware", adminHandler.HanldeServiceMiddlewareSwitch, setMethods("POST"))
+	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"))
@@ -362,11 +368,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {
-		apiRouter.PathPrefix("/fail").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registerPrefix(apiRouter, "failpoint", "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		})
+		}), setAudit("test"))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
