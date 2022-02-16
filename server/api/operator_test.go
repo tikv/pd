@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
@@ -82,6 +84,9 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	regionURL := fmt.Sprintf("%s/operators/%d", s.urlPrefix, region.GetId())
 	operator := mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "operator not found"), IsTrue)
+	recordURL := fmt.Sprintf("%s/operators/records?from=%s", s.urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
+	records := mustReadURL(c, recordURL)
+	c.Assert(strings.Contains(records, "operator not found"), IsTrue)
 
 	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, nil)
 	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
@@ -92,6 +97,8 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 
 	_, err = doDelete(testDialClient, regionURL)
 	c.Assert(err, IsNil)
+	records = mustReadURL(c, recordURL)
+	c.Assert(strings.Contains(records, "admin-add-peer {add peer: store [3]}"), IsTrue)
 
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
 	c.Assert(err, IsNil)
@@ -101,6 +108,8 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 
 	_, err = doDelete(testDialClient, regionURL)
 	c.Assert(err, IsNil)
+	records = mustReadURL(c, recordURL)
+	c.Assert(strings.Contains(records, "admin-remove-peer {rm peer: store [2]}"), IsTrue)
 
 	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, nil)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`))
@@ -117,6 +126,11 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(err, NotNil)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`))
 	c.Assert(err, NotNil)
+
+	// Fail to get operator if from is latest.
+	time.Sleep(time.Second)
+	records = mustReadURL(c, fmt.Sprintf("%s/operators/records?from=%s", s.urlPrefix, strconv.FormatInt(time.Now().Unix(), 10)))
+	c.Assert(strings.Contains(records, "operator not found"), IsTrue)
 }
 
 func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {

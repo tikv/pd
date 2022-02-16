@@ -27,8 +27,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -399,7 +400,7 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	if ok {
 		return conn.(*grpc.ClientConn), nil
 	}
-	tlsCfg, err := grpcutil.TLSConfig{
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   c.security.CAPath,
 		CertPath: c.security.CertPath,
 		KeyPath:  c.security.KeyPath,
