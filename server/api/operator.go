@@ -74,7 +74,7 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 const (
 	kindAdmin   = "admin"
 	kindLeader  = "leader"
-	kingRegion  = "region"
+	kindRegion  = "region"
 	kindWaiting = "waiting"
 )
 
@@ -106,7 +106,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 				ops, err = h.GetAdminOperators()
 			case kindLeader:
 				ops, err = h.GetLeaderOperators()
-			case kingRegion:
+			case kindRegion:
 				ops, err = h.GetRegionOperators()
 			case kindWaiting:
 				ops, err = h.GetWaitingOperators()

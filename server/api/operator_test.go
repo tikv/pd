@@ -15,10 +15,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	. "github.com/pingcap/check"
@@ -376,6 +379,85 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 	}
 }
 
+func (s *testOperatorSuite) TestListOperationsParams(c *C) {
+	operatorsURL := fmt.Sprintf("%s/operators", s.urlPrefix)
+	mustReadURLWithHTTPCode(c, operatorsURL, http.StatusOK)
+	legalKinds := []string{kindAdmin, kindLeader, kindWaiting, kindRegion}
+	for _, kinds := range legalKinds {
+		url := fmt.Sprintf("%s?%s=%s", operatorsURL, pKind, kinds)
+		mustReadURLWithHTTPCode(c, url, http.StatusOK)
+	}
+
+	illegalKinds := []string{"", "a", "12"}
+	for _, kinds := range illegalKinds {
+		url := fmt.Sprintf("%s?%s=%s", operatorsURL, pKind, kinds)
+		mustReadURLWithHTTPCode(c, url, http.StatusOK)
+	}
+}
+
+func (s *testOperatorSuite) TestPostOperatorsWithInvalidParams(c *C) {
+	operatorURL := fmt.Sprintf("%s/operators", s.urlPrefix)
+	mustPostJSONWithRes := func(data []byte, expectedCode int, expectBodyKey string) {
+		req, err := http.NewRequest(http.MethodPost, operatorURL, bytes.NewBuffer(data))
+		c.Assert(err, IsNil)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := testDialClient.Do(req)
+		c.Assert(err, IsNil)
+		defer resp.Body.Close()
+		if len(expectBodyKey) > 0 {
+			body, err := io.ReadAll(resp.Body)
+			c.Assert(err, IsNil)
+			bodyStr := string(body)
+			c.Assert(strings.Contains(bodyStr, expectBodyKey), IsTrue)
+		}
+		c.Assert(resp.StatusCode, Equals, expectedCode)
+	}
+
+	mustPostJSONWithRes([]byte("{}"), http.StatusBadRequest, pName)
+	mustPostJSONWithRes([]byte(`{"name":"unknow"}`), http.StatusBadRequest, "unknown operator")
+
+	// test invalid params for transfer region
+	input := map[string]interface{}{}
+	input[pName] = opTransferRegion
+	input[pRegionID] = "regionID"
+	// invalid regionID
+	body, _ := json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pRegionID)
+	// invalid storeIDs
+	input[pRegionID] = 1
+	input[pPeerRoles] = []string{string(placement.Voter), string(placement.Leader)}
+	input[pToStoreIDs] = []string{"1,2,3", "222"}
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pToStoreIDs)
+
+	// empty storeIDs
+	input[pStoreID] = []int{}
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pToStoreIDs)
+
+	// test invalid params for split region
+	input[pName] = opSplitRegion
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pPolicy)
+	input[pPolicy] = "xxx"
+	input[pKeys] = []int{1, 2, 3}
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pKeys)
+
+	// test scatter regions
+	input[pName] = opScatterRegions
+	input[pStartKey] = "aaa"
+	input[pEndKey] = "endkey"
+	// invalid region ids
+	input[pRegionIDs] = []string{"a", "b"}
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusBadRequest, pRegionIDs)
+	input[pRegionIDs] = []int{1, 2, 3}
+	input[pRetryLimit] = 5
+	body, _ = json.Marshal(input)
+	mustPostJSONWithRes(body, http.StatusOK, "encoding/hex: odd length hex string")
+}
+
 func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
 	s := &server.GrpcServer{Server: svr}
 	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
@@ -409,4 +491,11 @@ func mustReadURL(c *C, url string) string {
 	data, err := io.ReadAll(res.Body)
 	c.Assert(err, IsNil)
 	return string(data)
+}
+
+func mustReadURLWithHTTPCode(c *C, url string, code int) {
+	res, err := testDialClient.Get(url)
+	c.Assert(err, IsNil)
+	defer res.Body.Close()
+	c.Assert(res.StatusCode, Equals, code)
 }
