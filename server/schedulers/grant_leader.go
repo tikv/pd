@@ -200,6 +200,8 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 
 // Prepare run it after adding new scheduler.
 func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+	s.conf.mu.RLock()
+	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
 		if err := cluster.PauseLeaderTransfer(id); err != nil {

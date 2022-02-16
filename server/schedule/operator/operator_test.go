@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -430,43 +431,49 @@ func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
 		step:   []OpStep{AddLearner{regionSize: 10 * 1000}, AddPeer{regionSize: 10 * 1000}},
 		start:  time.Now().Add(-time.Second * (6*10*1000 + 20)),
 		expect: true,
-	}, {
-		step:   []OpStep{AddLearner{regionSize: 10 * 1000}, AddPeer{regionSize: 10 * 1000}},
-		start:  time.Now().Add(-time.Second * (6*10*1000 - 20)),
-		expect: false,
-	}, {
-		// case2: 10MB region will have at least SlowOperatorWaitTime(10min) to executor.
-		step:   []OpStep{AddLearner{regionSize: 10}, AddPeer{regionSize: 10}},
-		start:  time.Now().Add(-(SlowOperatorWaitTime + time.Second*20)),
-		expect: true,
-	}, {
-		step:   []OpStep{AddLearner{regionSize: 10}, AddPeer{regionSize: 10}},
-		start:  time.Now().Add(-time.Second * (6*10 + 20)),
-		expect: false,
-	}, {
-		// case3: RemovePeer, TransferLeader, SplitRegion, MergeRegion, PromoteLearner will have  FastOperatorWaitTime(10s) to executor.
-		step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, MergeRegion{}, PromoteLearner{}},
-		start:  time.Now().Add(-(FastOperatorWaitTime + time.Second)),
-		expect: true,
-	}, {
-		step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, MergeRegion{}, PromoteLearner{}},
-		start:  time.Now().Add(-(FastOperatorWaitTime - time.Second)),
-		expect: false,
-	}, {
-		// case4: ChangePeerV2Enter, ChangePeerV2Leave has FastOperatorWaitTime times than FastOperatorWaitTime
-		step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
-			ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-		start:  time.Now().Add(-(FastOperatorWaitTime*(2+1) + time.Second)),
-		expect: true,
-	}, {
-		step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
-			ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-		start:  time.Now().Add(-(FastOperatorWaitTime*(2+1) - time.Second)),
-		expect: false,
 	},
+		{
+			step:   []OpStep{AddLearner{regionSize: 10 * 1000}, AddPeer{regionSize: 10 * 1000}},
+			start:  time.Now().Add(-time.Second * (6*10*1000 - 20)),
+			expect: false,
+		}, {
+			// case2: 10MB region will have at least SlowOperatorWaitTime(10min) to executor.
+			step:   []OpStep{AddLearner{regionSize: 10}, AddPeer{regionSize: 10}},
+			start:  time.Now().Add(-(SlowOperatorWaitTime + time.Second*20)),
+			expect: true,
+		}, {
+			step:   []OpStep{AddLearner{regionSize: 10}, AddPeer{regionSize: 10}},
+			start:  time.Now().Add(-time.Second * (6*10 + 20)),
+			expect: false,
+		}, {
+			// case3: RemovePeer, TransferLeader, SplitRegion, MergeRegion, PromoteLearner will have  FastOperatorWaitTime(10s) to executor.
+			step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
+			start:  time.Now().Add(-(FastOperatorWaitTime + time.Second)),
+			expect: true,
+		}, {
+			step:   []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
+			start:  time.Now().Add(-(FastOperatorWaitTime - time.Second)),
+			expect: false,
+		}, {
+			// case4: ChangePeerV2Enter, ChangePeerV2Leave has FastOperatorWaitTime times than FastOperatorWaitTime
+			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
+				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
+			start:  time.Now().Add(-(FastOperatorWaitTime*(2+1) + time.Second)),
+			expect: true,
+		}, {
+			step:   []OpStep{MergeRegion{}},
+			start:  time.Now().Add(-(FastOperatorWaitTime*20 + time.Second)),
+			expect: true,
+		}, {
+			step:   []OpStep{MergeRegion{}},
+			start:  time.Now().Add(-(FastOperatorWaitTime*20 - time.Second)),
+			expect: false,
+		},
 	}
-	for _, v := range testdata {
+	for i, v := range testdata {
+		fmt.Printf("case:%d ,data:%v\n", i, v)
 		for _, step := range v.step {
+			fmt.Printf("step:%v\n", step)
 			c.Assert(v.expect, Equals, step.Timeout(v.start, 6.0))
 		}
 	}
