@@ -263,6 +263,7 @@ func (oc *OperatorController) PushOperators() {
 func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
 	added := 0
+	needPromoted := 0
 
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
@@ -288,12 +289,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
+				i++
+				next := ops[i]
 				_ = next.Cancel()
 				oc.buryOperator(next)
 			}
-			oc.Unlock()
-			return added
+			continue
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -306,11 +307,15 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
+		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	for i := 0; i < needPromoted; i++ {
+		// these ops are created by one kind of scheduler/checker, so descs should be same
+		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 
@@ -378,14 +383,14 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 	for _, op := range ops {
 		region := oc.cluster.GetRegion(op.RegionID())
 		if region == nil {
-			log.Debug("region not found, cancel add operator",
+			log.Info("region not found, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "not-found").Inc()
 			return false
 		}
 		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
 			region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
-			log.Debug("region epoch not match, cancel add operator",
+			log.Info("region epoch not match, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", region.GetRegionEpoch()),
 				zap.Reflect("new", op.RegionEpoch()))
@@ -393,14 +398,14 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
-			log.Debug("already have operator, cancel add operator",
+			log.Info("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", old))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "already-have").Inc()
 			return false
 		}
 		if op.Status() != operator.CREATED {
-			log.Error("trying to add operator with unexpected status",
+			log.Info("trying to add operator with unexpected status",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
 				zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
@@ -411,7 +416,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
+			log.Info("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
 		}

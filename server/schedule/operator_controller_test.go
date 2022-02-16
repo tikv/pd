@@ -640,8 +640,16 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	added := controller.AddWaitingOperator(batch...)
 	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()-1))
 
-	source := newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
-	target := newRegionInfo(0, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	// test adding a batch of operators when some operators will get false in check
+	// and remain operators can be added normally
+	batch = append(batch, addPeerOp(cluster.GetSchedulerMaxWaitingOperator()-1))
+	added = controller.AddWaitingOperator(batch...)
+	c.Assert(added, Equals, 1)
+
+	source := newRegionInfo(5, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	cluster.PutRegion(source)
+	target := newRegionInfo(6, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	cluster.PutRegion(target)
 	// now there is one operator being allowed to add, if it is a merge operator
 	// both of the pair are allowed
 	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
