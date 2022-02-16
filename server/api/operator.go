@@ -341,7 +341,7 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags operator
-// @Summary lists the finished operators in the given time.
+// @Summary lists the finished operators since the given timestamp in second.
 // @Param from query integer false "From Unix timestamp"
 // @Produce json
 // @Success 200 {object} []operator.OpRecord

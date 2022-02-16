@@ -458,12 +458,12 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 }
 
 // GetRecords returns finished operators since start.
-func (h *Handler) GetRecords(start time.Time) ([]*operator.OpRecord, error) {
+func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	records := c.GetRecords(start)
+	records := c.GetRecords(from)
 	if len(records) == 0 {
 		return nil, ErrOperatorNotFound
 	}

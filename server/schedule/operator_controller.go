@@ -726,11 +726,11 @@ func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 }
 
 // GetRecords gets operators' records.
-func (oc *OperatorController) GetRecords(start time.Time) []*operator.OpRecord {
+func (oc *OperatorController) GetRecords(from time.Time) []*operator.OpRecord {
 	records := make([]*operator.OpRecord, 0, oc.opRecords.ttl.Len())
 	for _, id := range oc.opRecords.ttl.GetAllID() {
 		op := oc.opRecords.Get(id)
-		if op == nil || op.FinishTime.Before(start) {
+		if op == nil || op.FinishTime.Before(from) {
 			continue
 		}
 		records = append(records, op.Record(op.FinishTime))
