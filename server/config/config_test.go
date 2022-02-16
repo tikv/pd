@@ -515,7 +515,7 @@ func (s *testConfigSuite) TestImmutableConfig(c *C) {
 	config := NewConfig()
 	config.Adjust(nil, false)
 	iconfig := NewImmutableConfig(config)
-	c.Assert(iconfig.maxRegionSize, Equals, defaultMaxRegionSize)
+	c.Assert(iconfig.maxRegionSize, Equals, uint64(defaultMaxRegionSize))
 	iconfig = NewImmutableConfig(config, WithMaxRegionSize(200))
-	c.Assert(iconfig.GetMaxRegionSize(), Equals, 200)
+	c.Assert(iconfig.GetMaxRegionSize(), Equals, uint64(200))
 }
