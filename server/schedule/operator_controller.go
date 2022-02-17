@@ -311,9 +311,8 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 	}
 
 	oc.Unlock()
+	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
 	for i := 0; i < needPromoted; i++ {
-		// these ops are created by one kind of scheduler/checker, so descs should be same
-		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
 		oc.PromoteWaitingOperator()
 	}
 	return added
