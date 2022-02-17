@@ -120,14 +120,12 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 var _ = Suite(&testMiddlewareSuite{})
 
 type testMiddlewareSuite struct {
-	cleanup        func()
-	cluster        *tests.TestCluster
-	tempStdoutFile *os.File
+	cleanup func()
+	cluster *tests.TestCluster
 }
 
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
-	s.tempStdoutFile, _ = os.CreateTemp("/tmp", "pd_tests")
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
@@ -142,7 +140,6 @@ func (s *testMiddlewareSuite) TearDownSuite(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
 	s.cleanup()
 	s.cluster.Destroy()
-	os.Remove(s.tempStdoutFile.Name())
 }
 
 func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
@@ -268,8 +265,9 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
 	cfg := &log.Config{}
-	cfg.File.Filename = s.tempStdoutFile.Name()
+	cfg.File.Filename = tempStdoutFile.Name()
 	cfg.Level = "info"
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
@@ -285,10 +283,12 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	b, _ := os.ReadFile(s.tempStdoutFile.Name())
+	b, _ := os.ReadFile(tempStdoutFile.Name())
 	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, true)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	os.Remove(tempStdoutFile.Name())
 }
 
 func BenchmarkDoRequestWithLocallogAudit(b *testing.B) {
