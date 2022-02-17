@@ -475,3 +475,11 @@ func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
 		}
 	}
 }
+func (s *testOperatorSuite) TestRecord(c *C) {
+	operator := s.newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
+	now := time.Now()
+	time.Sleep(time.Second)
+	ob := operator.Record(now)
+	c.Assert(ob.FinishTime, Equals, now)
+	c.Assert(ob.duration.Seconds(), Greater, time.Second.Seconds())
+}

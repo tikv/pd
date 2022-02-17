@@ -608,7 +608,7 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Operator) {
 	c.Assert(oc.RemoveOperator(op), IsTrue)
 	c.Assert(op.IsEnd(), IsTrue)
-	c.Assert(oc.GetOperatorStatus(op.RegionID()).Op, DeepEquals, op)
+	c.Assert(oc.GetOperatorStatus(op.RegionID()).Operator, DeepEquals, op)
 }
 
 func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
