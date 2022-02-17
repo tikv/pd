@@ -604,7 +604,6 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
 	}
 	s.tc.AddLeaderRegionWithRange(uint64(101), "101a", "101z", 5, 4, 3)
 	c.Assert(lb.Schedule(s.tc), HasLen, 3)
-
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
