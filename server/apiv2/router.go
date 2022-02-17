@@ -61,6 +61,8 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.S
 	meta.DELETE("/stores/:id", handlers.DeleteStoreByID())
 
 	root.GET("/members", handlers.GetMembers())
+	root.DELETE("/members/:name", handlers.DeleteMemberByName())
+	root.PUT("/members/:name", handlers.UpdateMemberByName())
 	router.GET("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
 
 	return router, group, nil

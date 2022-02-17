@@ -316,10 +316,11 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !res.Succeeded {
-		return errors.New("save etcd leader priority failed, maybe not pd leader")
+		log.Error("save etcd leader priority failed, maybe not pd leader")
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
 }
@@ -329,10 +330,11 @@ func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !res.Succeeded {
-		return errors.New("delete etcd leader priority failed, maybe not pd leader")
+		log.Error("delete etcd leader priority failed, maybe not pd leader")
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
 }
@@ -342,10 +344,11 @@ func (m *Member) DeleteMemberDCLocationInfo(id uint64) error {
 	key := m.GetDCLocationPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
-		return errors.WithStack(err)
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !res.Succeeded {
-		return errors.New("delete dc-location info failed, maybe not pd leader")
+		log.Error("delete dc-location info failed, maybe not pd leader")
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
 }
