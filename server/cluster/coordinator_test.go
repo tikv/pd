@@ -16,7 +16,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -1117,7 +1116,6 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	sc := newScheduleController(co, lb)
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
-		fmt.Println(sc.GetInterval(), i)
 		c.Assert(sc.GetInterval(), Equals, i)
 		c.Assert(sc.Schedule(), HasLen, 0)
 	}
