@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package redirector_test
+package middlewares_test
 
 import (
 	"context"

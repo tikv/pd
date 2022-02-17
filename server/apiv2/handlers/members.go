@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -16,21 +17,19 @@ import (
 func GetMembers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		svr := c.MustGet("server").(*server.Server)
-		members, err := svr.GetMembers()
+		req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+		grpcServer := &server.GrpcServer{Server: svr}
+		members, err := grpcServer.GetMembers(context.Background(), req)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
 		dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		for _, m := range members {
+		for _, m := range members.GetMembers() {
 			m.DcLocation = ""
 			binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 			if e != nil {
@@ -72,38 +71,7 @@ func GetMembers() gin.HandlerFunc {
 				}
 			}
 		}
-		var etcdLeader, pdLeader *pdpb.Member
-		leaderID := svr.GetMember().GetEtcdLeader()
-		for _, m := range members {
-			if m.MemberId == leaderID {
-				etcdLeader = m
-				break
-			}
-		}
-
-		tsoAllocatorManager := svr.GetTSOAllocatorManager()
-		tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
-			return
-		}
-
-		leader := svr.GetMember().GetLeader()
-		for _, m := range members {
-			if m.MemberId == leader.GetMemberId() {
-				pdLeader = m
-				break
-			}
-		}
-
-		c.IndentedJSON(http.StatusOK, gin.H{
-			"members":               members,
-			"leader":                pdLeader,
-			"etcd_leader":           etcdLeader,
-			"tso_allocator_leaders": tsoAllocatorLeaders,
-		})
+		c.IndentedJSON(http.StatusOK, members)
 	}
 }
 
@@ -111,6 +79,7 @@ type updateParams struct {
 	LeaderPriority float64 `json:"leader_priority"`
 }
 
+// UpdateMemberByName will update the PD member info according to the given parameters.
 func UpdateMemberByName() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		svr := c.MustGet("server").(*server.Server)
@@ -118,9 +87,7 @@ func UpdateMemberByName() gin.HandlerFunc {
 		// Get etcd ID by name.
 		id, err := getMemberIDByName(svr, c.Param("name"))
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
 		if id == 0 {
@@ -130,22 +97,15 @@ func UpdateMemberByName() gin.HandlerFunc {
 
 		var p updateParams
 		if err := c.BindJSON(&p); err != nil {
-			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-				"error": errs.ErrBindJSON.Wrap(err).GenWithStackByCause(),
-			})
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 			return
 		}
 		err = svr.GetMember().SetMemberLeaderPriority(id, int(p.LeaderPriority))
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		c.JSON(
-			http.StatusOK,
-			nil,
-		)
+		c.JSON(http.StatusOK, nil)
 	}
 }
 
@@ -157,9 +117,7 @@ func DeleteMemberByName() gin.HandlerFunc {
 		// Get etcd ID by name.
 		id, err := getMemberIDByName(svr, c.Param("name"))
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
 
@@ -169,9 +127,7 @@ func DeleteMemberByName() gin.HandlerFunc {
 		}
 
 		if err := deleteMemberByID(svr, id); err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
 		c.JSON(

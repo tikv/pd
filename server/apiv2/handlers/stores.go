@@ -36,12 +36,7 @@ func GetStores() gin.HandlerFunc {
 			storeID := s.GetId()
 			store := rc.GetStore(storeID)
 			if store == nil {
-				c.AbortWithStatusJSON(
-					http.StatusInternalServerError,
-					gin.H{
-						"error": errs.ErrStoreNotFound.FastGenByArgs(storeID).Error(),
-					},
-				)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 				return
 			}
 
@@ -49,12 +44,7 @@ func GetStores() gin.HandlerFunc {
 			StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 		}
 		StoresInfo.Count = len(StoresInfo.Stores)
-		c.IndentedJSON(
-			http.StatusOK,
-			gin.H{
-				"stores": StoresInfo,
-			},
-		)
+		c.IndentedJSON(http.StatusOK, StoresInfo)
 	}
 }
 
@@ -75,31 +65,17 @@ func GetStoreByID() gin.HandlerFunc {
 		idParam := c.Param("id")
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
-			c.AbortWithStatusJSON(
-				http.StatusBadRequest,
-				gin.H{
-					"error": errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())
+			return
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			c.AbortWithStatusJSON(
-				http.StatusInternalServerError,
-				gin.H{
-					"error": errs.ErrStoreNotFound.FastGenByArgs(id).Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
 			return
 		}
 
 		storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
-		c.IndentedJSON(
-			http.StatusOK,
-			gin.H{
-				"store": storeInfo,
-			},
-		)
+		c.IndentedJSON(http.StatusOK, storeInfo)
 	}
 }
 
@@ -110,12 +86,8 @@ func DeleteStoreByID() gin.HandlerFunc {
 		idParam := c.Param("id")
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
-			c.AbortWithStatusJSON(
-				http.StatusBadRequest,
-				gin.H{
-					"error": errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())
+			return
 		}
 
 		var force bool
@@ -123,29 +95,17 @@ func DeleteStoreByID() gin.HandlerFunc {
 		if forceQuery != "" {
 			force, err = strconv.ParseBool(forceQuery)
 			if err != nil {
-				c.IndentedJSON(
-					http.StatusBadRequest,
-					gin.H{
-						"error": errs.ErrStrconvParseBool.Wrap(err).FastGenWithCause().Error(),
-					},
-				)
+				c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseBool.Wrap(err).FastGenWithCause().Error())
+				return
 			}
 		}
 
 		err = rc.RemoveStore(id, force)
 		if err != nil {
-			c.AbortWithStatusJSON(
-				http.StatusBadRequest,
-				gin.H{
-					"error": err.Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
 
-		c.JSON(
-			http.StatusOK,
-			nil,
-		)
+		c.JSON(http.StatusOK, nil)
 	}
 }

@@ -28,12 +28,7 @@ func BootstrapChecker() gin.HandlerFunc {
 		svr := c.MustGet("server").(*server.Server)
 		rc := svr.GetRaftCluster()
 		if rc == nil {
-			c.AbortWithStatusJSON(
-				http.StatusInternalServerError,
-				gin.H{
-					"error": errs.ErrNotBootstrapped.FastGenByArgs().Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
 		c.Set("cluster", rc)

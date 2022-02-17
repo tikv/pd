@@ -40,12 +40,7 @@ func Redirector() gin.HandlerFunc {
 		// Prevent more than one redirection.
 		if name := c.Request.Header.Get(serverapi.RedirectorHeader); len(name) != 0 {
 			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
-			c.AbortWithStatusJSON(
-				http.StatusInternalServerError,
-				gin.H{
-					"error": errs.ErrRedirect.FastGenByArgs().Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirect.FastGenByArgs().Error())
 			return
 		}
 
@@ -53,12 +48,7 @@ func Redirector() gin.HandlerFunc {
 
 		leader := svr.GetMember().GetLeader()
 		if leader == nil {
-			c.AbortWithStatusJSON(
-				http.StatusServiceUnavailable,
-				gin.H{
-					"error": errs.ErrLeaderNil.FastGenByArgs().Error(),
-				},
-			)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return
 		}
 		clientUrls := leader.GetClientUrls()
@@ -66,12 +56,7 @@ func Redirector() gin.HandlerFunc {
 		for _, item := range clientUrls {
 			u, err := url.Parse(item)
 			if err != nil {
-				c.AbortWithStatusJSON(
-					http.StatusInternalServerError,
-					gin.H{
-						"error": errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error(),
-					},
-				)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error())
 				return
 			}
 
