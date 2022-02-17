@@ -15,17 +15,22 @@
 package schedulers
 
 import (
+	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
@@ -65,14 +70,49 @@ func init() {
 }
 
 type balanceLeaderSchedulerConfig struct {
+	mu     sync.RWMutex
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+}
+
+type balanceLeaderHandler struct {
+	rd     *render.Render
+	config *balanceLeaderSchedulerConfig
+}
+
+func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
+	handler := &balanceLeaderHandler{
+		config: conf,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", handler.UpdateConfig).Methods("POST")
+	// router.HandleFunc("/list", handler.ListConfig).Methods("GET")
+	return router
+}
+
+func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var args []string
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	ranges, ok := (input["ranges"]).([]string)
+	if ok {
+		args = append(args, ranges...)
+	}
+	if batch, ok := input["batch"].(float64); ok {
+		args = append(args, strconv.FormatInt(int64(batch), 10))
+	}
+	handler.config.mu.Lock()
+	handler.config.mu.Unlock()
 }
 
 type balanceLeaderScheduler struct {
 	*BaseScheduler
 	*retryQuota
 	conf         *balanceLeaderSchedulerConfig
+	handler      http.Handler
 	opController *schedule.OperatorController
 	filters      []filter.Filter
 	counter      *prometheus.CounterVec
@@ -82,11 +122,11 @@ type balanceLeaderScheduler struct {
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
-
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
 		conf:          conf,
+		handler:       newBalanceLeaderHandler(conf),
 		opController:  opController,
 		counter:       balanceLeaderCounter,
 	}
@@ -98,6 +138,10 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s
+}
+
+func (s *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
@@ -138,6 +182,8 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+	l.conf.mu.RLock()
+	defer l.conf.mu.RUnlock()
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
