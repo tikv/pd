@@ -34,6 +34,11 @@ const (
 	KeyRange = "key-range"
 )
 
+const (
+	scheduleOptionLabel      = "schedule"
+	scheduleOptioonValueDeny = "deny"
+)
+
 // KeyRangeRule contains the start key and end key of the LabelRule.
 type KeyRangeRule struct {
 	StartKey    []byte `json:"-"`         // range start key
