@@ -17,6 +17,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
@@ -342,6 +343,32 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
+}
+
+// @Tags operator
+// @Summary lists the finished operators since the given timestamp in second.
+// @Param from query integer false "From Unix timestamp"
+// @Produce json
+// @Success 200 {object} []operator.OpRecord
+// @Failure 400 {string} string "The request is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators/records [get]
+func (h *operatorHandler) Records(w http.ResponseWriter, r *http.Request) {
+	var from time.Time
+	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
+		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		from = time.Unix(fromInt, 0)
+	}
+	records, err := h.GetRecords(from)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, records)
 }
 
 func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {
