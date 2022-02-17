@@ -50,25 +50,12 @@ func init() {
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Name = BalanceLeaderName
-			conf.Batch = 1
-			if len(args) > len(ranges)*2 {
-				conf.Batch, err = strconv.Atoi(args[len(ranges)*2])
-				if err != nil {
-					return err
-				}
-			}
-			return nil
+			return conf.BuildWithArgs(args)
 		}
 	})
 
 	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceLeaderSchedulerConfig{}
+		conf := &balanceLeaderSchedulerConfig{storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
@@ -77,10 +64,50 @@ func init() {
 }
 
 type balanceLeaderSchedulerConfig struct {
-	mu     sync.RWMutex
-	Name   string          `json:"name"`
-	Ranges []core.KeyRange `json:"ranges"`
-	Batch  int             `json:"batch"`
+	mu      sync.RWMutex
+	storage endpoint.ConfigStorage
+	Name    string          `json:"name"`
+	Ranges  []core.KeyRange `json:"ranges"`
+	Batch   int             `json:"batch"`
+}
+
+func (conf *balanceLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+	ranges, err := getKeyRanges(args)
+	if err != nil {
+		return err
+	}
+	conf.Ranges = ranges
+	conf.Name = BalanceLeaderName
+	conf.Batch = 1
+	if len(args) > len(ranges)*2 {
+		conf.Batch, err = strconv.Atoi(args[len(ranges)*2])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	return &balanceLeaderSchedulerConfig{
+		Ranges: conf.Ranges,
+		Batch:  conf.Batch,
+	}
+}
+
+func (conf *balanceLeaderSchedulerConfig) Persist() error {
+	name := conf.Name
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	return conf.storage.SaveScheduleConfig(name, data)
 }
 
 type balanceLeaderHandler struct {
@@ -95,7 +122,7 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 	}
 	router := mux.NewRouter()
 	router.HandleFunc("/config", handler.UpdateConfig).Methods("POST")
-	// router.HandleFunc("/list", handler.ListConfig).Methods("GET")
+	router.HandleFunc("/list", handler.ListConfig).Methods("GET")
 	return router
 }
 
@@ -112,8 +139,16 @@ func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http
 	if batch, ok := input["batch"].(float64); ok {
 		args = append(args, strconv.FormatInt(int64(batch), 10))
 	}
-	handler.config.mu.Lock()
-	handler.config.mu.Unlock()
+	err := handler.config.BuildWithArgs(args)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type balanceLeaderScheduler struct {
