@@ -234,7 +234,7 @@ func (o *Operator) CheckTimeout() bool {
 		startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
 	}
 	step := o.steps[currentStep]
-	return o.status.CheckStepTimeout(startTime, step)
+	return o.status.CheckStepTimeout(startTime, step, o.ApproximateSize)
 }
 
 // Len returns the operator's steps count.
