@@ -36,7 +36,7 @@ const (
 	// default: 6 s/Mb
 	DefaultSlowExecutorRate = 6
 	// DefaultFastExecutorRate is the slow rate of the operator executor.
-	// default:  0.01 s/Mb
+	// default:  0.1 s/Mb
 	DefaultFastExecutorRate = 0.1
 )
 
@@ -112,7 +112,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 
 // Timeout returns true if the step is timeout.
 func (tl TransferLeader) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // AddPeer is an OpStep that adds a region peer.
@@ -170,7 +170,7 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 
 // Timeout returns true if the step is timeout.
 func (ap AddPeer) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxSlowWaitTime(regionSize)
+	return time.Since(start) > slowStepWaitDuration(regionSize)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -234,7 +234,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 
 // Timeout returns true if the step is timeout.
 func (al AddLearner) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxSlowWaitTime(regionSize)
+	return time.Since(start) > slowStepWaitDuration(regionSize)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -277,7 +277,7 @@ func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
 func (pl PromoteLearner) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // RemovePeer is an OpStep that removes a region peer.
@@ -333,7 +333,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 
 // Timeout returns true if the step is timeout.
 func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // MergeRegion is an OpStep that merge two regions.
@@ -386,7 +386,7 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 
 // Timeout returns true if the step is timeout.
 func (mr MergeRegion) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)*10
+	return time.Since(start) > fastStepWaitDuration(regionSize)*10
 }
 
 // SplitRegion is an OpStep that splits a region.
@@ -428,7 +428,7 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, _ *core.RegionInfo) err
 
 // Timeout returns true if the step is timeout.
 func (sr SplitRegion) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
@@ -460,7 +460,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 
 // Timeout returns true if the step is timeout.
 func (dv DemoteVoter) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > maxFastWaitTime(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -607,7 +607,7 @@ func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
 // Timeout returns true if the step is timeout.
 func (cpe ChangePeerV2Enter) Timeout(start time.Time, regionSize int64) bool {
 	count := uint64(len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) + 1
-	return time.Since(start) > maxFastWaitTime(regionSize)*time.Duration(count)
+	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
 }
 
 // ChangePeerV2Leave is an OpStep that leaves the joint state.
@@ -732,7 +732,7 @@ func (cpl ChangePeerV2Leave) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 // Timeout returns true if the step is timeout.
 func (cpl ChangePeerV2Leave) Timeout(start time.Time, regionSize int64) bool {
 	count := uint64(len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) + 1
-	return time.Since(start) > maxFastWaitTime(regionSize)*time.Duration(count)
+	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
 }
 
 func validateStore(ci ClusterInformer, id uint64) error {
@@ -746,7 +746,7 @@ func validateStore(ci ClusterInformer, id uint64) error {
 	return nil
 }
 
-func maxSlowWaitTime(regionSize int64) time.Duration {
+func slowStepWaitDuration(regionSize int64) time.Duration {
 	seconds := DefaultSlowExecutorRate * regionSize
 	wait := time.Duration(seconds) * time.Second
 	if wait < SlowOperatorWaitTime {
@@ -755,7 +755,7 @@ func maxSlowWaitTime(regionSize int64) time.Duration {
 	return wait
 }
 
-func maxFastWaitTime(regionSize int64) time.Duration {
+func fastStepWaitDuration(regionSize int64) time.Duration {
 	seconds := int64(DefaultFastExecutorRate * float64(regionSize))
 	wait := time.Duration(seconds) * time.Second
 	if wait < FastOperatorWaitTime {

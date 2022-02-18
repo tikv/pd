@@ -130,6 +130,7 @@ func (s *testOpStatusTrackerSuite) TestCheckStepTimeout(c *C) {
 	}}
 
 	for _, v := range testdata {
+		// Timeout and status changed
 		trk := NewOpStatusTracker()
 		trk.To(STARTED)
 		c.Assert(trk.CheckStepTimeout(v.start, v.step, 0), Equals, v.status == TIMEOUT)
