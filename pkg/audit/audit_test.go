@@ -45,14 +45,6 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 	c.Assert(matcher.Match(labels2), Equals, false)
 }
 
-func (s *testAuditSuite) TestLocalLogBackendUsingTerminal(c *C) {
-	backend := NewLocalLogBackend(true)
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
-	info := requestutil.GetRequestInfo(req)
-	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
-}
-
 func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
 	backend := NewLocalLogBackend(true)
 	fname := initLog()

@@ -126,7 +126,7 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
-	setAudit := func(labels ...string) createRouteOption {
+	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
 			svr.SetServiceAuditBackendForHTTP(route, labels...)
 		}
@@ -175,13 +175,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	confHandler := newConfHandler(svr, rd)
 	registerFunc(apiRouter, "GetConfig", "/config", confHandler.Get, setMethods("GET"))
-	registerFunc(apiRouter, "SetConfig", "/config", confHandler.Post, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "SetConfig", "/config", confHandler.Post, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "GetDefaultConfig", "/config/default", confHandler.GetDefault, setMethods("GET"))
 	registerFunc(apiRouter, "GetScheduleConfig", "/config/schedule", confHandler.GetSchedule, setMethods("GET"))
-	registerFunc(apiRouter, "SetScheduleConfig", "/config/schedule", confHandler.SetSchedule, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "SetScheduleConfig", "/config/schedule", confHandler.SetSchedule, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "GetPDServerConfig", "/config/pd-server", confHandler.GetPDServer, setMethods("GET"))
 	registerFunc(apiRouter, "GetReplicationConfig", "/config/replicate", confHandler.GetReplication, setMethods("GET"))
-	registerFunc(apiRouter, "SetReplicationConfig", "/config/replicate", confHandler.SetReplication, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "SetReplicationConfig", "/config/replicate", confHandler.SetReplication, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "GetLabelProperty", "/config/label-property", confHandler.GetLabelProperty, setMethods("GET"))
 	registerFunc(apiRouter, "SetLabelProperty", "/config/label-property", confHandler.SetLabelProperty, setMethods("POST"))
 	registerFunc(apiRouter, "GetClusterVersion", "/config/cluster-version", confHandler.GetClusterVersion, setMethods("GET"))
@@ -191,53 +191,53 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	rulesHandler := newRulesHandler(svr, rd)
 	registerFunc(clusterRouter, "GetAllRules", "/config/rules", rulesHandler.GetAll, setMethods("GET"))
-	registerFunc(clusterRouter, "SetAllRules", "/config/rules", rulesHandler.SetAll, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetBatchRules", "/config/rules/batch", rulesHandler.Batch, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetAllRules", "/config/rules", rulesHandler.SetAll, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetBatchRules", "/config/rules/batch", rulesHandler.Batch, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetRuleByGroup", "/config/rules/group/{group}", rulesHandler.GetAllByGroup, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRuleByByRegion", "/config/rules/region/{region}", rulesHandler.GetAllByRegion, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRuleByKey", "/config/rules/key/{key}", rulesHandler.GetAllByKey, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRuleByGroupAndID", "/config/rule/{group}/{id}", rulesHandler.Get, setMethods("GET"))
-	registerFunc(clusterRouter, "SetRule", "/config/rule", rulesHandler.Set, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "DeleteRuleByGroup", "/config/rule/{group}/{id}", rulesHandler.Delete, setMethods("DELETE"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetRule", "/config/rule", rulesHandler.Set, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "DeleteRuleByGroup", "/config/rule/{group}/{id}", rulesHandler.Delete, setMethods("DELETE"), setAuditBackend(localLog))
 
 	regionLabelHandler := newRegionLabelHandler(svr, rd)
 	registerFunc(clusterRouter, "GetAllRegionLabelRule", "/config/region-label/rules", regionLabelHandler.GetAllRules, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRegionLabelRulesByIDs", "/config/region-label/rules/ids", regionLabelHandler.GetRulesByIDs, setMethods("GET"))
 	// {id} can be a string with special characters, we should enable path encode to support it.
 	registerFunc(escapeRouter, "GetRegionLabelRuleByID", "/config/region-label/rule/{id}", regionLabelHandler.GetRule, setMethods("GET"))
-	registerFunc(escapeRouter, "DeleteRegionLabelRule", "/config/region-label/rule/{id}", regionLabelHandler.DeleteRule, setMethods("DELETE"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetRegionLabelRule", "/config/region-label/rule", regionLabelHandler.SetRule, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "PatchRegionLabelRules", "/config/region-label/rules", regionLabelHandler.Patch, setMethods("PATCH"), setAudit(localLog))
+	registerFunc(escapeRouter, "DeleteRegionLabelRule", "/config/region-label/rule/{id}", regionLabelHandler.DeleteRule, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetRegionLabelRule", "/config/region-label/rule", regionLabelHandler.SetRule, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "PatchRegionLabelRules", "/config/region-label/rules", regionLabelHandler.Patch, setMethods("PATCH"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetRegionLabelByKey", "/region/id/{id}/label/{key}", regionLabelHandler.GetRegionLabel, setMethods("GET"))
 	registerFunc(clusterRouter, "GetAllRegionLabels", "/region/id/{id}/labels", regionLabelHandler.GetRegionLabels, setMethods("GET"))
 
 	registerFunc(clusterRouter, "GetRuleGroup", "/config/rule_group/{id}", rulesHandler.GetGroupConfig, setMethods("GET"))
-	registerFunc(clusterRouter, "SetRuleGroup", "/config/rule_group", rulesHandler.SetGroupConfig, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "DeleteRuleGroup", "/config/rule_group/{id}", rulesHandler.DeleteGroupConfig, setMethods("DELETE"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetRuleGroup", "/config/rule_group", rulesHandler.SetGroupConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "DeleteRuleGroup", "/config/rule_group/{id}", rulesHandler.DeleteGroupConfig, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetAllRuleGroups", "/config/rule_groups", rulesHandler.GetAllGroupConfigs, setMethods("GET"))
 
 	registerFunc(clusterRouter, "GetAllPlacementRules", "/config/placement-rule", rulesHandler.GetAllGroupBundles, setMethods("GET"))
-	registerFunc(clusterRouter, "SetAllPlacementRules", "/config/placement-rule", rulesHandler.SetAllGroupBundles, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetAllPlacementRules", "/config/placement-rule", rulesHandler.SetAllGroupBundles, setMethods("POST"), setAuditBackend(localLog))
 	// {group} can be a regular expression, we should enable path encode to
 	// support special characters.
 	registerFunc(clusterRouter, "GetPlacementRuleByGroup", "/config/placement-rule/{group}", rulesHandler.GetGroupBundle, setMethods("GET"))
-	registerFunc(clusterRouter, "SetPlacementRuleByGroup", "/config/placement-rule/{group}", rulesHandler.SetGroupBundle, setMethods("POST"), setAudit(localLog))
-	registerFunc(escapeRouter, "DeletePlacementRuleByGroup", "/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle, setMethods("DELETE"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetPlacementRuleByGroup", "/config/placement-rule/{group}", rulesHandler.SetGroupBundle, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(escapeRouter, "DeletePlacementRuleByGroup", "/config/placement-rule/{group}", rulesHandler.DeleteGroupBundle, setMethods("DELETE"), setAuditBackend(localLog))
 
 	storeHandler := newStoreHandler(handler, rd)
 	registerFunc(clusterRouter, "GetStore", "/store/{id}", storeHandler.Get, setMethods("GET"))
-	registerFunc(clusterRouter, "DeleteStore", "/store/{id}", storeHandler.Delete, setMethods("DELETE"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetStoreState", "/store/{id}/state", storeHandler.SetState, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetStoreLabel", "/store/{id}/label", storeHandler.SetLabels, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetStoreWeight", "/store/{id}/weight", storeHandler.SetWeight, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetStoreLimit", "/store/{id}/limit", storeHandler.SetLimit, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "DeleteStore", "/store/{id}", storeHandler.Delete, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetStoreState", "/store/{id}/state", storeHandler.SetState, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetStoreLabel", "/store/{id}/label", storeHandler.SetLabels, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetStoreWeight", "/store/{id}/weight", storeHandler.SetWeight, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetStoreLimit", "/store/{id}/limit", storeHandler.SetLimit, setMethods("POST"), setAuditBackend(localLog))
 
 	storesHandler := newStoresHandler(handler, rd)
 	register(clusterRouter, "GetAllStores", "/stores", storesHandler, setMethods("GET"))
-	registerFunc(clusterRouter, "RemoveTombstone", "/stores/remove-tombstone", storesHandler.RemoveTombStone, setMethods("DELETE"), setAudit(localLog))
+	registerFunc(clusterRouter, "RemoveTombstone", "/stores/remove-tombstone", storesHandler.RemoveTombStone, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetAllStoresLimit", "/stores/limit", storesHandler.GetAllLimit, setMethods("GET"))
-	registerFunc(clusterRouter, "SetAllStoresLimit", "/stores/limit", storesHandler.SetAllLimit, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetStoreSceneLimit", "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "SetAllStoresLimit", "/stores/limit", storesHandler.SetAllLimit, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetStoreSceneLimit", "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetStoreSceneLimit", "/stores/limit/scene", storesHandler.GetStoreLimitScene, setMethods("GET"))
 
 	labelsHandler := newLabelsHandler(svr, rd)
@@ -245,22 +245,22 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetStoresByLabel", "/labels/stores", labelsHandler.GetStores, setMethods("GET"))
 
 	hotStatusHandler := newHotStatusHandler(handler, rd)
-	registerFunc(apiRouter, "GetHotspotWriteRegion", "/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions, setMethods("GET"), setAudit(localLog))
-	registerFunc(apiRouter, "GetHotspotReadRegion", "/hotspot/regions/read", hotStatusHandler.GetHotReadRegions, setMethods("GET"), setAudit(localLog))
-	registerFunc(apiRouter, "GetHotspotStores", "/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions, setMethods("GET"), setAudit(localLog))
-	registerFunc(apiRouter, "GetHistoryHotspotRegion", "/hotspot/stores", hotStatusHandler.GetHotStores, setMethods("GET"), setAudit(localLog))
+	registerFunc(apiRouter, "GetHotspotWriteRegion", "/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "GetHotspotReadRegion", "/hotspot/regions/read", hotStatusHandler.GetHotReadRegions, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "GetHotspotStores", "/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "GetHistoryHotspotRegion", "/hotspot/stores", hotStatusHandler.GetHotStores, setMethods("GET"), setAuditBackend(localLog))
 
 	regionHandler := newRegionHandler(svr, rd)
-	registerFunc(clusterRouter, "GetRegionByID", "/region/id/{id}", regionHandler.GetRegionByID, setMethods("GET"), setAudit(localLog))
-	registerFunc(clusterRouter.UseEncodedPath(), "GetRegion", "/region/key/{key}", regionHandler.GetRegionByKey, setMethods("GET"), setAudit(localLog))
+	registerFunc(clusterRouter, "GetRegionByID", "/region/id/{id}", regionHandler.GetRegionByID, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(clusterRouter.UseEncodedPath(), "GetRegion", "/region/key/{key}", regionHandler.GetRegionByKey, setMethods("GET"), setAuditBackend(localLog))
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)
 	registerFunc(clusterRouter, "GetAllRegions", "/regions", regionsAllHandler.GetAll, setMethods("GET"))
 
 	regionsHandler := newRegionsHandler(svr, rd)
-	registerFunc(clusterRouter, "ScanRegions", "/regions/key", regionsHandler.ScanRegions, setMethods("GET"), setAudit(localLog))
-	registerFunc(clusterRouter, "CountRegions", "/regions/count", regionsHandler.GetRegionCount, setMethods("GET"), setAudit(localLog))
+	registerFunc(clusterRouter, "ScanRegions", "/regions/key", regionsHandler.ScanRegions, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "CountRegions", "/regions/count", regionsHandler.GetRegionCount, setMethods("GET"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetRegionsByStore", "/regions/store/{id}", regionsHandler.GetStoreRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "GetTopWriteRegions", "/regions/writeflow", regionsHandler.GetTopWriteFlow, setMethods("GET"))
 	registerFunc(clusterRouter, "GetTopReadRegions", "/regions/readflow", regionsHandler.GetTopReadFlow, setMethods("GET"))
@@ -278,9 +278,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetSizeHistogram", "/regions/check/hist-size", regionsHandler.GetSizeHistogram, setMethods("GET"))
 	registerFunc(clusterRouter, "GetKeysHistogram", "/regions/check/hist-keys", regionsHandler.GetKeysHistogram, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRegionSiblings", "/regions/sibling/{id}", regionsHandler.GetRegionSiblings, setMethods("GET"))
-	registerFunc(clusterRouter, "AccelerateRegionsSchedule", "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "ScatterRegions", "/regions/scatter", regionsHandler.ScatterRegions, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SplitRegions", "/regions/split", regionsHandler.SplitRegions, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "AccelerateRegionsSchedule", "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "ScatterRegions", "/regions/scatter", regionsHandler.ScatterRegions, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SplitRegions", "/regions/split", regionsHandler.SplitRegions, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetRangeHoles", "/regions/range-holes", regionsHandler.GetRangeHoles, setMethods("GET"))
 	registerFunc(clusterRouter, "CheckRegionsReplicated", "/regions/replicated", regionsHandler.CheckRegionsReplicated, setMethods("GET"), setQueries("startKey", "{startKey}", "endKey", "{endKey}"))
 
@@ -289,14 +289,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	memberHandler := newMemberHandler(svr, rd)
 	registerFunc(apiRouter, "GetMembers", "/members", memberHandler.ListMembers, setMethods("GET"))
-	registerFunc(apiRouter, "DeleteMemberByName", "/members/name/{name}", memberHandler.DeleteByName, setMethods("DELETE"), setAudit(localLog))
-	registerFunc(apiRouter, "DeleteMemberByID", "/members/id/{id}", memberHandler.DeleteByID, setMethods("DELETE"), setAudit(localLog))
-	registerFunc(apiRouter, "SetMemberByName", "/members/name/{name}", memberHandler.SetMemberPropertyByName, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "DeleteMemberByName", "/members/name/{name}", memberHandler.DeleteByName, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "DeleteMemberByID", "/members/id/{id}", memberHandler.DeleteByID, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "SetMemberByName", "/members/name/{name}", memberHandler.SetMemberPropertyByName, setMethods("POST"), setAuditBackend(localLog))
 
 	leaderHandler := newLeaderHandler(svr, rd)
 	registerFunc(apiRouter, "GetLeader", "/leader", leaderHandler.Get, setMethods("GET"))
-	registerFunc(apiRouter, "ResignLeader", "/leader/resign", leaderHandler.Resign, setMethods("POST"), setAudit(localLog))
-	registerFunc(apiRouter, "TransferLeader", "/leader/transfer/{next_leader}", leaderHandler.Transfer, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "ResignLeader", "/leader/resign", leaderHandler.Resign, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "TransferLeader", "/leader/transfer/{next_leader}", leaderHandler.Transfer, setMethods("POST"), setAuditBackend(localLog))
 
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "GetRegionStatus", "/stats/region", statsHandler.Region, setMethods("GET"))
@@ -305,14 +305,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"))
 
 	adminHandler := newAdminHandler(svr, rd)
-	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"), setAudit(localLog))
-	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAudit(localLog))
-	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"), setAudit(localLog))
-	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAudit(localLog))
-	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"), setAudit(localLog))
+	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
-	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAuditBackend(localLog))
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	registerFunc(clusterRouter, "GetReplicationModeStatus", "/replication_mode/status", replicationModeHandler.GetStatus)
 
@@ -338,7 +338,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// tso API
 	tsoHandler := newTSOHandler(svr, rd)
-	registerFunc(apiRouter, "TransferLocalTSOAllocator", "/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator, setMethods("POST"), setAudit(localLog))
+	registerFunc(apiRouter, "TransferLocalTSOAllocator", "/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator, setMethods("POST"), setAuditBackend(localLog))
 
 	// profile API
 	registerFunc(apiRouter, "DebugPProfProfile", "/debug/pprof/profile", pprof.Profile)
@@ -354,8 +354,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
-	registerFunc(apiRouter, "GetGCSafePoint", "/gc/safepoint", serviceGCSafepointHandler.List, setMethods("GET"), setAudit(localLog))
-	registerFunc(apiRouter, "DeleteGCSafePoint", "/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete, setMethods("DELETE"), setAudit(localLog))
+	registerFunc(apiRouter, "GetGCSafePoint", "/gc/safepoint", serviceGCSafepointHandler.List, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "DeleteGCSafePoint", "/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete, setMethods("DELETE"), setAuditBackend(localLog))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
@@ -372,7 +372,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAudit("test"))
+		}), setAuditBackend("test"))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.

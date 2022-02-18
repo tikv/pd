@@ -291,7 +291,7 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	os.Remove(tempStdoutFile.Name())
 }
 
-func BenchmarkDoRequestWithLocallogAudit(b *testing.B) {
+func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
