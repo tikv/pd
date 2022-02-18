@@ -15,10 +15,12 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
 )
@@ -32,6 +34,7 @@ func GetStores() gin.HandlerFunc {
 			Stores: make([]*StoreInfo, 0, len(stores)),
 		}
 
+		state, exist := c.GetQuery("state")
 		for _, s := range stores {
 			storeID := s.GetId()
 			store := rc.GetStore(storeID)
@@ -40,8 +43,10 @@ func GetStores() gin.HandlerFunc {
 				return
 			}
 
-			storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
-			StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+			if !exist || (exist && store.GetState().String() == state) {
+				storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
+				StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+			}
 		}
 		StoresInfo.Count = len(StoresInfo.Stores)
 		c.IndentedJSON(http.StatusOK, StoresInfo)
@@ -91,8 +96,8 @@ func DeleteStoreByID() gin.HandlerFunc {
 		}
 
 		var force bool
-		forceQuery := c.Query("force")
-		if forceQuery != "" {
+		forceQuery, exist := c.GetQuery("force")
+		if exist && forceQuery != "" {
 			force, err = strconv.ParseBool(forceQuery)
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseBool.Wrap(err).FastGenWithCause().Error())
@@ -103,6 +108,70 @@ func DeleteStoreByID() gin.HandlerFunc {
 		err = rc.RemoveStore(id, force)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+
+		c.JSON(http.StatusOK, nil)
+	}
+}
+
+type updateStoresParams struct {
+	State        string  `json:"state"`
+	LeaderWeight float64 `json:"leader_weight"`
+	RegionWeight float64 `json:"region_weight"`
+}
+
+// UpdateStoreByID will delete the store according to the given ID.
+func UpdateStoreByID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rc := c.MustGet("cluster").(*cluster.RaftCluster)
+		idParam := c.Param("id")
+		id, err := strconv.ParseUint(idParam, 10, 64)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())
+			return
+		}
+
+		var p updateStoresParams
+		if err := c.BindJSON(&p); err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+			return
+		}
+
+		if p.LeaderWeight < 0 || p.RegionWeight < 0 {
+			c.AbortWithStatus(http.StatusBadRequest)
+			return
+		}
+
+		if err := rc.SetStoreWeight(id, p.LeaderWeight, p.RegionWeight); err != nil {
+			if errors.Is(err, errs.ErrStoreNotFound) {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if p.State != "" {
+			switch p.State {
+			case metapb.StoreState_Up.String():
+				if err = rc.UpStore(id); errors.Is(err, errs.ErrStoreNotFound) {
+					c.AbortWithStatus(http.StatusNotFound)
+					return
+				}
+			case metapb.StoreState_Offline.String():
+				if err = rc.RemoveStore(id, false); errors.Is(err, errs.ErrStoreNotFound) {
+					c.AbortWithStatus(http.StatusNotFound)
+					return
+				}
+			default:
+				c.AbortWithStatus(http.StatusBadRequest)
+				return
+			}
+		}
+
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
 

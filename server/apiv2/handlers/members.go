@@ -1,3 +1,17 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package handlers
 
 import (
@@ -17,65 +31,37 @@ import (
 func GetMembers() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		svr := c.MustGet("server").(*server.Server)
-		req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
-		grpcServer := &server.GrpcServer{Server: svr}
-		members, err := grpcServer.GetMembers(context.Background(), req)
+		members, err := getAllMembers(svr)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
-		}
-		dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-		for _, m := range members.GetMembers() {
-			m.DcLocation = ""
-			binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
-			if e != nil {
-				log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
-			}
-			m.BinaryVersion = binaryVersion
-			deployPath, e := svr.GetMember().GetMemberDeployPath(m.GetMemberId())
-			if e != nil {
-				log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
-			}
-			m.DeployPath = deployPath
-			if svr.GetMember().GetEtcdLeader() == 0 {
-				log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
-				continue
-			}
-			leaderPriority, e := svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
-			if e != nil {
-				log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
-				continue
-			}
-			m.LeaderPriority = int32(leaderPriority)
-			gitHash, e := svr.GetMember().GetMemberGitHash(m.GetMemberId())
-			if e != nil {
-				log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
-				continue
-			}
-			m.GitHash = gitHash
-			found := false
-			for dcLocation, serverIDs := range dclocationDistribution {
-				for _, serverID := range serverIDs {
-					if serverID == m.MemberId {
-						m.DcLocation = dcLocation
-						found = true
-						break
-					}
-				}
-				if found {
-					break
-				}
-			}
 		}
 		c.IndentedJSON(http.StatusOK, members)
 	}
 }
 
-type updateParams struct {
+// GetMemberByName will return the PD member according to the given member's name.
+func GetMemberByName() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		svr := c.MustGet("server").(*server.Server)
+		// TODO: only get the member with the given name
+		members, err := getAllMembers(svr)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		for _, member := range members.Members {
+			if member.GetName() == c.Param("name") {
+				c.JSON(http.StatusOK, member)
+				return
+			}
+		}
+		c.AbortWithStatus(http.StatusNotFound)
+	}
+}
+
+type updateMembersParams struct {
 	LeaderPriority float64 `json:"leader_priority"`
 }
 
@@ -95,7 +81,7 @@ func UpdateMemberByName() gin.HandlerFunc {
 			return
 		}
 
-		var p updateParams
+		var p updateMembersParams
 		if err := c.BindJSON(&p); err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 			return
@@ -170,4 +156,60 @@ func deleteMemberByID(svr *server.Server, id uint64) error {
 		return err
 	}
 	return nil
+}
+
+func getAllMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+	grpcServer := &server.GrpcServer{Server: svr}
+	members, err := grpcServer.GetMembers(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range members.GetMembers() {
+		m.DcLocation = ""
+		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+		}
+		m.BinaryVersion = binaryVersion
+		deployPath, e := svr.GetMember().GetMemberDeployPath(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+		}
+		m.DeployPath = deployPath
+		if svr.GetMember().GetEtcdLeader() == 0 {
+			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
+			continue
+		}
+		leaderPriority, e := svr.GetMember().GetMemberLeaderPriority(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load leader priority", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			continue
+		}
+		m.LeaderPriority = int32(leaderPriority)
+		gitHash, e := svr.GetMember().GetMemberGitHash(m.GetMemberId())
+		if e != nil {
+			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
+			continue
+		}
+		m.GitHash = gitHash
+		found := false
+		for dcLocation, serverIDs := range dclocationDistribution {
+			for _, serverID := range serverIDs {
+				if serverID == m.MemberId {
+					m.DcLocation = dcLocation
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+	return members, nil
 }

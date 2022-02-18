@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,14 +44,14 @@ func Test(t *testing.T) {
 var _ = Suite(&testRedirectorSuite{})
 
 type testRedirectorSuite struct {
-	cleanup context.CancelFunc
+	cancel  context.CancelFunc
 	cluster *tests.TestCluster
 }
 
 func (s *testRedirectorSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
-	s.cleanup = cancel
+	s.cancel = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
@@ -65,7 +65,7 @@ func (s *testRedirectorSuite) SetUpSuite(c *C) {
 }
 
 func (s *testRedirectorSuite) TearDownSuite(c *C) {
-	s.cleanup()
+	s.cancel()
 	s.cluster.Destroy()
 }
 
@@ -145,8 +145,8 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 		}
 	}
 
-	addr := follower.GetAddr() + "/pd/api/v2/members"
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	url := follower.GetAddr() + "/pd/api/v2/members"
+	request, err := http.NewRequest(http.MethodGet, url, nil)
 	c.Assert(err, IsNil)
 	request.Header.Add(serverapi.AllowFollowerHandle, "true")
 	header := mustRequestSuccess(c, request)
@@ -164,9 +164,9 @@ func (s *testRedirectorSuite) TestNotLeader(c *C) {
 		}
 	}
 
-	addr := follower.GetAddr() + "/pd/api/v2/members"
+	url := follower.GetAddr() + "/pd/api/v2/members"
 	// Request to follower without redirectorHeader is OK.
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, url, nil)
 	c.Assert(err, IsNil)
 	_ = mustRequestSuccess(c, request)
 
