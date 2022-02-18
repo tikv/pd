@@ -442,7 +442,28 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigHotRegionCommand(),
 		newConfigShuffleRegionCommand(),
 		newConfigGrantHotRegionCommand(),
+		newConfigBalanceLeaderCommand(),
 	)
+	return c
+}
+
+func newConfigBalanceLeaderCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-leader-scheduler",
+		Short: "balance-leader-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
 	return c
 }
 
