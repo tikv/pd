@@ -183,8 +183,8 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	return s
 }
 
-func (s *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.handler.ServeHTTP(w, r)
+func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l.handler.ServeHTTP(w, r)
 }
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
