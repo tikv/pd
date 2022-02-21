@@ -3,9 +3,13 @@ on:
   push:
     branches:
       - master
+      - release-4.0
+      - release-5.*
   pull_request:
     branches:
       - master
+      - release-4.0
+      - release-5.*
 jobs:
   chunks:
     runs-on: ubuntu-latest
