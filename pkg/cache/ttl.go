@@ -167,6 +167,23 @@ func (c *ttlCache) doGC() {
 	}
 }
 
+// UpdateTTL updates the TTL for the cache.
+func (c *ttlCache) UpdateTTL(duration time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	if c.ttl == duration {
+		return
+	}
+
+	for key := range c.items {
+		c.items[key] = ttlCacheItem{
+			value:  c.items[key].value,
+			expire: time.Now().Add(duration),
+		}
+	}
+	c.ttl = duration
+}
+
 // TTLUint64 is simple TTL saves only uint64s.
 type TTLUint64 struct {
 	*ttlCache

@@ -21,11 +21,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -88,7 +91,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(e, IsNil)
 				defer res.Body.Close()
@@ -104,7 +107,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Request will fail with no leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
 				defer res.Body.Close()
@@ -276,6 +279,77 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	c.Assert(err, IsNil)
+}
+
+func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	cfg := &log.Config{}
+	cfg.File.Filename = tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	b, _ := os.ReadFile(tempStdoutFile.Name())
+	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, true)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	os.Remove(tempStdoutFile.Name())
+}
+
+func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
 }
 
 var _ = Suite(&testRedirectorSuite{})

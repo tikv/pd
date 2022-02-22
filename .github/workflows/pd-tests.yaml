@@ -3,9 +3,13 @@ on:
   push:
     branches:
       - master
+      - release-4.0
+      - release-5.*
   pull_request:
     branches:
       - master
+      - release-4.0
+      - release-5.*
 jobs:
   chunks:
     runs-on: ubuntu-latest
@@ -35,7 +39,8 @@ jobs:
           WORKER_ID: ${{ matrix.worker_id }}
           WORKER_COUNT: 10
         run: |
-          make ci-test-job JOB_COUNT=$WORKER_COUNT JOB_INDEX=$WORKER_ID
+          [ $WORKER_ID -ne $WORKER_COUNT ] && make ci-test-job JOB_COUNT=$(($WORKER_COUNT-1)) JOB_INDEX=$WORKER_ID
+          [ $WORKER_ID -eq $WORKER_COUNT ] && make ci-test-job-submod
           mv covprofile covprofile_$WORKER_ID
           sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}

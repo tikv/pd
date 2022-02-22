@@ -35,6 +35,7 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 	}
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type listServiceGCSafepoint struct {
 	ServiceGCSafepoints []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
 	GCSafePoint         uint64                       `json:"gc_safe_point"`

@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -40,6 +41,7 @@ import (
 )
 
 // MetaPeer is api compatible with *metapb.Peer.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetaPeer struct {
 	*metapb.Peer
 	// RoleName is `Role.String()`.
@@ -52,6 +54,7 @@ type MetaPeer struct {
 }
 
 // PDPeerStats is api compatible with *pdpb.PeerStats.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDPeerStats struct {
 	*pdpb.PeerStats
 	Peer MetaPeer `json:"peer"`
@@ -95,6 +98,7 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 }
 
 // RegionInfo records detail region info for api usage.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
@@ -116,6 +120,7 @@ type RegionInfo struct {
 }
 
 // ReplicationStatus represents the replication mode status of the region.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationStatus struct {
 	State   string `json:"state"`
 	StateID uint64 `json:"state_id"`
@@ -805,9 +810,9 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		group = ""
 	}
-	retryLimit, ok := input["retry_limit"].(int)
-	if !ok {
-		retryLimit = 5
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
 	}
 	var ops []*operator.Operator
 	var failures map[uint64]error
@@ -829,8 +834,12 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	} else {
-		regionsID := input["regions_id"].([]uint64)
-		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
+			return
+		}
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -884,9 +893,9 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
 	}
-	retryLimit, ok := input["retry_limit"].(int)
-	if !ok {
-		retryLimit = 5
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
 	}
 	splitKeys := make([][]byte, 0, len(rawSplitKeys))
 	for _, rawKey := range rawSplitKeys {

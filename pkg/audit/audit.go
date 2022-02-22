@@ -17,13 +17,17 @@ package audit
 import (
 	"net/http"
 
+	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/requestutil"
+	"go.uber.org/zap"
 )
 
 const (
 	// PrometheusHistogram is label name of PrometheusCounterBackend
 	PrometheusHistogram = "prometheus-histogram"
+	// LocalLogLabel is label name of LocalLogBackend
+	LocalLogLabel = "local-log"
 )
 
 // BackendLabels is used to store some audit backend labels.
@@ -93,5 +97,30 @@ func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool 
 		return false
 	}
 	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component).Observe(float64(endTime - requestInfo.StartTimeStamp))
+	return true
+}
+
+// LocalLogBackend is an implementation of audit.Backend
+// and it uses `github.com/pingcap/log` to implement audit
+type LocalLogBackend struct {
+	*LabelMatcher
+	*Sequence
+}
+
+// NewLocalLogBackend returns a LocalLogBackend
+func NewLocalLogBackend(before bool) Backend {
+	return &LocalLogBackend{
+		LabelMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
+		Sequence:     &Sequence{before: before},
+	}
+}
+
+// ProcessHTTPRequest is used to implement audit.Backend
+func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		return false
+	}
+	log.Info("Audit Log", zap.String("service-info", requestInfo.String()))
 	return true
 }

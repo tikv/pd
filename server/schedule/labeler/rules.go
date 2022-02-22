@@ -15,12 +15,14 @@
 package labeler
 
 // RegionLabel is the label of a region.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type RegionLabel struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
 // LabelRule is the rule to assign labels to a region.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
 	ID       string        `json:"id"`
 	Index    int           `json:"index"`
@@ -35,6 +37,7 @@ const (
 )
 
 // KeyRangeRule contains the start key and end key of the LabelRule.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type KeyRangeRule struct {
 	StartKey    []byte `json:"-"`         // range start key
 	StartKeyHex string `json:"start_key"` // hex format start key, for marshal/unmarshal
@@ -43,6 +46,7 @@ type KeyRangeRule struct {
 }
 
 // LabelRulePatch is the patch to update the label rules.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRulePatch struct {
 	SetRules    []*LabelRule `json:"sets"`
 	DeleteRules []string     `json:"deletes"`

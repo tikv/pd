@@ -155,7 +155,7 @@ type Server struct {
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
-	auditBackend []audit.Backend
+	auditBackends []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -247,7 +247,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	s.handler = newHandler(s)
 
 	// create audit backend
-	s.auditBackend = []audit.Backend{
+	s.auditBackends = []audit.Backend{
+		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
@@ -507,9 +508,8 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// RegistServiceForHTTP is used to regist service config for HTTP.
-// Currently can add audit backend labels. Todo: add rate limit config
-func (s *Server) RegistServiceForHTTP(route *mux.Route, labels ...string) {
+// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
 	if len(route.GetName()) == 0 {
 		return
 	}
@@ -1122,7 +1122,7 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 
 // GetAuditBackend returns audit backends
 func (s *Server) GetAuditBackend() []audit.Backend {
-	return s.auditBackend
+	return s.auditBackends
 }
 
 // GetServiceAuditBackendLabels returns audit backend labels by serviceLabel
