@@ -17,6 +17,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -215,4 +216,39 @@ func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
 
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, false)
+}
+
+func (s *testServiceSuite) TestSwitchRateLimitMiddleware(c *C) {
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/ratelimit-middleware", s.svr.GetAddr(), apiPrefix)
+
+	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
+	err := postJSON(testDialClient, enableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching ratelimit middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.IsRateLimitMiddlewareEnabled(), Equals, true)
+
+	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
+	err = postJSON(testDialClient, disableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching ratelimit middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.IsRateLimitMiddlewareEnabled(), Equals, false)
+
+	failedPostURL := fmt.Sprintf("%s?enable=xxxx", urlPrefix)
+	req, err := http.NewRequest(http.MethodPost, failedPostURL, nil)
+	c.Assert(err, IsNil)
+	resp, err := testDialClient.Do(req)
+	c.Assert(err, IsNil)
+	res, err := io.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	c.Assert(string(res), Equals, "\"The input is invalid.\"\n")
+	c.Assert(resp.StatusCode, Equals, http.StatusBadRequest)
 }

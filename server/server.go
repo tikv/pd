@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -152,6 +153,8 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	serviceRateLimiters sync.Map
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -515,6 +518,16 @@ func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...strin
 	}
 }
 
+// SetServiceRateLimiterForHTTP is used to register service rate limit for HTTP.
+func (s *Server) SetServiceRateLimiterForHTTP(route *mux.Route, rateLimiter ratelimit.RateLimiter) {
+	if len(route.GetName()) == 0 {
+		return
+	}
+	if rateLimiter != nil {
+		s.SetServiceRateLimiter(route.GetName(), rateLimiter)
+	}
+}
+
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
@@ -753,6 +766,16 @@ func (s *Server) SetAuditMiddleware(status bool) {
 // IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
 func (s *Server) IsAuditMiddlewareEnabled() bool {
 	return s.cfg.EnableAuditMiddleware
+}
+
+// SetRateLimitMiddleware changes EnableRateLimitMiddleware
+func (s *Server) SetRateLimitMiddleware(status bool) {
+	s.cfg.EnableRateLimitMiddleware = status
+}
+
+// isRateLimitMiddlewareEnabled returns EnableRateLimitMiddleware status
+func (s *Server) IsRateLimitMiddlewareEnabled() bool {
+	return s.cfg.EnableRateLimitMiddleware
 }
 
 // GetBasicCluster returns the basic cluster of server.
@@ -1130,6 +1153,21 @@ func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.Backen
 // SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
 func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
 	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
+}
+
+// GetServiceRateLimiter is used to get rate limiter
+func (s *Server) GetServiceRateLimiter(serviceLabel string) (ratelimit.RateLimiter, bool) {
+	v, ok := s.serviceRateLimiters.Load(serviceLabel)
+	if !ok {
+		return nil, false
+	}
+	ratelimiter, ok := v.(ratelimit.RateLimiter)
+	return ratelimiter, ok
+}
+
+// SetServiceRateLimiter is used to add rate limit for specific service
+func (s *Server) SetServiceRateLimiter(serviceLabel string, rateLimiter ratelimit.RateLimiter) {
+	s.serviceRateLimiters.Store(serviceLabel, rateLimiter)
 }
 
 // GetClusterStatus gets cluster status.

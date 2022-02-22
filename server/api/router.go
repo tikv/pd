@@ -67,7 +67,7 @@ func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
 			newAuditMiddleware(s),
-			// todo: add rate limit middleware
+			newRateLimitMiddleware(s),
 		),
 	}
 }
@@ -128,6 +128,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	setAudit := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
 			svr.SetServiceAuditBackendForHTTP(route, labels...)
+		}
+	}
+	setRateLimit := func(rate float64) createRouteOption {
+		return func(route *mux.Route) {
+			// todo: add implement
+			// this is just for golangci-lint
+			rate = 100
+			svr.SetServiceRateLimiterForHTTP(route, nil)
 		}
 	}
 
@@ -309,6 +317,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"))
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"))
 	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"))
+	registerFunc(apiRouter, "SwitchRateLimitMiddleware", "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"))
@@ -372,7 +381,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAudit("test"))
+		}), setAudit("test"), setRateLimit(100.))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.

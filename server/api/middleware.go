@@ -41,7 +41,7 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !rm.svr.IsAuditMiddlewareEnabled() {
+	if !rm.svr.IsAuditMiddlewareEnabled() && !rm.svr.IsRateLimitMiddlewareEnabled() {
 		next(w, r)
 		return
 	}
@@ -91,6 +91,41 @@ func getCluster(r *http.Request) *cluster.RaftCluster {
 	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
 }
 
+type rateLimitMiddleware struct {
+	svr *server.Server
+}
+
+func newRateLimitMiddleware(s *server.Server) negroni.Handler {
+	return &rateLimitMiddleware{svr: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for rateLimitMiddleware
+func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !s.svr.IsRateLimitMiddlewareEnabled() {
+		next(w, r)
+		return
+	}
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		log.Error("failed to get request info when ratelimit")
+		next(w, r)
+		return
+	}
+
+	failpoint.Inject("addRateLimitMiddleware", func() {
+		w.Header().Add("rate-limit", "rate-limit")
+	})
+
+	rateLimiter, ok := s.svr.GetServiceRateLimiter(requestInfo.ServiceLabel)
+	if !ok {
+		next(w, r)
+		return
+	}
+	if rateLimiter.Allow(requestInfo.Component) {
+		next(w, r)
+	}
+}
+
 type auditMiddleware struct {
 	svr *server.Server
 }
@@ -110,6 +145,7 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	if !ok {
 		log.Error("failed to get request info when auditing")
 		next(w, r)
+		return
 	}
 
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
