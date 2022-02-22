@@ -306,7 +306,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name} [post]
 func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
-	var input map[string]int
+	var input map[string]int64
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
@@ -317,7 +317,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 		h.r.JSON(w, http.StatusBadRequest, "missing pause time")
 		return
 	}
-	if err := h.PauseOrResumeScheduler(name, int64(t)); err != nil {
+	if err := h.PauseOrResumeScheduler(name, t); err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
