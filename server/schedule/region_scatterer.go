@@ -274,7 +274,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
 	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
-	ordinaryPeers := make(map[uint64]*metapb.Peer)
+	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	// Group peers by the engine of their stores
 	for _, peer := range region.GetPeers() {
@@ -283,24 +283,36 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 			return nil
 		}
 		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
-			ordinaryPeers[peer.GetId()] = peer
+			ordinaryPeers[peer.GetStoreId()] = peer
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
 			if _, ok := specialPeers[engine]; !ok {
 				specialPeers[engine] = make(map[uint64]*metapb.Peer)
 			}
-			specialPeers[engine][peer.GetId()] = peer
+			specialPeers[engine][peer.GetStoreId()] = peer
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer)
-	selectedStores := make(map[uint64]struct{})
-	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) {
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // StoreID set
+	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		for _, peer := range peers {
-			candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
-			newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
-			targetPeers[newPeer.GetStoreId()] = newPeer
-			selectedStores[newPeer.GetStoreId()] = struct{}{}
+			if _, ok := selectedStores[peer.GetStoreId()]; ok {
+				// It is both sourcePeer and targetPeer itself, no need to select.
+				continue
+			}
+			for {
+				candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
+				newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
+				targetPeers[newPeer.GetStoreId()] = newPeer
+				selectedStores[newPeer.GetStoreId()] = struct{}{}
+				// If the selected peer is a peer other than origin peer in this region,
+				// it is considered that the selected peer select itself.
+				// This origin peer re-selects.
+				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					break
+				}
+			}
 		}
 	}
 
