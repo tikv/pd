@@ -29,6 +29,7 @@ import (
 const zeroDuration = time.Duration(0)
 
 // MetricConfig is the metric configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetricConfig struct {
 	PushJob      string            `toml:"job" json:"job"`
 	PushAddress  string            `toml:"address" json:"address"`

@@ -21,12 +21,14 @@ import (
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersInfos struct {
 	AsPeer   StoreHotPeersStat `json:"as_peer"`
 	AsLeader StoreHotPeersStat `json:"as_leader"`
 }
 
 // StoreHotPeersStat is used to record the hot region statistics group by store.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // GetHotStatus returns the hot status for a given type.
