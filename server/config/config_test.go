@@ -26,8 +26,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage"
 )
 
 func Test(t *testing.T) {
@@ -67,7 +66,7 @@ func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
 func (s *testConfigSuite) TestReloadConfig(c *C) {
 	opt, err := newTestScheduleOption()
 	c.Assert(err, IsNil)
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
@@ -107,7 +106,7 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 		Schedule:    *opt.GetScheduleConfig(),
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -127,7 +126,7 @@ func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
 	}
-	storage := core.NewStorage(kv.NewMemoryKV())
+	storage := storage.NewStorageWithMemoryBackend()
 	c.Assert(storage.SaveConfig(old), IsNil)
 
 	newOpt, err := newTestScheduleOption()
@@ -158,12 +157,15 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.Validate(), NotNil)
 	// check quota
 	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
+	// check request bytes
+	c.Assert(cfg.MaxRequestBytes, Equals, defaultMaxRequestBytes)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {
 	cfgData := `
 name = ""
 lease = 0
+max-request-bytes = 20000000
 
 [pd-server]
 metric-storage = "http://127.0.0.1:9090"
@@ -184,12 +186,14 @@ leader-schedule-limit = 0
 	c.Assert(err, IsNil)
 	c.Assert(cfg.Name, Equals, fmt.Sprintf("%s-%s", defaultName, host))
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
+	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
 	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
 	c.Assert(cfg.PreVote, IsTrue)
+	c.Assert(cfg.Log.Level, Equals, "info")
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
 
@@ -460,7 +464,7 @@ wait-store-timeout = "120s"
 	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
 }
 
-func (s *testConfigSuite) TestHotRegionConfig(c *C) {
+func (s *testConfigSuite) TestHotHistoryRegionConfig(c *C) {
 	cfgData := `
 [schedule]
 hot-regions-reserved-days= 30
@@ -471,8 +475,14 @@ hot-regions-write-interval= "30m"
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
-	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, time.Minute*30)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, int64(30))
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 30*time.Minute)
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(30))
+	// Verify default value
+	cfg = NewConfig()
+	err = cfg.Adjust(nil, false)
+	c.Assert(err, IsNil)
+	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 10*time.Minute)
+	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(7))
 }
 
 func (s *testConfigSuite) TestConfigClone(c *C) {

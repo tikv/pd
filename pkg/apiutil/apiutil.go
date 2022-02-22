@@ -18,13 +18,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/unrolled/render"
+)
+
+var (
+	// componentSignatureKey is used for http request header key
+	// to identify component signature
+	componentSignatureKey = "component"
+	// componentAnonymousValue identifies anonymous request source
+	componentAnonymousValue = "anonymous"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
@@ -126,4 +137,66 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	} else {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+}
+
+// GetIPAddrFromHTTPRequest returns http client IP from context.
+// Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
+// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// And both of them have the higher priority than `RemoteAddr`
+func GetIPAddrFromHTTPRequest(r *http.Request) string {
+	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	if len(strings.Trim(ips[0], " ")) > 0 {
+		return ips[0]
+	}
+
+	ip := r.Header.Get("X-Real-Ip")
+	if ip != "" {
+		return ip
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
+	}
+	return ip
+}
+
+// GetComponentNameOnHTTP returns component name from Request Header
+func GetComponentNameOnHTTP(r *http.Request) string {
+	componentName := r.Header.Get(componentSignatureKey)
+	if len(componentName) == 0 {
+		componentName = componentAnonymousValue
+	}
+	return componentName
+}
+
+// ComponentSignatureRoundTripper is used to add component signature in HTTP header
+type ComponentSignatureRoundTripper struct {
+	proxied   http.RoundTripper
+	component string
+}
+
+// NewComponentSignatureRoundTripper returns a new ComponentSignatureRoundTripper.
+func NewComponentSignatureRoundTripper(roundTripper http.RoundTripper, componentName string) *ComponentSignatureRoundTripper {
+	return &ComponentSignatureRoundTripper{
+		proxied:   roundTripper,
+		component: componentName,
+	}
+}
+
+// RoundTrip is used to implement RoundTripper
+func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Add(componentSignatureKey, rt.component)
+	// Send the request, get the response and the error
+	resp, err = rt.proxied.RoundTrip(req)
+	return
+}
+
+// GetRouteName return mux route name registered
+func GetRouteName(req *http.Request) string {
+	route := mux.CurrentRoute(req)
+	if route != nil {
+		return route.GetName()
+	}
+	return ""
 }

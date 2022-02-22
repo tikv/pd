@@ -22,7 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/kv"
+	"github.com/tikv/pd/server/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -120,7 +120,7 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 	}
 
 	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
-	idGauge.WithLabelValues("idalloc").Set(float64(end))
+	idallocGauge.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - allocStep
 	return nil

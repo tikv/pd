@@ -37,10 +37,10 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
@@ -190,6 +190,16 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	return c.GetHotReadRegions()
+}
+
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
+	return h.opt.GetHotRegionsWriteInterval()
+}
+
+//  GetHotRegionsReservedDays gets days hot region information is kept.
+func (h *Handler) GetHotRegionsReservedDays() uint64 {
+	return h.opt.GetHotRegionsReservedDays()
 }
 
 // GetStoresLoads gets all hot write stores stats.
@@ -447,6 +457,19 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	return c.GetHistory(start), nil
 }
 
+// GetRecords returns finished operators since start.
+func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	records := c.GetRecords(from)
+	if len(records) == 0 {
+		return nil, ErrOperatorNotFound
+	}
+	return records, nil
+}
+
 // SetAllStoresLimit is used to set limit of all stores.
 func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
 	c, err := h.GetRaftCluster()
@@ -520,7 +543,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return err
@@ -717,11 +740,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !opt.IsRegionHealthy(region) || !opt.IsRegionReplicated(c, region) {
+	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !opt.IsRegionHealthy(target) || !opt.IsRegionReplicated(c, target) {
+	if !schedule.IsRegionHealthy(target) || !schedule.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -953,26 +976,26 @@ func (h *Handler) IsLeader() bool {
 }
 
 // PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() ([]core.HistoryHotRegion, error) {
+func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error) {
 	hotReadRegions := h.GetHotReadRegions()
 	if hotReadRegions == nil {
 		return nil, nil
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, core.ReadType.String())
+	return h.packHotRegions(hotReadPeerRegions, storage.ReadType.String())
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() ([]core.HistoryHotRegion, error) {
+func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, error) {
 	hotWriteRegions := h.GetHotWriteRegions()
 	if hotWriteRegions == nil {
 		return nil, nil
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, core.WriteType.String())
+	return h.packHotRegions(hotWritePeerRegions, storage.WriteType.String())
 }
 
-func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []core.HistoryHotRegion, err error) {
+func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
@@ -998,8 +1021,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 					break
 				}
 			}
-			stat := core.HistoryHotRegion{
-				// store in  ms.
+			stat := storage.HistoryHotRegion{
+				// store in ms.
 				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
@@ -1022,8 +1045,10 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 }
 
 // GetHistoryHotRegionIter return a iter which iter all qualified item .
-func (h *Handler) GetHistoryHotRegionIter(hotRegionTypes []string,
-	startTime, endTime int64) core.HotRegionStorageIterator {
+func (h *Handler) GetHistoryHotRegionIter(
+	hotRegionTypes []string,
+	startTime, endTime int64,
+) storage.HotRegionStorageIterator {
 	iter := h.s.hotRegionStorage.NewIterator(hotRegionTypes, startTime, endTime)
 	return iter
 }

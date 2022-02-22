@@ -30,7 +30,8 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -66,8 +67,8 @@ type ModeManager struct {
 
 	sync.RWMutex
 	config            config.ReplicationModeConfig
-	storage           *core.Storage
-	cluster           opt.Cluster
+	storage           endpoint.ReplicationStatusStorage
+	cluster           schedule.Cluster
 	fileReplicater    FileReplicater
 	replicatedMembers []uint64
 
@@ -86,7 +87,7 @@ type ModeManager struct {
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage *core.Storage, cluster opt.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage endpoint.ReplicationStatusStorage, cluster schedule.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
 		initTime:              time.Now(),
 		config:                config,
@@ -254,7 +255,7 @@ func (m *ModeManager) drSwitchToAsync() error {
 }
 
 func (m *ModeManager) drSwitchToAsyncWithLock() error {
-	id, err := m.cluster.AllocID()
+	id, err := m.cluster.GetAllocator().Alloc()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -277,7 +278,7 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 }
 
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
-	id, err := m.cluster.AllocID()
+	id, err := m.cluster.GetAllocator().Alloc()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -298,7 +299,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
-	id, err := m.cluster.AllocID()
+	id, err := m.cluster.GetAllocator().Alloc()
 	if err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err

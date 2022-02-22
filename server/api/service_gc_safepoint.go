@@ -19,7 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -35,9 +35,10 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 	}
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type listServiceGCSafepoint struct {
-	ServiceGCSafepoints []*core.ServiceSafePoint `json:"service_gc_safe_points"`
-	GCSafePoint         uint64                   `json:"gc_safe_point"`
+	ServiceGCSafepoints []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
+	GCSafePoint         uint64                       `json:"gc_safe_point"`
 }
 
 // @Tags servicegcsafepoint
@@ -53,7 +54,7 @@ func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ssps, err := storage.GetAllServiceGCSafePoints()
+	ssps, err := storage.LoadAllServiceGCSafePoints()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

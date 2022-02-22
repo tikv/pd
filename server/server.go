@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -50,12 +51,14 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/id"
-	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -122,7 +125,7 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
-	storage *core.Storage
+	storage storage.Storage
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -143,12 +146,16 @@ type Server struct {
 	serviceSafePointLock sync.Mutex
 
 	// hot region history info storeage
-	hotRegionStorage *core.HotRegionStorage
+	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	serviceAuditBackendLabels map[string]*audit.BackendLabels
+
+	auditBackends []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -238,6 +245,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 
 	s.handler = newHandler(s)
+
+	// create audit backend
+	s.auditBackends = []audit.Backend{
+		audit.NewLocalLogBackend(true),
+	}
+	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -377,32 +390,22 @@ func (s *Server) startServer(ctx context.Context) error {
 			return err
 		}
 	}
-	encryptionKeyManager, err := encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
+	s.encryptionKeyManager, err = encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	s.encryptionKeyManager = encryptionKeyManager
-	kvBase := kv.NewEtcdKVBase(s.client, s.rootPath)
-	path := filepath.Join(s.cfg.DataDir, "region-meta")
-	regionStorage, err := core.NewRegionStorage(ctx, path, encryptionKeyManager)
+	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
-
-	s.storage = core.NewStorage(
-		kvBase,
-		core.WithRegionStorage(regionStorage),
-		core.WithEncryptionKeyManager(encryptionKeyManager),
-	)
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
-	hotRegionPath := filepath.Join(s.cfg.DataDir, "hot-region")
-	s.hotRegionStorage, err = core.NewHotRegionsStorage(
-		ctx, hotRegionPath, encryptionKeyManager, s.handler,
-		s.cfg.Schedule.HotRegionsReservedDays,
-		s.cfg.Schedule.HotRegionsWriteInterval.Duration)
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 	if err != nil {
 		return err
 	}
@@ -504,6 +507,16 @@ func (s *Server) Run() error {
 	return nil
 }
 
+// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
+	if len(route.GetName()) == 0 {
+		return
+	}
+	if len(labels) > 0 {
+		s.SetServiceAuditBackendLabels(route.GetName(), labels)
+	}
+}
+
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
@@ -595,13 +608,15 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := s.GetClusterRootPath()
+	clusterRootPath := endpoint.ClusterRootPath(s.rootPath)
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
 
 	// Set bootstrap time
-	bootstrapKey := makeBootstrapTimeKey(clusterRootPath)
+	// Because we will write the cluster meta into etcd directly,
+	// so we need to handle the root key path manually here.
+	bootstrapKey := endpoint.AppendToRootPath(s.rootPath, endpoint.ClusterBootstrapTimeKey())
 	nano := time.Now().UnixNano()
 
 	timeData := typeutil.Uint64ToBytes(uint64(nano))
@@ -609,7 +624,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := makeStoreKey(clusterRootPath, storeMeta.GetId())
+	storePath := endpoint.AppendToRootPath(s.rootPath, endpoint.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -622,7 +637,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := makeRegionKey(clusterRootPath, req.GetRegion().GetId())
+	regionPath := endpoint.AppendToRootPath(s.rootPath, endpoint.RegionPath(req.GetRegion().GetId()))
 	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
@@ -717,19 +732,29 @@ func (s *Server) GetMember() *member.Member {
 }
 
 // GetStorage returns the backend storage of server.
-func (s *Server) GetStorage() *core.Storage {
+func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
-func (s *Server) GetHistoryHotRegionStorage() *core.HotRegionStorage {
+func (s *Server) GetHistoryHotRegionStorage() *storage.HotRegionStorage {
 	return s.hotRegionStorage
 }
 
 // SetStorage changes the storage only for test purpose.
 // When we use it, we should prevent calling GetStorage, otherwise, it may cause a data race problem.
-func (s *Server) SetStorage(storage *core.Storage) {
+func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
+}
+
+// SetAuditMiddleware changes EnableAuditMiddleware
+func (s *Server) SetAuditMiddleware(status bool) {
+	s.cfg.EnableAuditMiddleware = status
+}
+
+// IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
+func (s *Server) IsAuditMiddlewareEnabled() bool {
+	return s.cfg.EnableAuditMiddleware
 }
 
 // GetBasicCluster returns the basic cluster of server.
@@ -790,11 +815,10 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	storage := s.GetStorage()
-	if storage == nil {
+	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := storage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllScheduleConfig()
 	if err != nil {
 		return cfg
 	}
@@ -1055,16 +1079,6 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
-// GetServerRootPath returns the server root path.
-func (s *Server) GetServerRootPath() string {
-	return s.rootPath
-}
-
-// GetClusterRootPath returns the cluster root path.
-func (s *Server) GetClusterRootPath() string {
-	return path.Join(s.rootPath, "raft")
-}
-
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *cluster.RaftCluster {
@@ -1103,6 +1117,21 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return cluster.GetRegions()
 	}
 	return nil
+}
+
+// GetAuditBackend returns audit backends
+func (s *Server) GetAuditBackend() []audit.Backend {
+	return s.auditBackends
+}
+
+// GetServiceAuditBackendLabels returns audit backend labels by serviceLabel
+func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
+	return s.serviceAuditBackendLabels[serviceLabel]
+}
+
+// SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
+func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
+	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
 }
 
 // GetClusterStatus gets cluster status.
@@ -1349,11 +1378,18 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	switchableStorage, ok := s.storage.(interface {
+		SwitchToRegionStorage()
+		SwitchToDefaultStorage()
+	})
+	if !ok {
+		return nil
+	}
 	if s.persistOptions.IsUseRegionStorage() {
-		s.storage.SwitchToRegionStorage()
+		switchableStorage.SwitchToRegionStorage()
 		log.Info("server enable region storage")
 	} else {
-		s.storage.SwitchToDefaultStorage()
+		switchableStorage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
 	return nil

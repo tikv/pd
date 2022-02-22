@@ -45,6 +45,7 @@ const (
 )
 
 // StoreInfo contains information about a store.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats

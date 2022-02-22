@@ -25,11 +25,15 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/apiutil"
 	"go.etcd.io/etcd/pkg/transport"
 )
 
 var (
-	dialClient = &http.Client{}
+	pdControllerComponentName = "pdctl"
+	dialClient                = &http.Client{
+		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, pdControllerComponentName),
+	}
 	pingPrefix = "pd/api/v1/ping"
 )
 
@@ -46,31 +50,28 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 
 	dialClient = &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
+		Transport: apiutil.NewComponentSignatureRoundTripper(
+			&http.Transport{TLSClientConfig: tlsConfig}, pdControllerComponentName),
 	}
 
 	return nil
 }
 
 type bodyOption struct {
-	contentType string
-	body        io.Reader
+	body io.Reader
 }
 
 // BodyOption sets the type and content of the body
 type BodyOption func(*bodyOption)
 
 // WithBody returns a BodyOption
-func WithBody(contentType string, body io.Reader) BodyOption {
+func WithBody(body io.Reader) BodyOption {
 	return func(bo *bodyOption) {
-		bo.contentType = contentType
 		bo.body = body
 	}
 }
 
-func doRequest(cmd *cobra.Command, prefix string, method string,
+func doRequest(cmd *cobra.Command, prefix string, method string, customHeader http.Header,
 	opts ...BodyOption) (string, error) {
 	b := &bodyOption{}
 	for _, o := range opts {
@@ -80,12 +81,12 @@ func doRequest(cmd *cobra.Command, prefix string, method string,
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		return doGet(endpoint, prefix, method, &resp, b)
+		return doGet(endpoint, prefix, method, &resp, customHeader, b)
 	})
 	return resp, err
 }
 
-func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string,
+func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string, customHeader http.Header,
 	opts ...BodyOption) (string, error) {
 	b := &bodyOption{}
 	for _, o := range opts {
@@ -94,7 +95,7 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 	var resp string
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return doGet(endpoint, prefix, method, &resp, b)
+		return doGet(endpoint, prefix, method, &resp, customHeader, b)
 	})
 	return resp, err
 }
@@ -161,13 +162,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 		cmd.Println("get pd address failed, should set flag with '-u'")
 		os.Exit(1)
 	}
-	eps := strings.Split(addrs, ",")
-	for i, ep := range eps {
-		if j := strings.Index(ep, "//"); j == -1 {
-			eps[i] = "//" + ep
-		}
-	}
-	return eps
+	return strings.Split(addrs, ",")
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
@@ -204,7 +199,7 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 }
 
 // doGet send a get request to server.
-func doGet(endpoint, prefix, method string, resp *string, b *bodyOption) error {
+func doGet(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
 	url := endpoint + "/" + prefix
 	if method == "" {
@@ -216,8 +211,11 @@ func doGet(endpoint, prefix, method string, resp *string, b *bodyOption) error {
 	if err != nil {
 		return err
 	}
-	if b.contentType != "" {
-		req.Header.Set("Content-Type", b.contentType)
+
+	for key, values := range customHeader {
+		for _, v := range values {
+			req.Header.Add(key, v)
+		}
 	}
 	// the resp would be returned by the outer function
 	*resp, err = dial(req)
@@ -228,6 +226,9 @@ func doGet(endpoint, prefix, method string, resp *string, b *bodyOption) error {
 }
 
 func checkURL(endpoint string) (string, error) {
+	if j := strings.Index(endpoint, "//"); j == -1 {
+		endpoint = "//" + endpoint
+	}
 	var u *url.URL
 	u, err := url.Parse(endpoint)
 	if err != nil {

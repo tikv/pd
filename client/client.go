@@ -29,8 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -265,6 +265,10 @@ func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
 	tbc.collectedRequestCount++
 }
 
+func (tbc *tsoBatchController) getCollectedRequests() []*tsoRequest {
+	return tbc.collectedRequests[:tbc.collectedRequestCount]
+}
+
 // adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (tbc *tsoBatchController) adjustBestBatchSize() {
 	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
@@ -278,12 +282,6 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) revokeTSORequest(err error) {
-	for i := 0; i < tbc.collectedRequestCount; i++ {
-		tbc.collectedRequests[i].done <- err
-	}
-}
-
 func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
@@ -292,7 +290,6 @@ func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
 }
 
 type tsoDispatcher struct {
-	dispatcherCtx      context.Context
 	dispatcherCancel   context.CancelFunc
 	tsoBatchController *tsoBatchController
 }
@@ -662,7 +659,6 @@ func (c *client) checkTSODispatcher(dcLocation string) bool {
 func (c *client) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tsoDispatcher{
-		dispatcherCtx:    dispatcherCtx,
 		dispatcherCancel: dispatcherCancel,
 		tsoBatchController: newTSOBatchController(
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
@@ -754,7 +750,13 @@ tsoBatchLoop:
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
-			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			if err == context.Canceled {
+				log.Info("[pd] stop fetching the pending tso requests due to context canceled",
+					zap.String("dc-location", dc))
+			} else {
+				log.Error("[pd] fetch pending tso requests error",
+					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			}
 			return
 		}
 		if maxBatchWaitInterval >= 0 {
@@ -772,10 +774,10 @@ tsoBatchLoop:
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				if retryTimeConsuming >= c.option.timeout {
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
-					tbc.revokeTSORequest(errors.WithStack(err))
+					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					retryTimeConsuming = 0
 					continue tsoBatchLoop
 				}
@@ -1032,7 +1034,7 @@ func (c *client) tryConnectWithProxy(
 }
 
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range tbc.collectedRequests[:tbc.collectedRequestCount] {
+	for _, req := range tbc.getCollectedRequests() {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
@@ -1046,7 +1048,7 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 		defer span.Finish()
 	}
 	start := time.Now()
-	requests := tbc.collectedRequests[:tbc.collectedRequestCount]
+	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
 		Header:     c.requestHeader(),
@@ -1137,7 +1139,6 @@ func (c *client) Close() {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
 			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokeTSORequest(tsoErr)
 			dispatcher.tsoBatchController.revokePendingTSORequest(tsoErr)
 			dispatcher.dispatcherCancel()
 		}

@@ -17,9 +17,11 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -286,14 +288,18 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 		// support both receiving key ranges or regionIDs
 		startKey, _ := input["start_key"].(string)
 		endKey, _ := input["end_key"].(string)
-		regionIDs, _ := input["region_ids"].([]uint64)
-		group, _ := input["group"].(string)
-		retryLimit, ok := input["retry_limit"].(int)
+		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
 		if !ok {
-			// retry 5 times if retryLimit not defined
-			retryLimit = 5
+			h.r.JSON(w, http.StatusBadRequest, "region_ids is invalid")
+			return
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(regionIDs, startKey, endKey, group, retryLimit)
+		group, _ := input["group"].(string)
+		// retry 5 times if retryLimit not defined
+		retryLimit := 5
+		if rl, ok := input["retry_limit"].(float64); ok {
+			retryLimit = int(rl)
+		}
+		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()
@@ -337,6 +343,32 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
+}
+
+// @Tags operator
+// @Summary lists the finished operators since the given timestamp in second.
+// @Param from query integer false "From Unix timestamp"
+// @Produce json
+// @Success 200 {object} []operator.OpRecord
+// @Failure 400 {string} string "The request is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /operators/records [get]
+func (h *operatorHandler) Records(w http.ResponseWriter, r *http.Request) {
+	var from time.Time
+	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
+		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		from = time.Unix(fromInt, 0)
+	}
+	records, err := h.GetRecords(from)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, records)
 }
 
 func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {

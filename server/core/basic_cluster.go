@@ -397,6 +397,15 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.PutRegion(region)
 }
 
+// RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
+func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
+	bc.Lock()
+	defer bc.Unlock()
+	if region := bc.Regions.GetRegion(id); region != nil {
+		bc.Regions.RemoveRegion(region)
+	}
+}
+
 // RemoveRegion removes RegionInfo from regionTree and regionMap.
 func (bc *BasicCluster) RemoveRegion(region *RegionInfo) {
 	bc.Lock()
@@ -404,18 +413,18 @@ func (bc *BasicCluster) RemoveRegion(region *RegionInfo) {
 	bc.Regions.RemoveRegion(region)
 }
 
-// SearchRegion searches RegionInfo from regionTree.
-func (bc *BasicCluster) SearchRegion(regionKey []byte) *RegionInfo {
+// GetRegionByKey searches RegionInfo from regionTree.
+func (bc *BasicCluster) GetRegionByKey(regionKey []byte) *RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.SearchRegion(regionKey)
+	return bc.Regions.GetRegionByKey(regionKey)
 }
 
-// SearchPrevRegion searches previous RegionInfo from regionTree.
-func (bc *BasicCluster) SearchPrevRegion(regionKey []byte) *RegionInfo {
+// GetPrevRegionByKey searches previous RegionInfo from regionTree.
+func (bc *BasicCluster) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	bc.RLock()
 	defer bc.RUnlock()
-	return bc.Regions.SearchPrevRegion(regionKey)
+	return bc.Regions.GetPrevRegionByKey(regionKey)
 }
 
 // ScanRange scans regions intersecting [start key, end key), returns at most

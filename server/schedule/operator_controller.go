@@ -16,7 +16,6 @@ package schedule
 
 import (
 	"container/heap"
-	"container/list"
 	"context"
 	"fmt"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/opt"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +44,6 @@ const (
 )
 
 var (
-	historyKeepTime    = 5 * time.Minute
 	slowNotifyInterval = 5 * time.Second
 	fastNotifyInterval = 2 * time.Second
 	// PushOperatorTickInterval is the interval try to push the operator.
@@ -61,11 +58,10 @@ var (
 type OperatorController struct {
 	sync.RWMutex
 	ctx             context.Context
-	cluster         opt.Cluster
+	cluster         Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
-	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
 	wop             WaitingOperator
@@ -74,13 +70,12 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster opt.Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
-		histories:       list.New(),
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
@@ -97,7 +92,7 @@ func (oc *OperatorController) Ctx() context.Context {
 }
 
 // GetCluster exports cluster to evict-scheduler for check store status.
-func (oc *OperatorController) GetCluster() opt.Cluster {
+func (oc *OperatorController) GetCluster() Cluster {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.cluster
@@ -115,7 +110,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
-
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
@@ -124,7 +118,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
-			oc.pushHistory(op)
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -196,7 +189,7 @@ func (oc *OperatorController) checkStaleOperator(op *operator.Operator, step ope
 func (oc *OperatorController) getNextPushOperatorTime(step operator.OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
-	case operator.TransferLeader, operator.PromoteLearner, operator.DemoteFollower, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
+	case operator.TransferLeader, operator.PromoteLearner, operator.ChangePeerV2Enter, operator.ChangePeerV2Leave:
 		nextTime = fastNotifyInterval
 	}
 	return now.Add(nextTime)
@@ -264,6 +257,7 @@ func (oc *OperatorController) PushOperators() {
 func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
 	added := 0
+	needPromoted := 0
 
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
@@ -289,12 +283,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
+				i++
+				next := ops[i]
 				_ = next.Cancel()
 				oc.buryOperator(next)
 			}
-			oc.Unlock()
-			return added
+			continue
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -307,11 +301,14 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
+		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
+	for i := 0; i < needPromoted; i++ {
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 
@@ -640,9 +637,14 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	var cmd *pdpb.RegionHeartbeatResponse
 	switch st := step.(type) {
 	case operator.TransferLeader:
+		peers := make([]*metapb.Peer, 0, len(st.ToStores))
+		for _, storeID := range st.ToStores {
+			peers = append(peers, region.GetStorePeer(storeID))
+		}
 		cmd = &pdpb.RegionHeartbeatResponse{
 			TransferLeader: &pdpb.TransferLeader{
-				Peer: region.GetStorePeer(st.ToStore),
+				Peer:  region.GetStorePeer(st.ToStore),
+				Peers: peers,
 			},
 		}
 	case operator.AddPeer:
@@ -659,8 +661,6 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.PromoteLearner:
 		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.DemoteFollower:
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
 	case operator.RemovePeer:
 		cmd = &pdpb.RegionHeartbeatResponse{
 			ChangePeer: &pdpb.ChangePeer{
@@ -725,43 +725,34 @@ func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 	}
 }
 
-func (oc *OperatorController) pushHistory(op *operator.Operator) {
-	oc.Lock()
-	defer oc.Unlock()
-	for _, h := range op.History() {
-		oc.histories.PushFront(h)
-	}
-}
-
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 	oc.fastOperators.Put(op.RegionID(), op)
 }
 
-// PruneHistory prunes a part of operators' history.
-func (oc *OperatorController) PruneHistory() {
-	oc.Lock()
-	defer oc.Unlock()
-	p := oc.histories.Back()
-	for p != nil && time.Since(p.Value.(operator.OpHistory).FinishTime) > historyKeepTime {
-		prev := p.Prev()
-		oc.histories.Remove(p)
-		p = prev
+// GetRecords gets operators' records.
+func (oc *OperatorController) GetRecords(from time.Time) []*operator.OpRecord {
+	records := make([]*operator.OpRecord, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(from) {
+			continue
+		}
+		records = append(records, op.Record(op.FinishTime))
 	}
+	return records
 }
 
 // GetHistory gets operators' history.
 func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
-	oc.RLock()
-	defer oc.RUnlock()
-	histories := make([]operator.OpHistory, 0, oc.histories.Len())
-	for p := oc.histories.Front(); p != nil; p = p.Next() {
-		history := p.Value.(operator.OpHistory)
-		if history.FinishTime.Before(start) {
-			break
+	history := make([]operator.OpHistory, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(start) {
+			continue
 		}
-		histories = append(histories, history)
+		history = append(history, op.History()...)
 	}
-	return histories
+	return history
 }
 
 // updateCounts updates resource counts using current pending operators.
@@ -783,7 +774,7 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInfluence {
+func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -801,7 +792,7 @@ func (oc *OperatorController) GetOpInfluence(cluster opt.Cluster) operator.OpInf
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence operator.OpInfluence) {
+func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence operator.OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -820,7 +811,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster opt.Cluster, influence 
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*operator.Operator, cluster opt.Cluster) operator.OpInfluence {
+func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -845,21 +836,23 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 
 // OperatorWithStatus records the operator and its status.
 type OperatorWithStatus struct {
-	Op     *operator.Operator
-	Status pdpb.OperatorStatus
+	*operator.Operator
+	Status     pdpb.OperatorStatus
+	FinishTime time.Time
 }
 
 // NewOperatorWithStatus creates an OperatorStatus from an operator.
 func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 	return &OperatorWithStatus{
-		Op:     op,
-		Status: operator.OpStatusToPDPB(op.Status()),
+		Operator:   op,
+		Status:     operator.OpStatusToPDPB(op.Status()),
+		FinishTime: time.Now(),
 	}
 }
 
 // MarshalJSON returns the status of operator as a JSON string
 func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Operator.String()) + `"`), nil
 }
 
 // OperatorRecords remains the operator and its status for a while.

@@ -15,13 +15,20 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -84,7 +91,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Make sure they proxy requests to the new leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, e := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(e, IsNil)
 				defer res.Body.Close()
@@ -100,7 +107,7 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 	// Request will fail with no leader.
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
-			testutil.WaitUntil(c, func(c *C) bool {
+			testutil.WaitUntil(c, func() bool {
 				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				c.Assert(err, IsNil)
 				defer res.Body.Close()
@@ -108,6 +115,224 @@ func (s *serverTestSuite) TestReconnect(c *C) {
 			})
 		}
 	}
+}
+
+var _ = Suite(&testMiddlewareSuite{})
+
+type testMiddlewareSuite struct {
+	cleanup func()
+	cluster *tests.TestCluster
+}
+
+func (s *testMiddlewareSuite) SetUpSuite(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	s.cleanup = cancel
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	c.Assert(cluster.RunInitialServers(), IsNil)
+	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
+	s.cluster = cluster
+}
+
+func (s *testMiddlewareSuite) TearDownSuite(c *C) {
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"), IsNil)
+	s.cleanup()
+	s.cluster.Destroy()
+}
+
+func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+
+	labels := make(map[string]interface{})
+	labels["testkey"] = "testvalue"
+	data, _ := json.Marshal(labels)
+	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	c.Assert(resp.Header.Get("service-label"), Equals, "DebugPProfProfile")
+	c.Assert(resp.Header.Get("url-param"), Equals, "{\"force\":[\"true\"]}")
+	c.Assert(resp.Header.Get("body-param"), Equals, "{\"testkey\":\"testvalue\"}")
+	c.Assert(resp.Header.Get("method"), Equals, "HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile")
+	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
+	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+
+	header := mustRequestSuccess(c, leader.GetServer())
+	c.Assert(header.Get("service-label"), Equals, "")
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"), IsNil)
+}
+
+func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func doTestRequest(srv *tests.TestServer) {
+	timeUnix := time.Now().Unix() - 20
+	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
+	req.Header.Set("component", "test")
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+}
+
+func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.Header.Get("audit-label"), Equals, "")
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
+}
+
+func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	cfg := &log.Config{}
+	cfg.File.Filename = tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	b, _ := os.ReadFile(tempStdoutFile.Name())
+	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, true)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	os.Remove(tempStdoutFile.Name())
+}
+
+func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	server.EnableZap = true
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, _ = dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequest(leader)
+	}
+	cancel()
+	cluster.Destroy()
 }
 
 var _ = Suite(&testRedirectorSuite{})
@@ -167,7 +392,7 @@ func (s *testRedirectorSuite) TestAllowFollowerHandle(c *C) {
 	request.Header.Add(serverapi.AllowFollowerHandle, "true")
 	resp, err := dialClient.Do(request)
 	c.Assert(err, IsNil)
-	c.Assert(resp.Header.Get(serverapi.FollowerHandle), Equals, "true")
+	c.Assert(resp.Header.Get(serverapi.RedirectorHeader), Equals, "")
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	_, err = io.ReadAll(resp.Body)

@@ -64,7 +64,6 @@ func (s *testOperatorSuite) TearDownTest(c *C) {
 	s.cancel()
 }
 
-//nolint
 func (s *testOperatorSuite) newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
 	var (
 		region metapb.Region
@@ -95,15 +94,14 @@ func (s *testOperatorSuite) TestOperatorStep(c *C) {
 	c.Assert(RemovePeer{FromStore: 3}.IsFinish(region), IsTrue)
 }
 
-//nolint
 func (s *testOperatorSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewOperator("test", "test", regionID, &metapb.RegionEpoch{}, kind, steps...)
+	return NewTestOperator(regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
 func (s *testOperatorSuite) checkSteps(c *C, op *Operator, steps []OpStep) {
 	c.Assert(op.Len(), Equals, len(steps))
 	for i := range steps {
-		c.Assert(op.Step(i), Equals, steps[i])
+		c.Assert(op.Step(i), DeepEquals, steps[i])
 	}
 }
 
@@ -338,13 +336,13 @@ func (s *testOperatorSuite) TestCheckExpired(c *C) {
 
 func (s *testOperatorSuite) TestCheck(c *C) {
 	{
-		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+		region := s.newTestRegion(2, 2, [2]uint64{1, 1}, [2]uint64{2, 2})
 		steps := []OpStep{
 			AddPeer{ToStore: 1, PeerID: 1},
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := s.newTestOperator(2, OpLeader|OpRegion, steps...)
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, STARTED)
@@ -419,4 +417,13 @@ func (s *testOperatorSuite) TestSchedulerKind(c *C) {
 	for _, v := range testdata {
 		c.Assert(v.op.SchedulerKind(), Equals, v.expect)
 	}
+}
+
+func (s *testOperatorSuite) TestRecord(c *C) {
+	operator := s.newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
+	now := time.Now()
+	time.Sleep(time.Second)
+	ob := operator.Record(now)
+	c.Assert(ob.FinishTime, Equals, now)
+	c.Assert(ob.duration.Seconds(), Greater, time.Second.Seconds())
 }
