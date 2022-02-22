@@ -76,15 +76,15 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
+	if op := c.jointStateChecker.Check(region); op != nil {
+		return []*operator.Operator{op}
+	}
+
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
 		if l.ScheduleDisabled(region) {
 			return nil
 		}
-	}
-
-	if op := c.jointStateChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
 	}
 
 	if op := c.splitChecker.Check(region); op != nil {

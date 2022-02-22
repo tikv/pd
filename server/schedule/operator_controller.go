@@ -278,7 +278,7 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			}
 			isMerge = true
 		}
-		if !oc.checkAddOperator(op) {
+		if !oc.checkAddOperator(false, op) {
 			_ = op.Cancel()
 			oc.buryOperator(op)
 			if isMerge {
@@ -314,7 +314,7 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
 
-	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(ops...) {
+	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(true, ops...) {
 		for _, op := range ops {
 			_ = op.Cancel()
 			oc.buryOperator(op)
@@ -342,7 +342,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 		}
 		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
 
-		if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(ops...) {
+		if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(false, ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
 				_ = op.Cancel()
@@ -369,7 +369,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 // - The region already has a higher priority or same priority operator.
 // - Exceed the max number of waiting operators
 // - At least one operator is expired.
-func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
+func (oc *OperatorController) checkAddOperator(fromAddmin bool, ops ...*operator.Operator) bool {
 	for _, op := range ops {
 		region := oc.cluster.GetRegion(op.RegionID())
 		if region == nil {
@@ -409,6 +409,9 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
+		}
+		if fromAddmin || op.IsLeaveJointStateOperator() {
+			continue
 		}
 		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 			l := cl.GetRegionLabeler()
