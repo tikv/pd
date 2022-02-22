@@ -313,7 +313,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster.Destroy()
 }
 
-func BenchmarkDoRequestWithoutLocallogAudit(b *testing.B) {
+func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
