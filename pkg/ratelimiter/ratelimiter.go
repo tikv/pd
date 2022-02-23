@@ -34,7 +34,7 @@ func (l *RateLimiter) Allow(label string) bool {
 	return ret
 }
 
-// // Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
+// Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
 func (l *RateLimiter) Release(label string) {
 }
 

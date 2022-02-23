@@ -756,7 +756,7 @@ func (s *Server) SetRateLimitMiddleware(status bool) {
 	s.cfg.EnableRateLimitMiddleware = status
 }
 
-// isRateLimitMiddlewareEnabled returns EnableRateLimitMiddleware status
+// IsRateLimitMiddlewareEnabled returns EnableRateLimitMiddleware status
 func (s *Server) IsRateLimitMiddlewareEnabled() bool {
 	return s.cfg.EnableRateLimitMiddleware
 }
@@ -1148,6 +1148,7 @@ func (s *Server) SetServiceRateLimiter(limiter *ratelimiter.RateLimiter) {
 	s.serviceRateLimiter = limiter
 }
 
+// UpdateServiceRateLimiter is used to update RateLimiter
 func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {
 	s.serviceRateLimiter.Update(serviceLabel, opts...)
 }
