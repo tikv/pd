@@ -144,7 +144,6 @@ func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	CountRateLimiterHandleResult(limiter, label, successCount, failedCount, lock, wg)
 	wg.Wait()
 	c.Assert(*successCount, Equals, 101)
-
 }
 
 func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
