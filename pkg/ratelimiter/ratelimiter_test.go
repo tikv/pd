@@ -35,7 +35,7 @@ type testRatelimiterSuite struct {
 func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	c.Parallel()
 
-	opts := []CreateOption{WithConcurrencyLimiter(10)}
+	opts := []Option{UpdateConcurrencyLimiter(10)}
 	limiter := NewLimiter()
 
 	label := "test"
@@ -61,7 +61,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	c.Assert(limit, Equals, uint64(10))
 	c.Assert(current, Equals, uint64(0))
 
-	limiter.UpdateConcurrencyLimiter(label, 5)
+	limiter.Update(label, UpdateConcurrencyLimiter(5))
 	*failedCount = 0
 	*successCount = 0
 	for i := 0; i < 15; i++ {
@@ -79,7 +79,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 
 func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Parallel()
-	opts := []CreateOption{WithQPSLimiter(rate.Every(time.Second), 1)}
+	opts := []Option{UpdateQPSLimiter(rate.Every(time.Second), 1)}
 	limiter := NewLimiter()
 
 	label := "test"
@@ -100,7 +100,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Assert(limit, Equals, rate.Limit(1))
 	c.Assert(burst, Equals, 1)
 
-	limiter.UpdateQPSLimiter(label, 5, 5)
+	limiter.Update(label, UpdateQPSLimiter(5, 5))
 	limit, burst = limiter.GetQPSLimiterStatus(label)
 	c.Assert(limit, Equals, rate.Limit(5))
 	c.Assert(burst, Equals, 5)
@@ -122,7 +122,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 
 func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	c.Parallel()
-	opts := []CreateOption{WithQPSLimiter(100, 100)}
+	opts := []Option{UpdateQPSLimiter(100, 100)}
 	limiter := NewLimiter()
 
 	label := "test"

@@ -60,22 +60,9 @@ func (l *Limiter) Release(label string) {
 	}
 }
 
-// UpdateQPSLimiter updates the settings for a given label's QPS limiter.
-func (l *Limiter) UpdateQPSLimiter(label string, limit rate.Limit, burst int) {
-	if limiter, exist := l.qpsLimiter.Load(label); exist {
-		limiter.(*rate.Limiter).SetLimit(limit)
-		limiter.(*rate.Limiter).SetBurst(burst)
-	} else {
-		l.qpsLimiter.Store(label, rate.NewLimiter(limit, burst))
-	}
-}
-
-// UpdateQPSLimiter updates the settings for a given label's concurrency limiter.
-func (l *Limiter) UpdateConcurrencyLimiter(label string, limit uint64) {
-	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
-		limiter.(*concurrencyLimiter).setLimit(limit)
-	} else {
-		l.concurrencyLimiter.Store(label, newConcurrencyLimiter(limit))
+func (l *Limiter) Update(label string, opts ...Option) {
+	for _, opt := range opts {
+		opt(label, l)
 	}
 }
 
