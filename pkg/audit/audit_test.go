@@ -48,6 +48,7 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 	c.Assert(matcher.Match(labels2), Equals, false)
 }
 
+// TestPrometheusHistogramBackend is used to test result manually
 func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -74,6 +75,8 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	info.ServiceLabel = "test"
 	info.Component = "user1"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
+
 	endTime := time.Now().Unix() + 20
 	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
 
@@ -92,6 +95,7 @@ func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
 	fname := initLog()
 	defer os.Remove(fname)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
