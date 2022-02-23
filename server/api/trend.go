@@ -26,11 +26,13 @@ import (
 )
 
 // Trend describes the cluster's schedule trend.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Trend struct {
 	Stores  []trendStore  `json:"stores"`
 	History *trendHistory `json:"history"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendStore struct {
 	ID              uint64             `json:"id"`
 	Address         string             `json:"address"`
@@ -49,12 +51,14 @@ type trendStore struct {
 	HotReadRegionFlows  []float64 `json:"hot_read_region_flows"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistory struct {
 	StartTime int64               `json:"start"`
 	EndTime   int64               `json:"end"`
 	Entries   []trendHistoryEntry `json:"entries"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistoryEntry struct {
 	From  uint64 `json:"from"`
 	To    uint64 `json:"to"`

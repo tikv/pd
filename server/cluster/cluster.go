@@ -128,6 +128,7 @@ type RaftCluster struct {
 }
 
 // Status saves some state information.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`

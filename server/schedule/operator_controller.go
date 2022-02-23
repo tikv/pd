@@ -257,6 +257,7 @@ func (oc *OperatorController) PushOperators() {
 func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
 	added := 0
+	needPromoted := 0
 
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
@@ -282,12 +283,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
+				i++
+				next := ops[i]
 				_ = next.Cancel()
 				oc.buryOperator(next)
 			}
-			oc.Unlock()
-			return added
+			continue
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -300,11 +301,14 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
+		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
+	for i := 0; i < needPromoted; i++ {
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 

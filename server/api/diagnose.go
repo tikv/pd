@@ -27,6 +27,7 @@ import (
 type diagnoseType int
 
 // Recommendation contains a potential problem and possible way to deal with it.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Recommendation struct {
 	Module      string `json:"module"`
 	Level       string `json:"level"`
