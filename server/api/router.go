@@ -314,20 +314,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"))
 
 	adminHandler := newAdminHandler(svr, rd)
-<<<<<<< HEAD
-	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"))
-	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"))
-	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"))
-	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"))
-	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"))
-	registerFunc(apiRouter, "SwitchRateLimitMiddleware", "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"))
-=======
+
 	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
->>>>>>> master
+	registerFunc(apiRouter, "SwitchRateLimitMiddleware", "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAuditBackend(localLog))
@@ -390,11 +383,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-<<<<<<< HEAD
-		}), setAudit("test"), setRateLimit(100.))
-=======
-		}), setAuditBackend("test"))
->>>>>>> master
+		}), setAuditBackend("test"), setRateLimit(100.))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
