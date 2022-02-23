@@ -153,7 +153,7 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 	s.PendingSum.Count += infl.Count * w
 }
 
-// IsTiFlash returns if the store is TiFlash.
+// IsTiFlash returns true if the store is TiFlash.
 func (s *StoreSummaryInfo) IsTiFlash() bool {
 	return s.isTiFlash
 }
