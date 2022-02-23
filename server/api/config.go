@@ -201,6 +201,9 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value in
 	if !found {
 		return errors.Errorf("config item %s not found", key)
 	}
+	if err = config.Validate(); err != nil {
+		return err
+	}
 
 	if updated {
 		err = h.svr.SetScheduleConfig(config.Schedule)

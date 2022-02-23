@@ -121,6 +121,10 @@ func (s *configTestSuite) TestConfig(c *C) {
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, NotNil)
 
+	args = []string{"-u", pdAddr, "config", "set", "schedule.max-merge-region-size", "48"}
+	output, _ = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(strings.Contains(string(output), "Failed to set config"), IsTrue)
+
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)

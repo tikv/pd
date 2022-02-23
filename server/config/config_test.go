@@ -141,6 +141,22 @@ func (s *testConfigSuite) TestValidation(c *C) {
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
 	c.Assert(cfg.Validate(), NotNil)
+	cfg.Log.File.Filename = "test"
+	c.Assert(cfg.Validate(), IsNil)
+
+	// check merge-region-size
+	cfg.MaxSplitSize = 100
+	c.Assert(cfg.Validate(), NotNil)
+	cfg.MaxSplitSize = defaultMaxSplitSize
+	c.Assert(cfg.Validate(), IsNil)
+	cfg.MaxRegionSize = defaultMaxMergeRegionSize
+	c.Assert(cfg.Validate(), NotNil)
+	cfg.MaxRegionSize = defaultMaxRegionSize
+	c.Assert(cfg.Validate(), IsNil)
+	cfg.Schedule.MaxMergeRegionSize = 48
+	c.Assert(cfg.Validate(), NotNil)
+	cfg.Schedule.MaxMergeRegionSize = defaultMaxMergeRegionSize
+	c.Assert(cfg.Validate(), IsNil)
 
 	// check schedule config
 	cfg.Schedule.HighSpaceRatio = -0.1
@@ -155,10 +171,13 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.Schedule.Validate(), IsNil)
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	c.Assert(cfg.Schedule.Validate(), NotNil)
+	cfg.Schedule.TolerantSizeRatio = defaultTolerantSizeRatio
+	c.Assert(cfg.Schedule.Validate(), IsNil)
 	// check quota
 	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
 	// check request bytes
 	c.Assert(cfg.MaxRequestBytes, Equals, defaultMaxRequestBytes)
+
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {

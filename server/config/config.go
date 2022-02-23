@@ -447,6 +447,25 @@ func (c *Config) Validate() error {
 	if !strings.HasPrefix(rel, "..") {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
 	}
+
+	// check merge configuration is right.
+	// issue：#4659
+	if c.MaxSplitSize < c.MaxRegionSize {
+		return errors.New("max-split-size should be greater than max-region-size")
+	}
+
+	if c.MaxRegionSize <= c.Schedule.MaxMergeRegionSize {
+		return errors.New("max-region-size should be greater than max-merge-region-size")
+	}
+
+	if c.MaxSplitSize-c.MaxRegionSize <= c.Schedule.MaxMergeRegionSize {
+		return errors.New("the diff of max-split-size and max-region-size should be greater than max-merge-region-size")
+	}
+
+	if (c.MaxSplitSize+c.Schedule.MaxMergeRegionSize-c.MaxRegionSize)%c.MaxRegionSize <= c.Schedule.MaxMergeRegionSize {
+		return errors.New("the mod of max-split-size+max-merge-region-size and max-region-size should be greater than max-merge-region-size")
+	}
+
 	return nil
 }
 
@@ -509,10 +528,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 	adjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
 	adjustPath(&c.DataDir)
-
-	if err := c.Validate(); err != nil {
-		return err
-	}
 
 	adjustString(&c.ClientUrls, defaultClientUrls)
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
@@ -600,9 +615,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.Security.Encryption.Adjust()
 
 	adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
-	adjustUint64(&c.MaxRegionSize, defaultMaxSplitSize)
+	adjustUint64(&c.MaxSplitSize, defaultMaxSplitSize)
 
-	return nil
+	return c.Validate()
 }
 
 func (c *Config) adjustLog(meta *configMetaData) {
