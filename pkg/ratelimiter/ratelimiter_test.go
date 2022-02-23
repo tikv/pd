@@ -150,7 +150,7 @@ func initCount() (*int, *int, *sync.Mutex, *sync.WaitGroup) {
 	return &successCount, &failedCount, &lock, &wg
 }
 
-func CountRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
+func CountRateLimiterHandleResult(limiter *RateLimiter, label string, successCount *int,
 	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
 	result := limiter.Allow(label)
 	lock.Lock()

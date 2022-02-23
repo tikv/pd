@@ -20,19 +20,19 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Limiter is a controller for the request rate.
-type Limiter struct {
+// RateLimiter is a controller for the request rate.
+type RateLimiter struct {
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 }
 
 // NewLimiter returns a global limiter which can be updated in the later.
-func NewLimiter() *Limiter {
-	return &Limiter{}
+func NewLimiter() *RateLimiter {
+	return &RateLimiter{}
 }
 
 // Allow is used to check whether it has enough token.
-func (l *Limiter) Allow(label string) bool {
+func (l *RateLimiter) Allow(label string) bool {
 	var cl *concurrencyLimiter
 	var ok bool
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
@@ -54,7 +54,7 @@ func (l *Limiter) Allow(label string) bool {
 }
 
 // Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
-func (l *Limiter) Release(label string) {
+func (l *RateLimiter) Release(label string) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
 		if cl, ok := limiter.(*concurrencyLimiter); ok {
 			cl.release()
@@ -63,14 +63,14 @@ func (l *Limiter) Release(label string) {
 }
 
 // Update is used to update Ratelimiter with Options
-func (l *Limiter) Update(label string, opts ...Option) {
+func (l *RateLimiter) Update(label string, opts ...Option) {
 	for _, opt := range opts {
 		opt(label, l)
 	}
 }
 
 // GetQPSLimiterStatus returns the status of a given label's QPS limiter.
-func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int) {
+func (l *RateLimiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int) {
 	if limiter, exist := l.qpsLimiter.Load(label); exist {
 		return limiter.(*rate.Limiter).Limit(), limiter.(*rate.Limiter).Burst()
 	}
@@ -79,7 +79,7 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 }
 
 // GetConcurrencyLimiterStatus returns the status of a given label's concurrency limiter.
-func (l *Limiter) GetConcurrencyLimiterStatus(label string) (uint64, uint64) {
+func (l *RateLimiter) GetConcurrencyLimiterStatus(label string) (uint64, uint64) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
 		return limiter.(*concurrencyLimiter).getLimit(), limiter.(*concurrencyLimiter).getCurrent()
 	}
