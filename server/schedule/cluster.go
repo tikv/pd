@@ -15,6 +15,7 @@
 package schedule
 
 import (
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
@@ -33,4 +34,5 @@ type Cluster interface {
 
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
+	GetImmutableCfg() *config.ImmutableConfig
 }

@@ -61,7 +61,7 @@ func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecke
 	return &MergeChecker{
 		cluster:    cluster,
 		opts:       opts,
-		config:     cluster.GetConfig(),
+		config:     cluster.GetImmutableCfg(),
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}

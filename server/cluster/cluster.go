@@ -97,13 +97,13 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core    *core.BasicCluster
-	meta    *metapb.Cluster
-	opt     *config.PersistOptions
-	cfg     *config.ImmutableConfig
-	storage storage.Storage
-	id      id.Allocator
-	limiter *StoreLimiter
+	core         *core.BasicCluster
+	meta         *metapb.Cluster
+	opt          *config.PersistOptions
+	immutableCfg *config.ImmutableConfig
+	storage      storage.Storage
+	id           id.Allocator
+	limiter      *StoreLimiter
 
 	changedRegions chan *core.RegionInfo
 
@@ -136,7 +136,8 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, cfg *config.Config) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
 		running:      false,
@@ -144,6 +145,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
+		immutableCfg: config.NewImmutableConfig(cfg),
 	}
 }
 
@@ -491,8 +493,8 @@ func (c *RaftCluster) GetOpts() *config.PersistOptions {
 }
 
 // GetConfig gets the cluster configuration.
-func (c *RaftCluster) GetConfig() *config.ImmutableConfig {
-	return c.cfg
+func (c *RaftCluster) GetImmutableCfg() *config.ImmutableConfig {
+	return c.immutableCfg
 }
 
 // AddSuspectRegions adds regions to suspect list.

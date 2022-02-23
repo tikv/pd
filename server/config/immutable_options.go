@@ -17,32 +17,24 @@ package config
 // ImmutableConfig is a readonly config.
 type ImmutableConfig struct {
 	maxRegionSize uint64
-	leaderLease   int64
+	maxSplitSize  uint64
 }
 
 // NewImmutableConfig creates a new immutable config.
-func NewImmutableConfig(cfg *Config, ops ...ImmutableConfigCreateOption) *ImmutableConfig {
+func NewImmutableConfig(cfg *Config) *ImmutableConfig {
 	config := &ImmutableConfig{
 		maxRegionSize: cfg.MaxRegionSize,
-		leaderLease:   cfg.LeaderLease,
-	}
-	for _, op := range ops {
-		op(config)
+		maxSplitSize:  cfg.MaxSplitSize,
 	}
 	return config
 }
 
-// GetMaxRegionSize returns the max region size.
-func (c *ImmutableConfig) GetMaxRegionSize() uint64 {
-	return c.maxRegionSize
+// GetMaxRegionSize returns the max size of every region.
+func (ic *ImmutableConfig) GetMaxRegionSize() uint64 {
+	return ic.maxRegionSize
 }
 
-// ImmutableConfigCreateOption used to create ImmutableConfig.
-type ImmutableConfigCreateOption func(config *ImmutableConfig)
-
-// WithMaxRegionSize set max region size.
-func WithMaxRegionSize(maxRegionSize uint64) ImmutableConfigCreateOption {
-	return func(config *ImmutableConfig) {
-		config.maxRegionSize = maxRegionSize
-	}
+// GetMaxSplitSize returns the max split size of every region.
+func (ic *ImmutableConfig) GetMaxSplitSize() uint64 {
+	return ic.maxSplitSize
 }

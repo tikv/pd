@@ -167,6 +167,7 @@ name = ""
 lease = 0
 max-request-bytes = 20000000
 max-region-size = 10000
+max-region-size = 14400
 
 [pd-server]
 metric-storage = "http://127.0.0.1:9090"
@@ -189,6 +190,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
 	c.Assert(cfg.MaxRegionSize, Equals, uint64(10000))
+	c.Assert(cfg.MaxSplitSize, Equals, uint64(14400))
 	// When defined, use values from config file.
 	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
 	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
@@ -516,6 +518,11 @@ func (s *testConfigSuite) TestImmutableConfig(c *C) {
 	config.Adjust(nil, false)
 	iconfig := NewImmutableConfig(config)
 	c.Assert(iconfig.maxRegionSize, Equals, uint64(defaultMaxRegionSize))
-	iconfig = NewImmutableConfig(config, WithMaxRegionSize(200))
+	c.Assert(iconfig.maxSplitSize, Equals, uint64(defaultMaxSplitSize))
+	config.MaxSplitSize = 200
+	config.MaxSplitSize = 300
+	iconfig = NewImmutableConfig(config)
 	c.Assert(iconfig.GetMaxRegionSize(), Equals, uint64(200))
+	c.Assert(iconfig.GetMaxRegionSize(), Equals, uint64(300))
+
 }

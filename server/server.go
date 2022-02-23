@@ -101,6 +101,7 @@ type Server struct {
 	cfg            *config.Config
 	etcdCfg        *embed.Config
 	persistOptions *config.PersistOptions
+	immutableCfg   *config.ImmutableConfig
 	handler        *Handler
 
 	ctx              context.Context
@@ -238,6 +239,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	s := &Server{
 		cfg:               cfg,
 		persistOptions:    config.NewPersistOptions(cfg),
+		immutableCfg:      config.NewImmutableConfig(cfg),
 		member:            &member.Member{},
 		ctx:               ctx,
 		startTimestamp:    time.Now().Unix(),
@@ -399,7 +401,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient, s.GetConfig())
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(

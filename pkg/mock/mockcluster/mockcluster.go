@@ -81,7 +81,7 @@ func (mc *Cluster) GetOpts() *config.PersistOptions {
 }
 
 // GetConfig returns the cluster immutable configuration.
-func (mc *Cluster) GetConfig() *config.ImmutableConfig {
+func (mc *Cluster) GetImmutableCfg() *config.ImmutableConfig {
 	return mc.ImmutableConfig
 }
 

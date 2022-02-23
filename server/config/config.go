@@ -166,6 +166,8 @@ type Config struct {
 	EnableAuditMiddleware bool
 
 	MaxRegionSize uint64 `toml:"max-region-size" json:"max-region-size"`
+
+	MaxSplitSize uint64 `toml:"max-split-size" json:"max-split-size"`
 }
 
 // NewConfig creates a new config.
@@ -254,6 +256,7 @@ const (
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
 	defaultMaxRegionSize = 96
+	defaultMaxSplitSize  = 144
 )
 
 // Special keys for Labels
@@ -444,7 +447,6 @@ func (c *Config) Validate() error {
 	if !strings.HasPrefix(rel, "..") {
 		return errors.New("log directory shouldn't be the subdirectory of data directory")
 	}
-
 	return nil
 }
 
@@ -598,6 +600,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.Security.Encryption.Adjust()
 
 	adjustUint64(&c.MaxRegionSize, defaultMaxRegionSize)
+	adjustUint64(&c.MaxRegionSize, defaultMaxSplitSize)
 
 	return nil
 }
