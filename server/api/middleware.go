@@ -121,11 +121,13 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 		next(w, r)
 		return
 	}
-	if !rateLimiter.Allow(requestInfo.ServiceLabel) {
+	if rateLimiter.Allow(requestInfo.ServiceLabel) {
 		next(w, r)
+		rateLimiter.Release(requestInfo.ServiceLabel)
+	} else {
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 	}
-	next(w, r)
-	rateLimiter.Release(requestInfo.ServiceLabel)
+
 }
 
 type auditMiddleware struct {

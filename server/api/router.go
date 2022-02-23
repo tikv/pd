@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/ratelimiter"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -136,18 +137,18 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			}
 		}
 	}
-	setRateLimit := func(rate float64) createRouteOption {
+	localLog := audit.LocalLogLabel
+
+	setRateLimit := func(opts ...ratelimiter.Option) createRouteOption {
 		return func(route *mux.Route) {
-			// todo: add implement
-			// this is just for golangci-lint
-			rate = 100
 			if len(route.GetName()) == 0 {
 				return
 			}
+			if len(opts) > 0 {
+				svr.UpdateServiceRateLimiter(route.GetName(), opts...)
+			}
 		}
 	}
-
-	localLog := audit.LocalLogLabel
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -390,7 +391,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"), setRateLimit(100.))
+		}), setAuditBackend("test"), setRateLimit())
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.

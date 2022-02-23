@@ -254,7 +254,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewLocalLogBackend(true),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = nil
+	s.serviceRateLimiter = ratelimiter.NewRateLimiter()
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -511,14 +511,9 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
-func (s *Server) SetServiceAuditBackendForHTTP(serviceLabel string, labels ...string) {
+// SetServiceAuditBackend is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackend(serviceLabel string, labels ...string) {
 	s.SetServiceAuditBackendLabels(serviceLabel, labels)
-}
-
-// SetServiceRateLimiterForHTTP is used to register service rate limit for HTTP.
-func (s *Server) SetServiceRateLimiterForHTTP(serviceLabel string, rateLimiter ratelimiter.RateLimiter) {
-	//
 }
 
 // Context returns the context of server.
@@ -1149,8 +1144,12 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter() ratelimiter.RateLimiter {
-	return *s.serviceRateLimiter
+func (s *Server) GetServiceRateLimiter() *ratelimiter.RateLimiter {
+	return s.serviceRateLimiter
+}
+
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {
+	s.serviceRateLimiter.Update(serviceLabel, opts...)
 }
 
 // GetClusterStatus gets cluster status.

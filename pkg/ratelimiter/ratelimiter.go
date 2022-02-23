@@ -14,10 +14,27 @@
 
 package ratelimiter
 
-// RateLimiter is a inferface for
-type RateLimiter interface {
-	// Allow is used to check whether it has enough token.
-	Allow(label string) bool
-	// Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
-	Release(label string)
+// RateLimiter is a controller for the request rate for different services.
+type RateLimiter struct {
+}
+
+// NewRateLimiter returns RateLimiter
+func NewRateLimiter() *RateLimiter {
+	return &RateLimiter{}
+}
+
+// Allow is used to check whether it has enough token.
+func (l *RateLimiter) Allow(label string) bool {
+	return true
+}
+
+// // Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
+func (l *RateLimiter) Release(label string) {
+}
+
+// Update is used to update Ratelimiter with Options
+func (l *RateLimiter) Update(label string, opts ...Option) {
+	for _, opt := range opts {
+		opt(label, l)
+	}
 }
