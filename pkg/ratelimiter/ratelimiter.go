@@ -31,6 +31,7 @@ func NewLimiter() *Limiter {
 	return &Limiter{}
 }
 
+// Allow is used to check whether it has enough token.
 func (l *Limiter) Allow(label string) bool {
 	var cl *concurrencyLimiter
 	var ok bool
@@ -52,6 +53,7 @@ func (l *Limiter) Allow(label string) bool {
 	return true
 }
 
+// Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
 func (l *Limiter) Release(label string) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
 		if cl, ok := limiter.(*concurrencyLimiter); ok {
@@ -60,6 +62,7 @@ func (l *Limiter) Release(label string) {
 	}
 }
 
+// Update is used to update Ratelimiter with Options
 func (l *Limiter) Update(label string, opts ...Option) {
 	for _, opt := range opts {
 		opt(label, l)
@@ -75,7 +78,7 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 	return 0, 0
 }
 
-// GetQPSLimiterStatus returns the status of a given label's concurrency limiter.
+// GetConcurrencyLimiterStatus returns the status of a given label's concurrency limiter.
 func (l *Limiter) GetConcurrencyLimiterStatus(label string) (uint64, uint64) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
 		return limiter.(*concurrencyLimiter).getLimit(), limiter.(*concurrencyLimiter).getCurrent()
