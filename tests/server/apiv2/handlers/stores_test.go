@@ -100,7 +100,7 @@ func (s *testStoresAPISuite) TearDownSuite(c *C) {
 	s.cluster.Destroy()
 }
 
-func (s *testStoresAPISuite) TestStoresList(c *C) {
+func (s *testStoresAPISuite) TestStoresGet(c *C) {
 	url := s.leaderServer.GetServer().GetAddr() + storesPrefix
 	resp, err := dialClient.Get(url)
 	c.Assert(err, IsNil)
@@ -197,7 +197,7 @@ func setStoreState(c *C, url, state string, expectStatusCode int) {
 	data := map[string]string{"state": state}
 	putData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
-	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(putData))
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(putData))
 	c.Assert(err, IsNil)
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)

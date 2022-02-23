@@ -39,7 +39,7 @@ func GetStores() gin.HandlerFunc {
 			storeID := s.GetId()
 			store := rc.GetStore(storeID)
 			if store == nil {
-				c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
+				c.AbortWithStatus(http.StatusNotFound)
 				return
 			}
 
@@ -75,7 +75,7 @@ func GetStoreByID() gin.HandlerFunc {
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
+			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
 

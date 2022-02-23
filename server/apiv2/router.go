@@ -59,12 +59,15 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.S
 	meta.GET("/stores", handlers.GetStores())
 	meta.GET("/stores/:id", handlers.GetStoreByID())
 	meta.DELETE("/stores/:id", handlers.DeleteStoreByID())
-	meta.PUT("/stores/:id", handlers.UpdateStoreByID())
+	meta.PATCH("/stores/:id", handlers.UpdateStoreByID())
+
+	meta.GET("/regions", handlers.GetRegions())
+	meta.GET("/regions/:id", handlers.GetRegionByID())
 
 	root.GET("/members", handlers.GetMembers())
 	root.GET("/members/:name", handlers.GetMemberByName())
 	root.DELETE("/members/:name", handlers.DeleteMemberByName())
-	root.PUT("/members/:name", handlers.UpdateMemberByName())
+	root.PATCH("/members/:name", handlers.UpdateMemberByName())
 
 	router.GET("/swagger/*any", gs.WrapHandler(swaggerFiles.Handler))
 

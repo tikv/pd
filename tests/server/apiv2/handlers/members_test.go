@@ -115,7 +115,7 @@ func (s *testMembersAPISuite) TestUpdateLeaderPriority(c *C) {
 	data := map[string]float64{"leader_priority": 5}
 	putData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
-	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(putData))
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(putData))
 	c.Assert(err, IsNil)
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)

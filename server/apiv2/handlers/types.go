@@ -18,14 +18,17 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
 const (
-	disconnectedName = "Disconnected"
-	downStateName    = "Down"
+	aliveStateName        = "Alive"
+	disconnectedStateName = "Disconnected"
+	downStateName         = "Down"
 )
 
 // StoresInfo records stores' info.
@@ -37,7 +40,7 @@ type StoresInfo struct {
 // MetaStore contains meta information about a store.
 type MetaStore struct {
 	*metapb.Store
-	StateName string `json:"state_name"`
+	HeartbeatStatus string `json:"heartbeat_status"`
 }
 
 // StoreStatus contains status about a store.
@@ -66,10 +69,13 @@ type StoreInfo struct {
 }
 
 func newStoreInfo(cfg *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+	if store == nil {
+		return nil
+	}
 	s := &StoreInfo{
 		Store: &MetaStore{
-			Store:     store.GetMeta(),
-			StateName: store.GetState().String(),
+			Store:           store.GetMeta(),
+			HeartbeatStatus: aliveStateName,
 		},
 		Status: &StoreStatus{
 			Capacity:     typeutil.ByteSize(store.GetCapacity()),
@@ -99,12 +105,133 @@ func newStoreInfo(cfg *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		s.Status.Uptime = &duration
 	}
 
-	if store.GetState() == metapb.StoreState_Up {
-		if store.DownTime() > cfg.MaxStoreDownTime.Duration {
-			s.Store.StateName = downStateName
-		} else if store.IsDisconnected() {
-			s.Store.StateName = disconnectedName
-		}
+	if store.DownTime() > cfg.MaxStoreDownTime.Duration {
+		s.Store.HeartbeatStatus = downStateName
+	} else if store.IsDisconnected() {
+		s.Store.HeartbeatStatus = disconnectedStateName
 	}
+
 	return s
+}
+
+// RegionsInfo records regions' info.
+type RegionsInfo struct {
+	Count   int           `json:"count"`
+	Regions []*RegionInfo `json:"regions"`
+}
+
+// RegionInfo records detail region info for api usage.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type RegionInfo struct {
+	ID          uint64              `json:"id"`
+	StartKey    string              `json:"start_key"`
+	EndKey      string              `json:"end_key"`
+	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
+	Peers       []MetaPeer          `json:"peers,omitempty"`
+
+	Leader          MetaPeer      `json:"leader,omitempty"`
+	DownPeers       []PDPeerStats `json:"down_peers,omitempty"`
+	PendingPeers    []MetaPeer    `json:"pending_peers,omitempty"`
+	WrittenBytes    uint64        `json:"written_bytes"`
+	ReadBytes       uint64        `json:"read_bytes"`
+	WrittenKeys     uint64        `json:"written_keys"`
+	ReadKeys        uint64        `json:"read_keys"`
+	ApproximateSize uint64        `json:"approximate_size"`
+	ApproximateKeys uint64        `json:"approximate_keys"`
+
+	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
+}
+
+// MetaPeer is converted from *metapb.Peer.
+type MetaPeer struct {
+	ID      uint64 `json:"id"`
+	StoreID uint64 `json:"store_id"`
+	// RoleName is `Role.String()`.
+	// Since Role is serialized as int by json by default,
+	// introducing it will make the output of pd-ctl easier to identify Role.
+	RoleName string `json:"role_name"`
+}
+
+// ReplicationStatus represents the replication mode status of the region.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ReplicationStatus struct {
+	State   string `json:"state"`
+	StateID uint64 `json:"state_id"`
+}
+
+func fromPBReplicationStatus(s *replication_modepb.RegionReplicationStatus) *ReplicationStatus {
+	if s == nil {
+		return nil
+	}
+	return &ReplicationStatus{
+		State:   s.GetState().String(),
+		StateID: s.GetStateId(),
+	}
+}
+
+// PDPeerStats is api compatible with *pdpb.PeerStats.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type PDPeerStats struct {
+	*pdpb.PeerStats
+	Peer MetaPeer `json:"peer"`
+}
+
+func fromPeer(peer *metapb.Peer) MetaPeer {
+	return MetaPeer{
+		ID:       peer.GetId(),
+		StoreID:  peer.GetStoreId(),
+		RoleName: peer.GetRole().String(),
+	}
+}
+
+func fromPeerSlice(peers []*metapb.Peer) []MetaPeer {
+	if peers == nil {
+		return nil
+	}
+	slice := make([]MetaPeer, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeer(peer)
+	}
+	return slice
+}
+
+func fromPeerStats(peer *pdpb.PeerStats) PDPeerStats {
+	return PDPeerStats{
+		PeerStats: peer,
+		Peer:      fromPeer(peer.Peer),
+	}
+}
+
+func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
+	if peers == nil {
+		return nil
+	}
+	slice := make([]PDPeerStats, len(peers))
+	for i, peer := range peers {
+		slice[i] = fromPeerStats(peer)
+	}
+	return slice
+}
+
+func newRegionInfo(r *core.RegionInfo) *RegionInfo {
+	if r == nil {
+		return nil
+	}
+	return &RegionInfo{
+		ID:                r.GetID(),
+		StartKey:          core.HexRegionKeyStr(r.GetStartKey()),
+		EndKey:            core.HexRegionKeyStr(r.GetEndKey()),
+		RegionEpoch:       r.GetRegionEpoch(),
+		Peers:             fromPeerSlice(r.GetPeers()),
+		Leader:            fromPeer(r.GetLeader()),
+		DownPeers:         fromPeerStatsSlice(r.GetDownPeers()),
+		PendingPeers:      fromPeerSlice(r.GetPendingPeers()),
+		WrittenBytes:      r.GetBytesWritten(),
+		WrittenKeys:       r.GetKeysWritten(),
+		ReadBytes:         r.GetBytesRead(),
+		ReadKeys:          r.GetKeysRead(),
+		ApproximateSize:   uint64(r.GetApproximateSize()),
+		ApproximateKeys:   uint64(r.GetApproximateKeys()),
+		ReplicationStatus: fromPBReplicationStatus(r.GetReplicationStatus()),
+	}
 }
