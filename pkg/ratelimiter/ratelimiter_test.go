@@ -130,11 +130,12 @@ func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	}
 
 	successCount, failedCount, lock, wg := initCount()
+	wg.Add(200)
 	for i := 0; i < 200; i++ {
-		wg.Add(1)
 		go CountRateLimiterHandleResult(limiter, label, successCount, failedCount, lock, wg)
 	}
 	wg.Wait()
+	c.Assert(*failedCount+*successCount, Equals, 200)
 	c.Assert(*failedCount, Equals, 100)
 	c.Assert(*successCount, Equals, 100)
 }
