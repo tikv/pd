@@ -117,7 +117,6 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	cLimit, cCurrent := limiter.GetConcurrencyLimiterStatus(label)
 	c.Assert(cLimit, Equals, uint64(0))
 	c.Assert(cCurrent, Equals, uint64(0))
-
 }
 
 func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
@@ -138,7 +137,6 @@ func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	wg.Wait()
 	c.Assert(*failedCount, Equals, 100)
 	c.Assert(*successCount, Equals, 100)
-
 }
 
 func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
