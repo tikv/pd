@@ -511,11 +511,6 @@ func (s *Server) Run() error {
 	return nil
 }
 
-// SetServiceAuditBackend is used to register service audit config for HTTP.
-func (s *Server) SetServiceAuditBackend(serviceLabel string, labels ...string) {
-	s.SetServiceAuditBackendLabels(serviceLabel, labels)
-}
-
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
@@ -1146,6 +1141,11 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 // GetServiceRateLimiter is used to get rate limiter
 func (s *Server) GetServiceRateLimiter() *ratelimiter.RateLimiter {
 	return s.serviceRateLimiter
+}
+
+// SetServiceRateLimiter is used to get rate limiter
+func (s *Server) SetServiceRateLimiter(limiter *ratelimiter.RateLimiter) {
+	s.serviceRateLimiter = limiter
 }
 
 func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {

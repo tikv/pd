@@ -14,6 +14,8 @@
 
 package ratelimiter
 
+import "github.com/pingcap/failpoint"
+
 // RateLimiter is a controller for the request rate for different services.
 type RateLimiter struct {
 }
@@ -25,7 +27,11 @@ func NewRateLimiter() *RateLimiter {
 
 // Allow is used to check whether it has enough token.
 func (l *RateLimiter) Allow(label string) bool {
-	return true
+	ret := true
+	failpoint.Inject("dontAllowRatelimiter", func() {
+		ret = false
+	})
+	return ret
 }
 
 // // Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
