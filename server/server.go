@@ -44,7 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/ratelimiter"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -154,7 +154,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
-	serviceRateLimiters sync.Map
+	serviceRateLimiter *ratelimiter.RateLimiter
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -254,6 +254,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewLocalLogBackend(true),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceRateLimiter = nil
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -511,23 +512,13 @@ func (s *Server) Run() error {
 }
 
 // SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
-func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
-	if len(route.GetName()) == 0 {
-		return
-	}
-	if len(labels) > 0 {
-		s.SetServiceAuditBackendLabels(route.GetName(), labels)
-	}
+func (s *Server) SetServiceAuditBackendForHTTP(serviceLabel string, labels ...string) {
+	s.SetServiceAuditBackendLabels(serviceLabel, labels)
 }
 
 // SetServiceRateLimiterForHTTP is used to register service rate limit for HTTP.
-func (s *Server) SetServiceRateLimiterForHTTP(route *mux.Route, rateLimiter ratelimit.RateLimiter) {
-	if len(route.GetName()) == 0 {
-		return
-	}
-	if rateLimiter != nil {
-		s.SetServiceRateLimiter(route.GetName(), rateLimiter)
-	}
+func (s *Server) SetServiceRateLimiterForHTTP(serviceLabel string, rateLimiter ratelimiter.RateLimiter) {
+	//
 }
 
 // Context returns the context of server.
@@ -1158,18 +1149,8 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter(serviceLabel string) (ratelimit.RateLimiter, bool) {
-	v, ok := s.serviceRateLimiters.Load(serviceLabel)
-	if !ok {
-		return nil, false
-	}
-	ratelimiter, ok := v.(ratelimit.RateLimiter)
-	return ratelimiter, ok
-}
-
-// SetServiceRateLimiter is used to add rate limit for specific service
-func (s *Server) SetServiceRateLimiter(serviceLabel string, rateLimiter ratelimit.RateLimiter) {
-	s.serviceRateLimiters.Store(serviceLabel, rateLimiter)
+func (s *Server) GetServiceRateLimiter() ratelimiter.RateLimiter {
+	return *s.serviceRateLimiter
 }
 
 // GetClusterStatus gets cluster status.

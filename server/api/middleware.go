@@ -116,14 +116,16 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 		w.Header().Add("rate-limit", "rate-limit")
 	})
 
-	rateLimiter, ok := s.svr.GetServiceRateLimiter(requestInfo.ServiceLabel)
-	if !ok {
+	rateLimiter := s.svr.GetServiceRateLimiter()
+	if rateLimiter == nil {
 		next(w, r)
 		return
 	}
-	if rateLimiter.Allow(requestInfo.Component) {
+	if !rateLimiter.Allow(requestInfo.ServiceLabel) {
 		next(w, r)
 	}
+	next(w, r)
+	rateLimiter.Release(requestInfo.ServiceLabel)
 }
 
 type auditMiddleware struct {

@@ -128,7 +128,12 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
 	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.SetServiceAuditBackendForHTTP(route, labels...)
+			if len(route.GetName()) == 0 {
+				return
+			}
+			if len(labels) > 0 {
+				svr.SetServiceAuditBackendLabels(route.GetName(), labels)
+			}
 		}
 	}
 	setRateLimit := func(rate float64) createRouteOption {
@@ -136,7 +141,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// todo: add implement
 			// this is just for golangci-lint
 			rate = 100
-			svr.SetServiceRateLimiterForHTTP(route, nil)
+			if len(route.GetName()) == 0 {
+				return
+			}
 		}
 	}
 
