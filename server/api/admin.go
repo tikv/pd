@@ -163,7 +163,7 @@ func (h *adminHandler) HanldeAuditMiddlewareSwitch(w http.ResponseWriter, r *htt
 // @Produce json
 // @Success 200 {string} string "Switching ratelimit middleware is successful."
 // @Failure 400 {string} string "The input is invalid."
-// @Router /admin/ratelimit-middleware [POST
+// @Router /admin/ratelimit-middleware [POST]
 func (h *adminHandler) HanldeRatelimitMiddlewareSwitch(w http.ResponseWriter, r *http.Request) {
 	enableStr := r.URL.Query().Get("enable")
 	enable, err := strconv.ParseBool(enableStr)
