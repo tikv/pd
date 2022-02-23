@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -99,7 +100,7 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 type AllocatorManager struct {
 	enableLocalTSO bool
 	mu             struct {
-		sync.RWMutex
+		deadlock.RWMutex
 		// There are two kinds of TSO Allocators:
 		//   1. Global TSO Allocator, as a global single point to allocate
 		//      TSO for global transactions, such as cross-region cases.
@@ -122,7 +123,7 @@ type AllocatorManager struct {
 	securityConfig         *grpcutil.TLSConfig
 	// for gRPC use
 	localAllocatorConn struct {
-		sync.RWMutex
+		deadlock.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
 }
@@ -449,7 +450,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 		nextLeaderValue := fmt.Sprintf("%v", am.member.ID())
 		cmps = append(cmps, clientv3.Compare(clientv3.Value(nextLeaderKey), "=", nextLeaderValue))
 	}
-	failpoint.Inject("injectNextLeaderKey", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("injectNextLeaderKey")); _err_ == nil {
 		if val.(bool) {
 			// In order not to campaign leader too often in tests
 			time.Sleep(5 * time.Second)
@@ -457,7 +458,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 				clientv3.Compare(clientv3.Value(nextLeaderKey), "=", "mockValue"),
 			}
 		}
-	})
+	}
 	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",

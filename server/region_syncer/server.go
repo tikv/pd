@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
@@ -73,7 +74,7 @@ type Server interface {
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
 	mu struct {
-		sync.RWMutex
+		deadlock.RWMutex
 		streams      map[string]ServerStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
@@ -229,13 +230,13 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 				select {
 				case <-ctx.Done():
 					log.Info("discontinue sending sync region response")
-					failpoint.Inject("noFastExitSync", func() {
-						failpoint.Goto("doSync")
-					})
+					if _, _err_ := failpoint.Eval(_curpkg_("noFastExitSync")); _err_ == nil {
+						goto doSync
+					}
 					return nil
 				default:
 				}
-				failpoint.Label("doSync")
+			doSync:
 				metas = append(metas, r.GetMeta())
 				stats = append(stats, r.GetStat())
 				leader := &metapb.Peer{}

@@ -15,9 +15,8 @@
 package placement
 
 import (
-	"sync"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
@@ -36,7 +35,7 @@ import (
 // 6. any store label is changed
 // 7. any store state is changed
 type RegionRuleFitCacheManager struct {
-	mu     sync.RWMutex
+	mu     deadlock.RWMutex
 	caches map[uint64]*RegionRuleFitCache
 }
 

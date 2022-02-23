@@ -15,11 +15,11 @@
 package statistics
 
 import (
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -36,7 +36,7 @@ const (
 
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	rollingStoresStats map[uint64]*RollingStoreStats
 }
 
@@ -133,7 +133,7 @@ func UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	timeMedians []*movingaverage.TimeMedian
 	movingAvgs  []movingaverage.MovingAvg
 }

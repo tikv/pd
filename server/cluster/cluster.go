@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -85,7 +86,7 @@ type Server interface {
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
-	sync.RWMutex
+	deadlock.RWMutex
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -265,9 +266,9 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.wg.Add(5)
 	go c.runCoordinator()
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		backgroundJobInterval = 100 * time.Microsecond
-	})
+	}
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
@@ -330,7 +331,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 		case <-ticker.C:
 			c.checkStores()
 			c.collectMetrics()
-			c.coordinator.opController.PruneHistory()
 		}
 	}
 }
@@ -492,7 +492,7 @@ func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
 }
 
-// GetConfig gets the cluster configuration.
+// GetImmutableCfg gets the cluster Immutable configuration.
 func (c *RaftCluster) GetImmutableCfg() *config.ImmutableConfig {
 	return c.immutableCfg
 }
@@ -642,9 +642,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 
 	var overlaps []*core.RegionInfo
 	c.Lock()
@@ -1402,9 +1402,9 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 
 	if minVersion != nil && clusterVersion.LessThan(*minVersion) {
 		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {

@@ -17,12 +17,12 @@ package schedulers
 import (
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -79,7 +79,7 @@ func init() {
 }
 
 type evictLeaderSchedulerConfig struct {
-	mu                sync.RWMutex
+	mu                deadlock.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           schedule.Cluster
@@ -117,9 +117,9 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
 		err = errors.New("fail to persist")
-	})
+	}
 	if err != nil {
 		return err
 	}

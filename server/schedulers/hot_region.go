@@ -21,11 +21,11 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
@@ -84,7 +84,7 @@ var (
 type hotScheduler struct {
 	name string
 	*BaseScheduler
-	sync.RWMutex
+	deadlock.RWMutex
 	types []statistics.RWType
 	r     *rand.Rand
 

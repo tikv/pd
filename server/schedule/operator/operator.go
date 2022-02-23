@@ -357,6 +357,37 @@ func (o *Operator) History() []OpHistory {
 	return histories
 }
 
+// OpRecord is used to log and visualize completed operators.
+type OpRecord struct {
+	*Operator
+	FinishTime time.Time
+	duration   time.Duration
+}
+
+func (o *OpRecord) String() string {
+	return fmt.Sprintf("%s (finishAt:%v, duration:%v)", o.Operator.String(), o.FinishTime, o.duration)
+}
+
+// MarshalJSON returns the status of operator as a JSON string
+func (o *OpRecord) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + o.String() + `"`), nil
+}
+
+// Record transfers the operator to OpRecord.
+func (o *Operator) Record(finishTime time.Time) *OpRecord {
+	step := atomic.LoadInt32(&o.currentStep)
+	record := &OpRecord{
+		Operator:   o,
+		FinishTime: finishTime,
+	}
+	start := o.GetStartTime()
+	if o.Status() != SUCCESS && 0 < step && int(step-1) < len(o.stepsTime) {
+		start = time.Unix(0, o.stepsTime[int(step-1)])
+	}
+	record.duration = finishTime.Sub(start)
+	return record
+}
+
 // GetAdditionalInfo returns additional info with string
 func (o *Operator) GetAdditionalInfo() string {
 	if len(o.AdditionalInfos) != 0 {

@@ -167,7 +167,7 @@ name = ""
 lease = 0
 max-request-bytes = 20000000
 max-region-size = 10000
-max-region-size = 14400
+max-split-size = 14400
 
 [pd-server]
 metric-storage = "http://127.0.0.1:9090"
@@ -519,10 +519,9 @@ func (s *testConfigSuite) TestImmutableConfig(c *C) {
 	iconfig := NewImmutableConfig(config)
 	c.Assert(iconfig.maxRegionSize, Equals, uint64(defaultMaxRegionSize))
 	c.Assert(iconfig.maxSplitSize, Equals, uint64(defaultMaxSplitSize))
-	config.MaxSplitSize = 200
+	config.MaxRegionSize = 200
 	config.MaxSplitSize = 300
 	iconfig = NewImmutableConfig(config)
 	c.Assert(iconfig.GetMaxRegionSize(), Equals, uint64(200))
-	c.Assert(iconfig.GetMaxRegionSize(), Equals, uint64(300))
-
+	c.Assert(iconfig.GetMaxSplitSize(), Equals, uint64(300))
 }

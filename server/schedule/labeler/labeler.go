@@ -20,9 +20,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/rangelist"
@@ -33,7 +33,7 @@ import (
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
 	storage endpoint.RuleStorage
-	sync.RWMutex
+	deadlock.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
 }

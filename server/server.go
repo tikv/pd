@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -144,7 +145,7 @@ type Server struct {
 	closeCallbacks []func()
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock sync.Mutex
+	serviceSafePointLock deadlock.Mutex
 
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
@@ -351,9 +352,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		},
 	}
 
-	failpoint.Inject("memberNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
 		time.Sleep(1500 * time.Millisecond)
-	})
+	}
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
@@ -679,7 +680,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
 	s.cluster.Stop()
 }
 

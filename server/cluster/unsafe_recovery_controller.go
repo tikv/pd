@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -27,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
@@ -42,7 +42,7 @@ const (
 )
 
 type unsafeRecoveryController struct {
-	sync.RWMutex
+	deadlock.RWMutex
 
 	cluster               *RaftCluster
 	stage                 unsafeRecoveryStage

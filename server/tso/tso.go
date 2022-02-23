@@ -18,13 +18,13 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -48,7 +48,7 @@ const (
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
 type tsoObject struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	physical   time.Time
 	logical    int64
 	updateTime time.Time
@@ -185,9 +185,9 @@ func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time
 func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	tsoCounter.WithLabelValues("sync", t.dcLocation).Inc()
 
-	failpoint.Inject("delaySyncTimestamp", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("delaySyncTimestamp")); _err_ == nil {
 		time.Sleep(time.Second)
-	})
+	}
 
 	last, err := t.loadTimestamp()
 	if err != nil {
@@ -195,12 +195,12 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	}
 
 	next := time.Now()
-	failpoint.Inject("fallBackSync", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fallBackSync")); _err_ == nil {
 		next = next.Add(time.Hour)
-	})
-	failpoint.Inject("systemTimeSlow", func() {
+	}
+	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
 		next = next.Add(-time.Hour)
-	})
+	}
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
@@ -300,12 +300,12 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	tsoGap.WithLabelValues(t.dcLocation).Set(float64(time.Since(prevPhysical).Milliseconds()))
 
 	now := time.Now()
-	failpoint.Inject("fallBackUpdate", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fallBackUpdate")); _err_ == nil {
 		now = now.Add(time.Hour)
-	})
-	failpoint.Inject("systemTimeSlow", func() {
+	}
+	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
 		now = now.Add(-time.Hour)
-	})
+	}
 
 	tsoCounter.WithLabelValues("save", t.dcLocation).Inc()
 

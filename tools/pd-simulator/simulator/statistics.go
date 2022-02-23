@@ -17,11 +17,12 @@ package simulator
 import (
 	"fmt"
 	"math"
-	"sync"
+
+	"github.com/sasha-s/go-deadlock"
 )
 
 type taskStatistics struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	addPeer        map[uint64]int
 	removePeer     map[uint64]int
 	addLearner     map[uint64]int
@@ -110,7 +111,7 @@ func (t *taskStatistics) incTransferLeader(fromPeerID, toPeerID uint64) {
 }
 
 type snapshotStatistics struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	receive map[uint64]int
 	send    map[uint64]int
 }

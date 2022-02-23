@@ -137,9 +137,9 @@ func (c *baseClient) memberLoop() {
 		case <-ctx.Done():
 			return
 		}
-		failpoint.Inject("skipUpdateMember", func() {
-			failpoint.Continue()
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("skipUpdateMember")); _err_ == nil {
+			continue
+		}
 		if err := c.updateMember(); err != nil {
 			log.Error("[pd] failed updateMember", errs.ZapError(err))
 		}

@@ -16,10 +16,10 @@ package core
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -28,7 +28,7 @@ import (
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	Stores  *StoresInfo
 	Regions *RegionsInfo
 }

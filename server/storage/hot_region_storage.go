@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -53,7 +54,7 @@ type HotRegionStorage struct {
 
 	curReservedDays uint64
 	curInterval     time.Duration
-	mu              sync.RWMutex
+	mu              deadlock.RWMutex
 }
 
 // HistoryHotRegions wraps historyHotRegion

@@ -20,12 +20,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
@@ -88,7 +88,7 @@ func init() {
 }
 
 type grantHotRegionSchedulerConfig struct {
-	mu          sync.RWMutex
+	mu          deadlock.RWMutex
 	storage     endpoint.ConfigStorage
 	cluster     schedule.Cluster
 	StoreIDs    []uint64 `json:"store-id"`

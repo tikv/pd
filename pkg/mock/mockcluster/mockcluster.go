@@ -80,7 +80,7 @@ func (mc *Cluster) GetOpts() *config.PersistOptions {
 	return mc.PersistOptions
 }
 
-// GetConfig returns the cluster immutable configuration.
+// GetImmutableCfg returns the cluster immutable configuration.
 func (mc *Cluster) GetImmutableCfg() *config.ImmutableConfig {
 	return mc.ImmutableConfig
 }

@@ -15,15 +15,14 @@
 package kv
 
 import (
-	"sync"
-
 	"github.com/google/btree"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/sasha-s/go-deadlock"
 )
 
 type memoryKV struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	tree *btree.BTree
 }
 
@@ -53,12 +52,12 @@ func (kv *memoryKV) Load(key string) (string, error) {
 }
 
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("withRangeLimit")); _err_ == nil {
 		rangeLimit, ok := val.(int)
 		if ok && limit > rangeLimit {
-			failpoint.Return(nil, nil, errors.Errorf("limit %d exceed max rangeLimit %d", limit, rangeLimit))
+			return nil, nil, errors.Errorf("limit %d exceed max rangeLimit %d", limit, rangeLimit)
 		}
-	})
+	}
 	kv.RLock()
 	defer kv.RUnlock()
 	keys := make([]string, 0, limit)

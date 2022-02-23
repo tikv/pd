@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
@@ -73,7 +74,7 @@ func (s *testAllocIDSuite) TestID(c *C) {
 
 	var wg sync.WaitGroup
 
-	var m sync.Mutex
+	var m deadlock.Mutex
 	ids := make(map[uint64]struct{})
 
 	for i := 0; i < 10; i++ {

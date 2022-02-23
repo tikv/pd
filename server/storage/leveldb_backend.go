@@ -16,13 +16,13 @@ package storage
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -43,7 +43,7 @@ const (
 type levelDBBackend struct {
 	*endpoint.StorageEndpoint
 	ekm                 *encryptionkm.KeyManager
-	mu                  sync.RWMutex
+	mu                  deadlock.RWMutex
 	batchRegions        map[string]*metapb.Region
 	batchSize           int
 	cacheSize           int
@@ -92,9 +92,9 @@ func (lb *levelDBBackend) backgroundFlush() {
 		case <-ticker.C:
 			lb.mu.RLock()
 			isFlush = lb.flushTime.Before(time.Now())
-			failpoint.Inject("regionStorageFastFlush", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("regionStorageFastFlush")); _err_ == nil {
 				isFlush = true
-			})
+			}
 			lb.mu.RUnlock()
 			if !isFlush {
 				continue

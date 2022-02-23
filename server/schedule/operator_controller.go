@@ -16,11 +16,9 @@ package schedule
 
 import (
 	"container/heap"
-	"container/list"
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -28,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -45,7 +44,6 @@ const (
 )
 
 var (
-	historyKeepTime    = 5 * time.Minute
 	slowNotifyInterval = 5 * time.Second
 	fastNotifyInterval = 2 * time.Second
 	// PushOperatorTickInterval is the interval try to push the operator.
@@ -58,13 +56,12 @@ var (
 
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	ctx             context.Context
 	cluster         Cluster
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
-	histories       *list.List
 	counts          map[operator.OpKind]uint64
 	opRecords       *OperatorRecords
 	wop             WaitingOperator
@@ -79,7 +76,6 @@ func NewOperatorController(ctx context.Context, cluster Cluster, hbStreams *hbst
 		cluster:         cluster,
 		operators:       make(map[uint64]*operator.Operator),
 		hbStreams:       hbStreams,
-		histories:       list.New(),
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		counts:          make(map[operator.OpKind]uint64),
 		opRecords:       NewOperatorRecords(ctx),
@@ -106,15 +102,14 @@ func (oc *OperatorController) GetCluster() Cluster {
 func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 	// Check existed operator.
 	if op := oc.GetOperator(region.GetID()); op != nil {
-		failpoint.Inject("concurrentRemoveOperator", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("concurrentRemoveOperator")); _err_ == nil {
 			time.Sleep(500 * time.Millisecond)
-		})
+		}
 
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
 		step := op.Check(region)
-
 		switch op.Status() {
 		case operator.STARTED:
 			operatorCounter.WithLabelValues(op.Desc(), "check").Inc()
@@ -123,7 +118,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
-			oc.pushHistory(op)
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -146,9 +140,9 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 					zap.String("status", operator.OpStatusToString(op.Status())),
 					zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
 				operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
-				failpoint.Inject("unexpectedOperator", func() {
+				if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
 					panic(op)
-				})
+				}
 				_ = op.Cancel()
 				oc.buryOperator(op)
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-unexpected").Inc()
@@ -263,6 +257,7 @@ func (oc *OperatorController) PushOperators() {
 func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
 	added := 0
+	needPromoted := 0
 
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
@@ -288,12 +283,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
+				i++
+				next := ops[i]
 				_ = next.Cancel()
 				oc.buryOperator(next)
 			}
-			oc.Unlock()
-			return added
+			continue
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -306,11 +301,14 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
+		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
+	for i := 0; i < needPromoted; i++ {
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 
@@ -404,9 +402,9 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", operator.OpStatusToString(op.Status())),
 				zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-			failpoint.Inject("unexpectedOperator", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
 				panic(op)
-			})
+			}
 			operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false
 		}
@@ -451,9 +449,9 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			zap.Uint64("region-id", regionID),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-		failpoint.Inject("unexpectedOperator", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
 			panic(op)
-		})
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		return false
 	}
@@ -539,9 +537,9 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", operator.OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-		failpoint.Inject("unexpectedOperator", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
 			panic(op)
-		})
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		_ = op.Cancel()
 	}
@@ -727,43 +725,34 @@ func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 	}
 }
 
-func (oc *OperatorController) pushHistory(op *operator.Operator) {
-	oc.Lock()
-	defer oc.Unlock()
-	for _, h := range op.History() {
-		oc.histories.PushFront(h)
-	}
-}
-
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 	oc.fastOperators.Put(op.RegionID(), op)
 }
 
-// PruneHistory prunes a part of operators' history.
-func (oc *OperatorController) PruneHistory() {
-	oc.Lock()
-	defer oc.Unlock()
-	p := oc.histories.Back()
-	for p != nil && time.Since(p.Value.(operator.OpHistory).FinishTime) > historyKeepTime {
-		prev := p.Prev()
-		oc.histories.Remove(p)
-		p = prev
+// GetRecords gets operators' records.
+func (oc *OperatorController) GetRecords(from time.Time) []*operator.OpRecord {
+	records := make([]*operator.OpRecord, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(from) {
+			continue
+		}
+		records = append(records, op.Record(op.FinishTime))
 	}
+	return records
 }
 
 // GetHistory gets operators' history.
 func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
-	oc.RLock()
-	defer oc.RUnlock()
-	histories := make([]operator.OpHistory, 0, oc.histories.Len())
-	for p := oc.histories.Front(); p != nil; p = p.Next() {
-		history := p.Value.(operator.OpHistory)
-		if history.FinishTime.Before(start) {
-			break
+	history := make([]operator.OpHistory, 0, oc.opRecords.ttl.Len())
+	for _, id := range oc.opRecords.ttl.GetAllID() {
+		op := oc.opRecords.Get(id)
+		if op == nil || op.FinishTime.Before(start) {
+			continue
 		}
-		histories = append(histories, history)
+		history = append(history, op.History()...)
 	}
-	return histories
+	return history
 }
 
 // updateCounts updates resource counts using current pending operators.
@@ -847,21 +836,23 @@ func (oc *OperatorController) SetOperator(op *operator.Operator) {
 
 // OperatorWithStatus records the operator and its status.
 type OperatorWithStatus struct {
-	Op     *operator.Operator
-	Status pdpb.OperatorStatus
+	*operator.Operator
+	Status     pdpb.OperatorStatus
+	FinishTime time.Time
 }
 
 // NewOperatorWithStatus creates an OperatorStatus from an operator.
 func NewOperatorWithStatus(op *operator.Operator) *OperatorWithStatus {
 	return &OperatorWithStatus{
-		Op:     op,
-		Status: operator.OpStatusToPDPB(op.Status()),
+		Operator:   op,
+		Status:     operator.OpStatusToPDPB(op.Status()),
+		FinishTime: time.Now(),
 	}
 }
 
 // MarshalJSON returns the status of operator as a JSON string
 func (o *OperatorWithStatus) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Op.String()) + `"`), nil
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Operator.String()) + `"`), nil
 }
 
 // OperatorRecords remains the operator and its status for a while.

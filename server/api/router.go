@@ -150,6 +150,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "GetOperators", "/operators", operatorHandler.List, setMethods("GET"))
 	registerFunc(apiRouter, "SetOperators", "/operators", operatorHandler.Post, setMethods("POST"))
+	registerFunc(apiRouter, "GetOperatorRecords", "/operators/records", operatorHandler.Records, setMethods("GET"))
 	registerFunc(apiRouter, "GetRegionOperator", "/operators/{region_id}", operatorHandler.Get, setMethods("GET"))
 	registerFunc(apiRouter, "DeleteRegionOperator", "/operators/{region_id}", operatorHandler.Delete, setMethods("DELETE"))
 
@@ -366,13 +367,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		unsafeOperationHandler.GetFailedStoresRemovalHistory, setMethods("GET"))
 
 	// API to set or unset failpoints
-	failpoint.Inject("enableFailpointAPI", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("enableFailpointAPI")); _err_ == nil {
 		registerPrefix(apiRouter, "failpoint", "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
 		}), setAudit("test"))
-	})
+	}
 
 	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")

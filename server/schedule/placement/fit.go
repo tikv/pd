@@ -17,9 +17,9 @@ package placement
 import (
 	"math"
 	"sort"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -28,7 +28,7 @@ import (
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
 	mu struct {
-		sync.RWMutex
+		deadlock.RWMutex
 		cached bool
 	}
 	RuleFits     []*RuleFit

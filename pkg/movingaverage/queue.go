@@ -15,14 +15,13 @@
 package movingaverage
 
 import (
-	"sync"
-
 	"github.com/phf/go-queue/queue"
+	"github.com/sasha-s/go-deadlock"
 )
 
 // SafeQueue is a concurrency safe queue
 type SafeQueue struct {
-	mu  sync.Mutex
+	mu  deadlock.Mutex
 	que *queue.Queue
 }
 

@@ -16,10 +16,10 @@ package simulator
 
 import (
 	"context"
-	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -28,7 +28,7 @@ import (
 
 // RaftEngine records all raft information.
 type RaftEngine struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
 	regionChange      map[uint64][]uint64

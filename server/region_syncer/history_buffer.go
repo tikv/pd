@@ -16,9 +16,9 @@ package syncer
 
 import (
 	"strconv"
-	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage/kv"
@@ -31,7 +31,7 @@ const (
 )
 
 type historyBuffer struct {
-	sync.RWMutex
+	deadlock.RWMutex
 	index      uint64
 	records    []*core.RegionInfo
 	head       int

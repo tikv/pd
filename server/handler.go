@@ -22,13 +22,13 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
@@ -80,11 +80,11 @@ type Handler struct {
 	s               *Server
 	opt             *config.PersistOptions
 	pluginChMap     map[string]chan string
-	pluginChMapLock sync.RWMutex
+	pluginChMapLock deadlock.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
+	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: deadlock.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -455,6 +455,19 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 		return nil, err
 	}
 	return c.GetHistory(start), nil
+}
+
+// GetRecords returns finished operators since start.
+func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	records := c.GetRecords(from)
+	if len(records) == 0 {
+		return nil, ErrOperatorNotFound
+	}
+	return records, nil
 }
 
 // SetAllStoresLimit is used to set limit of all stores.

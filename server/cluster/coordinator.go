@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
@@ -57,7 +58,7 @@ const (
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
-	sync.RWMutex
+	deadlock.RWMutex
 
 	wg              sync.WaitGroup
 	ctx             context.Context
@@ -158,9 +159,9 @@ func (c *coordinator) patrolRegions() {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
-		failpoint.Inject("break-patrol", func() {
-			failpoint.Break()
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("break-patrol")); _err_ == nil {
+			break
+		}
 	}
 }
 
