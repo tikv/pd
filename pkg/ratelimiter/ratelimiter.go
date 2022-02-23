@@ -79,7 +79,7 @@ func (l *RateLimiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst
 }
 
 // GetConcurrencyLimiterStatus returns the status of a given label's concurrency limiter.
-func (l *RateLimiter) GetConcurrencyLimiterStatus(label string) (uint64, uint64) {
+func (l *RateLimiter) GetConcurrencyLimiterStatus(label string) (limit uint64, current uint64) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
 		return limiter.(*concurrencyLimiter).getLimit(), limiter.(*concurrencyLimiter).getCurrent()
 	}

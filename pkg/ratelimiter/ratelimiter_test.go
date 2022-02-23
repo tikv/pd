@@ -121,7 +121,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 
 func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	c.Parallel()
-	opts := []Option{UpdateQPSLimiter(100, 100)}
+	opts := []Option{UpdateQPSLimiter(rate.Every(3*time.Second), 100)}
 	limiter := NewLimiter()
 
 	label := "test"
@@ -138,6 +138,13 @@ func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	c.Assert(*failedCount+*successCount, Equals, 200)
 	c.Assert(*failedCount, Equals, 100)
 	c.Assert(*successCount, Equals, 100)
+
+	time.Sleep(4 * time.Second) // 3+1
+	wg.Add(1)
+	CountRateLimiterHandleResult(limiter, label, successCount, failedCount, lock, wg)
+	wg.Wait()
+	c.Assert(*successCount, Equals, 101)
+
 }
 
 func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
