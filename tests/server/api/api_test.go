@@ -299,7 +299,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRateLimitMiddleware"), IsNil)
 }
 
-func (s *testMiddlewareSuite) TestRateLimiterDontAllowRequset(c *C) {
+func (s *testMiddlewareSuite) TestRateLimiterNotAllowRequset(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/pkg/ratelimiter/dontAllowRatelimiter", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
