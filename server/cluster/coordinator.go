@@ -145,7 +145,7 @@ func (c *coordinator) patrolRegions() {
 			}
 
 			if !c.opController.ExceedStoreLimit(ops...) {
-				c.opController.AddWaitingOperator(ops...)
+				c.opController.AddWaitingOperatorFromCoordinator(ops...)
 				c.checkers.RemoveWaitingRegion(region.GetID())
 				c.checkers.RemoveSuspectRegion(region.GetID())
 			} else {
@@ -181,7 +181,7 @@ func (c *coordinator) checkPriorityRegions() {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
+			c.opController.AddWaitingOperatorFromCoordinator(ops...)
 		}
 	}
 	for _, v := range removes {
@@ -206,7 +206,7 @@ func (c *coordinator) checkSuspectRegions() {
 		}
 
 		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
+			c.opController.AddWaitingOperatorFromCoordinator(ops...)
 			c.checkers.RemoveSuspectRegion(region.GetID())
 		}
 	}
@@ -271,7 +271,7 @@ func (c *coordinator) checkWaitingRegions() {
 		}
 
 		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
+			c.opController.AddWaitingOperatorFromCoordinator(ops...)
 			c.checkers.RemoveWaitingRegion(region.GetID())
 		}
 	}
@@ -773,7 +773,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 				continue
 			}
 			if op := s.Schedule(); len(op) > 0 {
-				added := c.opController.AddWaitingOperator(op...)
+				added := c.opController.AddWaitingOperatorFromCoordinator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 
