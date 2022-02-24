@@ -70,7 +70,9 @@ type Backend interface {
 }
 
 // PrometheusHistogramBackend is an implementation of audit.Backend
-// and it uses Prometheus histogram data type to implement audit
+// and it uses Prometheus histogram data type to implement audit.
+// Note: histogram.WithLabelValues will degrade performance.
+// Please don't use it in the hot path.
 type PrometheusHistogramBackend struct {
 	*LabelMatcher
 	*Sequence
