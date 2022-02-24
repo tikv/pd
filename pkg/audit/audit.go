@@ -16,6 +16,15 @@ package audit
 
 import (
 	"net/http"
+
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/requestutil"
+	"go.uber.org/zap"
+)
+
+const (
+	// LocalLogLabel is label name of LocalLogBackend
+	LocalLogLabel = "local-log"
 )
 
 // BackendLabels is used to store some audit backend labels.
@@ -43,7 +52,7 @@ type Sequence struct {
 	before bool
 }
 
-// ProcessBeforeHandler is used to help backend implement audit.Backend
+// ProcessBeforeHandler is used to identify whether this backend should execute before handler
 func (s *Sequence) ProcessBeforeHandler() bool {
 	return s.before
 }
@@ -54,6 +63,30 @@ type Backend interface {
 	ProcessHTTPRequest(req *http.Request) bool
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
-	// ProcessBeforeHandler is used to identify whether this backend should execute before handler
 	ProcessBeforeHandler() bool
+}
+
+// LocalLogBackend is an implementation of audit.Backend
+// and it uses `github.com/pingcap/log` to implement audit
+type LocalLogBackend struct {
+	*LabelMatcher
+	*Sequence
+}
+
+// NewLocalLogBackend returns a LocalLogBackend
+func NewLocalLogBackend(before bool) Backend {
+	return &LocalLogBackend{
+		LabelMatcher: &LabelMatcher{backendLabel: LocalLogLabel},
+		Sequence:     &Sequence{before: before},
+	}
+}
+
+// ProcessHTTPRequest is used to implement audit.Backend
+func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		return false
+	}
+	log.Info("Audit Log", zap.String("service-info", requestInfo.String()))
+	return true
 }

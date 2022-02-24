@@ -21,6 +21,7 @@ import (
 	"github.com/unrolled/render"
 )
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type version struct {
 	Version   string `json:"version"`
 	BuildTime string `json:"build_time"`

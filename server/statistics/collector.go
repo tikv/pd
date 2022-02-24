@@ -37,12 +37,12 @@ func (c tikvCollector) Engine() string {
 }
 
 func (c tikvCollector) Filter(info *StoreSummaryInfo, kind core.ResourceKind) bool {
-	if info.IsTiFlash {
+	if info.IsTiFlash() {
 		return false
 	}
 	switch kind {
 	case core.LeaderKind:
-		return info.Store.AllowLeaderTransfer()
+		return info.AllowLeaderTransfer()
 	case core.RegionKind:
 		return true
 	}
@@ -92,7 +92,7 @@ func (c tiflashCollector) Filter(info *StoreSummaryInfo, kind core.ResourceKind)
 	case core.LeaderKind:
 		return false
 	case core.RegionKind:
-		return info.IsTiFlash
+		return info.IsTiFlash()
 	}
 	return false
 }

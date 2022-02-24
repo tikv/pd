@@ -36,6 +36,12 @@ type RequestInfo struct {
 	StartTimeStamp int64
 }
 
+func (info *RequestInfo) String() string {
+	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, Component:%s, IP:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
+		info.ServiceLabel, info.Method, info.Component, info.IP, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+	return s
+}
+
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
