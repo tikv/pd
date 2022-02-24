@@ -48,6 +48,7 @@ import (
 )
 
 // Config is the pd server configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Config struct {
 	flagSet *flag.FlagSet
 
@@ -162,6 +163,8 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+
+	EnableAuditMiddleware bool
 }
 
 // NewConfig creates a new config.
@@ -621,6 +624,7 @@ func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 }
 
 // ScheduleConfig is the schedule configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ScheduleConfig struct {
 	// If the snapshot count of one store is greater than this value,
 	// it will never be used as a source or target store.
@@ -1005,6 +1009,7 @@ func IsDefaultScheduler(typ string) bool {
 }
 
 // ReplicationConfig is the replication configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationConfig struct {
 	// MaxReplicas is the number of replicas for each region.
 	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
@@ -1076,6 +1081,7 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 }
 
 // PDServerConfig is the configuration for pd server.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
 	// UseRegionStorage enables the independent region storage.
 	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
@@ -1183,6 +1189,7 @@ type StoreLabel struct {
 const RejectLeader = "reject-leader"
 
 // LabelPropertyConfig is the config section to set properties to store labels.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelPropertyConfig map[string][]StoreLabel
 
 // Clone returns a cloned label property configuration.
@@ -1324,6 +1331,7 @@ func (c *DashboardConfig) adjust(meta *configMetaData) {
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationModeConfig struct {
 	ReplicationMode string                      `toml:"replication-mode" json:"replication-mode"` // can be 'dr-auto-sync' or 'majority', default value is 'majority'
 	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'

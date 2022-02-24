@@ -29,10 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -105,16 +103,13 @@ type RaftCluster struct {
 	id      id.Allocator
 	limiter *StoreLimiter
 
-	prepareChecker *prepareChecker
 	changedRegions chan *core.RegionInfo
 
 	labelLevelStats *statistics.LabelStatistics
 	regionStats     *statistics.RegionStatistics
 	hotStat         *statistics.HotStat
 
-	coordinator      *coordinator
-	suspectRegions   *cache.TTLUint64 // suspectRegions are regions that may need fix
-	suspectKeyRanges *cache.TTLString // suspect key-range regions that may need fix
+	coordinator *coordinator
 
 	regionSyncer *syncer.RegionSyncer
 
@@ -124,12 +119,12 @@ type RaftCluster struct {
 	httpClient    *http.Client
 
 	replicationMode *replication.ModeManager
-	traceRegionFlow bool
 
 	unsafeRecoveryController *unsafeRecoveryController
 }
 
 // Status saves some state information.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
@@ -210,11 +205,7 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
-	c.prepareChecker = newPrepareChecker()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.suspectRegions = cache.NewIDTTL(c.ctx, time.Minute, 3*time.Minute)
-	c.suspectKeyRanges = cache.NewStringTTL(c.ctx, time.Minute, 3*time.Minute)
-	c.traceRegionFlow = opt.GetPDServerConfig().TraceRegionFlow
 }
 
 // Start starts a cluster.
@@ -327,7 +318,6 @@ func (c *RaftCluster) runBackgroundJobs(interval time.Duration) {
 		case <-ticker.C:
 			c.checkStores()
 			c.collectMetrics()
-			c.coordinator.opController.PruneHistory()
 		}
 	}
 }
@@ -484,31 +474,24 @@ func (c *RaftCluster) SetStorage(s storage.Storage) {
 }
 
 // GetOpts returns cluster's configuration.
+// There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() *config.PersistOptions {
 	return c.opt
 }
 
 // AddSuspectRegions adds regions to suspect list.
 func (c *RaftCluster) AddSuspectRegions(regionIDs ...uint64) {
-	c.Lock()
-	defer c.Unlock()
-	for _, regionID := range regionIDs {
-		c.suspectRegions.Put(regionID, nil)
-	}
+	c.coordinator.checkers.AddSuspectRegions(regionIDs...)
 }
 
 // GetSuspectRegions gets all suspect regions.
 func (c *RaftCluster) GetSuspectRegions() []uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	return c.suspectRegions.GetAllID()
+	return c.coordinator.checkers.GetSuspectRegions()
 }
 
 // RemoveSuspectRegion removes region from suspect list.
 func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectRegions.Remove(id)
+	c.coordinator.checkers.RemoveSuspectRegion(id)
 }
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
@@ -520,33 +503,19 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
 func (c *RaftCluster) AddSuspectKeyRange(start, end []byte) {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectKeyRanges.Put(keyutil.BuildKeyRangeKey(start, end), [2][]byte{start, end})
+	c.coordinator.checkers.AddSuspectKeyRange(start, end)
 }
 
 // PopOneSuspectKeyRange gets one suspect keyRange group.
 // it would return value and true if pop success, or return empty [][2][]byte and false
 // if suspectKeyRanges couldn't pop keyRange group.
 func (c *RaftCluster) PopOneSuspectKeyRange() ([2][]byte, bool) {
-	c.Lock()
-	defer c.Unlock()
-	_, value, success := c.suspectKeyRanges.Pop()
-	if !success {
-		return [2][]byte{}, false
-	}
-	v, ok := value.([2][]byte)
-	if !ok {
-		return [2][]byte{}, false
-	}
-	return v, true
+	return c.coordinator.checkers.PopOneSuspectKeyRange()
 }
 
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
 func (c *RaftCluster) ClearSuspectKeyRanges() {
-	c.Lock()
-	defer c.Unlock()
-	c.suspectKeyRanges.Clear()
+	c.coordinator.checkers.ClearSuspectKeyRanges()
 }
 
 // HandleStoreHeartbeat updates the store status.
@@ -695,7 +664,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if isNew {
-		c.prepareChecker.collect(region)
+		c.coordinator.prepareChecker.collect(region)
 	}
 
 	if c.regionStats != nil {
@@ -873,11 +842,7 @@ func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
 
 // DropCacheRegion removes a region from the cache.
 func (c *RaftCluster) DropCacheRegion(id uint64) {
-	c.RLock()
-	defer c.RUnlock()
-	if region := c.GetRegion(id); region != nil {
-		c.core.RemoveRegion(region)
-	}
+	c.core.RemoveRegionIfExist(id)
 }
 
 // GetCacheCluster gets the cached cluster.
@@ -904,10 +869,7 @@ func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
-	c.RLock()
-	hotStat := c.hotStat
-	c.RUnlock()
-	return hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
+	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
 // GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
@@ -1468,17 +1430,8 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	return c.coordinator.checkers.GetMergeChecker()
 }
 
-// isPrepared if the cluster information is collected
-func (c *RaftCluster) isPrepared() bool {
-	c.RLock()
-	defer c.RUnlock()
-	return c.prepareChecker.check(c)
-}
-
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
-	c.RLock()
-	defer c.RUnlock()
 	return c.hotStat.GetStoresLoads()
 }
 
@@ -1527,57 +1480,10 @@ func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler
 }
 
-type prepareChecker struct {
-	reactiveRegions map[uint64]int
-	start           time.Time
-	sum             int
-	isPrepared      bool
-}
-
-func newPrepareChecker() *prepareChecker {
-	return &prepareChecker{
-		start:           time.Now(),
-		reactiveRegions: make(map[uint64]int),
-	}
-}
-
-// Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *RaftCluster) bool {
-	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
-		return true
-	}
-	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.core.GetRegionCount())*collectFactor > float64(checker.sum) {
-		return false
-	}
-	for _, store := range c.GetStores() {
-		if !store.IsUp() {
-			continue
-		}
-		storeID := store.GetID()
-		// For each store, the number of active regions should be more than total region of the store * collectFactor
-		if float64(c.core.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
-			return false
-		}
-	}
-	checker.isPrepared = true
-	return true
-}
-
-func (checker *prepareChecker) collect(region *core.RegionInfo) {
-	for _, p := range region.GetPeers() {
-		checker.reactiveRegions[p.GetStoreId()]++
-	}
-	checker.sum++
-}
-
 // GetHotWriteRegions gets hot write regions' info.
 func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	c.RLock()
-	co := c.coordinator
-	c.RUnlock()
-	hotWriteRegions := co.getHotWriteRegions()
-	if len(storeIDs) > 0 {
+	hotWriteRegions := c.coordinator.getHotRegionsByType(statistics.Write)
+	if len(storeIDs) > 0 && hotWriteRegions != nil {
 		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
 	}
 	return hotWriteRegions
@@ -1585,11 +1491,8 @@ func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHo
 
 // GetHotReadRegions gets hot read regions' info.
 func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	c.RLock()
-	co := c.coordinator
-	c.RUnlock()
-	hotReadRegions := co.getHotReadRegions()
-	if len(storeIDs) > 0 {
+	hotReadRegions := c.coordinator.getHotRegionsByType(statistics.Read)
+	if len(storeIDs) > 0 && hotReadRegions != nil {
 		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
 	}
 	return hotReadRegions

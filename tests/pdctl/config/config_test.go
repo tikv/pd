@@ -583,6 +583,11 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	c.Assert(err, IsNil)
 	conf.DRAutoSync.PrimaryReplicas = 5
 	check()
+
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "wait-store-timeout", "10m")
+	c.Assert(err, IsNil)
+	conf.DRAutoSync.WaitStoreTimeout = typeutil.NewDuration(time.Minute * 10)
+	check()
 }
 
 func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {

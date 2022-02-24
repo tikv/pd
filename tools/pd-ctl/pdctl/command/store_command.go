@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/server/api"
 )
 
 var (
@@ -243,18 +244,54 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 	}
 }
 
+func convertToStoreInfo(content string) string {
+	store := &api.StoreInfo{}
+	err := json.Unmarshal([]byte(content), store)
+	if err != nil {
+		return content
+	}
+	// In StoreInfo, users only need to pay attention to StateName.
+	// and State will be omitted when its value equals 0 from kvproto metapb
+	store.Store.State = 0
+	byteArr, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return content
+	}
+	return string(byteArr)
+}
+
+func convertToStoresInfo(content string) string {
+	stores := &api.StoresInfo{}
+	err := json.Unmarshal([]byte(content), stores)
+	if err != nil {
+		return content
+	}
+	// In StoreInfo, users only need to pay attention to StateName.
+	// and State will be omitted when its value equals 0 from kvproto metapb
+	for _, store := range stores.Stores {
+		store.Store.State = 0
+	}
+	byteArr, err := json.MarshalIndent(stores, "", "  ")
+	if err != nil {
+		return content
+	}
+	return string(byteArr)
+}
+
 func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := storesPrefix
 	if len(args) > 1 {
 		cmd.Usage()
 		return
 	}
+	cFunc := convertToStoresInfo
 	if len(args) == 1 {
 		if _, err := strconv.Atoi(args[0]); err != nil {
 			cmd.Println("store_id should be a number")
 			return
 		}
 		prefix = fmt.Sprintf(storePrefix, args[0])
+		cFunc = convertToStoreInfo
 	} else {
 		flags := cmd.Flags()
 		states, err := flags.GetStringSlice("state")
@@ -279,6 +316,7 @@ func showStoreCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
 	}
+	r = cFunc(r)
 	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
 		printWithJQFilter(r, flag.Value.String())
 		return

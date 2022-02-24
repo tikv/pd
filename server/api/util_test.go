@@ -41,6 +41,7 @@ func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
 	c.Assert(input["zone"], Equals, output["zone"])
 	c.Assert(input["host"], Equals, output["host"])
 	result := response.Result()
+	defer result.Body.Close()
 	c.Assert(result.StatusCode, Equals, 200)
 }
 
@@ -55,6 +56,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 	c.Assert(err, NotNil)
 	c.Assert(err.Error(), Equals, "json: cannot unmarshal object into Go value of type []string")
 	result := response.Result()
+	defer result.Body.Close()
 	c.Assert(result.StatusCode, Equals, 400)
 
 	{
@@ -64,6 +66,7 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 		c.Assert(err, NotNil)
 		c.Assert(err.Error(), Equals, "unexpected end of JSON input")
 		result := response.Result()
+		defer result.Body.Close()
 		c.Assert(result.StatusCode, Equals, 400)
 	}
 }

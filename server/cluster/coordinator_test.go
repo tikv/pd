@@ -189,9 +189,9 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, c)
 	defer cleanup()
-
+	co.prepareChecker.isPrepared = true
 	// Transfer peer from store 4 to store 1.
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addRegionStore(3, 30), IsNil)
@@ -535,6 +535,7 @@ func (s *testCoordinatorSuite) TestPeerState(c *C) {
 
 func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 5), IsNil)
@@ -574,11 +575,12 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 7)
+	c.Assert(co.prepareChecker.sum, Equals, 7)
 }
 
 func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
 	c.Assert(tc.addLeaderStore(1, 10), IsNil)
@@ -613,7 +615,7 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	nr := &metapb.Region{Id: 8, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 8)
+	c.Assert(co.prepareChecker.sum, Equals, 8)
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	c.Assert(tc.GetRegion(9).GetLeader().GetStoreId(), Equals, uint64(0))
@@ -831,11 +833,9 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	c.Assert(tc.addRegionStore(3, 3), IsNil)
 	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
 	region := tc.GetRegion(1)
-	tc.prepareChecker.collect(region)
+	co.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
-	co.run()
 	stream := mockhbstream.NewHeartbeatStream()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 2)
@@ -846,6 +846,7 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 
 	// Recreate coordinator then add another replica on store 3.
 	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co.prepareChecker.collect(region)
 	co.run()
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	region = waitAddLearner(c, stream, region, 3)
@@ -893,7 +894,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 }
 
 func waitOperator(c *C, co *coordinator, regionID uint64) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		return co.opController.GetOperator(regionID) != nil
 	})
 }
@@ -1205,7 +1206,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 
 func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
@@ -1221,7 +1222,7 @@ func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 
 func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
@@ -1238,7 +1239,7 @@ func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.
 
 func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
@@ -1254,7 +1255,7 @@ func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 
 func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		if res = stream.Recv(); res != nil {
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
@@ -1272,7 +1273,7 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 }
 
 func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
-	testutil.WaitUntil(c, func(c *C) bool {
+	testutil.WaitUntil(c, func() bool {
 		res := stream.Recv()
 		return res == nil
 	})
