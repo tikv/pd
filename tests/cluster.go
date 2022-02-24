@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/ratelimiter"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -154,6 +155,13 @@ func (s *TestServer) GetConfig() *config.Config {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetConfig()
+}
+
+// SetRateLimiter sets the current TestServer's RateLimiter.
+func (s *TestServer) SetRateLimiter(limiter *ratelimiter.RateLimiter) {
+	s.RLock()
+	defer s.RUnlock()
+	s.server.SetServiceRateLimiter(limiter)
 }
 
 // GetPersistOptions returns the current TestServer's schedule option.

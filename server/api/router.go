@@ -22,6 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/ratelimiter"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -68,7 +69,7 @@ func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 		handler: negroni.New(
 			newRequestInfoMiddleware(s),
 			newAuditMiddleware(s),
-			// todo: add rate limit middleware
+			newRateLimitMiddleware(s),
 		),
 	}
 }
@@ -128,11 +129,26 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rd := createIndentRender()
 	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.SetServiceAuditBackendForHTTP(route, labels...)
+			if len(route.GetName()) == 0 {
+				return
+			}
+			if len(labels) > 0 {
+				svr.SetServiceAuditBackendLabels(route.GetName(), labels)
+			}
 		}
 	}
-
 	localLog := audit.LocalLogLabel
+
+	setRateLimit := func(opts ...ratelimiter.Option) createRouteOption {
+		return func(route *mux.Route) {
+			if len(route.GetName()) == 0 {
+				return
+			}
+			if len(opts) > 0 {
+				svr.UpdateServiceRateLimiter(route.GetName(), opts...)
+			}
+		}
+	}
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -146,6 +162,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 
 	serviceBuilder := newServiceMiddlewareBuilder(svr)
+	failpoint.Inject("disableRequestInfoMiddleware", func() {
+		serviceBuilder = &serviceMiddlewareBuilder{
+			svr: svr,
+			handler: negroni.New(
+				newAuditMiddleware(svr),
+				newRateLimitMiddleware(svr),
+			),
+		}
+	})
 	register := serviceBuilder.registerRouteHandler
 	registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
 	registerFunc := serviceBuilder.registerRouteHandleFunc
@@ -306,11 +331,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"))
 
 	adminHandler := newAdminHandler(svr, rd)
+
 	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "ResetTS", "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SavePersistFile", "/admin/persist-file/{file_name}", adminHandler.persistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "SwitchRateLimitMiddleware", "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAuditBackend(localLog))
@@ -366,7 +393,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"))
+		}), setAuditBackend("test"), setRateLimit(func(label string, l *ratelimiter.RateLimiter) {}))
+
+		registerPrefix(apiRouter, "", "/routeName", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		}), setAuditBackend("test"), setRateLimit())
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
