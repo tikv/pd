@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/ratelimiter"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
@@ -227,45 +228,7 @@ func doTestRequest(srv *tests.TestServer) {
 	resp.Body.Close()
 }
 
-func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
-	leader := s.cluster.GetServer(s.cluster.GetLeader())
-
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
-	resp, err := dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
-
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "")
-
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
-}
-
 func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRateLimitMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
 	resp, err := dialClient.Do(req)
@@ -280,33 +243,8 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	resp.Body.Close()
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("rate-limit"), Equals, "rate-limit")
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=false", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, false)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("rate-limit"), Equals, "")
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRateLimitMiddleware"), IsNil)
-}
-
-func (s *testMiddlewareSuite) TestRateLimiterNotAllowRequset(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/pkg/ratelimiter/dontAllowRatelimiter", "return(true)"), IsNil)
-	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
-	resp, err := dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, true)
+	leader.UpdateServiceRateLimiter("failpoint", ratelimiter.UpdateConcurrencyLimiter(0))
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -316,59 +254,11 @@ func (s *testMiddlewareSuite) TestRateLimiterNotAllowRequset(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusTooManyRequests)
 
-	leader.SetRateLimiter(nil)
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=false", nil)
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, false)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/pkg/ratelimiter/dontAllowRatelimiter"), IsNil)
-}
-
-func (s *testMiddlewareSuite) TestNoRequsetInfo(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRateLimitMiddleware", "return(true)"), IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/disableRequestInfoMiddleware", "return(true)"), IsNil)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
-	c.Assert(cluster.RunInitialServers(), IsNil)
-	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
-	defer cancel()
-	defer cluster.Destroy()
-
-	leader := cluster.GetServer(cluster.GetLeader())
-
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
-	resp, err := dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "")
-
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -378,10 +268,6 @@ func (s *testMiddlewareSuite) TestNoRequsetInfo(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(resp.Header.Get("rate-limit"), Equals, "")
-
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addRateLimitMiddleware"), IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/disableRequestInfoMiddleware"), IsNil)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
@@ -407,6 +293,58 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, true)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+
+	os.Remove(tempStdoutFile.Name())
+}
+
+func (s *testMiddlewareSuite) TestNoRouteName(c *C) {
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	cfg := &log.Config{}
+	cfg.File.Filename = tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, true)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/routeName", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	b, _ := os.ReadFile(tempStdoutFile.Name())
+	// audit is useless
+	c.Assert(strings.Contains(string(b), "Audit Log"), Equals, false)
+	c.Assert(err, IsNil)
+	// limiter is useless
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, false)
 
 	os.Remove(tempStdoutFile.Name())
 }

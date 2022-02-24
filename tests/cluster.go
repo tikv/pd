@@ -157,11 +157,9 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
-// SetRateLimiter sets the current TestServer's RateLimiter.
-func (s *TestServer) SetRateLimiter(limiter *ratelimiter.RateLimiter) {
-	s.RLock()
-	defer s.RUnlock()
-	s.server.SetServiceRateLimiter(limiter)
+// UpdateServiceRateLimiter is used to update RateLimiter
+func (s *TestServer) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {
+	s.server.UpdateServiceRateLimiter(serviceLabel, opts...)
 }
 
 // GetPersistOptions returns the current TestServer's schedule option.
