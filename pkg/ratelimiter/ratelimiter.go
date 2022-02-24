@@ -20,7 +20,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// RateLimiter is a controller for the request rate.
+// RateLimiter is a controller for the request rate for different services.
 type RateLimiter struct {
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map

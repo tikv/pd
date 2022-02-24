@@ -162,15 +162,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 
 	serviceBuilder := newServiceMiddlewareBuilder(svr)
-	failpoint.Inject("disableRequestInfoMiddleware", func() {
-		serviceBuilder = &serviceMiddlewareBuilder{
-			svr: svr,
-			handler: negroni.New(
-				newAuditMiddleware(svr),
-				newRateLimitMiddleware(svr),
-			),
-		}
-	})
 	register := serviceBuilder.registerRouteHandler
 	registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
 	registerFunc := serviceBuilder.registerRouteHandleFunc
@@ -393,10 +384,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"), setRateLimit(func(label string, l *ratelimiter.RateLimiter) {}))
+		}), setAuditBackend("test"), setRateLimit(ratelimiter.UpdateQPSLimiter(10000, 10000)))
 
 		registerPrefix(apiRouter, "", "/routeName", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		}), setAuditBackend("test"), setRateLimit())
+		}), setAuditBackend(localLog), setRateLimit(ratelimiter.UpdateConcurrencyLimiter(0)))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.

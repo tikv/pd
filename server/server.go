@@ -254,7 +254,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewLocalLogBackend(true),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = ratelimiter.NewRateLimiter()
+	s.serviceRateLimiter = ratelimiter.NewLimiter()
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -1141,11 +1141,6 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 // GetServiceRateLimiter is used to get rate limiter
 func (s *Server) GetServiceRateLimiter() *ratelimiter.RateLimiter {
 	return s.serviceRateLimiter
-}
-
-// SetServiceRateLimiter is used to get rate limiter
-func (s *Server) SetServiceRateLimiter(limiter *ratelimiter.RateLimiter) {
-	s.serviceRateLimiter = limiter
 }
 
 // UpdateServiceRateLimiter is used to update RateLimiter

@@ -17,11 +17,9 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
@@ -105,22 +103,11 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 		next(w, r)
 		return
 	}
-	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
-	if !ok {
-		log.Error("failed to get request info when ratelimit")
-		next(w, r)
-		return
-	}
+	// There is no need to check whether requestInfo is available like getting RaftCluster
+	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
 
-	failpoint.Inject("addRateLimitMiddleware", func() {
-		w.Header().Add("rate-limit", "rate-limit")
-	})
-
+	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
 	rateLimiter := s.svr.GetServiceRateLimiter()
-	if rateLimiter == nil {
-		next(w, r)
-		return
-	}
 	if rateLimiter.Allow(requestInfo.ServiceLabel) {
 		next(w, r)
 		rateLimiter.Release(requestInfo.ServiceLabel)
@@ -144,22 +131,14 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		return
 	}
 
-	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
-	if !ok {
-		log.Error("failed to get request info when auditing")
-		next(w, r)
-		return
-	}
+	// There is no need to check whether requestInfo is available like getting RaftCluster
+	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
 
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
 	if labels == nil {
 		next(w, r)
 		return
 	}
-
-	failpoint.Inject("addAuditMiddleware", func() {
-		w.Header().Add("audit-label", strings.Join(labels.Labels, ","))
-	})
 
 	beforeNextBackends := make([]audit.Backend, 0)
 	afterNextBackends := make([]audit.Backend, 0)
