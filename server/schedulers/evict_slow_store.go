@@ -76,9 +76,9 @@ type evictSlowStoreSchedulerConfig struct {
 func (conf *evictSlowStoreSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	data, err := schedule.EncodeConfig(conf)
-	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
+	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
-	}
+	})
 	if err != nil {
 		return err
 	}

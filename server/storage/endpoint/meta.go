@@ -173,10 +173,10 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 	// a variable rangeLimit to work around.
 	rangeLimit := MaxKVRangeLimit
 	for {
-		if _, _err_ := failpoint.Eval(_curpkg_("slowLoadRegion")); _err_ == nil {
+		failpoint.Inject("slowLoadRegion", func() {
 			rangeLimit = 1
 			time.Sleep(time.Second)
-		}
+		})
 		startKey := RegionPath(nextID)
 		_, res, err := se.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {

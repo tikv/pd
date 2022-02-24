@@ -353,9 +353,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		},
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
+	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
-	}
+	})
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
@@ -681,7 +681,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 

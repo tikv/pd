@@ -49,14 +49,14 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	requestInfo := requestutil.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
-	if _, _err_ := failpoint.Eval(_curpkg_("addRequestInfoMiddleware")); _err_ == nil {
+	failpoint.Inject("addRequestInfoMiddleware", func() {
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
 		w.Header().Add("component", requestInfo.Component)
 		w.Header().Add("ip", requestInfo.IP)
-	}
+	})
 
 	next(w, r)
 }
@@ -118,9 +118,9 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		return
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("addAuditMiddleware")); _err_ == nil {
+	failpoint.Inject("addAuditMiddleware", func() {
 		w.Header().Add("audit-label", strings.Join(labels.Labels, ","))
-	}
+	})
 
 	beforeNextBackends := make([]audit.Backend, 0)
 	afterNextBackends := make([]audit.Backend, 0)

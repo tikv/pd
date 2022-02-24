@@ -73,15 +73,15 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
-		if _, _err_ := failpoint.Eval(_curpkg_("assertShouldNotCache")); _err_ == nil {
+		failpoint.Inject("assertShouldNotCache", func() {
 			panic("cached shouldn't be used")
-		}
+		})
 		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
 		return nil
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("assertShouldCache")); _err_ == nil {
+	failpoint.Inject("assertShouldCache", func() {
 		panic("cached should be used")
-	}
+	})
 
 	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
 	// invalid the cache if it exists

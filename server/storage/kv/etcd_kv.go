@@ -86,9 +86,9 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 }
 
 func (kv *etcdKVBase) Save(key, value string) error {
-	if _, _err_ := failpoint.Eval(_curpkg_("etcdSaveFailed")); _err_ == nil {
-		return errors.New("save failed")
-	}
+	failpoint.Inject("etcdSaveFailed", func() {
+		failpoint.Return(errors.New("save failed"))
+	})
 	key = path.Join(kv.rootPath, key)
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()

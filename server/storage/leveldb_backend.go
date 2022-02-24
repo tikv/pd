@@ -92,9 +92,9 @@ func (lb *levelDBBackend) backgroundFlush() {
 		case <-ticker.C:
 			lb.mu.RLock()
 			isFlush = lb.flushTime.Before(time.Now())
-			if _, _err_ := failpoint.Eval(_curpkg_("regionStorageFastFlush")); _err_ == nil {
+			failpoint.Inject("regionStorageFastFlush", func() {
 				isFlush = true
-			}
+			})
 			lb.mu.RUnlock()
 			if !isFlush {
 				continue
