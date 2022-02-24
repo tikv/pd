@@ -27,6 +27,7 @@ type statusHandler struct {
 	rd  *render.Render
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type status struct {
 	BuildTS        string `json:"build_ts"`
 	Version        string `json:"version"`

@@ -1414,8 +1414,8 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	return &pdpb.GetOperatorResponse{
 		Header:   s.header(),
 		RegionId: requestID,
-		Desc:     []byte(r.Op.Desc()),
-		Kind:     []byte(r.Op.Kind().String()),
+		Desc:     []byte(r.Desc()),
+		Kind:     []byte(r.Kind().String()),
 		Status:   r.Status,
 	}, nil
 }
