@@ -25,7 +25,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -40,7 +39,7 @@ const (
 // Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
-	deadlock.RWMutex
+	sync.RWMutex
 	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
@@ -51,7 +50,7 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	ioRate                   int64
-	sizeMutex                deadlock.Mutex
+	sizeMutex                sync.Mutex
 }
 
 // NewNode returns a Node.

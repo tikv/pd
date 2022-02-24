@@ -16,13 +16,13 @@ package storage
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -43,7 +43,7 @@ const (
 type levelDBBackend struct {
 	*endpoint.StorageEndpoint
 	ekm                 *encryptionkm.KeyManager
-	mu                  deadlock.RWMutex
+	mu                  sync.RWMutex
 	batchRegions        map[string]*metapb.Region
 	batchSize           int
 	cacheSize           int

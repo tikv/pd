@@ -17,9 +17,9 @@ package schedule
 import (
 	"path/filepath"
 	"plugin"
+	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 )
@@ -27,14 +27,14 @@ import (
 // PluginInterface is used to manage all plugin.
 type PluginInterface struct {
 	pluginMap     map[string]*plugin.Plugin
-	pluginMapLock deadlock.RWMutex
+	pluginMapLock sync.RWMutex
 }
 
 // NewPluginInterface create a plugin interface
 func NewPluginInterface() *PluginInterface {
 	return &PluginInterface{
 		pluginMap:     make(map[string]*plugin.Plugin),
-		pluginMapLock: deadlock.RWMutex{},
+		pluginMapLock: sync.RWMutex{},
 	}
 }
 

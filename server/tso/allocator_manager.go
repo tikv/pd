@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -100,7 +99,7 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 type AllocatorManager struct {
 	enableLocalTSO bool
 	mu             struct {
-		deadlock.RWMutex
+		sync.RWMutex
 		// There are two kinds of TSO Allocators:
 		//   1. Global TSO Allocator, as a global single point to allocate
 		//      TSO for global transactions, such as cross-region cases.
@@ -123,7 +122,7 @@ type AllocatorManager struct {
 	securityConfig         *grpcutil.TLSConfig
 	// for gRPC use
 	localAllocatorConn struct {
-		deadlock.RWMutex
+		sync.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -26,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
@@ -56,7 +56,7 @@ var (
 
 // OperatorController is used to limit the speed of scheduling.
 type OperatorController struct {
-	deadlock.RWMutex
+	sync.RWMutex
 	ctx             context.Context
 	cluster         Cluster
 	operators       map[uint64]*operator.Operator

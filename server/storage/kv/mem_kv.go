@@ -15,14 +15,15 @@
 package kv
 
 import (
+	"sync"
+
 	"github.com/google/btree"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/sasha-s/go-deadlock"
 )
 
 type memoryKV struct {
-	deadlock.RWMutex
+	sync.RWMutex
 	tree *btree.BTree
 }
 

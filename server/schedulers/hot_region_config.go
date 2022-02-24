@@ -21,11 +21,11 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/statistics"
@@ -109,7 +109,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 }
 
 type hotRegionSchedulerConfig struct {
-	deadlock.RWMutex
+	sync.RWMutex
 	storage            endpoint.ConfigStorage
 	lastQuerySupported bool
 

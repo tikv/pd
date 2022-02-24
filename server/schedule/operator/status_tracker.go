@@ -15,9 +15,8 @@
 package operator
 
 import (
+	"sync"
 	"time"
-
-	"github.com/sasha-s/go-deadlock"
 )
 
 // Only record non-end status and one end status.
@@ -25,7 +24,7 @@ type statusTimes [firstEndStatus + 1]time.Time
 
 // OpStatusTracker represents the status of an operator.
 type OpStatusTracker struct {
-	rw         deadlock.RWMutex
+	rw         sync.RWMutex
 	current    OpStatus    // Current status
 	reachTimes statusTimes // Time when reach the current status
 }

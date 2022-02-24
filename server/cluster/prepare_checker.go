@@ -15,14 +15,14 @@
 package cluster
 
 import (
+	"sync"
 	"time"
 
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/server/core"
 )
 
 type prepareChecker struct {
-	deadlock.RWMutex
+	sync.RWMutex
 	reactiveRegions map[uint64]int
 	start           time.Time
 	sum             int

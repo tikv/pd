@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -61,7 +60,7 @@ var (
 
 // TestServer is only for test.
 type TestServer struct {
-	deadlock.RWMutex
+	sync.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
@@ -396,7 +395,7 @@ type TestCluster struct {
 	servers map[string]*TestServer
 	// tsPool is used to check the TSO uniqueness among the test cluster
 	tsPool struct {
-		deadlock.Mutex
+		sync.Mutex
 		pool map[uint64]struct{}
 	}
 }
@@ -426,7 +425,7 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 		config:  config,
 		servers: servers,
 		tsPool: struct {
-			deadlock.Mutex
+			sync.Mutex
 			pool map[uint64]struct{}
 		}{
 			pool: make(map[uint64]struct{}),

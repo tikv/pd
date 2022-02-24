@@ -20,12 +20,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
@@ -88,7 +88,7 @@ func init() {
 }
 
 type grantHotRegionSchedulerConfig struct {
-	mu          deadlock.RWMutex
+	mu          sync.RWMutex
 	storage     endpoint.ConfigStorage
 	cluster     schedule.Cluster
 	StoreIDs    []uint64 `json:"store-id"`
@@ -307,12 +307,12 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedu
 	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, infos []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
+func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isleader := s.r.Int()%2 == 1
-	for _, detail := range infos {
-		srcStoreID := detail.Info.Store.GetID()
+	for _, srcStore := range srcStores {
+		srcStoreID := srcStore.GetID()
 		if isleader {
-			if s.conf.has(srcStoreID) || len(detail.HotPeers) < 1 {
+			if s.conf.has(srcStoreID) || len(srcStore.HotPeers) < 1 {
 				continue
 			}
 		} else {
@@ -321,7 +321,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, infos
 			}
 		}
 
-		for _, peer := range detail.HotPeers {
+		for _, peer := range srcStore.HotPeers {
 			if s.OpController.GetOperator(peer.RegionID) != nil {
 				continue
 			}

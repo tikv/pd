@@ -25,7 +25,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
@@ -44,7 +43,7 @@ type testTSOConsistencySuite struct {
 	leaderServer *tests.TestServer
 	dcClientMap  map[string]pdpb.PDClient
 
-	tsPoolMutex deadlock.Mutex
+	tsPoolMutex sync.Mutex
 	tsPool      map[uint64]struct{}
 }
 

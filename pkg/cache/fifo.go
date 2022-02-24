@@ -16,13 +16,12 @@ package cache
 
 import (
 	"container/list"
-
-	"github.com/sasha-s/go-deadlock"
+	"sync"
 )
 
 // FIFO is 'First-In-First-Out' cache.
 type FIFO struct {
-	deadlock.RWMutex
+	sync.RWMutex
 
 	// maxCount is the maximum number of items.
 	// 0 means no limit.

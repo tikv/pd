@@ -16,11 +16,11 @@ package cluster
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"go.uber.org/zap"
@@ -161,7 +161,7 @@ func (s *CPUEntries) CPU() float64 {
 
 // StatEntries saves the StatEntries for each store in the cluster
 type StatEntries struct {
-	m     deadlock.RWMutex
+	m     sync.RWMutex
 	stats map[uint64]*CPUEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended

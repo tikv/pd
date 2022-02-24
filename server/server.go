@@ -39,7 +39,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -145,7 +144,7 @@ type Server struct {
 	closeCallbacks []func()
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock deadlock.Mutex
+	serviceSafePointLock sync.Mutex
 
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
@@ -157,7 +156,7 @@ type Server struct {
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
-	auditBackend []audit.Backend
+	auditBackends []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -250,7 +249,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	s.handler = newHandler(s)
 
 	// create audit backend
-	s.auditBackend = []audit.Backend{}
+	s.auditBackends = []audit.Backend{
+		audit.NewLocalLogBackend(true),
+	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
 	// Adjust etcd config.
@@ -1122,7 +1123,7 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 
 // GetAuditBackend returns audit backends
 func (s *Server) GetAuditBackend() []audit.Backend {
-	return s.auditBackend
+	return s.auditBackends
 }
 
 // GetServiceAuditBackendLabels returns audit backend labels by serviceLabel

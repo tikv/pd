@@ -54,8 +54,7 @@ package btree
 
 import (
 	"sort"
-
-	"github.com/sasha-s/go-deadlock"
+	"sync"
 )
 
 // Item represents a single object in the tree.
@@ -83,7 +82,7 @@ var (
 // FreeList.
 // Two Btrees using the same freelist are safe for concurrent write access.
 type FreeList struct {
-	mu       deadlock.Mutex
+	mu       sync.Mutex
 	freelist []*node
 }
 

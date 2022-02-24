@@ -16,9 +16,9 @@ package id
 
 import (
 	"path"
+	"sync"
 
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -41,7 +41,7 @@ const allocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
-	mu   deadlock.Mutex
+	mu   sync.Mutex
 	base uint64
 	end  uint64
 

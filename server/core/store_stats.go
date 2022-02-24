@@ -16,14 +16,14 @@ package core
 
 import (
 	"math"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/movingaverage"
 )
 
 type storeStats struct {
-	mu       deadlock.RWMutex
+	mu       sync.RWMutex
 	rawStats *pdpb.StoreStats
 
 	// avgAvailable is used to make available smooth, aka no sudden changes.

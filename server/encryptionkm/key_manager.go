@@ -16,13 +16,13 @@ package encryptionkm
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/log"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -59,7 +59,7 @@ type KeyManager struct {
 	helper keyManagerHelper
 	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
 	mu struct {
-		deadlock.Mutex
+		sync.Mutex
 		// PD leadership of the current PD node. Only the PD leader will rotate data keys,
 		// or change current encryption method.
 		// Guarded by mu.

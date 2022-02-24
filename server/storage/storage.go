@@ -16,10 +16,10 @@ package storage
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/sasha-s/go-deadlock"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -35,7 +35,6 @@ type Storage interface {
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
 	endpoint.RuleStorage
-	endpoint.ComponentStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
 }
@@ -67,7 +66,7 @@ type coreStorage struct {
 
 	useRegionStorage int32
 	regionLoaded     bool
-	mu               deadlock.Mutex
+	mu               sync.Mutex
 }
 
 // NewCoreStorage creates a new core storage with the given default and region storage.

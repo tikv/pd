@@ -21,12 +21,14 @@ import (
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersInfos struct {
 	AsPeer   StoreHotPeersStat `json:"as_peer"`
 	AsLeader StoreHotPeersStat `json:"as_leader"`
 }
 
 // StoreHotPeersStat is used to record the hot region statistics group by store.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // GetHotStatus returns the hot status for a given type.
@@ -126,7 +128,7 @@ func summaryStoresLoadByEngine(
 	allHotPeersCount := 0
 
 	for _, info := range storeInfos {
-		store := info.Store
+		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
 		if !ok || !collector.Filter(info, kind) {
@@ -169,9 +171,9 @@ func summaryStoresLoadByEngine(
 
 		// Construct store load info.
 		loadDetail = append(loadDetail, &StoreLoadDetail{
-			Info:     info,
-			LoadPred: stLoadPred,
-			HotPeers: hotPeers,
+			StoreSummaryInfo: info,
+			LoadPred:         stLoadPred,
+			HotPeers:         hotPeers,
 		})
 	}
 

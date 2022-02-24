@@ -18,9 +18,8 @@ import (
 	"container/heap"
 	"container/list"
 	"fmt"
+	"sync"
 	"time"
-
-	"github.com/sasha-s/go-deadlock"
 )
 
 // TopNItem represents a single object in TopN.
@@ -33,7 +32,7 @@ type TopNItem interface {
 
 // TopN maintains the N largest items of multiple dimensions.
 type TopN struct {
-	rw     deadlock.RWMutex
+	rw     sync.RWMutex
 	topns  []*singleTopN
 	ttlLst *ttlList
 }
