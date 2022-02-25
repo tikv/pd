@@ -322,8 +322,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "DeletePlugin", "/plugin", pluginHandler.UnloadPlugin, setMethods("DELETE"))
 
 	register(apiRouter, "GetHealthStatus", "/health", newHealthHandler(svr, rd), setMethods("GET"))
-	// Deprecated: This API is no longer maintained anymore.
-	apiRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	registerFunc(apiRouter, "Ping", "/ping", func(w http.ResponseWriter, r *http.Request) {}, setMethods("GET"))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
@@ -368,13 +366,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
 		}), setAuditBackend("test"))
 	})
-
-	// Deprecated: use /pd/api/v1/health instead.
-	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
-	// Deprecated: use /pd/api/v1/diagnose instead.
-	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
-	// Deprecated: use /pd/api/v1/ping instead.
-	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
 	return rootRouter
 }
