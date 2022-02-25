@@ -264,6 +264,36 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
 }
 
+func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
+	leader := s.cluster.GetServer(s.cluster.GetLeader())
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	timeUnix := time.Now().Unix() - 20
+	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/metrics", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+}
+
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
 	cfg := &log.Config{}

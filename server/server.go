@@ -214,14 +214,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			// If PathPrefix is not specified, register into apiService,
 			// and finally apiService is registered in userHandlers.
 			router.PathPrefix(pathPrefix).Handler(handler)
-			if info.IsCore {
-				// Deprecated
-				router.Path("/pd/health").Handler(handler)
-				// Deprecated
-				router.Path("/pd/diagnose").Handler(handler)
-				// Deprecated
-				router.Path("/pd/ping").Handler(handler)
-			}
 		}
 	}
 	apiService.UseHandler(router)
@@ -249,6 +241,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	// create audit backend
 	s.auditBackends = []audit.Backend{
 		audit.NewLocalLogBackend(true),
+		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
