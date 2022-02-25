@@ -1791,3 +1791,7 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 	return err
 }
+
+func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
+	panic("not implemented")
+}
