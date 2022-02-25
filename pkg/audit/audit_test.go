@@ -16,7 +16,9 @@ package audit
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -25,9 +27,8 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/pkg/requestutil"
-	"github.com/tikv/pd/pkg/typeutil"
 )
 
 func Test(t *testing.T) {
@@ -48,7 +49,6 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 	c.Assert(matcher.Match(labels2), Equals, false)
 }
 
-// TestPrometheusHistogramBackend is used to test result manually
 func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -60,14 +60,9 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 		}, []string{"service", "method", "component"})
 
 	prometheus.MustRegister(serviceAuditHistogramTest)
-	cfg := &metricutil.MetricConfig{
-		PushJob:     "prometheus",
-		PushAddress: "127.0.0.1:9091",
-		PushInterval: typeutil.Duration{
-			Duration: time.Second,
-		},
-	}
-	metricutil.Push(cfg)
+
+	ts := httptest.NewServer(promhttp.Handler())
+	defer ts.Close()
 
 	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
@@ -86,8 +81,17 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	info.Component = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+
 	// For test, sleep time needs longer than the push interval
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
+	req, _ = http.NewRequest("GET", ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2"), Equals, true)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1"), Equals, true)
 }
 
 func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {

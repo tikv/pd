@@ -264,7 +264,6 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
 }
 
-// TestAuditPrometheusBackend is used to manually observe the results of etcd prometheus metrics
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
@@ -279,6 +278,20 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	c.Assert(err, IsNil)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/metrics", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
+
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
