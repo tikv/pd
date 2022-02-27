@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -131,6 +132,7 @@ type RaftCluster struct {
 	replicationMode *replication.ModeManager
 
 	unsafeRecoveryController *unsafeRecoveryController
+	progressManager          *progress.Manager
 }
 
 // Status saves some state information.
@@ -236,7 +238,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
-
+	c.progressManager = progress.NewManager()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -314,7 +316,11 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Duration("cost", time.Since(start)),
 	)
 	for _, store := range c.GetStores() {
-		c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
+		storeID := store.GetID()
+		c.hotStat.GetOrCreateRollingStoreStats(storeID)
+		if store.IsOffline() {
+			c.progressManager.AddProgressIndicator(fmt.Sprintf("offline-%d", storeID), float64(c.core.GetStoreRegionCount(storeID)))
+		}
 	}
 	return c, nil
 }
@@ -1078,6 +1084,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
+		c.progressManager.AddProgressIndicator(fmt.Sprintf("offline-%d", store.GetID()), float64(store.GetRegionCount()))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
@@ -1120,6 +1127,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	if err == nil {
 		// clean up the residual information.
 		c.RemoveStoreLimit(storeID)
+		c.progressManager.RemoveProgressIndicator(fmt.Sprintf("offline-%d", storeID))
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1228,9 +1236,11 @@ func (c *RaftCluster) checkStores() {
 
 		offlineStore := store.GetMeta()
 		// If the store is empty, it can be buried.
-		regionCount := c.core.GetStoreRegionCount(offlineStore.GetId())
+		id := offlineStore.GetId()
+		regionCount := c.core.GetStoreRegionCount(id)
+		c.progressManager.UpdateProgressIndicator(fmt.Sprintf("offline-%d", id), float64(regionCount))
 		if regionCount == 0 {
-			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
+			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))
@@ -1840,6 +1850,12 @@ func (c *RaftCluster) GetClusterVersion() string {
 // GetEtcdClient returns the current etcd client
 func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
+}
+
+// GetStoreProgressByID returns the progress details for a given action and store ID.
+func (c *RaftCluster) GetStoreProgressByID(action string, storeID uint64) (p float64, cs float64, ls float64) {
+	progress := fmt.Sprintf("%s-%d", action, storeID)
+	return c.progressManager.Process(progress), c.progressManager.CurrentSpeed(progress), c.progressManager.LeftSeconds(progress)
 }
 
 var healthURL = "/pd/api/v1/ping"

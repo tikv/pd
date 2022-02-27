@@ -597,7 +597,7 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Tags store
 // @Summary Get limit scene in the cluster.
 // @Produce json
-// @Success 200 {string} string "Set store limit scene successfully."
+// @Success 200 {string} string "Get store limit scene successfully."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
@@ -608,6 +608,47 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 	}
 	scene := h.Handler.GetStoreLimitScene(typeValue)
 	h.rd.JSON(w, http.StatusOK, scene)
+}
+
+// StoreProgress contains status about a progress.
+type StoreProgress struct {
+	StoreID      uint64  `json:"store_id"`
+	Action       string  `json:"action"`
+	Progress     float64 `json:"progress"`
+	CurrentSpeed float64 `json:"current_speed"`
+	LeftSeconds  float64 `json:"left_seconds"`
+}
+
+// @Tags stores
+// @Summary Get store progress in the cluster.
+// @Produce json
+// @Success 200 {object} StoreProgress
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /stores/{id}/progress [get]
+func (h *storesHandler) GetStoreProgressByID(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	action := r.URL.Query().Get("action")
+	if err := checkProgressAction(action); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	progress, currentSpeed, leftSeconds := h.Handler.GetStoreProgressByID(action, storeID)
+	sp := &StoreProgress{
+		StoreID:      storeID,
+		Action:       action,
+		Progress:     progress,
+		CurrentSpeed: currentSpeed,
+		LeftSeconds:  leftSeconds,
+	}
+
+	h.rd.JSON(w, http.StatusOK, sp)
 }
 
 // @Tags store
@@ -719,4 +760,13 @@ func parseStoreLimitType(typeName string) (storelimit.Type, error) {
 		}
 	}
 	return typeValue, err
+}
+
+func checkProgressAction(action string) error {
+	switch action {
+	case "offline", "online":
+		return nil
+	default:
+		return errors.New("unknown type")
+	}
 }

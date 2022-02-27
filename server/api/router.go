@@ -240,6 +240,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.GetStoreLimitScene, setMethods("GET"))
 
+	registerFunc(clusterRouter, "GetStoreProgress", "/stores/{id}/progress", storesHandler.GetStoreProgressByID, setMethods("GET"))
+
 	labelsHandler := newLabelsHandler(svr, rd)
 	registerFunc(clusterRouter, "/labels", labelsHandler.GetLabels, setMethods("GET"))
 	registerFunc(clusterRouter, "/labels/stores", labelsHandler.GetStoresByLabel, setMethods("GET"))

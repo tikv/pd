@@ -936,6 +936,12 @@ func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scen
 	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
+// GetStoreProgressByID returns the progress details for a given action and store ID.
+func (h *Handler) GetStoreProgressByID(action string, storeID uint64) (p float64, cs float64, ls float64) {
+	cluster := h.s.GetRaftCluster()
+	return cluster.GetStoreProgressByID(action, storeID)
+}
+
 // PluginLoad loads the plugin referenced by the pluginPath
 func (h *Handler) PluginLoad(pluginPath string) error {
 	h.pluginChMapLock.Lock()
