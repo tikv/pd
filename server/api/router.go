@@ -369,5 +369,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		}), setAuditBackend("test"))
 	})
 
+	// Deprecated: use /pd/api/v1/health instead.
+	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
+	// Deprecated: use /pd/api/v1/ping instead.
+	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+
 	return rootRouter
 }
