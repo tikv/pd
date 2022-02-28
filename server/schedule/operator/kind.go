@@ -80,6 +80,11 @@ func (k OpKind) String() string {
 	return strings.Join(flagNames, ",")
 }
 
+// ContainsOpAdmin returns true if it contains OpAdmin.
+func (k OpKind) ContainsOpAdmin() bool {
+	return k&OpAdmin != 0
+}
+
 // ParseOperatorKind converts string (flag name list concat by ',') to OpKind.
 func ParseOperatorKind(str string) (OpKind, error) {
 	var k OpKind
