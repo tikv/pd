@@ -154,8 +154,8 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
-	serviceLabels      map[string][]apiutil.ApiAccessPath
-	apiServiceLabelMap map[apiutil.ApiAccessPath]string
+	serviceLabels      map[string][]apiutil.APIAccessPath
+	apiServiceLabelMap map[apiutil.APIAccessPath]string
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -254,8 +254,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceLabels = make(map[string][]apiutil.ApiAccessPath)
-	s.apiServiceLabelMap = make(map[apiutil.ApiAccessPath]string)
+	s.serviceLabels = make(map[string][]apiutil.APIAccessPath)
+	s.apiServiceLabelMap = make(map[apiutil.APIAccessPath]string)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -1125,19 +1125,19 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 }
 
 // GetServiceLabels returns ApiAccessPaths by given service label
-func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.ApiAccessPath {
+func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.APIAccessPath {
 	if apis, ok := s.serviceLabels[serviceLabel]; ok {
 		return apis
 	}
 	return nil
 }
 
-// GetApiAccessServiceLabel returns service label by given access path
-func (s *Server) GetApiAccessServiceLabel(accessPath apiutil.ApiAccessPath) string {
+// GetAPIAccessServiceLabel returns service label by given access path
+func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.APIAccessPath) string {
 	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
 		return servicelabel
 	}
-	accessPathNoMethod := apiutil.NewApiAccessPath(accessPath.Path, "")
+	accessPathNoMethod := apiutil.NewAPIAccessPath(accessPath.Path, "")
 	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
 		return servicelabel
 	}
@@ -1145,12 +1145,12 @@ func (s *Server) GetApiAccessServiceLabel(accessPath apiutil.ApiAccessPath) stri
 }
 
 // AddServiceLabel is used to add the relationship between service label and api access path
-func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.ApiAccessPath) {
+func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.APIAccessPath) {
 	if slice, ok := s.serviceLabels[serviceLabel]; ok {
 		slice = append(slice, accessPath)
 		s.serviceLabels[serviceLabel] = slice
 	} else {
-		slice = []apiutil.ApiAccessPath{accessPath}
+		slice = []apiutil.APIAccessPath{accessPath}
 		s.serviceLabels[serviceLabel] = slice
 	}
 

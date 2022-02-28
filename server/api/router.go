@@ -384,10 +384,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		methods, _ := route.GetMethods()
 		if len(methods) > 0 {
 			for _, method := range methods {
-				svr.AddServiceLabel(serviceLabel, apiutil.NewApiAccessPath(path, method))
+				svr.AddServiceLabel(serviceLabel, apiutil.NewAPIAccessPath(path, method))
 			}
 		} else {
-			svr.AddServiceLabel(serviceLabel, apiutil.NewApiAccessPath(path, ""))
+			svr.AddServiceLabel(serviceLabel, apiutil.NewAPIAccessPath(path, ""))
 		}
 		return nil
 	})
