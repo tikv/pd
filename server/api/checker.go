@@ -24,13 +24,13 @@ import (
 )
 
 type checkerHandler struct {
-	*server.Handler
-	r *render.Render
+	handler *server.Handler
+	r       *render.Render
 }
 
 func newCheckerHandler(svr *server.Server, r *render.Render) *checkerHandler {
 	return &checkerHandler{
-		Handler: svr.GetHandler(),
+		handler: svr.GetHandler(),
 		r:       r,
 	}
 }
@@ -46,7 +46,7 @@ func newCheckerHandler(svr *server.Server, r *render.Render) *checkerHandler {
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /checker/{name} [post]
-func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
+func (c *checkerHandler) PauseOrResumeChecker(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int
 	if err := apiutil.ReadJSONRespondError(c.r, w, r.Body, &input); err != nil {
 		return
@@ -62,7 +62,7 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 		c.r.JSON(w, http.StatusBadRequest, "delay cannot be negative")
 		return
 	}
-	if err := c.PauseOrResumeChecker(name, int64(t)); err != nil {
+	if err := c.handler.PauseOrResumeChecker(name, int64(t)); err != nil {
 		c.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -81,9 +81,9 @@ func (c *checkerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "Pause or resume the scheduler successfully."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /checker/{name} [get]
-func (c *checkerHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+func (c *checkerHandler) GetCheckStatus(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	isPaused, err := c.IsCheckerPaused(name)
+	isPaused, err := c.handler.IsCheckerPaused(name)
 	if err != nil {
 		c.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return

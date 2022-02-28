@@ -50,7 +50,7 @@ func newRulesHandler(svr *server.Server, rd *render.Render) *ruleHandler {
 // @Success 200 {array} placement.Rule
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules [get]
-func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -69,7 +69,7 @@ func (h *ruleHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules [get]
-func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -104,7 +104,7 @@ func (h *ruleHandler) SetAll(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} placement.Rule
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules/group/{group} [get]
-func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -124,7 +124,7 @@ func (h *ruleHandler) GetAllByGroup(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "The region does not exist."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules/region/{region} [get]
-func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRuleByRegion(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -153,7 +153,7 @@ func (h *ruleHandler) GetAllByRegion(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules/key/{key} [get]
-func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRuleByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -178,7 +178,7 @@ func (h *ruleHandler) GetAllByKey(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "The rule does not exist."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rule/{group}/{id} [get]
-func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRuleByGroupAndID(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -203,7 +203,7 @@ func (h *ruleHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rule [post]
-func (h *ruleHandler) Set(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) SetRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -256,7 +256,7 @@ func (h *ruleHandler) syncReplicateConfigWithDefaultRule(rule *placement.Rule) e
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rule/{group}/{id} [delete]
-func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) DeleteRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -284,7 +284,7 @@ func (h *ruleHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/rules/batch [post]
-func (h *ruleHandler) Batch(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) BatchRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -407,7 +407,7 @@ func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request)
 // @Success 200 {array} placement.GroupBundle
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/placement-rule [get]
-func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetPlacementRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -426,7 +426,7 @@ func (h *ruleHandler) GetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/placement-rule [post]
-func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) SetPlacementRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -456,7 +456,7 @@ func (h *ruleHandler) SetAllGroupBundles(w http.ResponseWriter, r *http.Request)
 // @Success 200 {object} placement.GroupBundle
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/placement-rule/{group} [get]
-func (h *ruleHandler) GetGroupBundle(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetPlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -475,7 +475,7 @@ func (h *ruleHandler) GetGroupBundle(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "Bad request."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/placement-rule [delete]
-func (h *ruleHandler) DeleteGroupBundle(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) DeletePlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -503,7 +503,7 @@ func (h *ruleHandler) DeleteGroupBundle(w http.ResponseWriter, r *http.Request) 
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/placement-rule/{group} [post]
-func (h *ruleHandler) SetGroupBundle(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) SetPlacementRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())

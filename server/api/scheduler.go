@@ -34,27 +34,27 @@ import (
 const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 
 type schedulerHandler struct {
-	*server.Handler
-	svr *server.Server
-	r   *render.Render
+	handler *server.Handler
+	svr     *server.Server
+	r       *render.Render
 }
 
 func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler {
 	return &schedulerHandler{
-		Handler: svr.GetHandler(),
+		handler: svr.GetHandler(),
 		r:       r,
 		svr:     svr,
 	}
 }
 
 // @Tags scheduler
-// @Summary List all schedulers by status.
+// @Summary List all created schedulers by status.
 // @Produce json
 // @Success 200 {array} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers [get]
-func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
-	schedulers, err := h.GetSchedulers()
+func (h *schedulerHandler) ListSchedulers(w http.ResponseWriter, r *http.Request) {
+	schedulers, err := h.handler.GetSchedulers()
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -65,7 +65,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 	case "paused":
 		var pausedSchedulers []string
 		for _, scheduler := range schedulers {
-			paused, err := h.IsSchedulerPaused(scheduler)
+			paused, err := h.handler.IsSchedulerPaused(scheduler)
 			if err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
@@ -80,7 +80,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 	case "disabled":
 		var disabledSchedulers []string
 		for _, scheduler := range schedulers {
-			disabled, err := h.IsSchedulerDisabled(scheduler)
+			disabled, err := h.handler.IsSchedulerDisabled(scheduler)
 			if err != nil {
 				h.r.JSON(w, http.StatusInternalServerError, err.Error())
 				return
@@ -106,7 +106,7 @@ func (h *schedulerHandler) List(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers [post]
-func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
@@ -120,22 +120,22 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 
 	switch name {
 	case schedulers.BalanceLeaderName:
-		if err := h.AddBalanceLeaderScheduler(); err != nil {
+		if err := h.handler.AddBalanceLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.HotRegionName:
-		if err := h.AddBalanceHotRegionScheduler(); err != nil {
+		if err := h.handler.AddBalanceHotRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.BalanceRegionName:
-		if err := h.AddBalanceRegionScheduler(); err != nil {
+		if err := h.handler.AddBalanceRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.LabelName:
-		if err := h.AddLabelScheduler(); err != nil {
+		if err := h.handler.AddLabelScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -159,7 +159,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if err := h.AddScatterRangeScheduler(args...); err != nil {
+		if err := h.handler.AddScatterRangeScheduler(args...); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -169,17 +169,17 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	case schedulers.EvictLeaderName:
 		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
 	case schedulers.ShuffleLeaderName:
-		if err := h.AddShuffleLeaderScheduler(); err != nil {
+		if err := h.handler.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.ShuffleRegionName:
-		if err := h.AddShuffleRegionScheduler(); err != nil {
+		if err := h.handler.AddShuffleRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.RandomMergeName:
-		if err := h.AddRandomMergeScheduler(); err != nil {
+		if err := h.handler.AddRandomMergeScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -189,12 +189,12 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			limit = uint64(l)
 		}
-		if err := h.AddShuffleHotRegionScheduler(limit); err != nil {
+		if err := h.handler.AddShuffleHotRegionScheduler(limit); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	case schedulers.EvictSlowStoreName:
-		if err := h.AddEvictSlowStoreScheduler(); err != nil {
+		if err := h.handler.AddEvictSlowStoreScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -209,7 +209,7 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
 			return
 		}
-		if err := h.AddGrantHotRegionScheduler(leaderID, peerIDs); err != nil {
+		if err := h.handler.AddGrantHotRegionScheduler(leaderID, peerIDs); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -225,7 +225,7 @@ func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64)
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
+	updateURL := fmt.Sprintf("%s/%s/%s/config", h.handler.GetAddr(), schedulerConfigPrefix, name)
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
@@ -239,16 +239,16 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 		h.r.JSON(w, http.StatusBadRequest, "missing store id")
 		return
 	}
-	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
+	if exist, err := h.handler.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		switch name {
 		case schedulers.EvictLeaderName:
-			err = h.AddEvictLeaderScheduler(uint64(storeID))
+			err = h.handler.AddEvictLeaderScheduler(uint64(storeID))
 		case schedulers.GrantLeaderName:
-			err = h.AddGrantLeaderScheduler(uint64(storeID))
+			err = h.handler.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -271,7 +271,7 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 // @Failure 404 {string} string "The scheduler is not found."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name} [delete]
-func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
 	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
@@ -281,7 +281,7 @@ func (h *schedulerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		h.redirectSchedulerDelete(w, name, schedulers.GrantLeaderName)
 		return
 	default:
-		if err := h.RemoveScheduler(name); err != nil {
+		if err := h.handler.RemoveScheduler(name); err != nil {
 			h.handleErr(w, err)
 			return
 		}
@@ -300,7 +300,7 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
-	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
+	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.handler.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
 	statusCode, err := doDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		h.r.JSON(w, statusCode, err.Error())
@@ -320,7 +320,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name} [post]
-func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int64
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
@@ -332,7 +332,7 @@ func (h *schedulerHandler) PauseOrResume(w http.ResponseWriter, r *http.Request)
 		h.r.JSON(w, http.StatusBadRequest, "missing pause time")
 		return
 	}
-	if err := h.PauseOrResumeScheduler(name, t); err != nil {
+	if err := h.handler.PauseOrResumeScheduler(name, t); err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

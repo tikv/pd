@@ -52,7 +52,7 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Produce json
 // @Success 200 {object} config.Config
 // @Router /config [get]
-func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
 }
 
@@ -62,7 +62,7 @@ func (h *confHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} config.Config
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/default [get]
-func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
 	config := config.NewConfig()
 	err := config.Adjust(nil, false)
 	if err != nil {
@@ -83,7 +83,7 @@ func (h *confHandler) GetDefault(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config [post]
-func (h *confHandler) Post(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -341,7 +341,7 @@ func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, fou
 // @Produce json
 // @Success 200 {object} config.ScheduleConfig
 // @Router /config/schedule [get]
-func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetScheduleVCConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
 }
 
@@ -355,7 +355,7 @@ func (h *confHandler) GetSchedule(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/schedule [post]
-func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetScheduleConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -373,7 +373,7 @@ func (h *confHandler) SetSchedule(w http.ResponseWriter, r *http.Request) {
 // @Produce json
 // @Success 200 {object} config.ReplicationConfig
 // @Router /config/replicate [get]
-func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
@@ -387,7 +387,7 @@ func (h *confHandler) GetReplication(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/replicate [post]
-func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -406,7 +406,7 @@ func (h *confHandler) SetReplication(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} config.LabelPropertyConfig
 // @Failure 400 {string} string "The input is invalid."
 // @Router /config/label-property [get]
-func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }
 
@@ -419,7 +419,7 @@ func (h *confHandler) GetLabelProperty(w http.ResponseWriter, r *http.Request) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/label-property [post]
-func (h *confHandler) SetLabelProperty(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -483,7 +483,7 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 // @Produce json
 // @Success 200 {object} config.ReplicationModeConfig
 // @Router /config/replication-mode [get]
-func (h *confHandler) GetReplicationMode(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationModeConfig())
 }
 
@@ -495,7 +495,7 @@ func (h *confHandler) GetReplicationMode(w http.ResponseWriter, r *http.Request)
 // @Success 200 {string} string "The replication mode config is updated."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/replication-mode [post]
-func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationModeConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
@@ -513,6 +513,6 @@ func (h *confHandler) SetReplicationMode(w http.ResponseWriter, r *http.Request)
 // @Produce json
 // @Success 200 {object} config.PDServerConfig
 // @Router /config/pd-server [get]
-func (h *confHandler) GetPDServer(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
 }

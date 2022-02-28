@@ -48,7 +48,7 @@ func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
 // @Success 200 {array} Health
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /health [get]
-func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 	members, err := cluster.GetMembers(client)
 	if err != nil {
@@ -72,3 +72,7 @@ func (h *healthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rd.JSON(w, http.StatusOK, healths)
 }
+
+// @Summary Health status of PD servers.
+// @Router /ping [get]
+func (h *healthHandler) Ping(w http.ResponseWriter, r *http.Request) {}

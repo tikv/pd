@@ -173,26 +173,26 @@ func (s *testServerServiceSuite) TearDownSuite(c *C) {
 }
 
 func (s *testServiceSuite) TestServiceLabels(c *C) {
-	accessPaths := s.svr.GetServiceLabels("DebugPProfProfile")
+	accessPaths := s.svr.GetServiceLabels("Profile")
 	c.Assert(accessPaths, HasLen, 1)
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/debug/pprof/profile")
 	c.Assert(accessPaths[0].Method, Equals, "")
 	serviceLabel := s.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", ""))
-	c.Assert(serviceLabel, Equals, "DebugPProfProfile")
+	c.Assert(serviceLabel, Equals, "Profile")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", "GET"))
-	c.Assert(serviceLabel, Equals, "DebugPProfProfile")
+		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
+	c.Assert(serviceLabel, Equals, "Profile")
 
 	accessPaths = s.svr.GetServiceLabels("ResignLeader")
 	c.Assert(accessPaths, HasLen, 1)
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/leader/resign")
-	c.Assert(accessPaths[0].Method, Equals, "POST")
+	c.Assert(accessPaths[0].Method, Equals, http.MethodPost)
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", "POST"))
+		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
 	c.Assert(serviceLabel, Equals, "ResignLeader")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", "GET"))
+		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", ""))
@@ -207,17 +207,17 @@ func (s *testServiceSuite) TestServiceLabels(c *C) {
 		return accessPaths[i].Path < accessPaths[j].Path
 	})
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/metric/query")
-	c.Assert(accessPaths[0].Method, Equals, "GET")
+	c.Assert(accessPaths[0].Method, Equals, http.MethodGet)
 	c.Assert(accessPaths[1].Path, Equals, "/pd/api/v1/metric/query")
-	c.Assert(accessPaths[1].Method, Equals, "POST")
+	c.Assert(accessPaths[1].Method, Equals, http.MethodPost)
 	c.Assert(accessPaths[2].Path, Equals, "/pd/api/v1/metric/query_range")
-	c.Assert(accessPaths[2].Method, Equals, "GET")
+	c.Assert(accessPaths[2].Method, Equals, http.MethodGet)
 	c.Assert(accessPaths[3].Path, Equals, "/pd/api/v1/metric/query_range")
-	c.Assert(accessPaths[3].Method, Equals, "POST")
+	c.Assert(accessPaths[3].Method, Equals, http.MethodPost)
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", "POST"))
+		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", http.MethodPost))
 	c.Assert(serviceLabel, Equals, "QueryMetric")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", "GET"))
+		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "QueryMetric")
 }
