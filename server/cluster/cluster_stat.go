@@ -195,15 +195,6 @@ func (cst *StatEntries) Append(stat *StatEntry) bool {
 	return entries.Append(stat, ThreadsCollected...)
 }
 
-func contains(slice []uint64, value uint64) bool {
-	for i := range slice {
-		if slice[i] == value {
-			return true
-		}
-	}
-	return false
-}
-
 // CPU returns the cpu usage of the cluster
 func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 	cst.m.Lock()
@@ -216,7 +207,7 @@ func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 
 	sum := 0.0
 	for sid, stat := range cst.stats {
-		if contains(excludes, sid) {
+		if slice.Contains(excludes, sid) {
 			continue
 		}
 		if time.Since(stat.updated) > cst.ttl {

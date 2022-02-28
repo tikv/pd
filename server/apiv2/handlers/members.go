@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
@@ -170,17 +171,15 @@ func getAllMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		return nil, err
 	}
 	for _, m := range members.GetMembers() {
-		m.DcLocation = ""
-		binaryVersion, e := svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
+		var e error
+		m.BinaryVersion, e = svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load binary version", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
-		m.BinaryVersion = binaryVersion
-		deployPath, e := svr.GetMember().GetMemberDeployPath(m.GetMemberId())
+		m.DeployPath, e = svr.GetMember().GetMemberDeployPath(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
-		m.DeployPath = deployPath
 		if svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
@@ -191,22 +190,15 @@ func getAllMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 			continue
 		}
 		m.LeaderPriority = int32(leaderPriority)
-		gitHash, e := svr.GetMember().GetMemberGitHash(m.GetMemberId())
+		m.GitHash, e = svr.GetMember().GetMemberGitHash(m.GetMemberId())
 		if e != nil {
 			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
 		}
-		m.GitHash = gitHash
-		found := false
 		for dcLocation, serverIDs := range dclocationDistribution {
-			for _, serverID := range serverIDs {
-				if serverID == m.MemberId {
-					m.DcLocation = dcLocation
-					found = true
-					break
-				}
-			}
+			found := slice.Contains(serverIDs, m.MemberId)
 			if found {
+				m.DcLocation = dcLocation
 				break
 			}
 		}

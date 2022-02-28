@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
@@ -173,18 +174,9 @@ func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
 		values := dst[k]
 		for _, v := range vv {
-			if !contains(values, v) {
+			if !slice.Contains(values, v) {
 				dst.Add(k, v)
 			}
 		}
 	}
-}
-
-func contains(s []string, x string) bool {
-	for _, n := range s {
-		if x == n {
-			return true
-		}
-	}
-	return false
 }
