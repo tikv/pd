@@ -351,7 +351,7 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 	}
 }
 
-func (h *schedulerConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerConfigHandler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	sh := handler.GetSchedulerConfigHandler()
 	if sh != nil {

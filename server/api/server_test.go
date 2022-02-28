@@ -184,6 +184,11 @@ func (s *testServiceSuite) TestServiceLabels(c *C) {
 		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "Profile")
 
+	accessPaths = s.svr.GetServiceLabels("GetSchedulerConfig")
+	c.Assert(accessPaths, HasLen, 1)
+	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/scheduler-config")
+	c.Assert(accessPaths[0].Method, Equals, "")
+
 	accessPaths = s.svr.GetServiceLabels("ResignLeader")
 	c.Assert(accessPaths, HasLen, 1)
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/leader/resign")

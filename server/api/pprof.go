@@ -33,7 +33,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// PProfHandler pprof handler
+// pprofHandler pprof handler
 type pprofHandler struct {
 	svr *server.Server
 	rd  *render.Render

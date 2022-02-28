@@ -80,8 +80,7 @@ func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, path string,
 	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
 	route := router.HandleFunc(path, s.middlewareFunc(handleFunc))
-	strs := strings.Split((runtime.FuncForPC(reflect.ValueOf(handleFunc).Pointer()).Name()), ".")
-	handleFuncName := strings.Split(strs[len(strs)-1], "-")[0]
+	handleFuncName := getFunctionName(handleFunc)
 	route = route.Name(handleFuncName)
 	for _, opt := range opts {
 		opt(route)
@@ -89,28 +88,16 @@ func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, p
 	return route
 }
 
-// registerRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path
-func (s *serviceMiddlewareBuilder) registerRouteHandler(router *mux.Router, serviceLabel, path string,
-	handler http.Handler, opts ...createRouteOption) *mux.Route {
-	route := router.Handle(path, s.middleware(handler)).Name(serviceLabel)
+// registerPathPrefixRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
+func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandleFunc(router *mux.Router, prefix string,
+	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
+	route := router.PathPrefix(prefix).HandlerFunc(s.middlewareFunc(handleFunc))
+	handleFuncName := getFunctionName(handleFunc)
+	route = route.Name(handleFuncName)
 	for _, opt := range opts {
 		opt(route)
 	}
 	return route
-}
-
-// registerPathPrefixRouteHandler is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
-func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandler(router *mux.Router, serviceLabel, prefix string,
-	handler http.Handler, opts ...createRouteOption) *mux.Route {
-	route := router.PathPrefix(prefix).Handler(s.middleware(handler)).Name(serviceLabel)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
-}
-
-func (s *serviceMiddlewareBuilder) middleware(handler http.Handler) http.Handler {
-	return negroni.New(negroni.Wrap(s.handler), negroni.Wrap(handler))
 }
 
 func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
@@ -118,6 +105,11 @@ func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter,
 		s.handler.ServeHTTP(w, r)
 		next(w, r)
 	}
+}
+
+func getFunctionName(f interface{}) string {
+	strs := strings.Split((runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name()), ".")
+	return strings.Split(strs[len(strs)-1], "-")[0]
 }
 
 // The returned function is used as a lazy router to avoid the data race problem.
@@ -154,8 +146,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 
 	serviceBuilder := newServiceMiddlewareBuilder(svr)
-	register := serviceBuilder.registerRouteHandler
-	registerPrefix := serviceBuilder.registerPathPrefixRouteHandler
+	registerPrefix := serviceBuilder.registerPathPrefixRouteHandleFunc
 	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
@@ -176,7 +167,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods("POST"))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	registerPrefix(apiRouter, "GetSchedulerConfig", "/scheduler-config", schedulerConfigHandler)
+	registerPrefix(apiRouter, "/scheduler-config", schedulerConfigHandler.GetSchedulerConfig)
 
 	clusterHandler := newClusterHandler(svr, rd)
 	registerFunc(apiRouter, "/cluster", clusterHandler.GetCluster, setMethods("GET"))
@@ -293,8 +284,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/range-holes", regionsHandler.GetRangeHoles, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/replicated", regionsHandler.CheckRegionsReplicated, setMethods("GET"), setQueries("startKey", "{startKey}", "endKey", "{endKey}"))
 
-	register(apiRouter, "GetVersion", "/version", newVersionHandler(rd), setMethods("GET"))
-	register(apiRouter, "GetPDStatus", "/status", newStatusHandler(svr, rd), setMethods("GET"))
+	registerFunc(apiRouter, "/version", newVersionHandler(rd).GetVersion, setMethods("GET"))
+	registerFunc(apiRouter, "/status", newStatusHandler(svr, rd).GetPDStatus, setMethods("GET"))
 
 	memberHandler := newMemberHandler(svr, rd)
 	registerFunc(apiRouter, "/members", memberHandler.ListMembers, setMethods("GET"))
@@ -334,8 +325,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods("GET"))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
-	register(apiRouter, "QueryMetric", "/metric/query", newQueryMetric(svr), setMethods("GET", "POST"))
-	register(apiRouter, "QueryMetric", "/metric/query_range", newQueryMetric(svr), setMethods("GET", "POST"))
+	registerFunc(apiRouter, "/metric/query", newQueryMetric(svr).QueryMetric, setMethods("GET", "POST"))
+	registerFunc(apiRouter, "/metric/query_range", newQueryMetric(svr).QueryMetric, setMethods("GET", "POST"))
 
 	// tso API
 	tsoHandler := newTSOHandler(svr, rd)
@@ -370,7 +361,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {
-		registerPrefix(apiRouter, "failpoint", "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// this function will be named to "func2". It may be used in test
+		registerPrefix(apiRouter, "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
