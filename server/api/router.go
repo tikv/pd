@@ -15,7 +15,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/pprof"
 	"reflect"
@@ -342,7 +341,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	tsoHandler := newTSOHandler(svr, rd)
 	registerFunc(apiRouter, "/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator, setMethods("POST"), setAuditBackend(localLog))
 
-	pprofHandler := newPProfHandler(svr, rd)
+	pprofHandler := newPprofHandler(svr, rd)
 	// profile API
 	registerFunc(apiRouter, "/debug/pprof/profile", pprof.Profile)
 	registerFunc(apiRouter, "/debug/pprof/trace", pprof.Trace)
@@ -387,7 +386,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		serviceLabel := route.GetName()
 		methods, _ := route.GetMethods()
 		path, _ := route.GetPathTemplate()
-		fmt.Println(serviceLabel, path, methods)
 		if len(serviceLabel) == 0 {
 			return nil
 		}

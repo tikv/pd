@@ -34,23 +34,24 @@ import (
 )
 
 // PProfHandler pprof handler
-type PProfHandler struct {
+type pprofHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-// newPProfHandler constructor for ProfHandler
-func newPProfHandler(svr *server.Server, rd *render.Render) *PProfHandler {
-	return &PProfHandler{
+// newPprofHandler constructor for ProfHandler
+func newPprofHandler(svr *server.Server, rd *render.Render) *pprofHandler {
+	return &pprofHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
+// @Tags debug
 // @Summary debug zip of PD servers.
 // @Produce application/octet-stream
 // @Router /debug/pprof/zip [get]
-func (h *PProfHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
 
 	// dump goroutine/heap/mutex
@@ -146,55 +147,55 @@ func (h *PProfHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 
 // @Summary debug profile of PD servers.
 // @Router /debug/pprof/profile [get]
-func (h *PProfHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
 	netPprof.Profile(w, r)
 }
 
 // @Summary debug trace of PD servers.
 // @Router /debug/pprof/trace [get]
-func (h *PProfHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
 	netPprof.Trace(w, r)
 }
 
 // @Summary debug symbol of PD servers.
 // @Router /debug/pprof/symbol [get]
-func (h *PProfHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
 	netPprof.Symbol(w, r)
 }
 
 // @Summary debug heap of PD servers.
 // @Router /debug/pprof/heap [get]
-func (h *PProfHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("heap").ServeHTTP(w, r)
 }
 
 // @Summary debug mutex of PD servers.
 // @Router /debug/pprof/mutex [get]
-func (h *PProfHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("mutex").ServeHTTP(w, r)
 }
 
 // @Summary debug allocs of PD servers.
 // @Router /debug/pprof/allocs [get]
-func (h *PProfHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("allocs").ServeHTTP(w, r)
 }
 
 // @Summary debug block of PD servers.
 // @Router /debug/pprof/block [get]
-func (h *PProfHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("block").ServeHTTP(w, r)
 }
 
 // @Summary debug goroutine of PD servers.
 // @Router /debug/pprof/goroutine [get]
-func (h *PProfHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("goroutine").ServeHTTP(w, r)
 }
 
 // @Summary debug threadcreate of PD servers.
 // @Router /debug/pprof/threadcreate [get]
-func (h *PProfHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
+func (h *pprofHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
 	netPprof.Handler("threadcreate").ServeHTTP(w, r)
 }
 

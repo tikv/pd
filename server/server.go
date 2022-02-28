@@ -1125,6 +1125,7 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 }
 
 // GetServiceLabels returns ApiAccessPaths by given service label
+// TODO: this function will be used for updating api rate limit config
 func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.APIAccessPath {
 	if apis, ok := s.serviceLabels[serviceLabel]; ok {
 		return apis
@@ -1133,6 +1134,7 @@ func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.APIAccessPath {
 }
 
 // GetAPIAccessServiceLabel returns service label by given access path
+// TODO: this function will be used for updating api rate limit config
 func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.APIAccessPath) string {
 	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
 		return servicelabel
@@ -1145,6 +1147,7 @@ func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.APIAccessPath) stri
 }
 
 // AddServiceLabel is used to add the relationship between service label and api access path
+// TODO: this function will be used for updating api rate limit config
 func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.APIAccessPath) {
 	if slice, ok := s.serviceLabels[serviceLabel]; ok {
 		slice = append(slice, accessPath)
