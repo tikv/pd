@@ -128,7 +128,7 @@ func summaryStoresLoadByEngine(
 	allHotPeersCount := 0
 
 	for _, info := range storeInfos {
-		store := info.Store
+		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
 		if !ok || !collector.Filter(info, kind) {
@@ -171,9 +171,9 @@ func summaryStoresLoadByEngine(
 
 		// Construct store load info.
 		loadDetail = append(loadDetail, &StoreLoadDetail{
-			Info:     info,
-			LoadPred: stLoadPred,
-			HotPeers: hotPeers,
+			StoreSummaryInfo: info,
+			LoadPred:         stLoadPred,
+			HotPeers:         hotPeers,
 		})
 	}
 
