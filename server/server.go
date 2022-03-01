@@ -221,8 +221,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated
-				router.Path("/pd/diagnose").Handler(handler)
-				// Deprecated
 				router.Path("/pd/ping").Handler(handler)
 			}
 		}
@@ -252,6 +250,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	// create audit backend
 	s.auditBackends = []audit.Backend{
 		audit.NewLocalLogBackend(true),
+		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceRateLimiter = ratelimiter.NewLimiter()

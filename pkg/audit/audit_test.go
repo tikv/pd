@@ -16,7 +16,9 @@ package audit
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -24,6 +26,8 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/pkg/requestutil"
 )
 
@@ -45,11 +49,57 @@ func (s *testAuditSuite) TestLabelMatcher(c *C) {
 	c.Assert(matcher.Match(labels2), Equals, false)
 }
 
+func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
+	serviceAuditHistogramTest := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_handling_seconds_test",
+			Help:      "PD server service handling audit",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"service", "method", "component"})
+
+	prometheus.MustRegister(serviceAuditHistogramTest)
+
+	ts := httptest.NewServer(promhttp.Handler())
+	defer ts.Close()
+
+	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
+	info := requestutil.GetRequestInfo(req)
+	info.ServiceLabel = "test"
+	info.Component = "user1"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
+
+	endTime := time.Now().Unix() + 20
+	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
+
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+
+	info.Component = "user2"
+	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+
+	// For test, sleep time needs longer than the push interval
+	time.Sleep(1 * time.Second)
+	req, _ = http.NewRequest("GET", ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2"), Equals, true)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1"), Equals, true)
+}
+
 func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
 	defer os.Remove(fname)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)

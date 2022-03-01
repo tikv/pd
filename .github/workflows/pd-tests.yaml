@@ -10,6 +10,9 @@ on:
       - master
       - release-4.0
       - release-5.*
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 jobs:
   chunks:
     runs-on: ubuntu-latest
