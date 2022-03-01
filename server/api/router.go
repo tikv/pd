@@ -133,6 +133,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	}
 
 	localLog := audit.LocalLogLabel
+	// Please don't use PrometheusHistogram in the hot path.
+	prometheus := audit.PrometheusHistogram
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -152,7 +154,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "GetOperators", "/operators", operatorHandler.List, setMethods("GET"))
-	registerFunc(apiRouter, "SetOperators", "/operators", operatorHandler.Post, setMethods("POST"))
+	registerFunc(apiRouter, "SetOperators", "/operators", operatorHandler.Post, setMethods("POST"), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "GetOperatorRecords", "/operators/records", operatorHandler.Records, setMethods("GET"))
 	registerFunc(apiRouter, "GetRegionOperator", "/operators/{region_id}", operatorHandler.Get, setMethods("GET"))
 	registerFunc(apiRouter, "DeleteRegionOperator", "/operators/{region_id}", operatorHandler.Delete, setMethods("DELETE"))
@@ -246,22 +248,22 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetStoresByLabel", "/labels/stores", labelsHandler.GetStores, setMethods("GET"))
 
 	hotStatusHandler := newHotStatusHandler(handler, rd)
-	registerFunc(apiRouter, "GetHotspotWriteRegion", "/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "GetHotspotReadRegion", "/hotspot/regions/read", hotStatusHandler.GetHotReadRegions, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "GetHotspotStores", "/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "GetHistoryHotspotRegion", "/hotspot/stores", hotStatusHandler.GetHotStores, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "GetHotspotWriteRegion", "/hotspot/regions/write", hotStatusHandler.GetHotWriteRegions, setMethods("GET"), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "GetHotspotReadRegion", "/hotspot/regions/read", hotStatusHandler.GetHotReadRegions, setMethods("GET"), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "GetHotspotStores", "/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions, setMethods("GET"), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "GetHistoryHotspotRegion", "/hotspot/stores", hotStatusHandler.GetHotStores, setMethods("GET"), setAuditBackend(prometheus))
 
 	regionHandler := newRegionHandler(svr, rd)
-	registerFunc(clusterRouter, "GetRegionByID", "/region/id/{id}", regionHandler.GetRegionByID, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(clusterRouter.UseEncodedPath(), "GetRegion", "/region/key/{key}", regionHandler.GetRegionByKey, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "GetRegionByID", "/region/id/{id}", regionHandler.GetRegionByID, setMethods("GET"), setAuditBackend(prometheus))
+	registerFunc(clusterRouter.UseEncodedPath(), "GetRegion", "/region/key/{key}", regionHandler.GetRegionByKey, setMethods("GET"), setAuditBackend(prometheus))
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)
-	registerFunc(clusterRouter, "GetAllRegions", "/regions", regionsAllHandler.GetAll, setMethods("GET"))
+	registerFunc(clusterRouter, "GetAllRegions", "/regions", regionsAllHandler.GetAll, setMethods("GET"), setAuditBackend(prometheus))
 
 	regionsHandler := newRegionsHandler(svr, rd)
-	registerFunc(clusterRouter, "ScanRegions", "/regions/key", regionsHandler.ScanRegions, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "CountRegions", "/regions/count", regionsHandler.GetRegionCount, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "ScanRegions", "/regions/key", regionsHandler.ScanRegions, setMethods("GET"), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "CountRegions", "/regions/count", regionsHandler.GetRegionCount, setMethods("GET"), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "GetRegionsByStore", "/regions/store/{id}", regionsHandler.GetStoreRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "GetTopWriteRegions", "/regions/writeflow", regionsHandler.GetTopWriteFlow, setMethods("GET"))
 	registerFunc(clusterRouter, "GetTopReadRegions", "/regions/readflow", regionsHandler.GetTopReadFlow, setMethods("GET"))
@@ -279,8 +281,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetSizeHistogram", "/regions/check/hist-size", regionsHandler.GetSizeHistogram, setMethods("GET"))
 	registerFunc(clusterRouter, "GetKeysHistogram", "/regions/check/hist-keys", regionsHandler.GetKeysHistogram, setMethods("GET"))
 	registerFunc(clusterRouter, "GetRegionSiblings", "/regions/sibling/{id}", regionsHandler.GetRegionSiblings, setMethods("GET"))
-	registerFunc(clusterRouter, "AccelerateRegionsSchedule", "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "ScatterRegions", "/regions/scatter", regionsHandler.ScatterRegions, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "AccelerateRegionsSchedule", "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods("POST"), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "ScatterRegions", "/regions/scatter", regionsHandler.ScatterRegions, setMethods("POST"), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "SplitRegions", "/regions/split", regionsHandler.SplitRegions, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "GetRangeHoles", "/regions/range-holes", regionsHandler.GetRangeHoles, setMethods("GET"))
 	registerFunc(clusterRouter, "CheckRegionsReplicated", "/regions/replicated", regionsHandler.CheckRegionsReplicated, setMethods("GET"), setQueries("startKey", "{startKey}", "endKey", "{endKey}"))
@@ -303,7 +305,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "GetRegionStatus", "/stats/region", statsHandler.Region, setMethods("GET"))
 
 	trendHandler := newTrendHandler(svr, rd)
-	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"))
+	registerFunc(apiRouter, "GetTrend", "/trend", trendHandler.Handle, setMethods("GET"), setAuditBackend(prometheus))
 
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "DeleteRegionCache", "/admin/cache/region/{id}", adminHandler.HandleDropCacheRegion, setMethods("DELETE"), setAuditBackend(localLog))
@@ -317,20 +319,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	replicationModeHandler := newReplicationModeHandler(svr, rd)
 	registerFunc(clusterRouter, "GetReplicationModeStatus", "/replication_mode/status", replicationModeHandler.GetStatus)
 
-	// Deprecated: component exists for historical compatibility and should not be used anymore. See https://github.com/tikv/tikv/issues/11472.
-	componentHandler := newComponentHandler(svr, rd)
-	clusterRouter.HandleFunc("/component", componentHandler.Register).Methods("POST")
-	clusterRouter.HandleFunc("/component/{component}/{addr}", componentHandler.UnRegister).Methods("DELETE")
-	clusterRouter.HandleFunc("/component", componentHandler.GetAllAddress).Methods("GET")
-	clusterRouter.HandleFunc("/component/{type}", componentHandler.GetAddress).Methods("GET")
-
 	pluginHandler := newPluginHandler(handler, rd)
 	registerFunc(apiRouter, "SetPlugin", "/plugin", pluginHandler.LoadPlugin, setMethods("POST"))
 	registerFunc(apiRouter, "DeletePlugin", "/plugin", pluginHandler.UnloadPlugin, setMethods("DELETE"))
 
 	register(apiRouter, "GetHealthStatus", "/health", newHealthHandler(svr, rd), setMethods("GET"))
-	// Deprecated: This API is no longer maintained anymore.
-	apiRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	registerFunc(apiRouter, "Ping", "/ping", func(w http.ResponseWriter, r *http.Request) {}, setMethods("GET"))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
@@ -378,8 +371,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
-	// Deprecated: use /pd/api/v1/diagnose instead.
-	rootRouter.Handle("/diagnose", newDiagnoseHandler(svr, rd)).Methods("GET")
 	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
 
