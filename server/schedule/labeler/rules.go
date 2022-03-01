@@ -36,6 +36,11 @@ const (
 	KeyRange = "key-range"
 )
 
+const (
+	scheduleOptionLabel      = "schedule"
+	scheduleOptioonValueDeny = "deny"
+)
+
 // KeyRangeRule contains the start key and end key of the LabelRule.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type KeyRangeRule struct {

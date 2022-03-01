@@ -17,6 +17,7 @@ package schedule
 import (
 	"container/heap"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
@@ -592,11 +594,13 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	for _, peer := range peers {
 		prs = append(prs, &metapb.Peer{Id: peer[0], StoreId: peer[1]})
 	}
+	start, _ := hex.DecodeString(startKey)
+	end, _ := hex.DecodeString(endKey)
 	return core.NewRegionInfo(
 		&metapb.Region{
 			Id:       id,
-			StartKey: []byte(startKey),
-			EndKey:   []byte(endKey),
+			StartKey: start,
+			EndKey:   end,
 			Peers:    prs,
 		},
 		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
@@ -650,9 +654,31 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 	cluster.PutRegion(source)
 	target := newRegionInfo(6, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
+
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	c.Assert(err, IsNil)
+	c.Assert(ops, HasLen, 2)
+
+	// test with label schedule=deny
+	labelerManager := cluster.GetRegionLabeler()
+	labelerManager.SetLabelRule(&labeler.LabelRule{
+		ID:       "schedulelabel",
+		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+		RuleType: labeler.KeyRange,
+		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
+	})
+
+	c.Assert(labelerManager.ScheduleDisabled(source), IsTrue)
+	// add operator should be failed since it is labeled with `schedule=deny`.
+	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
+
+	// add operator should be success without `schedule=deny`
+	labelerManager.DeleteLabelRule("schedulelabel")
+	labelerManager.ScheduleDisabled(source)
+	c.Assert(labelerManager.ScheduleDisabled(source), IsFalse)
 	// now there is one operator being allowed to add, if it is a merge operator
 	// both of the pair are allowed
-	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	ops, err = operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
 	c.Assert(err, IsNil)
 	c.Assert(ops, HasLen, 2)
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)

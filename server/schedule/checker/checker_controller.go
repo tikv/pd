@@ -80,6 +80,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
+	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		l := cl.GetRegionLabeler()
+		if l.ScheduleDisabled(region) {
+			return nil
+		}
+	}
+
 	if op := c.splitChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
