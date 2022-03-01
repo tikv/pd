@@ -415,7 +415,7 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			return false
 		}
 
-		if op.Kind().ContainsOpAdmin() || op.IsLeaveJointStateOperator() {
+		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
 			continue
 		}
 		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
