@@ -513,7 +513,7 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 	defer m.RUnlock()
 	stores := make([][]uint64, storeStatusTypeCount)
 	for _, s := range m.cluster.GetStores() {
-		if s.IsTombstone() {
+		if s.IsRemoved() {
 			continue
 		}
 		down := s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration

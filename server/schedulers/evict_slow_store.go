@@ -152,7 +152,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 	evictedStores := s.conf.EvictedStores
 	if len(evictedStores) != 0 {
 		store := cluster.GetStore(evictedStores[0])
-		if store == nil || store.IsTombstone() {
+		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the sheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
@@ -174,11 +174,11 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 	} else {
 		slowStores := make([]*core.StoreInfo, 0)
 		for _, store := range cluster.GetStores() {
-			if store.IsTombstone() {
+			if store.IsRemoved() {
 				continue
 			}
 
-			if store.IsUp() && store.IsSlow() {
+			if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 				slowStores = append(slowStores, store)
 			}
 		}
