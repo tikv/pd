@@ -22,7 +22,7 @@ import (
 // these setting is used to add a kind of limiter for a service
 type Option func(string, *RateLimiter)
 
-// UpdateConcurrencyLimiter creates a concurrency limiter for a given path if it doesn't exist.
+// UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
 	return func(label string, l *RateLimiter) {
 		if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(limit)); exist {
@@ -31,12 +31,26 @@ func UpdateConcurrencyLimiter(limit uint64) Option {
 	}
 }
 
-// UpdateQPSLimiter creates a QPS limiter for a given path if it doesn't exist.
+// DeleteConcurrencyLimiter deletes concurrency limiter of given label
+func DeleteConcurrencyLimiter() Option {
+	return func(label string, l *RateLimiter) {
+		l.concurrencyLimiter.Delete(label)
+	}
+}
+
+// UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit rate.Limit, burst int) Option {
 	return func(label string, l *RateLimiter) {
 		if limiter, exist := l.qpsLimiter.LoadOrStore(label, rate.NewLimiter(limit, burst)); exist {
 			limiter.(*rate.Limiter).SetLimit(limit)
 			limiter.(*rate.Limiter).SetBurst(burst)
 		}
+	}
+}
+
+// DeleteQPSLimiter deletes QPS limiter of given label
+func DeleteQPSLimiter() Option {
+	return func(label string, l *RateLimiter) {
+		l.qpsLimiter.Delete(label)
 	}
 }
