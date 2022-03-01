@@ -403,6 +403,11 @@ func (o *Operator) GetAdditionalInfo() string {
 	return ""
 }
 
+// IsLeaveJointStateOperator returns true if the desc is OpDescLeaveJointState.
+func (o *Operator) IsLeaveJointStateOperator() bool {
+	return strings.EqualFold(o.desc, OpDescLeaveJointState)
+}
+
 // these values are used for unit test.
 const (
 	// mock region default region size is 96MB.

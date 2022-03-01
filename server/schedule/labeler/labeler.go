@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/pingcap/log"
@@ -285,6 +286,12 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 		}
 	}
 	return value
+}
+
+// ScheduleDisabled returns true if the region is lablelld with schedule-disabled.
+func (l *RegionLabeler) ScheduleDisabled(region *core.RegionInfo) bool {
+	v := l.GetRegionLabel(region, scheduleOptionLabel)
+	return strings.EqualFold(v, scheduleOptioonValueDeny)
 }
 
 // GetRegionLabels returns the labels of the region.
