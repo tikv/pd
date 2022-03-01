@@ -73,6 +73,6 @@ func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, healths)
 }
 
-// @Summary Health status of PD servers.
+// @Summary Ping PD servers.
 // @Router /ping [get]
 func (h *healthHandler) Ping(w http.ResponseWriter, r *http.Request) {}

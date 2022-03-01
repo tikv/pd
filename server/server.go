@@ -154,8 +154,8 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
-	serviceLabels      map[string][]apiutil.APIAccessPath
-	apiServiceLabelMap map[apiutil.APIAccessPath]string
+	serviceLabels      map[string][]apiutil.AccessPath
+	apiServiceLabelMap map[apiutil.AccessPath]string
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -254,8 +254,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceLabels = make(map[string][]apiutil.APIAccessPath)
-	s.apiServiceLabelMap = make(map[apiutil.APIAccessPath]string)
+	s.serviceLabels = make(map[string][]apiutil.AccessPath)
+	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -1126,7 +1126,7 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 
 // GetServiceLabels returns ApiAccessPaths by given service label
 // TODO: this function will be used for updating api rate limit config
-func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.APIAccessPath {
+func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
 	if apis, ok := s.serviceLabels[serviceLabel]; ok {
 		return apis
 	}
@@ -1135,7 +1135,7 @@ func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.APIAccessPath {
 
 // GetAPIAccessServiceLabel returns service label by given access path
 // TODO: this function will be used for updating api rate limit config
-func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.APIAccessPath) string {
+func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.AccessPath) string {
 	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
 		return servicelabel
 	}
@@ -1148,12 +1148,12 @@ func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.APIAccessPath) stri
 
 // AddServiceLabel is used to add the relationship between service label and api access path
 // TODO: this function will be used for updating api rate limit config
-func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.APIAccessPath) {
+func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.AccessPath) {
 	if slice, ok := s.serviceLabels[serviceLabel]; ok {
 		slice = append(slice, accessPath)
 		s.serviceLabels[serviceLabel] = slice
 	} else {
-		slice = []apiutil.APIAccessPath{accessPath}
+		slice = []apiutil.AccessPath{accessPath}
 		s.serviceLabels[serviceLabel] = slice
 	}
 

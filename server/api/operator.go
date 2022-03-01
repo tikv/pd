@@ -48,7 +48,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [get]
-func (h *operatorHandler) ListOperatorsByRegion(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)

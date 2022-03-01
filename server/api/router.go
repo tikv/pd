@@ -153,7 +153,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/operators", operatorHandler.ListOperators, setMethods("GET"))
 	registerFunc(apiRouter, "/operators", operatorHandler.CreateOperator, setMethods("POST"), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/records", operatorHandler.GetOperatorRecords, setMethods("GET"))
-	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.ListOperatorsByRegion, setMethods("GET"))
+	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.GetOperatorsByRegion, setMethods("GET"))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteRegionOperator, setMethods("DELETE"))
 
 	checkerHandler := newCheckerHandler(svr, rd)
@@ -161,7 +161,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/checker/{name}", checkerHandler.GetCheckStatus, setMethods("GET"))
 
 	schedulerHandler := newSchedulerHandler(svr, rd)
-	registerFunc(apiRouter, "/schedulers", schedulerHandler.ListSchedulers, setMethods("GET"))
+	registerFunc(apiRouter, "/schedulers", schedulerHandler.GetSchedulers, setMethods("GET"))
 	registerFunc(apiRouter, "/schedulers", schedulerHandler.CreateScheduler, setMethods("POST"))
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.DeleteScheduler, setMethods("DELETE"))
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods("POST"))
@@ -177,7 +177,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/config", confHandler.GetConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config", confHandler.SetConfig, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/config/default", confHandler.GetDefaultConfig, setMethods("GET"))
-	registerFunc(apiRouter, "/config/schedule", confHandler.GetScheduleVCConfig, setMethods("GET"))
+	registerFunc(apiRouter, "/config/schedule", confHandler.GetScheduleConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/schedule", confHandler.SetScheduleConfig, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/config/pd-server", confHandler.GetPDServerConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/replicate", confHandler.GetReplicationConfig, setMethods("GET"))
@@ -288,7 +288,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/status", newStatusHandler(svr, rd).GetPDStatus, setMethods("GET"))
 
 	memberHandler := newMemberHandler(svr, rd)
-	registerFunc(apiRouter, "/members", memberHandler.ListMembers, setMethods("GET"))
+	registerFunc(apiRouter, "/members", memberHandler.GetMembers, setMethods("GET"))
 	registerFunc(apiRouter, "/members/name/{name}", memberHandler.DeleteMemberByName, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/members/id/{id}", memberHandler.DeleteMemberByID, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/members/name/{name}", memberHandler.SetMemberPropertyByName, setMethods("POST"), setAuditBackend(localLog))
@@ -347,7 +347,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
-	registerFunc(apiRouter, "/gc/safepoint", serviceGCSafepointHandler.ListGCSafePoint, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/gc/safepoint", serviceGCSafepointHandler.GetGCSafePoint, setMethods("GET"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/gc/safepoint/{service_id}", serviceGCSafepointHandler.DeleteGCSafePoint, setMethods("DELETE"), setAuditBackend(localLog))
 
 	// unsafe admin operation API

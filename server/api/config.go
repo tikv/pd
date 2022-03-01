@@ -341,7 +341,7 @@ func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, fou
 // @Produce json
 // @Success 200 {object} config.ScheduleConfig
 // @Router /config/schedule [get]
-func (h *confHandler) GetScheduleVCConfig(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
 }
 

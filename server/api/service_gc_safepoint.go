@@ -47,7 +47,7 @@ type listServiceGCSafepoint struct {
 // @Success 200 {array} listServiceGCSafepoint
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /gc/safepoint [get]
-func (h *serviceGCSafepointHandler) ListGCSafePoint(w http.ResponseWriter, r *http.Request) {
+func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
 	if err != nil {

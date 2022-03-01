@@ -53,7 +53,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 // @Success 200 {array} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers [get]
-func (h *schedulerHandler) ListSchedulers(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	schedulers, err := h.handler.GetSchedulers()
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())

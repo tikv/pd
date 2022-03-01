@@ -50,7 +50,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 // @Success 200 {object} pdpb.GetMembersResponse
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members [get]
-func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) GetMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := getMembers(h.svr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
