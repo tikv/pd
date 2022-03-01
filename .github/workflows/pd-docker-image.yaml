@@ -6,6 +6,9 @@ on:
   pull_request:
     branches:
       - master
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 jobs:
   chunks:
     runs-on: ubuntu-latest

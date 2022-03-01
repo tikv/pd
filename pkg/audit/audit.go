@@ -18,11 +18,14 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/requestutil"
 	"go.uber.org/zap"
 )
 
 const (
+	// PrometheusHistogram is label name of PrometheusCounterBackend
+	PrometheusHistogram = "prometheus-histogram"
 	// LocalLogLabel is label name of LocalLogBackend
 	LocalLogLabel = "local-log"
 )
@@ -64,6 +67,39 @@ type Backend interface {
 	// Match is used to determine if the backend matches
 	Match(*BackendLabels) bool
 	ProcessBeforeHandler() bool
+}
+
+// PrometheusHistogramBackend is an implementation of audit.Backend
+// and it uses Prometheus histogram data type to implement audit.
+// Note: histogram.WithLabelValues will degrade performance.
+// Please don't use it in the hot path.
+type PrometheusHistogramBackend struct {
+	*LabelMatcher
+	*Sequence
+	histogramVec *prometheus.HistogramVec
+}
+
+// NewPrometheusHistogramBackend returns a PrometheusHistogramBackend
+func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec, before bool) Backend {
+	return &PrometheusHistogramBackend{
+		LabelMatcher: &LabelMatcher{backendLabel: PrometheusHistogram},
+		Sequence:     &Sequence{before: before},
+		histogramVec: histogramVec,
+	}
+}
+
+// ProcessHTTPRequest is used to implement audit.Backend
+func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
+	requestInfo, ok := requestutil.RequestInfoFrom(req.Context())
+	if !ok {
+		return false
+	}
+	endTime, ok := requestutil.EndTimeFrom(req.Context())
+	if !ok {
+		return false
+	}
+	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component).Observe(float64(endTime - requestInfo.StartTimeStamp))
+	return true
 }
 
 // LocalLogBackend is an implementation of audit.Backend
