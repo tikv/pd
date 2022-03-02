@@ -84,6 +84,8 @@ func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	cmd.Println(r)
 }
+
+// NewCheckLabels returns a isolation label check.
 func NewCheckLabels() *cobra.Command {
 	return &cobra.Command{
 		Use:     "isolation [label]",

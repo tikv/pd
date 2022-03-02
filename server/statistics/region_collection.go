@@ -301,6 +301,7 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 	return l.labelCounter
 }
 
+// GetRegionLabelIsolation returns the isolation level of the region.
 func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 	if len(stores) == 0 || len(labels) == 0 {
 		return nonIsolation
