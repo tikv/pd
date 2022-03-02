@@ -15,10 +15,12 @@
 package labeler
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"sort"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
@@ -40,7 +42,7 @@ type testLabelerSuite struct {
 func (s *testLabelerSuite) SetUpTest(c *C) {
 	s.store = storage.NewStorageWithMemoryBackend()
 	var err error
-	s.labeler, err = NewRegionLabeler(s.store)
+	s.labeler, err = NewRegionLabeler(context.Background(), s.store)
 	c.Assert(err, IsNil)
 }
 
@@ -137,7 +139,9 @@ func (s *testLabelerSuite) TestGetSetRule(c *C) {
 	c.Assert(err, IsNil)
 	allRules = s.labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
-	c.Assert(allRules, DeepEquals, rules[1:])
+	for id, rule := range allRules {
+		expectSameRules(c, rule, rules[id+1])
+	}
 }
 
 func (s *testLabelerSuite) TestIndex(c *C) {
@@ -189,12 +193,27 @@ func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 		c.Assert(err, IsNil)
 	}
 
-	labeler, err := NewRegionLabeler(s.store)
+	labeler, err := NewRegionLabeler(context.Background(), s.store)
 	c.Assert(err, IsNil)
 	for _, r := range rules {
 		r2 := labeler.GetLabelRule(r.ID)
-		c.Assert(r2, DeepEquals, r)
+		expectSameRules(c, r2, r)
 	}
+}
+
+func expectSameRules(c *C, r1, r2 *LabelRule) {
+	c.Assert(r2.isExpired(), DeepEquals, r1.isExpired())
+	absDiff := r1.expire.Sub(r2.expire) + r1.StartAt.Sub(r2.StartAt)
+	if absDiff < 0 {
+		absDiff = -absDiff
+	}
+	c.Assert(absDiff < time.Second, IsTrue)
+
+	// skip small difference for time.
+	r1.expire = r2.expire
+	r1.StartAt = r2.StartAt
+
+	c.Assert(r2, DeepEquals, r1)
 }
 
 func (s *testLabelerSuite) TestKeyRange(c *C) {

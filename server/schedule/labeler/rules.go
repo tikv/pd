@@ -18,10 +18,13 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"reflect"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -35,11 +38,14 @@ type RegionLabel struct {
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
-	ID       string        `json:"id"`
-	Index    int           `json:"index"`
-	Labels   []RegionLabel `json:"labels"`
-	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"data"`
+	ID       string            `json:"id"`
+	Index    int               `json:"index"`
+	Labels   []RegionLabel     `json:"labels"`
+	RuleType string            `json:"rule_type"`
+	Data     interface{}       `json:"data"`
+	TTL      typeutil.Duration `json:"ttl"`
+	StartAt  time.Time         `json:"start_at"`
+	expire   time.Time
 }
 
 const (
@@ -68,6 +74,23 @@ type LabelRulePatch struct {
 	DeleteRules []string     `json:"deletes"`
 }
 
+func (rule *LabelRule) isExpired() bool {
+	if rule.TTL.Duration == 0 {
+		rule.TTL.Duration = math.MaxInt64
+	}
+
+	if rule.StartAt.IsZero() {
+		rule.StartAt = time.Now()
+	}
+	if rule.TTL.Duration == math.MaxInt64 {
+		return false
+	}
+	if rule.expire.IsZero() {
+		rule.expire = rule.StartAt.Add(rule.TTL.Duration)
+	}
+	return rule.expire.Before(time.Now())
+}
+
 func (rule *LabelRule) checkAndAdjust() error {
 	if rule.ID == "" {
 		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
@@ -75,6 +98,11 @@ func (rule *LabelRule) checkAndAdjust() error {
 	if len(rule.Labels) == 0 {
 		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
 	}
+
+	if rule.isExpired() {
+		return errs.ErrRegionRuleContent.FastGenByArgs("expired rule")
+	}
+
 	for _, l := range rule.Labels {
 		if l.Key == "" {
 			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label key")

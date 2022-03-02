@@ -69,7 +69,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	}
 	// It should be updated to the latest feature version.
 	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewStorageWithMemoryBackend())
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend())
 	return clus
 }
 
