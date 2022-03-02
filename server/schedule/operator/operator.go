@@ -229,7 +229,7 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	if startTime, step := o.getStepStartTime(); step != nil {
+	if startTime, step := o.getCurrentTimeAndStep(); step != nil {
 		return o.status.CheckStepTimeout(startTime, step, o.ApproximateSize)
 	}
 	return false
@@ -248,9 +248,9 @@ func (o *Operator) Step(i int) OpStep {
 	return nil
 }
 
-// getStepStartTime returns the start time of the i-th step.
+// getCurrentTimeAndStep returns the start time of the i-th step.
 // opStep is nil if the i-th step is not found.
-func (o *Operator) getStepStartTime() (startTime time.Time, opStep OpStep) {
+func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {
 	startTime = o.GetStartTime()
 	currentStep := atomic.LoadInt32(&o.currentStep)
 	if int(currentStep) < len(o.steps) {
@@ -274,7 +274,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
-				startTime, _ := o.getStepStartTime()
+				startTime, _ := o.getCurrentTimeAndStep()
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(time.Unix(0, o.stepsTime[step]).Sub(startTime).Seconds())
 			}
