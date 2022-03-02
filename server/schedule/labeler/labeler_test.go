@@ -53,7 +53,7 @@ func (s *testLabelerSuite) TestAdjustRule(c *C) {
 		RuleType: "key-range",
 		Data:     makeKeyRanges("12abcd", "34cdef", "56abcd", "78cdef"),
 	}
-	err := s.labeler.adjustRule(&rule)
+	err := rule.checkAndAdjust()
 	c.Assert(err, IsNil)
 	c.Assert(rule.Data.([]*KeyRangeRule), HasLen, 2)
 	c.Assert(rule.Data.([]*KeyRangeRule)[0].StartKey, BytesEquals, []byte{0x12, 0xab, 0xcd})
@@ -67,7 +67,7 @@ func (s *testLabelerSuite) TestAdjustRule2(c *C) {
 	var rule LabelRule
 	err := json.Unmarshal([]byte(ruleData), &rule)
 	c.Assert(err, IsNil)
-	err = s.labeler.adjustRule(&rule)
+	err = rule.checkAndAdjust()
 	c.Assert(err, IsNil)
 
 	badRuleData := []string{
@@ -95,7 +95,7 @@ func (s *testLabelerSuite) TestAdjustRule2(c *C) {
 		var rule LabelRule
 		err := json.Unmarshal([]byte(str), &rule)
 		c.Assert(err, IsNil, Commentf("#%d", i))
-		err = s.labeler.adjustRule(&rule)
+		err = rule.checkAndAdjust()
 		c.Assert(err, NotNil, Commentf("#%d", i))
 	}
 }
