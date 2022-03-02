@@ -142,7 +142,7 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.limiter != nil && s.limiter[limitType] != nil {
-		return s.limiter[limitType].Available() >= storelimit.RegionInfluence[limitType]
+		return s.limiter[limitType].Available(storelimit.RegionInfluence[limitType])
 	}
 	return true
 }
