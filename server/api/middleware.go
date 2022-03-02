@@ -110,6 +110,7 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	if !ok {
 		log.Error("failed to get request info when auditing")
 		next(w, r)
+		return
 	}
 
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)

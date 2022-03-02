@@ -114,35 +114,27 @@ func (s *testOpStatusTrackerSuite) TestCheckExpired(c *C) {
 	}
 }
 
-func (s *testOpStatusTrackerSuite) TestCheckTimeout(c *C) {
-	{
-		// Not timeout
-		trk := NewOpStatusTracker()
-		before := time.Now()
-		c.Assert(trk.To(STARTED), IsTrue)
-		after := time.Now()
-		c.Assert(trk.CheckTimeout(10*time.Second), IsFalse)
-		c.Assert(trk.Status(), Equals, STARTED)
-		checkTimeOrder(c, before, trk.ReachTime(), after)
-	}
-	{
-		// Timeout but status not changed
-		trk := NewOpStatusTracker()
-		c.Assert(trk.To(STARTED), IsTrue)
-		trk.setTime(STARTED, time.Now().Add(-10*time.Second))
-		c.Assert(trk.CheckTimeout(5*time.Second), IsTrue)
-		c.Assert(trk.Status(), Equals, TIMEOUT)
-	}
-	{
+func (s *testOpStatusTrackerSuite) TestCheckStepTimeout(c *C) {
+	testdata := []struct {
+		step   OpStep
+		start  time.Time
+		status OpStatus
+	}{{
+		step:   AddLearner{},
+		start:  time.Now().Add(-(SlowOperatorWaitTime - 1*time.Second)),
+		status: STARTED,
+	}, {
+		step:   AddLearner{},
+		start:  time.Now().Add(-(SlowOperatorWaitTime + 1*time.Second)),
+		status: TIMEOUT,
+	}}
+
+	for _, v := range testdata {
 		// Timeout and status changed
 		trk := NewOpStatusTracker()
-		c.Assert(trk.To(STARTED), IsTrue)
-		before := time.Now()
-		c.Assert(trk.To(TIMEOUT), IsTrue)
-		after := time.Now()
-		c.Assert(trk.CheckTimeout(0), IsTrue)
-		c.Assert(trk.Status(), Equals, TIMEOUT)
-		checkTimeOrder(c, before, trk.ReachTime(), after)
+		trk.To(STARTED)
+		c.Assert(trk.CheckStepTimeout(v.start, v.step, 0), Equals, v.status == TIMEOUT)
+		c.Assert(trk.Status(), Equals, v.status)
 	}
 }
 
