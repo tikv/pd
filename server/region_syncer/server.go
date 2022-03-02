@@ -27,12 +27,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -81,7 +81,7 @@ type RegionSyncer struct {
 	server    Server
 	wg        sync.WaitGroup
 	history   *historyBuffer
-	limit     *rate.Limiter
+	limit     *ratelimit.RateLimiter
 	tlsConfig *grpcutil.TLSConfig
 }
 
@@ -100,7 +100,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	syncer := &RegionSyncer{
 		server:    s,
 		history:   newHistoryBuffer(defaultHistoryBufferSize, regionStorageGetter.GetRegionStorage().(kv.Base)),
-		limit:     rate.NewLimiter(defaultBucketRate, defaultBucketCapacity),
+		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]ServerStream)
