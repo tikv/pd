@@ -26,8 +26,8 @@ type RateLimiter struct {
 	concurrencyLimiter sync.Map
 }
 
-// NewLimiter returns a global limiter which can be updated in the later.
-func NewLimiter() *RateLimiter {
+// NewRateLimiter returns a global limiter which can be updated in the later.
+func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{}
 }
 
