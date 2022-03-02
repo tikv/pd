@@ -18,7 +18,6 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
