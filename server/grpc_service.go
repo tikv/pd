@@ -1792,6 +1792,7 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	return err
 }
 
+// ReportBuckets receives region buckets from tikv.
 func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
 	panic("not implemented")
 }
