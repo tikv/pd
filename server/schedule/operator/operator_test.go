@@ -151,7 +151,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
 
-	// case2: check successful operator will return false not panic.
+	// case2: check timeout operator will return false not panic.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1, FromStore: 4})
 	op.currentStep = 1
 	c.Assert(op.status.To(STARTED), IsTrue)
