@@ -26,9 +26,9 @@ import (
 )
 
 const (
-	aliveStateName        = "Alive"
-	disconnectedStateName = "Disconnected"
-	downStateName         = "Down"
+	AliveStatusName        = "Alive"
+	DisconnectedStatusName = "Disconnected"
+	DownStatusName         = "Down"
 )
 
 // StoresInfo records stores' info.
@@ -39,8 +39,38 @@ type StoresInfo struct {
 
 // MetaStore contains meta information about a store.
 type MetaStore struct {
-	*metapb.Store
-	HeartbeatStatus string `json:"heartbeat_status"`
+	ID          uint64               `json:"id,omitempty"`
+	Address     string               `json:"address,omitempty"`
+	Labels      []*metapb.StoreLabel `json:"labels,omitempty"`
+	Version     string               `json:"version,omitempty"`
+	PeerAddress string               `json:"peer_address,omitempty"`
+	// Status address provides the HTTP service for external components
+	StatusAddress string `json:"status_address,omitempty"`
+	GitHash       string `json:"git_hash,omitempty"`
+	// The start timestamp of the current store
+	StartTimestamp int64  `json:"start_timestamp,omitempty"`
+	DeployPath     string `json:"deploy_path,omitempty"`
+	// The last heartbeat timestamp of the store.
+	LastHeartbeat int64 `json:"last_heartbeat,omitempty"`
+	// If the store is physically destroyed, which means it can never up again.
+	PhysicallyDestroyed bool   `json:"physically_destroyed,omitempty"`
+	HeartbeatStatus     string `json:"heartbeat_status"`
+}
+
+func NewMetaStore(store *metapb.Store, heartbeatStatus string) *MetaStore {
+	metaStore := &MetaStore{HeartbeatStatus: heartbeatStatus}
+	metaStore.ID = store.GetId()
+	metaStore.Address = store.GetAddress()
+	metaStore.Labels = store.GetLabels()
+	metaStore.Version = store.GetVersion()
+	metaStore.PeerAddress = store.GetPeerAddress()
+	metaStore.StatusAddress = store.GetStatusAddress()
+	metaStore.GitHash = store.GetGitHash()
+	metaStore.StartTimestamp = store.GetStartTimestamp()
+	metaStore.DeployPath = store.GetDeployPath()
+	metaStore.LastHeartbeat = store.GetLastHeartbeat()
+	metaStore.PhysicallyDestroyed = store.GetPhysicallyDestroyed()
+	return metaStore
 }
 
 // StoreStatus contains status about a store.
@@ -73,10 +103,7 @@ func newStoreInfo(cfg *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 		return nil
 	}
 	s := &StoreInfo{
-		Store: &MetaStore{
-			Store:           store.GetMeta(),
-			HeartbeatStatus: aliveStateName,
-		},
+		Store: NewMetaStore(store.GetMeta(), AliveStatusName),
 		Status: &StoreStatus{
 			Capacity:     typeutil.ByteSize(store.GetCapacity()),
 			Available:    typeutil.ByteSize(store.GetAvailable()),
@@ -106,9 +133,9 @@ func newStoreInfo(cfg *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 	}
 
 	if store.DownTime() > cfg.MaxStoreDownTime.Duration {
-		s.Store.HeartbeatStatus = downStateName
+		s.Store.HeartbeatStatus = DownStatusName
 	} else if store.IsDisconnected() {
-		s.Store.HeartbeatStatus = disconnectedStateName
+		s.Store.HeartbeatStatus = DisconnectedStatusName
 	}
 
 	return s

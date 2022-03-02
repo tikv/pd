@@ -109,7 +109,11 @@ func (s *testStoresAPISuite) TestStoresGet(c *C) {
 	c.Assert(err, IsNil)
 	got := &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	checkStoresInfo(c, got.Stores, s.leaderServer.GetStores())
+	expects := make([]*handlers.MetaStore, got.Count)
+	for _, s := range s.leaderServer.GetStores() {
+		expects = append(expects, handlers.NewMetaStore(s, handlers.AliveStatusName))
+	}
+	checkStoresInfo(c, got.Stores, expects)
 
 	resp, err = dialClient.Get(url + "?state=Up")
 	c.Assert(err, IsNil)
@@ -118,7 +122,10 @@ func (s *testStoresAPISuite) TestStoresGet(c *C) {
 	c.Assert(err, IsNil)
 	got = &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	checkStoresInfo(c, got.Stores, []*metapb.Store{s.leaderServer.GetStore(1).GetMeta(), s.leaderServer.GetStore(4).GetMeta()})
+	expects1 := make([]*handlers.MetaStore, got.Count)
+	expects1 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(1).GetMeta(), handlers.AliveStatusName))
+	expects1 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(4).GetMeta(), handlers.AliveStatusName))
+	checkStoresInfo(c, got.Stores, expects1)
 
 	resp, err = dialClient.Get(url + "?state=Offline")
 	c.Assert(err, IsNil)
@@ -127,7 +134,9 @@ func (s *testStoresAPISuite) TestStoresGet(c *C) {
 	c.Assert(err, IsNil)
 	got = &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	checkStoresInfo(c, got.Stores, []*metapb.Store{s.leaderServer.GetStore(6).GetMeta()})
+	expects2 := make([]*handlers.MetaStore, got.Count)
+	expects2 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(6).GetMeta(), handlers.AliveStatusName))
+	checkStoresInfo(c, got.Stores, expects2)
 }
 
 func (s *testStoresAPISuite) TestStoreGet(c *C) {
@@ -150,7 +159,8 @@ func (s *testStoresAPISuite) TestStoreGet(c *C) {
 	c.Assert(err, IsNil)
 	got := &handlers.StoreInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	checkStoresInfo(c, []*handlers.StoreInfo{got}, []*metapb.Store{s.leaderServer.GetStore(1).GetMeta()})
+	expects := []*handlers.MetaStore{handlers.NewMetaStore(s.leaderServer.GetStore(1).GetMeta(), handlers.AliveStatusName)}
+	checkStoresInfo(c, []*handlers.StoreInfo{got}, expects)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
 	c.Assert(int64(got.Status.Capacity), Equals, capacity)
@@ -159,7 +169,7 @@ func (s *testStoresAPISuite) TestStoreGet(c *C) {
 
 func (s *testStoresAPISuite) TestStoreSetState(c *C) {
 	url := s.leaderServer.GetServer().GetAddr() + storesPrefix
-	c.Assert(getStoreState(c, url+"/1"), Equals, "Up")
+	c.Assert(getStoreNodeState(c, url+"/1"), Equals, "Serving")
 	setStoreState(c, url+"/1", "Offline", http.StatusOK)
 
 	// store not found
@@ -173,20 +183,20 @@ func (s *testStoresAPISuite) TestStoreSetState(c *C) {
 
 	// Set back to Up.
 	setStoreState(c, url+"/1", "Up", http.StatusOK)
-	c.Assert(getStoreState(c, url+"/1"), Equals, "Up")
+	c.Assert(getStoreNodeState(c, url+"/1"), Equals, "Serving")
 }
 
-func checkStoresInfo(c *C, ss []*handlers.StoreInfo, want []*metapb.Store) {
-	c.Assert(len(ss), Equals, len(want))
-	mapWant := make(map[uint64]*metapb.Store)
-	for _, s := range want {
-		if _, ok := mapWant[s.Id]; !ok {
-			mapWant[s.Id] = s
+func checkStoresInfo(c *C, ss []*handlers.StoreInfo, expects []*handlers.MetaStore) {
+	c.Assert(len(ss), Equals, len(expects))
+	mapWant := make(map[uint64]*handlers.MetaStore)
+	for _, s := range expects {
+		if _, ok := mapWant[s.ID]; !ok {
+			mapWant[s.ID] = s
 		}
 	}
 	for _, s := range ss {
-		obtained := s.Store.Store
-		expected := mapWant[obtained.Id]
+		obtained := s.Store
+		expected := mapWant[obtained.ID]
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
 		c.Assert(obtained, DeepEquals, expected)
@@ -205,7 +215,7 @@ func setStoreState(c *C, url, state string, expectStatusCode int) {
 	c.Assert(resp.StatusCode, Equals, expectStatusCode)
 }
 
-func getStoreState(c *C, url string) string {
+func getStoreNodeState(c *C, url string) string {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	c.Assert(err, IsNil)
 	resp, err := dialClient.Do(req)
@@ -216,5 +226,5 @@ func getStoreState(c *C, url string) string {
 	c.Assert(err, IsNil)
 	got := &handlers.StoreInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	return got.Store.Store.State.String()
+	return got.Store.NodeState.String()
 }
