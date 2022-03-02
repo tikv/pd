@@ -129,11 +129,11 @@ func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
-	l.Lock()
-	defer l.Unlock()
 	if err := rule.checkAndAdjust(); err != nil {
 		return err
 	}
+	l.Lock()
+	defer l.Unlock()
 	if err := l.storage.SaveRegionRule(rule.ID, rule); err != nil {
 		return err
 	}
