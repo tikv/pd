@@ -226,10 +226,11 @@ func (o *Operator) CheckExpired() bool {
 
 // CheckTimeout checks if the operator is timeout, and update the status.
 func (o *Operator) CheckTimeout() bool {
-	if o.CheckSuccess() {
+	currentStep := atomic.LoadInt32(&o.currentStep)
+	// return false if currentStep exceeds than len(steps).
+	if o.CheckSuccess() || currentStep >= int32(len(o.steps)) {
 		return false
 	}
-	currentStep := atomic.LoadInt32(&o.currentStep)
 	startTime := o.getStepStartTime(currentStep)
 	return o.status.CheckStepTimeout(startTime, o.steps[currentStep], o.ApproximateSize)
 }
