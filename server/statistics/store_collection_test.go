@@ -42,7 +42,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 		{Id: 6, Address: "mock://tikv-6", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h2"}}},
 		{Id: 7, Address: "mock://tikv-7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
 		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
-		{Id: 8, Address: "mock://tikv-9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone},
+		{Id: 8, Address: "mock://tikv-9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone, NodeState: metapb.NodeState_Removed},
 	}
 	storesStats := NewStoresStats()
 	stores := make([]*core.StoreInfo, 0, len(metaStores))

@@ -323,10 +323,10 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	mustRegionHeartbeat(c, s.svr, r1)
 	mustRegionHeartbeat(c, s.svr, r2)
 	mustRegionHeartbeat(c, s.svr, r3)
-	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
-	mustPutStore(c, s.svr, 14, metapb.StoreState_Up, []*metapb.StoreLabel{})
-	mustPutStore(c, s.svr, 15, metapb.StoreState_Up, []*metapb.StoreLabel{})
-	mustPutStore(c, s.svr, 16, metapb.StoreState_Up, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 14, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 15, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 16, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 
 	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))
@@ -346,7 +346,7 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 	r1 := newTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
 	mustRegionHeartbeat(c, s.svr, r1)
-	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, []*metapb.StoreLabel{})
+	mustPutStore(c, s.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
 	newRegionID := uint64(11)
 	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
 		hex.EncodeToString([]byte("bbb")),

@@ -472,7 +472,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	store := rc.GetStore(storeID)
 	if store != nil {
-		if store.GetState() == metapb.StoreState_Tombstone {
+		if store.IsRemoved() {
 			return &pdpb.Error{
 				Type:    pdpb.ErrorType_STORE_TOMBSTONE,
 				Message: "store is tombstone",
@@ -556,7 +556,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	var stores []*metapb.Store
 	if request.GetExcludeTombstoneStores() {
 		for _, store := range rc.GetMetaStores() {
-			if store.GetState() != metapb.StoreState_Tombstone {
+			if store.GetNodeState() != metapb.NodeState_Removed {
 				stores = append(stores, store)
 			}
 		}

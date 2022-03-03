@@ -48,7 +48,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return false
 	}
 	for _, store := range c.GetStores() {
-		if !store.IsUp() {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		storeID := store.GetID()
