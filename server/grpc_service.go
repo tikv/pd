@@ -1779,9 +1779,6 @@ func (s *GrpcServer) WatchGlobalConfig(request *pdpb.WatchGlobalConfigRequest, s
 	}
 }
 
-// ReportBuckets is used to report buckets information to PD.
-func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error { return nil }
-
 func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer) error {
 	configList, err := s.client.Get(ctx, globalConfigPath, clientv3.WithPrefix())
 	if err != nil {
