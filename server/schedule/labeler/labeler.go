@@ -15,11 +15,7 @@
 package labeler
 
 import (
-	"bytes"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"sync"
 
@@ -61,7 +57,7 @@ func (l *RegionLabeler) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		if err := l.adjustRule(&r); err != nil {
+		if err := r.checkAndAdjust(); err != nil {
 			log.Error("failed to adjust label rule", zap.String("rule-key", k), zap.String("rule-value", v), zap.Error(err))
 			toDelete = append(toDelete, k)
 			return
@@ -78,76 +74,6 @@ func (l *RegionLabeler) loadRules() error {
 	}
 	l.buildRangeList()
 	return nil
-}
-
-func (l *RegionLabeler) adjustRule(rule *LabelRule) error {
-	if rule.ID == "" {
-		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
-	}
-	if len(rule.Labels) == 0 {
-		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
-	}
-	for _, l := range rule.Labels {
-		if l.Key == "" {
-			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label key")
-		}
-		if l.Value == "" {
-			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label value")
-		}
-	}
-
-	// TODO: change it to switch statement once we support more types.
-	if rule.RuleType == KeyRange {
-		rules, ok := rule.Data.([]interface{})
-		if !ok {
-			return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", rule.Data))
-		}
-		if len(rules) == 0 {
-			return errs.ErrRegionRuleContent.FastGenByArgs("no key ranges")
-		}
-		rs := make([]*KeyRangeRule, 0, len(rules))
-		for _, r := range rules {
-			rr, err := l.adjustKeyRangeRule(r)
-			if err != nil {
-				return err
-			}
-			rs = append(rs, rr)
-		}
-		rule.Data = rs
-		return nil
-	}
-	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
-	return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
-}
-
-func (l *RegionLabeler) adjustKeyRangeRule(rule interface{}) (*KeyRangeRule, error) {
-	data, ok := rule.(map[string]interface{})
-	if !ok {
-		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %T", reflect.TypeOf(rule)))
-	}
-	startKey, ok := data["start_key"].(string)
-	if !ok {
-		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid startKey type: %T", reflect.TypeOf(data["start_key"])))
-	}
-	endKey, ok := data["end_key"].(string)
-	if !ok {
-		return nil, errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid endKey type: %T", reflect.TypeOf(data["end_key"])))
-	}
-	var r KeyRangeRule
-	r.StartKeyHex, r.EndKeyHex = startKey, endKey
-	var err error
-	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
-	if err != nil {
-		return nil, errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
-	}
-	r.EndKey, err = hex.DecodeString(r.EndKeyHex)
-	if err != nil {
-		return nil, errs.ErrHexDecodingString.FastGenByArgs(r.EndKeyHex)
-	}
-	if len(r.EndKey) > 0 && bytes.Compare(r.EndKey, r.StartKey) <= 0 {
-		return nil, errs.ErrRegionRuleContent.FastGenByArgs("endKey should be greater than startKey")
-	}
-	return &r, nil
 }
 
 func (l *RegionLabeler) buildRangeList() {
@@ -203,11 +129,11 @@ func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
-	l.Lock()
-	defer l.Unlock()
-	if err := l.adjustRule(rule); err != nil {
+	if err := rule.checkAndAdjust(); err != nil {
 		return err
 	}
+	l.Lock()
+	defer l.Unlock()
 	if err := l.storage.SaveRegionRule(rule.ID, rule); err != nil {
 		return err
 	}
@@ -234,7 +160,7 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 // Patch updates multiple region rules in a batch.
 func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	for _, rule := range patch.SetRules {
-		if err := l.adjustRule(rule); err != nil {
+		if err := rule.checkAndAdjust(); err != nil {
 			return err
 		}
 	}
