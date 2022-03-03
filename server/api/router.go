@@ -150,15 +150,15 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
-	registerFunc(apiRouter, "/operators", operatorHandler.ListOperators, setMethods("GET"))
+	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods("GET"))
 	registerFunc(apiRouter, "/operators", operatorHandler.CreateOperator, setMethods("POST"), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/records", operatorHandler.GetOperatorRecords, setMethods("GET"))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.GetOperatorsByRegion, setMethods("GET"))
-	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteRegionOperator, setMethods("DELETE"))
+	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteOperatorByRegion, setMethods("DELETE"))
 
 	checkerHandler := newCheckerHandler(svr, rd)
 	registerFunc(apiRouter, "/checker/{name}", checkerHandler.PauseOrResumeChecker, setMethods("POST"))
-	registerFunc(apiRouter, "/checker/{name}", checkerHandler.GetCheckStatus, setMethods("GET"))
+	registerFunc(apiRouter, "/checker/{name}", checkerHandler.GetCheckerStatus, setMethods("GET"))
 
 	schedulerHandler := newSchedulerHandler(svr, rd)
 	registerFunc(apiRouter, "/schedulers", schedulerHandler.GetSchedulers, setMethods("GET"))
@@ -194,8 +194,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/config/rules", rulesHandler.SetAllRules, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/config/rules/batch", rulesHandler.BatchRules, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/config/rules/group/{group}", rulesHandler.GetRuleByGroup, setMethods("GET"))
-	registerFunc(clusterRouter, "/config/rules/region/{region}", rulesHandler.GetRuleByRegion, setMethods("GET"))
-	registerFunc(clusterRouter, "/config/rules/key/{key}", rulesHandler.GetRuleByKey, setMethods("GET"))
+	registerFunc(clusterRouter, "/config/rules/region/{region}", rulesHandler.GetRulesByRegion, setMethods("GET"))
+	registerFunc(clusterRouter, "/config/rules/key/{key}", rulesHandler.GetRulesByKey, setMethods("GET"))
 	registerFunc(clusterRouter, "/config/rule/{group}/{id}", rulesHandler.GetRuleByGroupAndID, setMethods("GET"))
 	registerFunc(clusterRouter, "/config/rule", rulesHandler.SetRule, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/config/rule/{group}/{id}", rulesHandler.DeleteRuleByGroup, setMethods("DELETE"), setAuditBackend(localLog))

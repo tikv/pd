@@ -73,7 +73,7 @@ func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Re
 // @Success 200 {array} operator.Operator
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators [get]
-func (h *operatorHandler) ListOperators(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	var (
 		results []*operator.Operator
 		ops     []*operator.Operator
@@ -82,7 +82,7 @@ func (h *operatorHandler) ListOperators(w http.ResponseWriter, r *http.Request) 
 
 	kinds, ok := r.URL.Query()["kind"]
 	if !ok {
-		results, err = h.GetOperators()
+		results, err = h.Handler.GetOperators()
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -328,7 +328,7 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [delete]
-func (h *operatorHandler) DeleteRegionOperator(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)

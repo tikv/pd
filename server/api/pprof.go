@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	netPprof "net/http/pprof"
+	pp "net/http/pprof"
 	"runtime"
 	"runtime/pprof"
 	"strconv"
@@ -149,63 +149,63 @@ func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 // @Summary debug profile of PD servers.
 // @Router /debug/pprof/profile [get]
 func (h *pprofHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
-	netPprof.Profile(w, r)
+	pp.Profile(w, r)
 }
 
 // @Tags debug
 // @Summary debug trace of PD servers.
 // @Router /debug/pprof/trace [get]
 func (h *pprofHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
-	netPprof.Trace(w, r)
+	pp.Trace(w, r)
 }
 
 // @Tags debug
 // @Summary debug symbol of PD servers.
 // @Router /debug/pprof/symbol [get]
 func (h *pprofHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
-	netPprof.Symbol(w, r)
+	pp.Symbol(w, r)
 }
 
 // @Tags debug
 // @Summary debug heap of PD servers.
 // @Router /debug/pprof/heap [get]
 func (h *pprofHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("heap").ServeHTTP(w, r)
+	pp.Handler("heap").ServeHTTP(w, r)
 }
 
 // @Tags debug
 // @Summary debug mutex of PD servers.
 // @Router /debug/pprof/mutex [get]
 func (h *pprofHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("mutex").ServeHTTP(w, r)
+	pp.Handler("mutex").ServeHTTP(w, r)
 }
 
 // @Tags debug
 // @Summary debug allocs of PD servers.
 // @Router /debug/pprof/allocs [get]
 func (h *pprofHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("allocs").ServeHTTP(w, r)
+	pp.Handler("allocs").ServeHTTP(w, r)
 }
 
 // @Tags debug
 // @Summary debug block of PD servers.
 // @Router /debug/pprof/block [get]
 func (h *pprofHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("block").ServeHTTP(w, r)
+	pp.Handler("block").ServeHTTP(w, r)
 }
 
 // @Tags debug
 // @Summary debug goroutine of PD servers.
 // @Router /debug/pprof/goroutine [get]
 func (h *pprofHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("goroutine").ServeHTTP(w, r)
+	pp.Handler("goroutine").ServeHTTP(w, r)
 }
 
 // @Tags debug
 // @Summary debug threadcreate of PD servers.
 // @Router /debug/pprof/threadcreate [get]
 func (h *pprofHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
-	netPprof.Handler("threadcreate").ServeHTTP(w, r)
+	pp.Handler("threadcreate").ServeHTTP(w, r)
 }
 
 func sleepWithCtx(ctx context.Context, d time.Duration) {

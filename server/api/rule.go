@@ -124,7 +124,7 @@ func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "The region does not exist."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules/region/{region} [get]
-func (h *ruleHandler) GetRuleByRegion(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
@@ -153,7 +153,7 @@ func (h *ruleHandler) GetRuleByRegion(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 412 {string} string "Placement rules feature is disabled."
 // @Router /config/rules/key/{key} [get]
-func (h *ruleHandler) GetRuleByKey(w http.ResponseWriter, r *http.Request) {
+func (h *ruleHandler) GetRulesByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
