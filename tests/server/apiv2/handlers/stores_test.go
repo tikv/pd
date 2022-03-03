@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/docker/go-units"
 	. "github.com/pingcap/check"
@@ -56,33 +57,41 @@ func (s *testStoresAPISuite) SetUpSuite(c *C) {
 		{
 			Header: &pdpb.RequestHeader{ClusterId: clusterID},
 			Store: &metapb.Store{
-				Id:      1,
-				Address: "mock-1",
-				State:   metapb.StoreState_Up,
+				Id:            1,
+				Address:       "mock-1",
+				NodeState:     metapb.NodeState_Preparing,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 		},
 		{
 			Header: &pdpb.RequestHeader{ClusterId: clusterID},
 			Store: &metapb.Store{
-				Id:      4,
-				Address: "mock-4",
-				State:   metapb.StoreState_Up,
+				Id:            4,
+				Address:       "mock-4",
+				NodeState:     metapb.NodeState_Preparing,
+				State:         metapb.StoreState_Up,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 		},
 		{
 			Header: &pdpb.RequestHeader{ClusterId: clusterID},
 			Store: &metapb.Store{
-				Id:      6,
-				Address: "mock-6",
-				State:   metapb.StoreState_Offline,
+				Id:            6,
+				Address:       "mock-6",
+				NodeState:     metapb.NodeState_Removing,
+				State:         metapb.StoreState_Offline,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 		},
 		{
 			Header: &pdpb.RequestHeader{ClusterId: clusterID},
 			Store: &metapb.Store{
-				Id:      7,
-				Address: "mock-7",
-				State:   metapb.StoreState_Tombstone,
+				Id:            7,
+				Address:       "mock-7",
+				NodeState:     metapb.NodeState_Removed,
+				State:         metapb.StoreState_Tombstone,
+				LastHeartbeat: time.Now().UnixNano(),
 			},
 		},
 	}
@@ -109,33 +118,33 @@ func (s *testStoresAPISuite) TestStoresGet(c *C) {
 	c.Assert(err, IsNil)
 	got := &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	expects := make([]*handlers.MetaStore, got.Count)
+	var expects []*handlers.MetaStore
 	for _, s := range s.leaderServer.GetStores() {
 		expects = append(expects, handlers.NewMetaStore(s, handlers.AliveStatusName))
 	}
 	checkStoresInfo(c, got.Stores, expects)
 
-	resp, err = dialClient.Get(url + "?state=Up")
+	resp, err = dialClient.Get(url + "?node_state=Preparing&&node_state=Serving")
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	got = &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	expects1 := make([]*handlers.MetaStore, got.Count)
-	expects1 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(1).GetMeta(), handlers.AliveStatusName))
-	expects1 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(4).GetMeta(), handlers.AliveStatusName))
+	expects1 := []*handlers.MetaStore{
+		handlers.NewMetaStore(s.leaderServer.GetStore(1).GetMeta(), handlers.AliveStatusName),
+		handlers.NewMetaStore(s.leaderServer.GetStore(4).GetMeta(), handlers.AliveStatusName),
+	}
 	checkStoresInfo(c, got.Stores, expects1)
 
-	resp, err = dialClient.Get(url + "?state=Offline")
+	resp, err = dialClient.Get(url + "?node_state=Removing")
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	buf, err = io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	got = &handlers.StoresInfo{}
 	c.Assert(json.Unmarshal(buf, &got), IsNil)
-	expects2 := make([]*handlers.MetaStore, got.Count)
-	expects2 = append(expects, handlers.NewMetaStore(s.leaderServer.GetStore(6).GetMeta(), handlers.AliveStatusName))
+	expects2 := []*handlers.MetaStore{handlers.NewMetaStore(s.leaderServer.GetStore(6).GetMeta(), handlers.AliveStatusName)}
 	checkStoresInfo(c, got.Stores, expects2)
 }
 
@@ -167,23 +176,23 @@ func (s *testStoresAPISuite) TestStoreGet(c *C) {
 	c.Assert(int64(got.Status.Available), Equals, available)
 }
 
-func (s *testStoresAPISuite) TestStoreSetState(c *C) {
+func (s *testStoresAPISuite) TestStoreSetNodeState(c *C) {
 	url := s.leaderServer.GetServer().GetAddr() + storesPrefix
-	c.Assert(getStoreNodeState(c, url+"/1"), Equals, "Serving")
-	setStoreState(c, url+"/1", "Offline", http.StatusOK)
+	c.Assert(getStoreNodeState(c, url+"/1"), Equals, metapb.NodeState_Preparing.String())
+	setStoreNodeState(c, url+"/1", "Removing", http.StatusOK)
 
 	// store not found
-	setStoreState(c, url+"/2", "Offline", http.StatusNotFound)
+	setStoreNodeState(c, url+"/2", "Removing", http.StatusNotFound)
 
 	// Invalid state.
-	invalidStates := []string{"Foo", "Tombstone"}
+	invalidStates := []string{"Foo", "Removed"}
 	for _, state := range invalidStates {
-		setStoreState(c, url+"/1", state, http.StatusBadRequest)
+		setStoreNodeState(c, url+"/1", state, http.StatusBadRequest)
 	}
 
-	// Set back to Up.
-	setStoreState(c, url+"/1", "Up", http.StatusOK)
-	c.Assert(getStoreNodeState(c, url+"/1"), Equals, "Serving")
+	// Set back to Serving.
+	setStoreNodeState(c, url+"/1", "Serving", http.StatusOK)
+	c.Assert(getStoreNodeState(c, url+"/1"), Equals, metapb.NodeState_Serving.String())
 }
 
 func checkStoresInfo(c *C, ss []*handlers.StoreInfo, expects []*handlers.MetaStore) {
@@ -203,8 +212,8 @@ func checkStoresInfo(c *C, ss []*handlers.StoreInfo, expects []*handlers.MetaSto
 	}
 }
 
-func setStoreState(c *C, url, state string, expectStatusCode int) {
-	data := map[string]string{"state": state}
+func setStoreNodeState(c *C, url, state string, expectStatusCode int) {
+	data := map[string]string{"node_state": state}
 	putData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(putData))

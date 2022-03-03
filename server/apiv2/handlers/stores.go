@@ -34,7 +34,7 @@ func GetStores() gin.HandlerFunc {
 			Stores: make([]*StoreInfo, 0, len(stores)),
 		}
 
-		state, exist := c.GetQuery("state")
+		nodeStates, exist := c.GetQueryArray("node_state")
 		for _, s := range stores {
 			storeID := s.GetId()
 			store := rc.GetStore(storeID)
@@ -43,7 +43,7 @@ func GetStores() gin.HandlerFunc {
 				return
 			}
 
-			if !exist || (exist && store.GetState().String() == state) {
+			if !exist || (exist && store.IsInStates(nodeStates)) {
 				storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
 				StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 			}
@@ -116,7 +116,7 @@ func DeleteStoreByID() gin.HandlerFunc {
 }
 
 type updateStoresParams struct {
-	State        string  `json:"state"`
+	NodeState    string  `json:"node_state"`
 	LeaderWeight float64 `json:"leader_weight"`
 	RegionWeight float64 `json:"region_weight"`
 }
@@ -152,14 +152,14 @@ func UpdateStoreByID() gin.HandlerFunc {
 			return
 		}
 
-		if p.State != "" {
-			switch p.State {
-			case metapb.StoreState_Up.String():
+		if p.NodeState != "" {
+			switch p.NodeState {
+			case metapb.NodeState_Serving.String():
 				if err = rc.UpStore(id); errors.Is(err, errs.ErrStoreNotFound) {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
-			case metapb.StoreState_Offline.String():
+			case metapb.NodeState_Removing.String():
 				if err = rc.RemoveStore(id, false); errors.Is(err, errs.ErrStoreNotFound) {
 					c.AbortWithStatus(http.StatusNotFound)
 					return

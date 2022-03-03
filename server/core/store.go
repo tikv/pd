@@ -167,6 +167,16 @@ func (s *StoreInfo) IsRemoved() bool {
 	return s.GetNodeState() == metapb.NodeState_Removed
 }
 
+// IsInStates checks if the store's state belongs to the given list.
+func (s *StoreInfo) IsInStates(states []string) bool {
+	for _, state := range states {
+		if s.GetNodeState().String() == state {
+			return true
+		}
+	}
+	return false
+}
+
 // GetSlowScore returns the slow score of the store.
 func (s *StoreInfo) GetSlowScore() uint64 {
 	s.mu.RLock()
