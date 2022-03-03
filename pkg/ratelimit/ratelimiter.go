@@ -31,8 +31,8 @@ type RateLimiter struct {
 
 // NewRateLimiter returns a new Limiter that allows events up to rate r (it means limiter refill r token per second)
 // and permits bursts of at most b tokens.
-func NewRateLimiter(r float64, b int) *RateLimiter {
-	return &RateLimiter{Limiter: rate.NewLimiter(rate.Limit(r), b)}
+func NewRateLimiter(r rate.Limit, b int) *RateLimiter {
+	return &RateLimiter{Limiter: rate.NewLimiter(r, b)}
 }
 
 // Available returns whether limiter has enough tokens.
