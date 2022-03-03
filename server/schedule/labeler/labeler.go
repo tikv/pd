@@ -124,7 +124,7 @@ func (l *RegionLabeler) loadRules() error {
 
 func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
-	l.earlistExpireTime = time.Now().Add(time.Hour)
+	l.earlistExpireTime = unlimittedExpire
 	for _, rule := range l.labelRules {
 		if rule.expireBefore(l.earlistExpireTime) {
 			l.earlistExpireTime = rule.expire
