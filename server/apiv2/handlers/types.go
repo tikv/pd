@@ -53,9 +53,9 @@ type MetaStore struct {
 	// The last heartbeat timestamp of the store.
 	LastHeartbeat int64 `json:"last_heartbeat,omitempty"`
 	// If the store is physically destroyed, which means it can never up again.
-	PhysicallyDestroyed bool             `json:"physically_destroyed,omitempty"`
-	NodeState           metapb.NodeState `json:"node_state"`
-	HeartbeatStatus     string           `json:"heartbeat_status"`
+	PhysicallyDestroyed bool   `json:"physically_destroyed,omitempty"`
+	NodeState           string `json:"node_state"`
+	HeartbeatStatus     string `json:"heartbeat_status"`
 }
 
 func NewMetaStore(store *metapb.Store, heartbeatStatus string) *MetaStore {
@@ -71,7 +71,7 @@ func NewMetaStore(store *metapb.Store, heartbeatStatus string) *MetaStore {
 	metaStore.DeployPath = store.GetDeployPath()
 	metaStore.LastHeartbeat = store.GetLastHeartbeat()
 	metaStore.PhysicallyDestroyed = store.GetPhysicallyDestroyed()
-	metaStore.NodeState = store.GetNodeState()
+	metaStore.NodeState = store.GetNodeState().String()
 	return metaStore
 }
 
