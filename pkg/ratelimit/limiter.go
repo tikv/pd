@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ratelimiter
+package ratelimit
 
 import (
 	"sync"
@@ -42,7 +42,7 @@ func (l *Limiter) Allow(label string) bool {
 	}
 
 	if limiter, exist := l.qpsLimiter.Load(label); exist {
-		if ql, ok := limiter.(*rate.Limiter); ok && !ql.Allow() {
+		if ql, ok := limiter.(*RateLimiter); ok && !ql.Allow() {
 			if cl != nil {
 				cl.release()
 			}
@@ -72,7 +72,7 @@ func (l *Limiter) Update(label string, opts ...Option) {
 // GetQPSLimiterStatus returns the status of a given label's QPS limiter.
 func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int) {
 	if limiter, exist := l.qpsLimiter.Load(label); exist {
-		return limiter.(*rate.Limiter).Limit(), limiter.(*rate.Limiter).Burst()
+		return limiter.(*RateLimiter).Limit(), limiter.(*RateLimiter).Burst()
 	}
 
 	return 0, 0

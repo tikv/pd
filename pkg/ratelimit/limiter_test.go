@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ratelimiter
+package ratelimit
 
 import (
 	"sync"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"golang.org/x/time/rate"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testRatelimiterSuite{})
 

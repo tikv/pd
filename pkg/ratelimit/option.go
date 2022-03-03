@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ratelimiter
+package ratelimit
 
-import (
-	"golang.org/x/time/rate"
-)
+import "golang.org/x/time/rate"
 
 // Option is used to create a limiter with the optional settings.
 // these setting is used to add a kind of limiter for a service
@@ -41,9 +39,9 @@ func DeleteConcurrencyLimiter() Option {
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit rate.Limit, burst int) Option {
 	return func(label string, l *Limiter) {
-		if limiter, exist := l.qpsLimiter.LoadOrStore(label, rate.NewLimiter(limit, burst)); exist {
-			limiter.(*rate.Limiter).SetLimit(limit)
-			limiter.(*rate.Limiter).SetBurst(burst)
+		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
+			limiter.(*RateLimiter).SetLimit(limit)
+			limiter.(*RateLimiter).SetBurst(burst)
 		}
 	}
 }
