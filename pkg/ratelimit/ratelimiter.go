@@ -49,11 +49,7 @@ func (l *RateLimiter) AvailableN(n int) bool {
 	r := l.Limiter.ReserveN(now, n)
 	delay := r.Delay()
 	r.CancelAt(now)
-	if delay > 0 {
-		return false
-	} else {
-		return true
-	}
+	return delay <= 0
 }
 
 // Allow is same as `rate.Limiter.Allow`.
