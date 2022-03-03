@@ -619,6 +619,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
+	if status := request.GetDrAutosyncStatus(); status != nil {
+		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
+	}
+
 	resp := &pdpb.StoreHeartbeatResponse{
 		Header:            s.header(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
@@ -1786,4 +1790,9 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	}
 	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 	return err
+}
+
+// ReportBuckets receives region buckets from tikv.
+func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
+	panic("not implemented")
 }
