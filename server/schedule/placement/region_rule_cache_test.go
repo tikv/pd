@@ -15,6 +15,8 @@
 package placement
 
 import (
+	"time"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -198,8 +200,10 @@ func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores
 
 func mockStores(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
+	now := time.Now()
 	for i := 1; i <= num; i++ {
-		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i)}))
+		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i)},
+			core.SetLastHeartbeatTS(now)))
 	}
 	return stores
 }
