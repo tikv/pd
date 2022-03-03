@@ -202,8 +202,9 @@ func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 }
 
 func expectSameRules(c *C, r1, r2 *LabelRule) {
-	c.Assert(r2.isExpired(), DeepEquals, r1.isExpired())
-	absDiff := r1.expire.Sub(r2.expire) + r1.StartAt.Sub(r2.StartAt)
+	r1Exp := r1.getExpire()
+	r2Exp := r2.getExpire()
+	absDiff := r1Exp.Sub(r2Exp) + r1.StartAt.Sub(r2.StartAt)
 	if absDiff < 0 {
 		absDiff = -absDiff
 	}

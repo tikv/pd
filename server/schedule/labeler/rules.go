@@ -74,7 +74,16 @@ type LabelRulePatch struct {
 	DeleteRules []string     `json:"deletes"`
 }
 
-func (rule *LabelRule) isExpired() bool {
+func (rule *LabelRule) expireBefore(t time.Time) bool {
+	return rule.getExpire().Before(t)
+}
+
+// GetExpire returns time the rule expired.
+func (rule *LabelRule) getExpire() time.Time {
+	if !rule.expire.IsZero() {
+		return rule.expire
+	}
+
 	if rule.TTL.Duration == 0 {
 		rule.TTL.Duration = math.MaxInt64
 	}
@@ -82,13 +91,10 @@ func (rule *LabelRule) isExpired() bool {
 	if rule.StartAt.IsZero() {
 		rule.StartAt = time.Now()
 	}
-	if rule.TTL.Duration == math.MaxInt64 {
-		return false
-	}
 	if rule.expire.IsZero() {
 		rule.expire = rule.StartAt.Add(rule.TTL.Duration)
 	}
-	return rule.expire.Before(time.Now())
+	return rule.expire
 }
 
 func (rule *LabelRule) checkAndAdjust() error {
@@ -99,7 +105,7 @@ func (rule *LabelRule) checkAndAdjust() error {
 		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
 	}
 
-	if rule.isExpired() {
+	if rule.expireBefore(time.Now()) {
 		return errs.ErrRegionRuleContent.FastGenByArgs("expired rule")
 	}
 

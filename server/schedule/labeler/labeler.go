@@ -84,7 +84,7 @@ func (l *RegionLabeler) checkAndClearExpiredRulesInMemory() []string {
 	}
 
 	for key, rule := range l.labelRules {
-		if rule.expire.Before(now) {
+		if rule.expireBefore(now) {
 			expired++
 			delete(l.labelRules, key)
 			toDelete = append(toDelete, key)
@@ -126,7 +126,7 @@ func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
 	l.earlistExpireTime = time.Now().Add(time.Hour)
 	for _, rule := range l.labelRules {
-		if rule.expire.Before(l.earlistExpireTime) {
+		if rule.expireBefore(l.earlistExpireTime) {
 			l.earlistExpireTime = rule.expire
 		}
 		if rule.RuleType == KeyRange {
@@ -150,9 +150,10 @@ func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 	l.RLock()
 	defer l.RUnlock()
+	now := time.Now()
 	rules := make([]*LabelRule, 0, len(l.labelRules))
 	for _, rule := range l.labelRules {
-		if rule.isExpired() {
+		if rule.expireBefore(now) {
 			continue
 		}
 		rules = append(rules, rule)
@@ -164,9 +165,10 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	l.RLock()
 	defer l.RUnlock()
+	now := time.Now()
 	rules := make([]*LabelRule, 0, len(ids))
 	for _, id := range ids {
-		if rule := l.getLabelRuleInLock(id); rule != nil {
+		if rule := l.getLabelRuleInLock(id, now); rule != nil {
 			rules = append(rules, rule)
 		}
 	}
@@ -177,12 +179,12 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 	l.RLock()
 	defer l.RUnlock()
-	return l.getLabelRuleInLock(id)
+	return l.getLabelRuleInLock(id, time.Now())
 }
 
-func (l *RegionLabeler) getLabelRuleInLock(id string) *LabelRule {
+func (l *RegionLabeler) getLabelRuleInLock(id string, now time.Time) *LabelRule {
 	if rule, ok := l.labelRules[id]; ok {
-		if rule.isExpired() {
+		if rule.expireBefore(now) {
 			return nil
 		}
 		return rule
@@ -259,6 +261,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
 	l.RLock()
 	defer l.RUnlock()
+	now := time.Now()
 	value, index := "", -1
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
@@ -267,7 +270,7 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 			if r.Index <= index && value != "" {
 				continue
 			}
-			if r.isExpired() {
+			if r.expireBefore(now) {
 				continue
 			}
 			for _, l := range r.Labels {
