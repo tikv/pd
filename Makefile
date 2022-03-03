@@ -57,7 +57,7 @@ BUILD_BIN_PATH := $(shell pwd)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-analysis pd-heartbeat-bench
+tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
 
 PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
