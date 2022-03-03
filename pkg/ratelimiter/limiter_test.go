@@ -36,7 +36,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	c.Parallel()
 
 	opts := []Option{UpdateConcurrencyLimiter(10)}
-	limiter := NewRateLimiter()
+	limiter := NewLimiter()
 
 	label := "test"
 	for _, opt := range opts {
@@ -95,7 +95,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Parallel()
 	opts := []Option{UpdateQPSLimiter(rate.Every(time.Second), 1)}
-	limiter := NewRateLimiter()
+	limiter := NewLimiter()
 
 	label := "test"
 	for _, opt := range opts {
@@ -143,7 +143,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	c.Parallel()
 	opts := []Option{UpdateQPSLimiter(rate.Every(3*time.Second), 100)}
-	limiter := NewRateLimiter()
+	limiter := NewLimiter()
 
 	label := "test"
 	for _, opt := range opts {
@@ -174,7 +174,7 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	opts := []Option{UpdateQPSLimiter(100, 100),
 		UpdateConcurrencyLimiter(100),
 	}
-	limiter := NewRateLimiter()
+	limiter := NewLimiter()
 
 	label := "test"
 	for _, opt := range opts {
@@ -217,7 +217,7 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	c.Assert(current, Equals, uint64(1))
 }
 
-func CountRateLimiterHandleResult(limiter *RateLimiter, label string, successCount *int,
+func CountRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
 	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
 	result := limiter.Allow(label)
 	lock.Lock()
