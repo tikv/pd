@@ -255,7 +255,9 @@ func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) 
 	currentStep := atomic.LoadInt32(&o.currentStep)
 	if int(currentStep) < len(o.steps) {
 		opStep = o.steps[currentStep]
-		if 0 < currentStep {
+		// we should use the finished time of the previous step if the first step is finished.
+		// the start time of the first step is the start time of the operator.
+		if currentStep > 0 {
 			startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
 		}
 	}
