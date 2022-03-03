@@ -35,17 +35,17 @@ func (s *testRateLimiterSuite) TestRateLimiter(c *C) {
 
 	limiter := NewRateLimiter(100, 100)
 
-	c.Assert(limiter.Available(), Equals, true)
+	c.Assert(limiter.Available(1), Equals, true)
 
 	c.Assert(limiter.AllowN(50), Equals, true)
-	c.Assert(limiter.AvailableN(50), Equals, true)
-	c.Assert(limiter.AvailableN(100), Equals, false)
-	c.Assert(limiter.AvailableN(50), Equals, true)
+	c.Assert(limiter.Available(50), Equals, true)
+	c.Assert(limiter.Available(100), Equals, false)
+	c.Assert(limiter.Available(50), Equals, true)
 	c.Assert(limiter.AllowN(50), Equals, true)
-	c.Assert(limiter.AvailableN(50), Equals, false)
+	c.Assert(limiter.Available(50), Equals, false)
 	time.Sleep(time.Second)
-	c.Assert(limiter.Available(), Equals, true)
+	c.Assert(limiter.Available(1), Equals, true)
 	c.Assert(limiter.AllowN(99), Equals, true)
 	c.Assert(limiter.Allow(), Equals, true)
-	c.Assert(limiter.Available(), Equals, false)
+	c.Assert(limiter.Available(1), Equals, false)
 }

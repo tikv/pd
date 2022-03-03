@@ -94,7 +94,7 @@ func NewStoreLimit(ratePerSec float64, regionInfluence int64) *StoreLimit {
 // Available returns the number of available tokens
 func (l *StoreLimit) Available(n int64) bool {
 	// Unlimited = 1e8, so can convert int64 to int
-	return l.limiter.AvailableN(int(n))
+	return l.limiter.Available(int(n))
 }
 
 // Rate returns the fill rate of the bucket, in tokens per second.

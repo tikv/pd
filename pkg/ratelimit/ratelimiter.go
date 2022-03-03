@@ -29,27 +29,22 @@ type RateLimiter struct {
 	*rate.Limiter
 }
 
-// NewRateLimiter returns a new Limiter that allows events up to rate r and permits
-// bursts of at most b tokens.
+// NewRateLimiter returns a new Limiter that allows events up to rate r (it means limiter refill r token per second)
+// and permits bursts of at most b tokens.
 func NewRateLimiter(r float64, b int) *RateLimiter {
 	return &RateLimiter{Limiter: rate.NewLimiter(rate.Limit(r), b)}
 }
 
-// Available is shorthand for AvailableN(1).
-func (l *RateLimiter) Available() bool {
-	return l.AvailableN(1)
-}
-
-// AvailableN returns whether limiter has enough tokens.
-// Note: AvailableN will increase the wait time of WaitN.
-func (l *RateLimiter) AvailableN(n int) bool {
+// Available returns whether limiter has enough tokens.
+// Note: Available will increase the wait time of WaitN.
+func (l *RateLimiter) Available(n int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
 	r := l.Limiter.ReserveN(now, n)
 	delay := r.Delay()
 	r.CancelAt(now)
-	return delay <= 0
+	return delay == 0
 }
 
 // Allow is same as `rate.Limiter.Allow`.
