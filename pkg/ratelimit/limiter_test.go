@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ratelimiter
+package ratelimit
 
 import (
 	"sync"
-	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
 	"golang.org/x/time/rate"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 var _ = Suite(&testRatelimiterSuite{})
 
@@ -217,7 +212,7 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	c.Assert(current, Equals, uint64(1))
 }
 
-func CountRateLimiterHandleResult(limiter *RateLimiter, label string, successCount *int,
+func CountRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
 	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
 	result := limiter.Allow(label)
 	lock.Lock()

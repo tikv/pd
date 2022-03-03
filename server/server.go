@@ -44,7 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/ratelimiter"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -154,7 +154,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
-	serviceRateLimiter *ratelimiter.RateLimiter
+	serviceRateLimiter *ratelimit.Limiter
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -253,7 +253,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = ratelimiter.NewLimiter()
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -1138,12 +1138,12 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter() *ratelimiter.RateLimiter {
+func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
 // UpdateServiceRateLimiter is used to update RateLimiter
-func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) {
 	s.serviceRateLimiter.Update(serviceLabel, opts...)
 }
 

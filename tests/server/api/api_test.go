@@ -30,7 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
-	"github.com/tikv/pd/pkg/ratelimiter"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
@@ -244,7 +244,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 
-	leader.UpdateServiceRateLimiter("failpoint", ratelimiter.UpdateConcurrencyLimiter(0))
+	leader.UpdateServiceRateLimiter("failpoint", ratelimit.UpdateConcurrencyLimiter(0))
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
