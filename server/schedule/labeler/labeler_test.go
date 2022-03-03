@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server/core"
@@ -202,17 +201,14 @@ func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 }
 
 func expectSameRules(c *C, r1, r2 *LabelRule) {
-	r1Exp := r1.getExpire()
-	r2Exp := r2.getExpire()
-	absDiff := r1Exp.Sub(r2Exp) + r1.StartAt.Sub(r2.StartAt)
-	if absDiff < 0 {
-		absDiff = -absDiff
+	r1.checkAndAdjustExpire()
+	r2.checkAndAdjustExpire()
+	if len(r1.TTL) == 0 {
+		c.Assert(r2, DeepEquals, r1)
 	}
-	c.Assert(absDiff < time.Second, IsTrue)
 
-	// skip small difference for time.
-	r1.expire = r2.expire
-	r1.StartAt = r2.StartAt
+	r2.StartAt = r1.StartAt
+	r2.checkAndAdjustExpire()
 
 	c.Assert(r2, DeepEquals, r1)
 }

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"reflect"
 	"time"
 
@@ -38,13 +37,14 @@ type RegionLabel struct {
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
-	ID       string            `json:"id"`
-	Index    int               `json:"index"`
-	Labels   []RegionLabel     `json:"labels"`
-	RuleType string            `json:"rule_type"`
-	Data     interface{}       `json:"data"`
-	TTL      typeutil.Duration `json:"ttl"`
-	StartAt  time.Time         `json:"start_at"`
+	ID       string        `json:"id"`
+	Index    int           `json:"index"`
+	Labels   []RegionLabel `json:"labels"`
+	RuleType string        `json:"rule_type"`
+	Data     interface{}   `json:"data"`
+	TTL      string        `json:"ttl,omitempty"`
+	StartAt  string        `json:"start_at,omitempty"`
+	start    time.Time
 	expire   time.Time
 }
 
@@ -78,22 +78,43 @@ func (rule *LabelRule) expireBefore(t time.Time) bool {
 	return rule.getExpire().Before(t)
 }
 
+var unlimittedExpire time.Time
+
+func init() {
+	unlimittedExpire, _ = time.Parse(time.UnixDate, "Mon Jan 12 22:22:22 MST 2222")
+}
+
+func (rule *LabelRule) checkAndAdjustExpire() (err error) {
+	ttl := typeutil.Duration{}
+	now := time.Now()
+	if len(rule.TTL) > 0 {
+		err = ttl.UnmarshalJSON([]byte(rule.TTL))
+	} else {
+		rule.expire = unlimittedExpire
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(rule.StartAt) == 0 {
+		rule.start = now
+		rule.StartAt = rule.start.Format(time.UnixDate)
+	} else {
+		rule.start, err = time.Parse(time.UnixDate, rule.StartAt)
+		if err != nil {
+			return err
+		}
+	}
+	rule.expire = rule.start.Add(ttl.Duration)
+	return nil
+}
+
 // GetExpire returns time the rule expired.
 func (rule *LabelRule) getExpire() time.Time {
 	if !rule.expire.IsZero() {
 		return rule.expire
 	}
-
-	if rule.TTL.Duration == 0 {
-		rule.TTL.Duration = math.MaxInt64
-	}
-
-	if rule.StartAt.IsZero() {
-		rule.StartAt = time.Now()
-	}
-	if rule.expire.IsZero() {
-		rule.expire = rule.StartAt.Add(rule.TTL.Duration)
-	}
+	rule.checkAndAdjustExpire()
 	return rule.expire
 }
 
@@ -103,6 +124,11 @@ func (rule *LabelRule) checkAndAdjust() error {
 	}
 	if len(rule.Labels) == 0 {
 		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
+	}
+
+	if err := rule.checkAndAdjustExpire(); err != nil {
+		err := fmt.Sprintf("invalid ttl info %v", err)
+		return errs.ErrRegionRuleContent.FastGenByArgs(err)
 	}
 
 	if rule.expireBefore(time.Now()) {
