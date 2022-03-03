@@ -16,6 +16,8 @@ GO_TOOLS_BIN_PATH := $(shell pwd)/../.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
+default: static tidy test
+
 test:
 	CGO_ENABLE=1 go test -race -cover
 

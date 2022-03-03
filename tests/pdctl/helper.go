@@ -57,6 +57,7 @@ func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*api.StoreInfo)
 		expected := proto.Clone(mapWant[obtained.Id].Store.Store).(*metapb.Store)
 		// Ignore state
 		obtained.State, expected.State = 0, 0
+		obtained.NodeState, expected.NodeState = 0, 0
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
 		c.Assert(obtained, check.DeepEquals, expected)

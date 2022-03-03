@@ -82,7 +82,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	u.reset()
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
-		if store != nil && store.IsUp() && !store.IsDisconnected() {
+		if store != nil && (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
 			return errors.Errorf("Store %v is up and connected", failedStore)
 		}
 	}
@@ -94,7 +94,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	}
 	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
-		if s.IsTombstone() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
 		}
 		if _, exists := failedStores[s.GetID()]; exists {

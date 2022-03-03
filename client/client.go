@@ -1537,7 +1537,7 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 	if store == nil {
 		return nil, errors.New("[pd] store field in rpc response not set")
 	}
-	if store.GetState() == metapb.StoreState_Tombstone {
+	if store.GetNodeState() == metapb.NodeState_Removed {
 		return nil, nil
 	}
 	return store, nil
