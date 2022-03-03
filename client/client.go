@@ -83,7 +83,7 @@ type Client interface {
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte, needBuckets bool) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
-	GetRegionByID(ctx context.Context, regionID uint64) (*Region, error)
+	GetRegionByID(ctx context.Context, regionID uint64, needBuckets bool) (*Region, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
@@ -1422,7 +1422,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, needBuckets bool
 	return handleRegionResponse(resp), nil
 }
 
-func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, error) {
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64, needBuckets bool) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1432,8 +1432,9 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, e
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   c.requestHeader(),
-		RegionId: regionID,
+		Header:      c.requestHeader(),
+		RegionId:    regionID,
+		NeedBuckets: needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegionByID(ctx, req)
