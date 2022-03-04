@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -155,6 +156,8 @@ type Server struct {
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
 	serviceRateLimiter *ratelimit.Limiter
+	serviceLabels      map[string][]apiutil.ApiAccessPath
+	apiServiceLabelMap map[apiutil.ApiAccessPath]string
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
@@ -247,6 +250,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 
 	s.handler = newHandler(s)
 
+	s.serviceLabels = make(map[string][]apiutil.ApiAccessPath)
+	s.apiServiceLabelMap = make(map[apiutil.ApiAccessPath]string)
 	// create audit backend
 	s.auditBackends = []audit.Backend{
 		audit.NewLocalLogBackend(true),
@@ -1120,6 +1125,36 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return cluster.GetRegions()
 	}
 	return nil
+}
+
+func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.ApiAccessPath {
+	if apis, ok := s.serviceLabels[serviceLabel]; ok {
+		return apis
+	}
+	return nil
+}
+
+func (s *Server) GetApiAccessServiceLabel(accessPath apiutil.ApiAccessPath) string {
+	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
+		return servicelabel
+	}
+	accessPathNoMethod := apiutil.NewApiAccessPath(accessPath.Path, "")
+	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
+		return servicelabel
+	}
+	return ""
+}
+
+func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.ApiAccessPath) {
+	if slice, ok := s.serviceLabels[serviceLabel]; ok {
+		slice = append(slice, accessPath)
+		s.serviceLabels[serviceLabel] = slice
+	} else {
+		slice = []apiutil.ApiAccessPath{accessPath}
+		s.serviceLabels[serviceLabel] = slice
+	}
+
+	s.apiServiceLabelMap[accessPath] = serviceLabel
 }
 
 // GetAuditBackend returns audit backends

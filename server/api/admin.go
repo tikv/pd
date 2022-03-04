@@ -22,8 +22,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"golang.org/x/time/rate"
 )
 
 type adminHandler struct {
@@ -173,4 +175,69 @@ func (h *adminHandler) HanldeRatelimitMiddlewareSwitch(w http.ResponseWriter, r 
 	}
 	h.svr.SetRateLimitMiddleware(enable)
 	h.rd.JSON(w, http.StatusOK, "Switching ratelimit middleware is successful.")
+}
+
+//
+func (h *adminHandler) UpdateRatelimitConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	typeStr, ok := input["type"].(string)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "The type is empty.")
+		return
+	}
+	var serviceLabel string
+	switch typeStr {
+	case "label":
+		serviceLabel, ok = input["label"].(string)
+		if !ok || len(serviceLabel) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "The label is empty.")
+			return
+		}
+		if len(h.svr.GetServiceLabels(serviceLabel)) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			return
+		}
+	case "path":
+		method, _ := input["method"].(string)
+		path, ok := input["path"].(string)
+		if !ok || len(path) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "The path is empty.")
+			return
+		}
+		serviceLabel = h.svr.GetApiAccessServiceLabel(apiutil.NewApiAccessPath(path, method))
+		if len(serviceLabel) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			return
+		}
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
+		return
+	}
+
+	// update concurrency limiter
+	var concurrencyUpdated bool
+	concurrency, ok := input["concurrency"].(float64)
+	if ok {
+		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(uint64(concurrency)))
+		concurrencyUpdated = true
+	}
+	// update qps rate limiter
+	var qpsRateUpdated bool
+	qps, ok := input["qps"].(float64)
+	if ok {
+		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(rate.Limit(qps), int(qps)))
+		qpsRateUpdated = true
+	}
+	if !concurrencyUpdated && !qpsRateUpdated {
+		h.rd.JSON(w, http.StatusOK, "No changed.")
+	} else if qpsRateUpdated && concurrencyUpdated {
+		h.rd.JSON(w, http.StatusOK, "Concurrency limiter and QPS rate limiter are changed.")
+	} else if qpsRateUpdated {
+		h.rd.JSON(w, http.StatusOK, "QPS rate limiter is changed.")
+	} else if concurrencyUpdated {
+		h.rd.JSON(w, http.StatusOK, "Concurrency limiter is changed.")
+	}
 }

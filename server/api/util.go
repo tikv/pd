@@ -99,6 +99,15 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 	return doJSON(client, req, checkOpts...)
 }
 
+func postJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return doJSONIgnoreRespStatus(client, req, checkOpts...)
+}
+
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {
@@ -168,6 +177,22 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 	}
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
+	}
+	for _, opt := range checkOpts {
+		opt(res, resp.StatusCode)
+	}
+	return nil
+}
+
+func doJSONIgnoreRespStatus(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer resp.Body.Close()
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
 	for _, opt := range checkOpts {
 		opt(res, resp.StatusCode)

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
@@ -331,6 +332,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "SetWaitAsyncTime", "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SwitchAuditMiddleware", "/admin/audit-middleware", adminHandler.HanldeAuditMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "SwitchRateLimitMiddleware", "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "SetRateLimitConfig", "/admin/ratelimit/config", adminHandler.UpdateRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "SetLogLevel", "/admin/log", logHandler.Handle, setMethods("POST"), setAuditBackend(localLog))
@@ -394,6 +396,23 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	rootRouter.Handle("/health", newHealthHandler(svr, rd)).Methods("GET")
 	// Deprecated: use /pd/api/v1/ping instead.
 	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods("GET")
+
+	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+		serviceLabel := route.GetName()
+		path, err := route.GetPathTemplate()
+		if err != nil {
+			return nil
+		}
+		methods, _ := route.GetMethods()
+		if len(methods) > 0 {
+			for _, method := range methods {
+				svr.AddServiceLabel(serviceLabel, apiutil.NewApiAccessPath(path, method))
+			}
+		} else {
+			svr.AddServiceLabel(serviceLabel, apiutil.NewApiAccessPath(path, ""))
+		}
+		return nil
+	})
 
 	return rootRouter
 }
