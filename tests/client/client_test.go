@@ -400,13 +400,13 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"), IsNil)
 	time.Sleep(200 * time.Millisecond)
-	r, err := cli.GetRegion(context.Background(), []byte("a"), false)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, NotNil)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"), IsNil)
 	time.Sleep(200 * time.Millisecond)
-	r, err = cli.GetRegion(context.Background(), []byte("a"), false)
+	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	c.Assert(err, IsNil)
 	c.Assert(r, NotNil)
 }
@@ -722,7 +722,7 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	c.Assert(err, IsNil)
 
 	testutil.WaitUntil(c, func() bool {
-		r, err := s.client.GetRegion(context.Background(), []byte("a"), false)
+		r, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
 		if r == nil {
 			return false
@@ -760,7 +760,7 @@ func (s *testClientSuite) TestGetPrevRegion(c *C) {
 	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
 		testutil.WaitUntil(c, func() bool {
-			r, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)}, false)
+			r, err := s.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			c.Assert(err, IsNil)
 			if i > 0 && i < regionLen {
 				return c.Check(r.Leader, DeepEquals, peers[0]) &&
@@ -866,7 +866,7 @@ func (s *testClientSuite) TestGetRegionByID(c *C) {
 	c.Assert(err, IsNil)
 
 	testutil.WaitUntil(c, func() bool {
-		r, err := s.client.GetRegionByID(context.Background(), regionID, false)
+		r, err := s.client.GetRegionByID(context.Background(), regionID)
 		c.Assert(err, IsNil)
 		if r == nil {
 			return false
