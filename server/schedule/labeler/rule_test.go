@@ -38,6 +38,7 @@ func (s *testLabelerSuite) TestRuleTTL(c *C) {
 	c.Assert(err, IsNil)
 	// test rule with no ttl.
 	err = rule.checkAndAdjustExpire()
+	c.Assert(err, IsNil)
 	c.Assert(rule.start.IsZero(), IsTrue)
 	c.Assert(rule.StartAt, Equals, "")
 	c.Assert(rule.expire, Equals, unlimittedExpire)
