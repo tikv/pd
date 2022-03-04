@@ -342,8 +342,7 @@ func (s *testLabelerSuite) TestGC(c *C) {
 	// no rule was cleared because the gc interval is big.
 	c.Assert(labeler.labelRules, HasLen, len(ttls))
 
-	labeler.gcInterval = time.Millisecond
-	go labeler.doGC()
+	go labeler.doGC(time.Millisecond)
 	for {
 		time.Sleep(time.Millisecond * 5)
 		labeler.RLock()

@@ -37,7 +37,6 @@ type RegionLabeler struct {
 	rangeList         rangelist.List // sorted LabelRules of the type `KeyRange`
 	ctx               context.Context
 	earlistExpireTime time.Time
-	gcInterval        time.Duration
 }
 
 // NewRegionLabeler creates a Labeler instance.
@@ -46,18 +45,17 @@ func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInter
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),
 		ctx:        ctx,
-		gcInterval: gcInterval,
 	}
 
 	if err := l.loadRules(); err != nil {
 		return nil, err
 	}
-	go l.doGC()
+	go l.doGC(gcInterval)
 	return l, nil
 }
 
-func (l *RegionLabeler) doGC() {
-	ticker := time.NewTicker(l.gcInterval)
+func (l *RegionLabeler) doGC(gcInterval time.Duration) {
+	ticker := time.NewTicker(gcInterval)
 	defer ticker.Stop()
 	for {
 		select {
