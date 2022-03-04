@@ -201,12 +201,13 @@ func GetRouteName(req *http.Request) string {
 	return ""
 }
 
-// ApiAccessPath represents the access path including url path and http method
-type ApiAccessPath struct {
+// AccessPath is used to identify HTTP api access path including path and method
+type AccessPath struct {
 	Path   string
 	Method string
 }
 
-func NewApiAccessPath(path, method string) ApiAccessPath {
-	return ApiAccessPath{Path: path, Method: method}
+// NewAPIAccessPath returns an ApiAccessPath
+func NewAPIAccessPath(path, method string) AccessPath {
+	return AccessPath{Path: path, Method: method}
 }

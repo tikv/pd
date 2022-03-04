@@ -223,12 +223,12 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags region
-// @Summary Search for a region by a key.
+// @Summary Search for a region by a key. GetRegion is named to be consistent with gRPC
 // @Param key path string true "Region key"
 // @Produce json
 // @Success 200 {object} RegionInfo
 // @Router /region/key/{key} [get]
-func (h *regionHandler) GetRegionByKey(w http.ResponseWriter, r *http.Request) {
+func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	key := vars["key"]
@@ -317,7 +317,7 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Router /regions [get]
-func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
 	regionsInfo := convertToAPIRegions(regions)
@@ -482,7 +482,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Success 200 {object} RegionsInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/check/offline-peer [get]
-func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetOfflinePeer(statistics.OfflinePeer)
 	if err != nil {
@@ -499,7 +499,7 @@ func (h *regionsHandler) GetOfflinePeer(w http.ResponseWriter, r *http.Request) 
 // @Success 200 {object} RegionsInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/check/empty-region [get]
-func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetRegionsByType(statistics.EmptyRegion)
 	if err != nil {
@@ -666,7 +666,7 @@ const (
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/writeflow [get]
-func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() })
 }
 
@@ -677,7 +677,7 @@ func (h *regionsHandler) GetTopWriteFlow(w http.ResponseWriter, r *http.Request)
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/readflow [get]
-func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
 }
 
@@ -688,7 +688,7 @@ func (h *regionsHandler) GetTopReadFlow(w http.ResponseWriter, r *http.Request) 
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/confver [get]
-func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetTopConfVerRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
 	})
@@ -701,7 +701,7 @@ func (h *regionsHandler) GetTopConfVer(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/version [get]
-func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetTopVersionRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
 	})
@@ -714,7 +714,7 @@ func (h *regionsHandler) GetTopVersion(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Router /regions/size [get]
-func (h *regionsHandler) GetTopSize(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateSize() < b.GetApproximateSize()
 	})

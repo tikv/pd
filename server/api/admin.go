@@ -47,7 +47,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 // @Success 200 {string} string "The region is removed from server cache."
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/cache/region/{id} [delete]
-func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
@@ -100,7 +100,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 
 // Intentionally no swagger mark as it is supposed to be only used in
 // server-to-server. For security reason, it only accepts JSON formatted data.
-func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, "")
@@ -148,7 +148,7 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 // @Success 200 {string} string "Switching audit middleware is successful."
 // @Failure 400 {string} string "The input is invalid."
 // @Router /admin/audit-middleware [POST]
-func (h *adminHandler) HanldeAuditMiddlewareSwitch(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) SwitchAuditMiddleware(w http.ResponseWriter, r *http.Request) {
 	enableStr := r.URL.Query().Get("enable")
 	enable, err := strconv.ParseBool(enableStr)
 	if err != nil {
@@ -178,7 +178,7 @@ func (h *adminHandler) HanldeRatelimitMiddlewareSwitch(w http.ResponseWriter, r 
 }
 
 //
-func (h *adminHandler) UpdateRatelimitConfig(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -207,7 +207,7 @@ func (h *adminHandler) UpdateRatelimitConfig(w http.ResponseWriter, r *http.Requ
 			h.rd.JSON(w, http.StatusBadRequest, "The path is empty.")
 			return
 		}
-		serviceLabel = h.svr.GetApiAccessServiceLabel(apiutil.NewApiAccessPath(path, method))
+		serviceLabel = h.svr.GetAPIAccessServiceLabel(apiutil.NewAPIAccessPath(path, method))
 		if len(serviceLabel) == 0 {
 			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
 			return
