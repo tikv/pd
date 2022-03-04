@@ -347,7 +347,7 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))
 		return false
 	}
-	return !store.IsUp()
+	return !store.IsPreparing() && !store.IsServing()
 }
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {
@@ -401,7 +401,7 @@ func (o *recorder) refresh(cluster schedule.Cluster) {
 		needClean := false
 		for _, storeID := range o.offlineLeaderCounter {
 			store := cluster.GetStore(storeID)
-			if store == nil || store.IsTombstone() {
+			if store == nil || store.IsRemoved() {
 				needClean = true
 				break
 			}

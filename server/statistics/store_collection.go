@@ -60,15 +60,15 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		}
 		key := fmt.Sprintf("%s:%s", k, v)
 		// exclude tombstone
-		if store.GetState() != metapb.StoreState_Tombstone {
+		if !store.IsRemoved() {
 			s.LabelCounter[key]++
 		}
 	}
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
-	switch store.GetState() {
-	case metapb.StoreState_Up:
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			s.Down++
 		} else if store.IsUnhealthy() {
@@ -80,9 +80,9 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		} else {
 			s.Up++
 		}
-	case metapb.StoreState_Offline:
+	case metapb.NodeState_Removing:
 		s.Offline++
-	case metapb.StoreState_Tombstone:
+	case metapb.NodeState_Removed:
 		s.Tombstone++
 		s.resetStoreStatistics(storeAddress, id)
 		return
