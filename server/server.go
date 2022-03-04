@@ -235,14 +235,14 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:               cfg,
-		persistOptions:    config.NewPersistOptions(cfg),
-		member:            &member.Member{},
-		ctx:               ctx,
-		startTimestamp:    time.Now().Unix(),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                cfg,
+		persistOptions:     config.NewPersistOptions(cfg),
+		member:             &member.Member{},
+		ctx:                ctx,
+		startTimestamp:     time.Now().Unix(),
+		DiagnosticsServer:  sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		storeConfigManager: config.NewStoreConfigManager(),
 	}
-	s.storeConfigManager = config.NewStoreConfigManager(s.httpClient)
 	s.handler = newHandler(s)
 
 	// create audit backend

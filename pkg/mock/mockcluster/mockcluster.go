@@ -17,7 +17,6 @@ package mockcluster
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -65,7 +64,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:            statistics.NewHotStat(ctx),
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
-		StoreConfigManager: config.NewStoreConfigManager(http.DefaultClient),
+		StoreConfigManager: config.NewStoreConfigManager(),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
