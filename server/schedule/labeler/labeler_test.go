@@ -281,7 +281,7 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(start, end)
-	// the region has no lable rule in the begining.
+	// the region has no lable rule at the beginning.
 	c.Assert(s.labeler.GetRegionLabels(region), HasLen, 0)
 
 	// set rules for the region.
@@ -314,7 +314,7 @@ func (s *testLabelerSuite) TestGC(c *C) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(start, end)
-	// the region has no lable rule in the begining.
+	// the region has no lable rule at the beginning.
 	c.Assert(labeler.GetRegionLabels(region), HasLen, 0)
 
 	for id, ttl := range ttls {
