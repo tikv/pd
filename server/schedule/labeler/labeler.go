@@ -37,14 +37,16 @@ type RegionLabeler struct {
 	rangeList         rangelist.List // sorted LabelRules of the type `KeyRange`
 	ctx               context.Context
 	earlistExpireTime time.Time
+	gcInterval        time.Duration
 }
 
 // NewRegionLabeler creates a Labeler instance.
-func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage) (*RegionLabeler, error) {
+func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInterval time.Duration) (*RegionLabeler, error) {
 	l := &RegionLabeler{
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),
 		ctx:        ctx,
+		gcInterval: gcInterval,
 	}
 
 	if err := l.loadRules(); err != nil {
@@ -55,7 +57,7 @@ func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage) (*Regio
 }
 
 func (l *RegionLabeler) doGC() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(l.gcInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -68,6 +70,7 @@ func (l *RegionLabeler) doGC() {
 			}
 			log.Debug("RegionLabeler GC items", zap.Int("count", len(toDelete)))
 		case <-l.ctx.Done():
+			log.Debug("GC stopped")
 			return
 		}
 	}
@@ -89,6 +92,9 @@ func (l *RegionLabeler) checkAndClearExpiredRulesInMemory() []string {
 			delete(l.labelRules, key)
 			toDelete = append(toDelete, key)
 		}
+	}
+	if len(toDelete) == 0 {
+		return toDelete
 	}
 	l.buildRangeList()
 	return toDelete
@@ -299,11 +305,14 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 		index int
 	}
 	labels := make(map[string]valueIndex)
-
+	now := time.Now()
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
 			r := rule.(*LabelRule)
+			if r.expireBefore(now) {
+				continue
+			}
 			for _, l := range r.Labels {
 				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
 					labels[l.Key] = valueIndex{l.Value, r.Index}

@@ -49,7 +49,7 @@ func (s *testLabelerSuite) TestRuleTTL(c *C) {
 	c.Assert(err, NotNil)
 
 	// test legal rule with ttl
-	rule.TTL = "10h10m10s"
+	rule.TTL = "10h10m10s10ms"
 	err = rule.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
 	c.Assert(rule.start.IsZero(), IsFalse)

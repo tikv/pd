@@ -236,7 +236,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, time.Hour)
 	if err != nil {
 		return err
 	}

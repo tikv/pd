@@ -1157,7 +1157,7 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 			panic(err)
 		}
 	}
-	rc.regionLabeler, _ = labeler.NewRegionLabeler(ctx, storage)
+	rc.regionLabeler, _ = labeler.NewRegionLabeler(ctx, storage, time.Second*5)
 
 	return &testCluster{RaftCluster: rc}
 }
