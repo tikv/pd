@@ -24,6 +24,16 @@ import (
 // ByteSize is a retype uint64 for TOML and JSON.
 type ByteSize uint64
 
+// ToMiB converts ByteSize to MiB.
+func (b ByteSize) ToMiB() uint64 {
+	return uint64(b / units.MiB)
+}
+
+// ToGiB converts ByteSize to GiB.
+func (b ByteSize) ToGiB() uint64 {
+	return uint64(b / units.GiB)
+}
+
 // MarshalJSON returns the size as a JSON string.
 func (b ByteSize) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + units.BytesSize(float64(b)) + `"`), nil
