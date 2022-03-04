@@ -87,6 +87,24 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	c.Assert(current, Equals, uint64(0))
 }
 
+func (s *testRatelimiterSuite) TestBlockList(c *C) {
+	c.Parallel()
+	opts := []Option{AddLabelBlockList()}
+	limiter := NewLimiter()
+	label := "test"
+
+	c.Assert(limiter.IsInBlockList(label), Equals, false)
+	for _, opt := range opts {
+		opt(label, limiter)
+	}
+	c.Assert(limiter.IsInBlockList(label), Equals, true)
+
+	UpdateQPSLimiter(rate.Every(time.Second), 1)(label, limiter)
+	for i := 0; i < 10; i++ {
+		c.Assert(limiter.Allow(label), Equals, true)
+	}
+}
+
 func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Parallel()
 	opts := []Option{UpdateQPSLimiter(rate.Every(time.Second), 1)}
