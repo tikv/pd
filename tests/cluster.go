@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/ratelimiter"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -158,7 +158,7 @@ func (s *TestServer) GetConfig() *config.Config {
 }
 
 // UpdateServiceRateLimiter is used to update RateLimiter
-func (s *TestServer) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimiter.Option) {
+func (s *TestServer) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) {
 	s.server.UpdateServiceRateLimiter(serviceLabel, opts...)
 }
 
