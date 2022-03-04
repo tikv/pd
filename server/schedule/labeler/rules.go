@@ -23,7 +23,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -85,19 +84,16 @@ func init() {
 }
 
 func (rule *LabelRule) checkAndAdjustExpire() (err error) {
-	ttl := typeutil.Duration{}
-	now := time.Now()
-	if len(rule.TTL) > 0 {
-		err = ttl.UnmarshalJSON([]byte(rule.TTL))
-	} else {
+	if len(rule.TTL) == 0 {
 		rule.expire = unlimittedExpire
 		return nil
 	}
+	ttl, err := time.ParseDuration(rule.TTL)
 	if err != nil {
 		return err
 	}
 	if len(rule.StartAt) == 0 {
-		rule.start = now
+		rule.start = time.Now()
 		rule.StartAt = rule.start.Format(time.UnixDate)
 	} else {
 		rule.start, err = time.Parse(time.UnixDate, rule.StartAt)
@@ -105,7 +101,7 @@ func (rule *LabelRule) checkAndAdjustExpire() (err error) {
 			return err
 		}
 	}
-	rule.expire = rule.start.Add(ttl.Duration)
+	rule.expire = rule.start.Add(ttl)
 	return nil
 }
 
