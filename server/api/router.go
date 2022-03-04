@@ -22,7 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
-	"github.com/tikv/pd/pkg/ratelimiter"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -141,7 +141,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
 
-	setRateLimit := func(opts ...ratelimiter.Option) createRouteOption {
+	setRateLimit := func(opts ...ratelimit.Option) createRouteOption {
 		return func(route *mux.Route) {
 			if len(route.GetName()) == 0 {
 				return
@@ -384,10 +384,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"), setRateLimit(ratelimiter.UpdateQPSLimiter(10000, 10000)))
+		}), setAuditBackend("test"), setRateLimit(ratelimit.UpdateQPSLimiter(10000, 10000)))
 
 		registerPrefix(apiRouter, "", "/routeName", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		}), setAuditBackend(localLog), setRateLimit(ratelimiter.UpdateConcurrencyLimiter(0)))
+		}), setAuditBackend(localLog), setRateLimit(ratelimit.UpdateConcurrencyLimiter(0)))
 	})
 
 	// Deprecated: use /pd/api/v1/health instead.
