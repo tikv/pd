@@ -59,6 +59,7 @@ var (
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
+// Header returns header metadata.
 type Header interface {
 	GetHeader() *pdpb.RequestHeader
 }
