@@ -24,11 +24,12 @@ import (
 type Limiter struct {
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
+	labelBlockList     map[string]struct{}
 }
 
 // NewLimiter returns a global limiter which can be updated in the later.
 func NewLimiter() *Limiter {
-	return &Limiter{}
+	return &Limiter{labelBlockList: map[string]struct{}{}}
 }
 
 // Allow is used to check whether it has enough token.
@@ -85,4 +86,10 @@ func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, curre
 	}
 
 	return 0, 0
+}
+
+// IsInBlockList returns whether this label is in block list
+func (l *Limiter) IsInBlockList(label string) bool {
+	_, block := l.labelBlockList[label]
+	return block
 }
