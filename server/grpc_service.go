@@ -472,7 +472,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	store := rc.GetStore(storeID)
 	if store != nil {
-		if store.GetState() == metapb.StoreState_Tombstone {
+		if store.IsRemoved() {
 			return &pdpb.Error{
 				Type:    pdpb.ErrorType_STORE_TOMBSTONE,
 				Message: "store is tombstone",
@@ -556,7 +556,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	var stores []*metapb.Store
 	if request.GetExcludeTombstoneStores() {
 		for _, store := range rc.GetMetaStores() {
-			if store.GetState() != metapb.StoreState_Tombstone {
+			if store.GetNodeState() != metapb.NodeState_Removed {
 				stores = append(stores, store)
 			}
 		}
@@ -617,6 +617,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+	}
+
+	if status := request.GetDrAutosyncStatus(); status != nil {
+		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
 	}
 
 	resp := &pdpb.StoreHeartbeatResponse{
@@ -1410,8 +1414,8 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	return &pdpb.GetOperatorResponse{
 		Header:   s.header(),
 		RegionId: requestID,
-		Desc:     []byte(r.Op.Desc()),
-		Kind:     []byte(r.Op.Kind().String()),
+		Desc:     []byte(r.Desc()),
+		Kind:     []byte(r.Kind().String()),
 		Status:   r.Status,
 	}, nil
 }
@@ -1786,4 +1790,9 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	}
 	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 	return err
+}
+
+// ReportBuckets receives region buckets from tikv.
+func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
+	panic("not implemented")
 }

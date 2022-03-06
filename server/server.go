@@ -155,7 +155,7 @@ type Server struct {
 
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
-	auditBackend []audit.Backend
+	auditBackends []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -218,8 +218,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated
-				router.Path("/pd/diagnose").Handler(handler)
-				// Deprecated
 				router.Path("/pd/ping").Handler(handler)
 			}
 		}
@@ -247,7 +245,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	s.handler = newHandler(s)
 
 	// create audit backend
-	s.auditBackend = []audit.Backend{}
+	s.auditBackends = []audit.Backend{
+		audit.NewLocalLogBackend(true),
+		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
+	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 
 	// Adjust etcd config.
@@ -889,7 +890,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsTombstone() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+				if !s.IsRemoved() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -1119,7 +1120,7 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 
 // GetAuditBackend returns audit backends
 func (s *Server) GetAuditBackend() []audit.Backend {
-	return s.auditBackend
+	return s.auditBackends
 }
 
 // GetServiceAuditBackendLabels returns audit backend labels by serviceLabel

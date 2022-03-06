@@ -16,6 +16,7 @@ package operator_test
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,8 +180,13 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 		output, e := pdctl.ExecuteCommand(cmd, testCase.show...)
 		c.Assert(e, IsNil)
 		c.Assert(strings.Contains(string(output), testCase.expect), IsTrue)
+		t := time.Now()
 		_, e = pdctl.ExecuteCommand(cmd, testCase.reset...)
 		c.Assert(e, IsNil)
+		historyCmd := []string{"-u", pdAddr, "operator", "history", strconv.FormatInt(t.Unix(), 10)}
+		records, e := pdctl.ExecuteCommand(cmd, historyCmd...)
+		c.Assert(e, IsNil)
+		c.Assert(strings.Contains(string(records), "admin"), IsTrue)
 	}
 
 	// operator add merge-region <source_region_id> <target_region_id>

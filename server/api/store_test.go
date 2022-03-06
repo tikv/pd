@@ -60,30 +60,34 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	s.stores = []*metapb.Store{
 		{
 			// metapb.StoreState_Up == 0
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
 		},
 		{
-			Id:      4,
-			Address: "tikv4",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:        4,
+			Address:   "tikv4",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
 		},
 		{
 			// metapb.StoreState_Offline == 1
-			Id:      6,
-			Address: "tikv6",
-			State:   metapb.StoreState_Offline,
-			Version: "2.0.0",
+			Id:        6,
+			Address:   "tikv6",
+			State:     metapb.StoreState_Offline,
+			NodeState: metapb.NodeState_Removing,
+			Version:   "2.0.0",
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
-			Id:      7,
-			Address: "tikv7",
-			State:   metapb.StoreState_Tombstone,
-			Version: "2.0.0",
+			Id:        7,
+			Address:   "tikv7",
+			State:     metapb.StoreState_Tombstone,
+			NodeState: metapb.NodeState_Removed,
+			Version:   "2.0.0",
 		},
 	}
 	// TODO: enable placmentrules
@@ -97,7 +101,7 @@ func (s *testStoreSuite) SetUpSuite(c *C) {
 	mustBootstrapCluster(c, s.svr)
 
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store.Id, store.State, nil)
+		mustPutStore(c, s.svr, store.Id, store.State, store.NodeState, nil)
 	}
 }
 

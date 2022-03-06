@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -348,6 +349,34 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
 	s.checkRegion(c, tc, co, 1, 0)
+}
+
+func (s *testCoordinatorSuite) TestCheckRegionWithScheduleDeny(c *C) {
+	tc, co, cleanup := prepare(nil, nil, nil, c)
+
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(4, 4), IsNil)
+	c.Assert(tc.addRegionStore(3, 3), IsNil)
+	c.Assert(tc.addRegionStore(2, 2), IsNil)
+	c.Assert(tc.addRegionStore(1, 1), IsNil)
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	region := tc.GetRegion(1)
+	c.Assert(region, NotNil)
+	// test with label schedule=deny
+	labelerManager := tc.GetRegionLabeler()
+	labelerManager.SetLabelRule(&labeler.LabelRule{
+		ID:       "schedulelabel",
+		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+		RuleType: labeler.KeyRange,
+		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+	})
+
+	c.Assert(labelerManager.ScheduleDisabled(region), IsTrue)
+	s.checkRegion(c, tc, co, 1, 0)
+	labelerManager.DeleteLabelRule("schedulelabel")
+	c.Assert(labelerManager.ScheduleDisabled(region), IsFalse)
+	s.checkRegion(c, tc, co, 1, 1)
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {

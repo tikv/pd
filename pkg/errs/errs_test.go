@@ -89,7 +89,7 @@ func (s *testErrorSuite) TestError(c *C) {
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 	err := errors.New("test error")
 	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
-	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error"]`
+	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error`
 	c.Assert(strings.Contains(lg.Message(), rfc), IsTrue)
 }
 

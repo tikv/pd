@@ -29,8 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -1531,7 +1531,7 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 	if store == nil {
 		return nil, errors.New("[pd] store field in rpc response not set")
 	}
-	if store.GetState() == metapb.StoreState_Tombstone {
+	if store.GetNodeState() == metapb.NodeState_Removed {
 		return nil, nil
 	}
 	return store, nil

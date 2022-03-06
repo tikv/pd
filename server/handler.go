@@ -457,6 +457,19 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 	return c.GetHistory(start), nil
 }
 
+// GetRecords returns finished operators since start.
+func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	records := c.GetRecords(from)
+	if len(records) == 0 {
+		return nil, ErrOperatorNotFound
+	}
+	return records, nil
+}
+
 // SetAllStoresLimit is used to set limit of all stores.
 func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Type) error {
 	c, err := h.GetRaftCluster()
@@ -1045,8 +1058,8 @@ func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if store.IsTombstone() {
-		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	if store.IsUnhealthy() {
 		return errs.ErrStoreUnhealthy.FastGenByArgs(storeID)

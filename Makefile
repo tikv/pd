@@ -57,7 +57,7 @@ BUILD_BIN_PATH := $(shell pwd)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-analysis pd-heartbeat-bench
+tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
 
 PD_SERVER_DEP :=
 ifneq ($(SWAGGER), 0)
@@ -82,7 +82,7 @@ pd-server-basic:
 pd-ctl:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench:
-	CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench tools/pd-tso-bench/main.go
+	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-recover:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-analysis:
@@ -147,17 +147,20 @@ install-tools:
 check: install-tools static tidy check-plugin errdoc check-testing-t
 
 static: install-tools
-	@ # Not running vet and fmt through metalinter becauase it ends up looking at vendor
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run $(PACKAGE_DIRECTORIES)
 	@ echo "revive ..."
-	@revive -formatter friendly -config revive.toml $(PACKAGES)
+	@ revive -formatter friendly -config revive.toml $(PACKAGES)
+
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd - > /dev/null; done
 
 tidy:
-	go mod tidy
+	@ go mod tidy
 	git diff --quiet go.mod go.sum
+	
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
 
 check-plugin:
 	@echo "checking plugin"
@@ -215,6 +218,9 @@ TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
 BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
 
+SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
+				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
+
 test: install-tools
 	# testing all pkgs...
 	@$(DEADLOCK_ENABLE)
@@ -232,7 +238,14 @@ basic-test: install-tools
 ci-test-job: install-tools dashboard-ui
 	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)) || { $(FAILPOINT_DISABLE) && $(DEADLOCK_DISABLE) && exit 1;}
+	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
+	@$(FAILPOINT_DISABLE)
+	@$(DEADLOCK_DISABLE)
+
+ci-test-job-submod: install-tools dashboard-ui
+	@$(DEADLOCK_ENABLE)
+	@$(FAILPOINT_ENABLE)
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd - > /dev/null && cat $$mod/covprofile >> covprofile; done
 	@$(FAILPOINT_DISABLE)
 	@$(DEADLOCK_DISABLE)
 

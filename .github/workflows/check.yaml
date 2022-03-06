@@ -1,5 +1,8 @@
-on: [push, pull_request]
 name: Check PD
+on: [push, pull_request]
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 jobs:
   statics:
     runs-on: ubuntu-latest
@@ -23,4 +26,5 @@ jobs:
       - name: Make Check
         run: |
           make build
+          make tools
           make check

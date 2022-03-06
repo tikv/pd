@@ -28,7 +28,6 @@ const (
 	ruleGroupPath              = "rule_group"
 	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
-	componentPath              = "component"
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 )
