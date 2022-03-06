@@ -221,11 +221,11 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
 			op, err := r.Scatter(region, group)
-			if _, _err_ := failpoint.Eval(_curpkg_("scatterFail")); _err_ == nil {
+			failpoint.Inject("scatterFail", func() {
 				if region.GetID() == 1 {
 					err = errors.New("mock error")
 				}
-			}
+			})
 			if err != nil {
 				failures[region.GetID()] = err
 				continue

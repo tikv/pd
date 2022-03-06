@@ -599,9 +599,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
 	err := storage.SaveConfig(cfg)
-	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
+	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
-	}
+	})
 	return err
 }
 

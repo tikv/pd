@@ -247,12 +247,12 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 var globalTSOOverflowFlag = true
 
 func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBits int) bool {
-	if _, _err_ := failpoint.Eval(_curpkg_("globalTSOOverflow")); _err_ == nil {
+	failpoint.Inject("globalTSOOverflow", func() {
 		if globalTSOOverflowFlag {
 			maxTSO.Logical = maxLogical
 			globalTSOOverflowFlag = false
 		}
-	}
+	})
 	// Make sure the physical time is not empty again.
 	if maxTSO.GetPhysical() == 0 {
 		return false

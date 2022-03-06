@@ -158,9 +158,9 @@ func (c *coordinator) patrolRegions() {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("break-patrol")); _err_ == nil {
-			break
-		}
+		failpoint.Inject("break-patrol", func() {
+			failpoint.Break()
+		})
 	}
 }
 

@@ -472,10 +472,10 @@ func (c *client) checkLeaderHealth(ctx context.Context) {
 		healthCli := healthpb.NewHealthClient(cc.(*grpc.ClientConn))
 		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
 		rpcErr, ok := status.FromError(err)
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork1")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork1", func() {
 			resp = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
-		}
+		})
 		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
 		} else {
@@ -623,9 +623,9 @@ func (c *client) checkAllocator(
 		}
 		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
 		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-		}
+		})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
@@ -927,10 +927,10 @@ func (c *client) tryConnect(
 	for i := 0; i < maxRetryTimes; i++ {
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork", func() {
 			stream = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
-		}
+		})
 		if stream != nil && err == nil {
 			updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
 			return nil

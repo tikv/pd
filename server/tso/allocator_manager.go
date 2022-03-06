@@ -449,7 +449,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 		nextLeaderValue := fmt.Sprintf("%v", am.member.ID())
 		cmps = append(cmps, clientv3.Compare(clientv3.Value(nextLeaderKey), "=", nextLeaderValue))
 	}
-	if val, _err_ := failpoint.Eval(_curpkg_("injectNextLeaderKey")); _err_ == nil {
+	failpoint.Inject("injectNextLeaderKey", func(val failpoint.Value) {
 		if val.(bool) {
 			// In order not to campaign leader too often in tests
 			time.Sleep(5 * time.Second)
@@ -457,7 +457,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 				clientv3.Compare(clientv3.Value(nextLeaderKey), "=", "mockValue"),
 			}
 		}
-	}
+	})
 	if err := allocator.CampaignAllocatorLeader(defaultAllocatorLeaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",

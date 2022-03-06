@@ -540,9 +540,9 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("customTimeout")); _err_ == nil {
+	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
-	}
+	})
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -1492,13 +1492,13 @@ func (s *GrpcServer) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSReque
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
 
-		if _, _err_ := failpoint.Eval(_curpkg_("mockLocalAllocatorLeaderChange")); _err_ == nil {
+		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
 			if !mockLocalAllocatorLeaderChangeFlag {
 				maxLocalTS = nil
 				request.MaxTs = nil
 				mockLocalAllocatorLeaderChangeFlag = true
 			}
-		}
+		})
 
 		if maxLocalTS == nil {
 			return nil, status.Errorf(codes.Unknown, "local tso allocator leaders have changed during the sync, should retry")
