@@ -27,11 +27,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -156,19 +154,6 @@ func (s *TestServer) GetConfig() *config.Config {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetConfig()
-}
-
-// UpdateServiceRateLimiter is used to update RateLimiter
-func (s *TestServer) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) {
-	s.server.UpdateServiceRateLimiter(serviceLabel, opts...)
-}
-
-func (s *TestServer) GetServiceLabels(label string) []apiutil.ApiAccessPath {
-	return s.server.GetServiceLabels(label)
-}
-
-func (s *TestServer) GetApiAccessServiceLabel(accessPath apiutil.ApiAccessPath) string {
-	return s.server.GetApiAccessServiceLabel(accessPath)
 }
 
 // GetPersistOptions returns the current TestServer's schedule option.

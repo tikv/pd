@@ -229,13 +229,13 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 				select {
 				case <-ctx.Done():
 					log.Info("discontinue sending sync region response")
-					failpoint.Inject("noFastExitSync", func() {
-						failpoint.Goto("doSync")
-					})
+					if _, _err_ := failpoint.Eval(_curpkg_("noFastExitSync")); _err_ == nil {
+						goto doSync
+					}
 					return nil
 				default:
 				}
-				failpoint.Label("doSync")
+			doSync:
 				metas = append(metas, r.GetMeta())
 				stats = append(stats, r.GetStat())
 				leader := &metapb.Peer{}

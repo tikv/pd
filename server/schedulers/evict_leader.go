@@ -117,9 +117,9 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
 		err = errors.New("fail to persist")
-	})
+	}
 	if err != nil {
 		return err
 	}

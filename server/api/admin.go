@@ -16,6 +16,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -177,7 +178,13 @@ func (h *adminHandler) HanldeRatelimitMiddlewareSwitch(w http.ResponseWriter, r 
 	h.rd.JSON(w, http.StatusOK, "Switching ratelimit middleware is successful.")
 }
 
-//
+// @Tags admin
+// @Summary switch ratelimit middleware
+// @Param enable query string true "enable" Enums(true, false)
+// @Produce json
+// @Success 200 {string} string ""
+// @Failure 400 {string} string ""
+// @Router /admin/ratelimit/config [POST]
 func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -216,28 +223,40 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
 		return
 	}
+	if h.svr.IsInRateLimitBlockList(serviceLabel) {
+		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
+		return
+	}
 
 	// update concurrency limiter
-	var concurrencyUpdated bool
-	concurrency, ok := input["concurrency"].(float64)
-	if ok {
-		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(uint64(concurrency)))
-		concurrencyUpdated = true
+	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
+	concurrencyFloat, okc := input["concurrency"].(float64)
+	if okc {
+		concurrency := uint64(concurrencyFloat)
+		if concurrency > 0 {
+			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(concurrency))
+			concurrencyUpdatedFlag = "Concurrency limiter is changed."
+		} else {
+			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.DeleteConcurrencyLimiter())
+			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
+		}
 	}
 	// update qps rate limiter
-	var qpsRateUpdated bool
-	qps, ok := input["qps"].(float64)
-	if ok {
-		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(rate.Limit(qps), int(qps)))
-		qpsRateUpdated = true
+	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
+	qps, okq := input["qps"].(float64)
+	if okq {
+		if qps > 0 {
+			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(rate.Limit(qps), int(qps)))
+			qpsRateUpdatedFlag = "QPS rate limiter is changed."
+		} else {
+			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.DeleteQPSLimiter())
+			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
+		}
 	}
-	if !concurrencyUpdated && !qpsRateUpdated {
+	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
-	} else if qpsRateUpdated && concurrencyUpdated {
-		h.rd.JSON(w, http.StatusOK, "Concurrency limiter and QPS rate limiter are changed.")
-	} else if qpsRateUpdated {
-		h.rd.JSON(w, http.StatusOK, "QPS rate limiter is changed.")
-	} else if concurrencyUpdated {
-		h.rd.JSON(w, http.StatusOK, "Concurrency limiter is changed.")
+
+	} else {
+		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
 	}
 }

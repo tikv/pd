@@ -149,10 +149,10 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	var addResp *clientv3.MemberAddResponse
 
-	failpoint.Inject("add-member-failed", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("add-member-failed")); _err_ == nil {
 		listMemberRetryTimes = 2
-		failpoint.Goto("LabelSkipAddMember")
-	})
+		goto LabelSkipAddMember
+	}
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
 	{
@@ -162,7 +162,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 			return err
 		}
 	}
-	failpoint.Label("LabelSkipAddMember")
+LabelSkipAddMember:
 
 	var (
 		pds      []string

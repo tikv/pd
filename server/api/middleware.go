@@ -47,14 +47,14 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	requestInfo := requestutil.GetRequestInfo(r)
 	r = r.WithContext(requestutil.WithRequestInfo(r.Context(), requestInfo))
 
-	failpoint.Inject("addRequestInfoMiddleware", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("addRequestInfoMiddleware")); _err_ == nil {
 		w.Header().Add("service-label", requestInfo.ServiceLabel)
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
 		w.Header().Add("component", requestInfo.Component)
 		w.Header().Add("ip", requestInfo.IP)
-	})
+	}
 
 	next(w, r)
 }

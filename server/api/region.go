@@ -280,12 +280,12 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 			break
 		}
 	}
-	failpoint.Inject("mockPending", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("mockPending")); _err_ == nil {
 		aok, ok := val.(bool)
 		if ok && aok {
 			state = "PENDING"
 		}
-	})
+	}
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
@@ -913,13 +913,13 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(r.Context(), splitKeys, retryLimit)
 	s.ProcessedPercentage = percentage
 	s.NewRegionsID = newRegionsID
-	failpoint.Inject("splitResponses", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("splitResponses")); _err_ == nil {
 		rawID, ok := val.(int)
 		if ok {
 			s.ProcessedPercentage = 100
 			s.NewRegionsID = []uint64{uint64(rawID)}
 		}
-	})
+	}
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 

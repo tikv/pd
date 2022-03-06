@@ -361,9 +361,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		},
 	}
 
-	failpoint.Inject("memberNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
 		time.Sleep(1500 * time.Millisecond)
-	})
+	}
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
@@ -679,7 +679,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
 	s.cluster.Stop()
 }
 
@@ -1183,6 +1183,11 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 // GetServiceRateLimiter is used to get rate limiter
 func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
+}
+
+// IsInRateLimitBlockList returns whethis given service label is in block lost
+func (s *Server) IsInRateLimitBlockList(serviceLabel string) bool {
+	return s.serviceRateLimiter.IsInBlockList(serviceLabel)
 }
 
 // UpdateServiceRateLimiter is used to update RateLimiter
