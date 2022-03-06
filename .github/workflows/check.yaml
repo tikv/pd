@@ -26,4 +26,5 @@ jobs:
       - name: Make Check
         run: |
           make build
+          make tools
           make check

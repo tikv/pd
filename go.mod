@@ -18,7 +18,6 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -28,7 +27,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20211213085605-3329b3c5404c
+	github.com/pingcap/kvproto v0.0.0-20220228094105-9bb22e5a97fc
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20220117082709-e8076b5c79ba

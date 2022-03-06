@@ -242,7 +242,7 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 		return
 	}
 
-	if errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(storeID)) {
+	if errors.ErrorEqual(err, errs.ErrStoreRemoved.FastGenByArgs(storeID)) {
 		h.rd.JSON(w, http.StatusGone, err.Error())
 		return
 	}
@@ -559,7 +559,7 @@ func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
 		rc := getCluster(r)
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)
-			if store == nil || store.IsTombstone() {
+			if store == nil || store.IsRemoved() {
 				continue
 			}
 			returned[storeID] = v

@@ -267,9 +267,10 @@ func convertToStoresInfo(content string) string {
 		return content
 	}
 	// In StoreInfo, users only need to pay attention to StateName.
-	// and State will be omitted when its value equals 0 from kvproto metapb
+	// and both State and NodeState will be omitted when its value equals 0 from kvproto metapb
 	for _, store := range stores.Stores {
 		store.Store.State = 0
+		store.Store.NodeState = 0
 	}
 	byteArr, err := json.MarshalIndent(stores, "", "  ")
 	if err != nil {

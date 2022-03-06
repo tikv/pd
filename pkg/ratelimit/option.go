@@ -52,7 +52,7 @@ func UpdateQPSLimiter(limit rate.Limit, burst int) Option {
 		if _, block := l.labelBlockList[label]; block {
 			return
 		}
-		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
+		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(float64(limit), burst)); exist {
 			limiter.(*RateLimiter).SetLimit(limit)
 			limiter.(*RateLimiter).SetBurst(burst)
 		}
