@@ -20,17 +20,18 @@ import "golang.org/x/time/rate"
 // these setting is used to add a kind of limiter for a service
 type Option func(string, *Limiter)
 
-// AddLabelBlockList adds a label into blockList
-func AddLabelBlockList() Option {
+// AddLabelAllowList adds a label into allow list.
+// It means the given label will not be limited
+func AddLabelAllowList() Option {
 	return func(label string, l *Limiter) {
-		l.labelBlockList[label] = struct{}{}
+		l.labelAllowList[label] = struct{}{}
 	}
 }
 
 // UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
 	return func(label string, l *Limiter) {
-		if _, block := l.labelBlockList[label]; block {
+		if _, allow := l.labelAllowList[label]; allow {
 			return
 		}
 		if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(limit)); exist {
@@ -39,29 +40,15 @@ func UpdateConcurrencyLimiter(limit uint64) Option {
 	}
 }
 
-// DeleteConcurrencyLimiter deletes concurrency limiter of given label
-func DeleteConcurrencyLimiter() Option {
-	return func(label string, l *Limiter) {
-		l.concurrencyLimiter.Delete(label)
-	}
-}
-
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit rate.Limit, burst int) Option {
 	return func(label string, l *Limiter) {
-		if _, block := l.labelBlockList[label]; block {
+		if _, allow := l.labelAllowList[label]; allow {
 			return
 		}
 		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(float64(limit), burst)); exist {
 			limiter.(*RateLimiter).SetLimit(limit)
 			limiter.(*RateLimiter).SetBurst(burst)
 		}
-	}
-}
-
-// DeleteQPSLimiter deletes QPS limiter of given label
-func DeleteQPSLimiter() Option {
-	return func(label string, l *Limiter) {
-		l.qpsLimiter.Delete(label)
 	}
 }

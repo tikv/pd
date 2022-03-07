@@ -71,7 +71,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 		limiter.Release(label)
 	}
 
-	limiter.Update(label, DeleteConcurrencyLimiter())
+	limiter.DeleteConcurrencyLimiter(label)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -89,15 +89,15 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 
 func (s *testRatelimiterSuite) TestBlockList(c *C) {
 	c.Parallel()
-	opts := []Option{AddLabelBlockList()}
+	opts := []Option{AddLabelAllowList()}
 	limiter := NewLimiter()
 	label := "test"
 
-	c.Assert(limiter.IsInBlockList(label), Equals, false)
+	c.Assert(limiter.IsInAllowList(label), Equals, false)
 	for _, opt := range opts {
 		opt(label, limiter)
 	}
-	c.Assert(limiter.IsInBlockList(label), Equals, true)
+	c.Assert(limiter.IsInAllowList(label), Equals, true)
 
 	UpdateQPSLimiter(rate.Every(time.Second), 1)(label, limiter)
 	for i := 0; i < 10; i++ {
@@ -144,7 +144,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 		}
 	}
 	time.Sleep(time.Second)
-	limiter.Update(label, DeleteQPSLimiter())
+	limiter.DeleteQPSLimiter(label)
 	for i := 0; i < 10; i++ {
 		c.Assert(limiter.Allow(label), Equals, true)
 	}
