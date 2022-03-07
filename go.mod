@@ -18,7 +18,6 @@ require (
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
-	github.com/juju/ratelimit v1.0.1
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -47,6 +46,7 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.19.1
+	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0
 	gotest.tools/gotestsum v1.7.0
