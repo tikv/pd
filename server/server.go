@@ -1144,7 +1144,7 @@ func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.AccessPath) string 
 	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
 		return servicelabel
 	}
-	accessPathNoMethod := apiutil.NewAPIAccessPath(accessPath.Path, "")
+	accessPathNoMethod := apiutil.NewAccessPath(accessPath.Path, "")
 	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
 		return servicelabel
 	}

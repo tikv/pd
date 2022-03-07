@@ -166,7 +166,7 @@ func (s *testServerServiceSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
 func (s *testServerServiceSuite) TearDownSuite(c *C) {
@@ -179,10 +179,10 @@ func (s *testServiceSuite) TestServiceLabels(c *C) {
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/debug/pprof/profile")
 	c.Assert(accessPaths[0].Method, Equals, "")
 	serviceLabel := s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", ""))
+		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
 	c.Assert(serviceLabel, Equals, "Profile")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
+		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "Profile")
 
 	accessPaths = s.svr.GetServiceLabels("GetSchedulerConfig")
@@ -195,13 +195,13 @@ func (s *testServiceSuite) TestServiceLabels(c *C) {
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/leader/resign")
 	c.Assert(accessPaths[0].Method, Equals, http.MethodPost)
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
+		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
 	c.Assert(serviceLabel, Equals, "ResignLeader")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
+		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/leader/resign", ""))
+		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
 	c.Assert(serviceLabel, Equals, "")
 
 	accessPaths = s.svr.GetServiceLabels("QueryMetric")
@@ -221,9 +221,9 @@ func (s *testServiceSuite) TestServiceLabels(c *C) {
 	c.Assert(accessPaths[3].Path, Equals, "/pd/api/v1/metric/query_range")
 	c.Assert(accessPaths[3].Method, Equals, http.MethodPost)
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", http.MethodPost))
+		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
 	c.Assert(serviceLabel, Equals, "QueryMetric")
 	serviceLabel = s.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAPIAccessPath("/pd/api/v1/metric/query", http.MethodGet))
+		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	c.Assert(serviceLabel, Equals, "QueryMetric")
 }
