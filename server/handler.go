@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
@@ -1065,4 +1066,16 @@ func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 		return errs.ErrStoreUnhealthy.FastGenByArgs(storeID)
 	}
 	return nil
+}
+
+func (h *Handler) RedirectSchedulerUpdate(name string, storeID uint64) error {
+	input := make(map[string]interface{})
+	input["name"] = name
+	input["store_id"] = storeID
+	updateURL := path.Join(h.GetAddr(), pdRootPath, SchedulerConfigHandlerPath, name, "config")
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	return postJSON(h.s.GetHTTPClient(), updateURL, body)
 }

@@ -44,7 +44,6 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -590,7 +589,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 
-	c.handleDamagedStore(stats)
 	return nil
 }
 
@@ -1782,44 +1780,5 @@ func newCacheCluster(c *RaftCluster) *cacheCluster {
 	return &cacheCluster{
 		RaftCluster: c,
 		stores:      c.GetStores(),
-	}
-}
-
-// Evict the leaders when the store is damaged. Damaged regions are emergency errors
-// and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
-func (c *RaftCluster) handleDamagedStore(stats *pdpb.StoreStats) {
-	// ToDO: regions have no special process for the time being
-	// and need to be removed in the future
-	damaged_regions := stats.GetDamagedRegionsId()
-	if len(damaged_regions) == 0 {
-		return
-	}
-
-	log.Warn("store has damaged regions",
-		zap.Uint64("store-id", stats.GetStoreId()),
-		zap.Uint64s("region-ids", damaged_regions))
-	if exist, err := c.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
-		if err != nil {
-			log.Error("failed check scheduler existed",
-				zap.Uint64("store-id", stats.GetStoreId()),
-				errs.ZapError(err))
-			return
-		}
-
-		var args []string
-		args = append(args, strconv.FormatUint(stats.GetStoreId(), 10))
-		s, err := schedule.CreateScheduler(schedulers.EvictLeaderName, c.GetOperatorController(), c.storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderName, args))
-		if err != nil {
-			log.Error("failed create scheduler",
-				zap.Uint64("store-id", stats.GetStoreId()),
-				errs.ZapError(err))
-			return
-		}
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
-		if err = c.AddScheduler(s, args...); err != nil {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
-		} else {
-			log.Info("add scheduler successfully", zap.String("scheduler-name", schedulers.EvictLeaderName), zap.Strings("scheduler-args", args))
-		}
 	}
 }

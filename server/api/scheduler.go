@@ -15,7 +15,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -221,18 +220,6 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
-func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64) error {
-	input := make(map[string]interface{})
-	input["name"] = name
-	input["store_id"] = storeID
-	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
-	body, err := json.Marshal(input)
-	if err != nil {
-		return err
-	}
-	return postJSON(h.svr.GetHTTPClient(), updateURL, body)
-}
-
 func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
 	storeID, ok := input["store_id"].(float64)
 	if !ok {
@@ -255,7 +242,7 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 			return
 		}
 	} else {
-		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+		if err := h.RedirectSchedulerUpdate(name, uint64(storeID)); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

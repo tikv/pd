@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -615,6 +616,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		err := rc.HandleStoreHeartbeat(request.Stats)
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
+		}
+		s.handleDamagedStore(request.Stats)
+		if err != nil {
+			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
 		}
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
@@ -1795,4 +1800,39 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 // ReportBuckets receives region buckets from tikv.
 func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
 	panic("not implemented")
+}
+
+// Evict the leaders when the store is damaged. Damaged regions are emergency errors
+// and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
+func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
+	// ToDO: regions have no special process for the time being
+	// and need to be removed in the future
+	damaged_regions := stats.GetDamagedRegionsId()
+	if len(damaged_regions) == 0 {
+		return nil
+	}
+
+	log.Warn("store has damaged regions",
+		zap.Uint64("store-id", stats.GetStoreId()),
+		zap.Uint64s("region-ids", damaged_regions))
+
+	h := s.GetHandler()
+	if exist, err := h.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
+		if err != nil {
+			return err
+		}
+		err = h.AddEvictLeaderScheduler(stats.GetStoreId())
+		if err != nil {
+			return err
+		}
+	} else {
+		if err := h.RedirectSchedulerUpdate(schedulers.EvictLeaderName, stats.GetStoreId()); err != nil {
+			return err
+		}
+		log.Info("update scheduler",
+			zap.String("scheduler-name",
+				schedulers.EvictLeaderName), zap.Uint64("store-id",
+				uint64(stats.GetStoreId())))
+	}
+	return nil
 }

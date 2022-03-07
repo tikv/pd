@@ -15,9 +15,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/http"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -155,5 +158,33 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 		return errors.New("invalid zero peer id")
 	}
 
+	return nil
+}
+
+func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return doJSON(client, req, checkOpts...)
+}
+
+func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer resp.Body.Close()
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(string(res))
+	}
+	for _, opt := range checkOpts {
+		opt(res, resp.StatusCode)
+	}
 	return nil
 }
