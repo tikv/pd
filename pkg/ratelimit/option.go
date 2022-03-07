@@ -47,13 +47,13 @@ func DeleteConcurrencyLimiter() Option {
 }
 
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
-func UpdateQPSLimiter(limit rate.Limit, burst int) Option {
+func UpdateQPSLimiter(limit float64, burst int) Option {
 	return func(label string, l *Limiter) {
 		if _, block := l.labelBlockList[label]; block {
 			return
 		}
 		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
-			limiter.(*RateLimiter).SetLimit(limit)
+			limiter.(*RateLimiter).SetLimit(rate.Limit(limit))
 			limiter.(*RateLimiter).SetBurst(burst)
 		}
 	}

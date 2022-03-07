@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"golang.org/x/time/rate"
 )
 
 type adminHandler struct {
@@ -246,7 +245,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	qps, okq := input["qps"].(float64)
 	if okq {
 		if qps > 0 {
-			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(rate.Limit(qps), int(qps)))
+			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(qps, int(qps)))
 			qpsRateUpdatedFlag = "QPS rate limiter is changed."
 		} else {
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.DeleteQPSLimiter())
@@ -255,7 +254,6 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	}
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
-
 	} else {
 		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
 	}

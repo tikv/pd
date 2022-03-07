@@ -99,7 +99,7 @@ func (s *testRatelimiterSuite) TestBlockList(c *C) {
 	}
 	c.Assert(limiter.IsInBlockList(label), Equals, true)
 
-	UpdateQPSLimiter(rate.Every(time.Second), 1)(label, limiter)
+	UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
 	for i := 0; i < 10; i++ {
 		c.Assert(limiter.Allow(label), Equals, true)
 	}
@@ -107,7 +107,7 @@ func (s *testRatelimiterSuite) TestBlockList(c *C) {
 
 func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Parallel()
-	opts := []Option{UpdateQPSLimiter(rate.Every(time.Second), 1)}
+	opts := []Option{UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)}
 	limiter := NewLimiter()
 
 	label := "test"
@@ -155,7 +155,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 
 func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	c.Parallel()
-	opts := []Option{UpdateQPSLimiter(rate.Every(3*time.Second), 100)}
+	opts := []Option{UpdateQPSLimiter(float64(rate.Every(3*time.Second)), 100)}
 	limiter := NewLimiter()
 
 	label := "test"
@@ -217,7 +217,7 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	for i := 0; i < 100; i++ {
 		limiter.Release(label)
 	}
-	limiter.Update(label, UpdateQPSLimiter(rate.Every(10*time.Second), 1))
+	limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(10*time.Second)), 1))
 	wg.Add(100)
 	for i := 0; i < 100; i++ {
 		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
