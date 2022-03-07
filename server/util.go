@@ -161,16 +161,16 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
-func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func postJSON(client *http.Client, url string, data []byte) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, checkOpts...)
+	return doJSON(client, req)
 }
 
-func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
+func doJSON(client *http.Client, req *http.Request) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.WithStack(err)
@@ -182,9 +182,6 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 	}
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
-	}
-	for _, opt := range checkOpts {
-		opt(res, resp.StatusCode)
 	}
 	return nil
 }

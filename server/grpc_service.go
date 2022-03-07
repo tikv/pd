@@ -617,7 +617,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		s.handleDamagedStore(request.Stats)
+		err = s.handleDamagedStore(request.Stats)
 		if err != nil {
 			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
 		}
