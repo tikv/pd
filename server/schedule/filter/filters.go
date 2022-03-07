@@ -294,9 +294,9 @@ func (f *StoreStateFilter) Type() string {
 // It should consider if the filter allows temporary states.
 type conditionFunc func(*config.PersistOptions, *core.StoreInfo) bool
 
-func (f *StoreStateFilter) isTombstone(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "tombstone"
-	return store.IsTombstone()
+	return store.IsRemoved()
 }
 
 func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
@@ -304,9 +304,9 @@ func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreI
 	return store.DownTime() > opt.GetMaxStoreDownTime()
 }
 
-func (f *StoreStateFilter) isOffline(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *StoreStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	f.Reason = "offline"
-	return store.IsOffline()
+	return store.IsRemoving()
 }
 
 func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
@@ -382,17 +382,17 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isTombstone, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.pauseLeaderTransfer,
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
 			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy,
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
 	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isTombstone, f.isOffline, f.isDown, f.isDisconnected, f.isBusy}
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
 		if cf(opt, store) {

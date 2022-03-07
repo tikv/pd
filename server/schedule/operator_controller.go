@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"go.uber.org/zap"
 )
@@ -412,6 +413,18 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
+		}
+
+		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
+			continue
+		}
+		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+			l := cl.GetRegionLabeler()
+			if l.ScheduleDisabled(region) {
+				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
+				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
+				return false
+			}
 		}
 	}
 	expired := false
@@ -905,7 +918,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if limiter.Available() < stepCost {
+			if !limiter.Available(stepCost) {
 				return true
 			}
 		}

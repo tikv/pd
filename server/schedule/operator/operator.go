@@ -84,7 +84,7 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v,%v), createAt:%s, startAt:%s, currentStep:%v, size:%v, steps:[%s])",
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
 		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "))
 	if o.CheckSuccess() {
@@ -229,10 +229,10 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	if o.kind&OpRegion != 0 {
-		return o.status.CheckTimeout(SlowOperatorWaitTime)
+	if startTime, step := o.getCurrentTimeAndStep(); step != nil {
+		return o.status.CheckStepTimeout(startTime, step, o.ApproximateSize)
 	}
-	return o.status.CheckTimeout(FastOperatorWaitTime)
+	return false
 }
 
 // Len returns the operator's steps count.
@@ -248,6 +248,22 @@ func (o *Operator) Step(i int) OpStep {
 	return nil
 }
 
+// getCurrentTimeAndStep returns the start time of the i-th step.
+// opStep is nil if the i-th step is not found.
+func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {
+	startTime = o.GetStartTime()
+	currentStep := atomic.LoadInt32(&o.currentStep)
+	if int(currentStep) < len(o.steps) {
+		opStep = o.steps[currentStep]
+		// we should use the finished time of the previous step if the first step is finished.
+		// the start time of the first step is the start time of the operator.
+		if currentStep > 0 {
+			startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
+		}
+	}
+	return
+}
+
 // Check checks if current step is finished, returns next step to take action.
 // If operator is at an end status, check returns nil.
 // It's safe to be called by multiple goroutine concurrently.
@@ -260,12 +276,7 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
-				var startTime time.Time
-				if step == 0 {
-					startTime = o.GetStartTime()
-				} else {
-					startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[step-1])))
-				}
+				startTime, _ := o.getCurrentTimeAndStep()
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
 					Observe(time.Unix(0, o.stepsTime[step]).Sub(startTime).Seconds())
 			}
@@ -401,15 +412,24 @@ func (o *Operator) GetAdditionalInfo() string {
 	return ""
 }
 
+// IsLeaveJointStateOperator returns true if the desc is OpDescLeaveJointState.
+func (o *Operator) IsLeaveJointStateOperator() bool {
+	return strings.EqualFold(o.desc, OpDescLeaveJointState)
+}
+
 // these values are used for unit test.
 const (
 	// mock region default region size is 96MB.
-	mockRegionSize = 96 * (1 << 20)
+	mockRegionSize = 96
 	mockDesc       = "test"
 	mockBrief      = "test"
 )
 
 // NewTestOperator creates a test operator, only used for unit test.
 func NewTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
+	// OpSteps can not be empty for test.
+	if len(steps) == 0 {
+		steps = []OpStep{ChangePeerV2Leave{}}
+	}
 	return NewOperator(mockDesc, mockBrief, regionID, regionEpoch, kind, mockRegionSize, steps...)
 }

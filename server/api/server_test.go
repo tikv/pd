@@ -41,8 +41,9 @@ var (
 	}
 
 	store = &metapb.Store{
-		Id:      1,
-		Address: "localhost",
+		Id:        1,
+		Address:   "localhost",
+		NodeState: metapb.NodeState_Serving,
 	}
 	peers = []*metapb.Peer{
 		{
