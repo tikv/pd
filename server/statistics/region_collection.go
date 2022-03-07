@@ -144,13 +144,13 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 
-	var isOffline bool
+	var isRemoving bool
 
 	for _, store := range stores {
-		if store.IsOffline() {
+		if store.IsRemoving() {
 			peer := region.GetStorePeer(store.GetID())
 			if peer != nil {
-				isOffline = true
+				isRemoving = true
 				break
 			}
 		}
@@ -167,7 +167,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 
 	for typ, c := range conditions {
 		if c {
-			if isOffline {
+			if isRemoving {
 				r.offlineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
@@ -196,7 +196,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 
-	if isOffline {
+	if isRemoving {
 		r.offlineStats[OfflinePeer][regionID] = region
 		offlinePeerTypeIndex |= OfflinePeer
 	}

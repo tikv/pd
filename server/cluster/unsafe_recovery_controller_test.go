@@ -634,7 +634,7 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	}
 
 	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
-	c.Assert(cluster.GetStore(uint64(1)).IsTombstone(), IsTrue)
+	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
 
 	// Store 2's last heartbeat is recent, and is not allowed to be removed.
 	failedStores = map[uint64]string{

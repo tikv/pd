@@ -80,6 +80,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 				Store: &metapb.Store{
 					Id:            2,
 					State:         metapb.StoreState_Tombstone,
+					NodeState:     metapb.NodeState_Removed,
 					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Tombstone.String(),

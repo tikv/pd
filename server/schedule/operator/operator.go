@@ -229,9 +229,10 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	currentStep := atomic.LoadInt32(&o.currentStep)
-	startTime := o.getStepStartTime(currentStep)
-	return o.status.CheckStepTimeout(startTime, o.steps[currentStep], o.ApproximateSize)
+	if startTime, step := o.getCurrentTimeAndStep(); step != nil {
+		return o.status.CheckStepTimeout(startTime, step, o.ApproximateSize)
+	}
+	return false
 }
 
 // Len returns the operator's steps count.
@@ -247,13 +248,20 @@ func (o *Operator) Step(i int) OpStep {
 	return nil
 }
 
-// getStepStartTime returns the start time of the i-th step.
-func (o *Operator) getStepStartTime(step int32) time.Time {
-	startTime := o.GetStartTime()
-	if 0 < step && int(step-1) < len(o.steps) {
-		startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[step-1])))
+// getCurrentTimeAndStep returns the start time of the i-th step.
+// opStep is nil if the i-th step is not found.
+func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {
+	startTime = o.GetStartTime()
+	currentStep := atomic.LoadInt32(&o.currentStep)
+	if int(currentStep) < len(o.steps) {
+		opStep = o.steps[currentStep]
+		// we should use the finished time of the previous step if the first step is finished.
+		// the start time of the first step is the start time of the operator.
+		if currentStep > 0 {
+			startTime = time.Unix(0, atomic.LoadInt64(&(o.stepsTime[currentStep-1])))
+		}
 	}
-	return startTime
+	return
 }
 
 // Check checks if current step is finished, returns next step to take action.
@@ -268,8 +276,9 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
 			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
+				startTime, _ := o.getCurrentTimeAndStep()
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
-					Observe(time.Unix(0, o.stepsTime[step]).Sub(o.getStepStartTime(step)).Seconds())
+					Observe(time.Unix(0, o.stepsTime[step]).Sub(startTime).Seconds())
 			}
 			atomic.StoreInt32(&o.currentStep, step+1)
 		} else {

@@ -62,8 +62,8 @@ func (s *testOperatorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
-	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
@@ -85,7 +85,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	records := mustReadURL(c, recordURL)
 	c.Assert(strings.Contains(records, "operator not found"), IsTrue)
 
-	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
@@ -108,7 +108,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	records = mustReadURL(c, recordURL)
 	c.Assert(strings.Contains(records, "admin-remove-peer {rm peer: store [2]}"), IsTrue)
 
-	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
@@ -178,9 +178,9 @@ func (s *testTransferRegionOperatorSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c *C) {
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
-	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
-	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
+	mustPutStore(c, s.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
+	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
 
 	hbStream := mockhbstream.NewHeartbeatStream()
 	s.svr.GetHBStreams().BindStream(1, hbStream)
@@ -390,16 +390,17 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 	}
 }
 
-func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
+func mustPutStore(c *C, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
 	s := &server.GrpcServer{Server: svr}
 	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
 		Store: &metapb.Store{
-			Id:      id,
-			Address: fmt.Sprintf("tikv%d", id),
-			State:   state,
-			Labels:  labels,
-			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
+			Id:        id,
+			Address:   fmt.Sprintf("tikv%d", id),
+			State:     state,
+			NodeState: nodeState,
+			Labels:    labels,
+			Version:   versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		},
 	})
 	c.Assert(err, IsNil)

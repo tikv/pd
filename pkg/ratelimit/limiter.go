@@ -24,12 +24,13 @@ import (
 type Limiter struct {
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
-	labelBlockList     map[string]struct{}
+	// the label which is in labelAllowList won't be limited
+	labelAllowList map[string]struct{}
 }
 
 // NewLimiter returns a global limiter which can be updated in the later.
 func NewLimiter() *Limiter {
-	return &Limiter{labelBlockList: map[string]struct{}{}}
+	return &Limiter{labelAllowList: make(map[string]struct{})}
 }
 
 // Allow is used to check whether it has enough token.
@@ -79,6 +80,11 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 	return 0, 0
 }
 
+// DeleteQPSLimiter deletes QPS limiter of given label
+func (l *Limiter) DeleteQPSLimiter(label string) {
+	l.qpsLimiter.Delete(label)
+}
+
 // GetConcurrencyLimiterStatus returns the status of a given label's concurrency limiter.
 func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, current uint64) {
 	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
@@ -88,8 +94,14 @@ func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, curre
 	return 0, 0
 }
 
-// IsInBlockList returns whether this label is in block list
-func (l *Limiter) IsInBlockList(label string) bool {
-	_, block := l.labelBlockList[label]
-	return block
+// DeleteConcurrencyLimiter deletes concurrency limiter of given label
+func (l *Limiter) DeleteConcurrencyLimiter(label string) {
+	l.concurrencyLimiter.Delete(label)
+}
+
+// IsInAllowList returns whether this label is in allow list.
+// If returns true, the given label won't be limited
+func (l *Limiter) IsInAllowList(label string) bool {
+	_, allow := l.labelAllowList[label]
+	return allow
 }
