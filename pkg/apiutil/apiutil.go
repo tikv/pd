@@ -207,7 +207,7 @@ type AccessPath struct {
 	Method string
 }
 
-// NewAPIAccessPath returns an ApiAccessPath
-func NewAPIAccessPath(path, method string) AccessPath {
+// NewAccessPath returns an AccessPath
+func NewAccessPath(path, method string) AccessPath {
 	return AccessPath{Path: path, Method: method}
 }
