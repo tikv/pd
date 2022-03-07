@@ -166,7 +166,7 @@ func (s *testServerServiceSuite) SetUpSuite(c *C) {
 	mustWaitLeader(c, []*server.Server{s.svr})
 
 	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
 func (s *testServerServiceSuite) TearDownSuite(c *C) {
