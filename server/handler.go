@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
@@ -1078,5 +1079,5 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID uint64) error {
 	if err != nil {
 		return err
 	}
-	return postJSON(h.s.GetHTTPClient(), updateURL, body)
+	return apiutil.PostJSON(h.s.GetHTTPClient(), updateURL, body)
 }
