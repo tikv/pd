@@ -500,6 +500,10 @@ func (s *testUnsafeRecoverSuite) TestReportCollection(c *C) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(heartbeat, resp)
 	c.Assert(resp.RequireDetailedReport, Equals, true)
+	// Second and following heartbeats in a short period of time are ignored.
+	resp = &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(heartbeat, resp)
+	c.Assert(resp.RequireDetailedReport, Equals, false)
 
 	heartbeat.StoreReport = store1Report
 	recoveryController.HandleStoreHeartbeat(heartbeat, resp)
