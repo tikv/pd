@@ -2268,7 +2268,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -2361,7 +2361,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -2454,7 +2454,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -2546,7 +2546,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -2647,7 +2647,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -3031,7 +3031,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7623,7 +7623,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -7719,7 +7719,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -8451,7 +8451,7 @@
                 "query": {
                   "datasourceId": 1,
                   "model": {
-                    "expr": "rate(etcd_disk_wal_fsync_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}[1m])",
+                    "expr": "60 * rate(etcd_disk_wal_fsync_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}[1m])",
                     "intervalFactor": 2,
                     "legendFormat": "{{instance}} etch disk wal fsync rate",
                     "refId": "A",
@@ -8556,7 +8556,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -8745,7 +8745,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -9781,7 +9781,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -9968,7 +9968,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -10058,7 +10058,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
@@ -10349,7 +10349,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "ops",
               "label": null,
               "logBase": 1,
               "max": null,
