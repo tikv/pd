@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -592,10 +593,9 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
 
 	s.tc.AddLeaderRegionWithRange(uint64(102), "102a", "102z", 1, 2, 3)
 	s.tc.AddLeaderRegionWithRange(uint64(103), "103a", "103z", 4, 5, 6)
-	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", "", "3"}))
-	c.Assert(lb.Schedule(s.tc), HasLen, 2)
-
+	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 2)
 	for i := 1; i <= 50; i++ {
 		s.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 1, 2, 3)
 	}
@@ -603,7 +603,52 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
 		s.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 4, 5, 6)
 	}
 	s.tc.AddLeaderRegionWithRange(uint64(101), "101a", "101z", 5, 4, 3)
-	c.Assert(lb.Schedule(s.tc), HasLen, 3)
+	ops := lb.Schedule(s.tc)
+	c.Assert(ops, HasLen, 5)
+	regions := make(map[uint64]struct{})
+	for _, op := range ops {
+		regions[op.RegionID()] = struct{}{}
+	}
+	c.Assert(regions, HasLen, 5)
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TestSortStores(c *C) {
+	s.tc.AddLeaderStore(1, 104)
+	s.tc.AddLeaderStore(2, 0)
+	s.tc.AddLeaderStore(3, 0)
+	s.tc.AddLeaderStore(4, 100)
+	s.tc.AddLeaderStore(5, 100)
+	s.tc.AddLeaderStore(6, 0)
+	stores := s.tc.Stores.GetStores()
+	sort.Slice(stores, func(i, j int) bool {
+		return stores[i].LeaderScore(0, 0) >
+			stores[j].LeaderScore(0, 0)
+	})
+	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	deltaMap := make(map[uint64]int64)
+	deltaMap[1] = -1
+	sortStores(stores, 0, func(i, j int) bool {
+		iOp := deltaMap[stores[i].GetID()]
+		jOp := deltaMap[stores[j].GetID()]
+		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
+	})
+	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	deltaMap[1] = -4
+	sortStores(stores, 0, func(i, j int) bool {
+		iOp := deltaMap[stores[i].GetID()]
+		jOp := deltaMap[stores[j].GetID()]
+		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
+	})
+	c.Assert(stores[2].GetID(), Equals, uint64(1))
+	topID := stores[0].GetID()
+	deltaMap[topID] = -1
+	sortStores(stores, 0, func(i, j int) bool {
+		iOp := deltaMap[stores[i].GetID()]
+		jOp := deltaMap[stores[j].GetID()]
+		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
+	})
+	c.Assert(stores[1].GetID(), Equals, uint64(1))
+	c.Assert(stores[2].GetID(), Equals, topID)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
