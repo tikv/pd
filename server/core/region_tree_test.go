@@ -17,7 +17,6 @@ package core
 import (
 	"fmt"
 	"math/rand"
-	"sort"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -386,15 +385,6 @@ type mockRegionTreeData struct {
 
 func (m *mockRegionTreeData) clearTree() *mockRegionTreeData {
 	m.tree = newRegionTree()
-	return m
-}
-
-func (m *mockRegionTreeData) sortItems() *mockRegionTreeData {
-	sort.Slice(m.items, func(i, j int) bool {
-		l := newRegionItem(m.items[i].GetStartKey(), m.items[i].GetEndKey())
-		r := newRegionItem(m.items[j].GetStartKey(), m.items[j].GetEndKey())
-		return l.Less(r)
-	})
 	return m
 }
 
