@@ -1807,14 +1807,14 @@ func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
 func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 	// ToDO: regions have no special process for the time being
 	// and need to be removed in the future
-	damaged_regions := stats.GetDamagedRegionsId()
-	if len(damaged_regions) == 0 {
+	damagedRegions := stats.GetDamagedRegionsId()
+	if len(damagedRegions) == 0 {
 		return nil
 	}
 
 	log.Warn("store has damaged regions",
 		zap.Uint64("store-id", stats.GetStoreId()),
-		zap.Uint64s("region-ids", damaged_regions))
+		zap.Uint64s("region-ids", damagedRegions))
 
 	h := s.GetHandler()
 	if exist, err := h.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
@@ -1832,7 +1832,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		log.Info("update scheduler",
 			zap.String("scheduler-name",
 				schedulers.EvictLeaderName), zap.Uint64("store-id",
-				uint64(stats.GetStoreId())))
+				stats.GetStoreId()))
 	}
 	return nil
 }
