@@ -918,7 +918,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if limiter.Available() < stepCost {
+			if !limiter.Available(stepCost) {
 				return true
 			}
 		}
