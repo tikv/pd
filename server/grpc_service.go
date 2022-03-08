@@ -1812,7 +1812,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		return nil
 	}
 
-	log.Warn("store has damaged regions",
+	log.Error("store damaged and leaders will be evicted, you might fix the store and remove evict-leader-scheduler manually",
 		zap.Uint64("store-id", stats.GetStoreId()),
 		zap.Uint64s("region-ids", damagedRegions))
 
