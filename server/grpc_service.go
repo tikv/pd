@@ -603,7 +603,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			}, nil
 		}
 
-		storeID := request.Stats.GetStoreId()
+		storeID := request.GetStats().GetStoreId()
 		store := rc.GetStore(storeID)
 		if store == nil {
 			return nil, errors.Errorf("store %v not found", storeID)
@@ -613,11 +613,11 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
 
-		err := rc.HandleStoreHeartbeat(request.Stats)
+		err := rc.HandleStoreHeartbeat(request.GetStats())
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		err = s.handleDamagedStore(request.Stats)
+		err = s.handleDamagedStore(request.GetStats())
 		if err != nil {
 			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
 		}
@@ -1805,7 +1805,7 @@ func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
 // and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
 func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
-	// ToDO: regions have no special process for the time being
+	// TODO: regions have no special process for the time being
 	// and need to be removed in the future
 	damagedRegions := stats.GetDamagedRegionsId()
 	if len(damagedRegions) == 0 {
@@ -1816,6 +1816,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		zap.Uint64("store-id", stats.GetStoreId()),
 		zap.Uint64s("region-ids", damagedRegions))
 
+	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
 	h := s.GetHandler()
 	if exist, err := h.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
 		if err != nil {
@@ -1829,10 +1830,11 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		if err := h.RedirectSchedulerUpdate(schedulers.EvictLeaderName, float64(stats.GetStoreId())); err != nil {
 			return err
 		}
-		log.Info("update scheduler",
+		log.Info("update scheduler because of damaged regions",
 			zap.String("scheduler-name",
-				schedulers.EvictLeaderName), zap.Uint64("store-id",
-				stats.GetStoreId()))
+				schedulers.EvictLeaderName),
+			zap.Uint64("store-id", stats.GetStoreId()),
+			zap.Uint64s("region-ids", damagedRegions))
 	}
 	return nil
 }

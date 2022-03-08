@@ -202,7 +202,7 @@ func GetRouteName(req *http.Request) string {
 	return ""
 }
 
-// PostJSON is used to send POST requst to specific url
+// PostJSON is used to send the POST request to a specific URL
 func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
