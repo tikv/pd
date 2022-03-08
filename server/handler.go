@@ -75,6 +75,8 @@ var (
 	ErrPluginNotFound = func(pluginPath string) error {
 		return errors.Errorf("plugin is not found: %s", pluginPath)
 	}
+
+	schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -1074,7 +1076,7 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL := path.Join(h.GetAddr(), pdRootPath, SchedulerConfigHandlerPath, name, "config")
+	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err
