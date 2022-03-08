@@ -1819,7 +1819,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
 	h := s.GetHandler()
 	if exist, err := h.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
-		if err != nil {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			return err
 		}
 		err = h.AddEvictLeaderScheduler(stats.GetStoreId())
