@@ -143,7 +143,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 			}
 		}
 	}
-	blockList := ratelimit.AddLabelBlockList()
+	allowList := ratelimit.AddLabelAllowList()
 
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
@@ -323,7 +323,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/audit-middleware", adminHandler.SwitchAuditMiddleware, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/ratelimit/config", adminHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimit(blockList))
+	registerFunc(apiRouter, "/admin/ratelimit/config", adminHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimit(allowList))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

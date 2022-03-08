@@ -213,7 +213,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			h.rd.JSON(w, http.StatusBadRequest, "The path is empty.")
 			return
 		}
-		serviceLabel = h.svr.GetAPIAccessServiceLabel(apiutil.NewAPIAccessPath(path, method))
+		serviceLabel = h.svr.GetAPIAccessServiceLabel(apiutil.NewAccessPath(path, method))
 		if len(serviceLabel) == 0 {
 			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
 			return
@@ -236,7 +236,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(concurrency))
 			concurrencyUpdatedFlag = "Concurrency limiter is changed."
 		} else {
-			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.DeleteConcurrencyLimiter())
+			h.svr.DeteleServiceConcurrencyLimiter(serviceLabel)
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
 	}
@@ -248,7 +248,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(qps, int(qps)))
 			qpsRateUpdatedFlag = "QPS rate limiter is changed."
 		} else {
-			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.DeleteQPSLimiter())
+			h.svr.DeleteeServiceQPSLimiter(serviceLabel)
 			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
 		}
 	}
