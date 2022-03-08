@@ -1070,7 +1070,7 @@ func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 }
 
 // RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
-func (h *Handler) RedirectSchedulerUpdate(name string, storeID uint64) error {
+func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID

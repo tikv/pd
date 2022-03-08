@@ -1826,7 +1826,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 			return err
 		}
 	} else {
-		if err := h.RedirectSchedulerUpdate(schedulers.EvictLeaderName, stats.GetStoreId()); err != nil {
+		if err := h.RedirectSchedulerUpdate(schedulers.EvictLeaderName, float64(stats.GetStoreId())); err != nil {
 			return err
 		}
 		log.Info("update scheduler",

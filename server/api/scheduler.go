@@ -242,7 +242,7 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 			return
 		}
 	} else {
-		if err := h.RedirectSchedulerUpdate(name, uint64(storeID)); err != nil {
+		if err := h.RedirectSchedulerUpdate(name, storeID); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
