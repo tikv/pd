@@ -36,6 +36,8 @@ const (
 	BalanceLeaderType = "balance-leader"
 	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
 	balanceLeaderRetryLimit = 10
+	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling
+	BalanceLeaderBatchSize = 5
 )
 
 func init() {
@@ -51,7 +53,7 @@ func init() {
 			}
 			conf.Ranges = ranges
 			conf.Name = BalanceLeaderName
-			conf.Batch = 5
+			conf.Batch = BalanceLeaderBatchSize
 			return nil
 		}
 	})
