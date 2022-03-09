@@ -1288,28 +1288,34 @@ type TSFuture interface {
 }
 
 func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
-	// If tso command duration is observed very high, the reason could be it
-	// takes too long for Wait() be called.
 	start := time.Now()
+	// `cmdDurationTSOAsyncWait` is useful to see how long a TSFuture takes
+	// until the Wait() function is called.
+	// It represents the duration between the TSO request and actually being used.
 	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
 		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
+			// `cmdFailDurationTSO` is useful to see how long a TSO request takes until an error is met.
 			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
-			return 0, 0, err
+		} else {
+			physical, logical = req.physical, req.logical
 		}
-		physical, logical = req.physical, req.logical
-		now := time.Now()
-		cmdDurationWait.Observe(now.Sub(start).Seconds())
-		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
-		return
 	case <-req.requestCtx.Done():
-		return 0, 0, errors.WithStack(req.requestCtx.Err())
+		err = errors.WithStack(req.requestCtx.Err())
 	case <-req.clientCtx.Done():
-		return 0, 0, errors.WithStack(req.clientCtx.Err())
+		err = errors.WithStack(req.clientCtx.Err())
 	}
+	now := time.Now()
+	// `cmdDurationWait` is useful to see how long it takes to Wait() a TSO result.
+	// It partially or fully represents the client-side pressure.
+	cmdDurationWait.Observe(now.Sub(start).Seconds())
+	// `cmdDurationTSO` is useful to see how long a TSO request takes to get the final result.
+	// It represents both the client-side and server-side pressure.
+	cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
+	return
 }
 
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
