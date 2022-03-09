@@ -612,7 +612,7 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
 	c.Assert(regions, HasLen, 5)
 }
 
-func (s *testBalanceLeaderRangeSchedulerSuite) TestSortStores(c *C) {
+func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
 	s.tc.AddLeaderStore(1, 104)
 	s.tc.AddLeaderStore(2, 0)
 	s.tc.AddLeaderStore(3, 0)
@@ -627,14 +627,14 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSortStores(c *C) {
 	c.Assert(stores[0].GetID(), Equals, uint64(1))
 	deltaMap := make(map[uint64]int64)
 	deltaMap[1] = -1
-	sortStores(stores, 0, func(i, j int) bool {
+	resortStores(stores, 0, func(i, j int) bool {
 		iOp := deltaMap[stores[i].GetID()]
 		jOp := deltaMap[stores[j].GetID()]
 		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
 	})
 	c.Assert(stores[0].GetID(), Equals, uint64(1))
 	deltaMap[1] = -4
-	sortStores(stores, 0, func(i, j int) bool {
+	resortStores(stores, 0, func(i, j int) bool {
 		iOp := deltaMap[stores[i].GetID()]
 		jOp := deltaMap[stores[j].GetID()]
 		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
@@ -642,7 +642,7 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSortStores(c *C) {
 	c.Assert(stores[2].GetID(), Equals, uint64(1))
 	topID := stores[0].GetID()
 	deltaMap[topID] = -1
-	sortStores(stores, 0, func(i, j int) bool {
+	resortStores(stores, 0, func(i, j int) bool {
 		iOp := deltaMap[stores[i].GetID()]
 		jOp := deltaMap[stores[j].GetID()]
 		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
