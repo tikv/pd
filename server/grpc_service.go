@@ -1817,24 +1817,5 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		zap.Uint64s("region-ids", damagedRegions))
 
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
-	h := s.GetHandler()
-	if exist, err := h.IsSchedulerExisted(schedulers.EvictLeaderName); !exist {
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			return err
-		}
-		err = h.AddEvictLeaderScheduler(stats.GetStoreId())
-		if err != nil {
-			return err
-		}
-	} else {
-		if err := h.RedirectSchedulerUpdate(schedulers.EvictLeaderName, float64(stats.GetStoreId())); err != nil {
-			return err
-		}
-		log.Info("update scheduler because of damaged regions",
-			zap.String("scheduler-name",
-				schedulers.EvictLeaderName),
-			zap.Uint64("store-id", stats.GetStoreId()),
-			zap.Uint64s("region-ids", damagedRegions))
-	}
-	return nil
+	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
 }

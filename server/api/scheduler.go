@@ -21,13 +21,11 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
@@ -226,27 +224,9 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 		h.r.JSON(w, http.StatusBadRequest, "missing store id")
 		return
 	}
-	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		switch name {
-		case schedulers.EvictLeaderName:
-			err = h.AddEvictLeaderScheduler(uint64(storeID))
-		case schedulers.GrantLeaderName:
-			err = h.AddGrantLeaderScheduler(uint64(storeID))
-		}
-		if err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else {
-		if err := h.RedirectSchedulerUpdate(name, storeID); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	err := h.AddEvictOrGrant(storeID, name)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }
 

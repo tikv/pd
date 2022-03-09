@@ -1072,7 +1072,7 @@ func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 }
 
 // RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
-func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
+func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID
@@ -1082,4 +1082,28 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 		return err
 	}
 	return apiutil.PostJSON(h.s.GetHTTPClient(), updateURL, body)
+}
+
+// AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
+func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
+	if exist, err := h.IsSchedulerExisted(name); !exist {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			return err
+		}
+		switch name {
+		case schedulers.EvictLeaderName:
+			err = h.AddEvictLeaderScheduler(uint64(storeID))
+		case schedulers.GrantLeaderName:
+			err = h.AddGrantLeaderScheduler(uint64(storeID))
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+			return err
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	}
+	return nil
 }
