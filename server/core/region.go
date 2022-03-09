@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
@@ -58,6 +59,7 @@ type RegionInfo struct {
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
+	buckets           unsafe.Pointer
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -165,18 +167,22 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
+// Inherit inherits the buckets and region size from the parent region.
 // CorrectApproximateSize correct approximate size by the previous size if here exists an reported RegionInfo.
 //
 // See https://github.com/tikv/tikv/issues/11114
-func (r *RegionInfo) CorrectApproximateSize(origin *RegionInfo) {
-	if r.approximateSize != 0 {
+func (r *RegionInfo) Inherit(origin *RegionInfo) {
+	if origin == nil {
+		if r.approximateSize == 0 {
+			r.approximateSize = EmptyRegionApproximateSize
+		}
 		return
 	}
-
-	if origin != nil {
+	if r.approximateSize == 0 {
 		r.approximateSize = origin.approximateSize
-	} else {
-		r.approximateSize = EmptyRegionApproximateSize
+	}
+	if r.buckets == nil {
+		r.buckets = origin.buckets
 	}
 }
 
@@ -404,6 +410,30 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 		KeysWritten:  r.writtenKeys,
 		KeysRead:     r.readKeys,
 	}
+}
+
+// SetBuckets sets the buckets of the region.
+func (r *RegionInfo) SetBuckets(buckets *metapb.Buckets) bool {
+	// bucket is only nil in test cases.
+	if buckets == nil {
+		return true
+	}
+	// only need to update bucket keys,versions.
+	newBuckets := &metapb.Buckets{
+		RegionId: buckets.GetRegionId(),
+		Version:  buckets.GetVersion(),
+		Keys:     buckets.GetKeys(),
+	}
+	return atomic.CompareAndSwapPointer(&r.buckets, r.buckets, unsafe.Pointer(newBuckets))
+}
+
+// GetBuckets returns the buckets of the region.
+func (r *RegionInfo) GetBuckets() *metapb.Buckets {
+	if r == nil || r.buckets == nil {
+		return nil
+	}
+	buckets := atomic.LoadPointer(&r.buckets)
+	return (*metapb.Buckets)(buckets)
 }
 
 // GetApproximateSize returns the approximate size of the region.

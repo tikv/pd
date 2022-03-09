@@ -157,8 +157,9 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
-func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
+func (s *testRegionInfoSuite) TestInherit(c *C) {
 	// size in MB
+	// case for approximateSize
 	testcases := []struct {
 		originExists bool
 		originSize   uint64
@@ -179,8 +180,36 @@ func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(t.size)
-		r.CorrectApproximateSize(origin)
+		r.Inherit(origin)
 		c.Assert(r.approximateSize, Equals, int64(t.expect))
+	}
+
+	// bucket
+	data := []struct {
+		originExist   bool
+		originBuckets *metapb.Buckets
+		buckets       *metapb.Buckets
+		same          bool
+	}{
+		{false, nil, nil, true},
+		{false, nil, &metapb.Buckets{RegionId: 1, Version: 2}, false},
+		{true, &metapb.Buckets{RegionId: 1, Version: 2}, &metapb.Buckets{RegionId: 1, Version: 3}, false},
+		{true, &metapb.Buckets{RegionId: 1, Version: 2}, nil, true},
+	}
+	for _, d := range data {
+		var origin *RegionInfo
+		if d.originExist {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.SetBuckets(d.originBuckets)
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.SetBuckets(d.buckets)
+		r.Inherit(origin)
+		if d.same {
+			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
+		} else {
+			c.Assert(r.GetBuckets(), Not(DeepEquals), d.originBuckets)
+		}
 	}
 }
 

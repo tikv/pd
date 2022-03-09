@@ -427,10 +427,51 @@ func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	c.Assert(stats[4], HasLen, 1)
 }
 
+func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+
+	// case1: region is not exist
+	buckets := &metapb.Buckets{
+		RegionId: 0,
+		Version:  1,
+		Keys:     [][]byte{{'1'}, {'2'}},
+	}
+	c.Assert(cluster.processBucketHeartbeat(buckets), NotNil)
+
+	// case2: bucket can be processed after the region update.
+	stores := newTestStores(3, "2.0.0")
+	n, np := uint64(1), uint64(1)
+	regions := newTestRegions(n, np)
+	for _, store := range stores {
+		c.Assert(cluster.putStoreLocked(store), IsNil)
+	}
+
+	c.Assert(cluster.processRegionHeartbeat(regions[0]), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), IsNil)
+	c.Assert(cluster.processBucketHeartbeat(buckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+
+	// case3: the bucket version is same.
+	c.Assert(cluster.processBucketHeartbeat(buckets), NotNil)
+	// case4: the bucket version is changed.
+	buckets.Version = 3
+	c.Assert(cluster.processBucketHeartbeat(buckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+
+	//case5: region update should inherit buckets.
+	newRegion := regions[0].Clone(core.WithIncConfVer())
+	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), NotNil)
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	n, np := uint64(3), uint64(3)

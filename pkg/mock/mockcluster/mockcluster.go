@@ -40,7 +40,7 @@ import (
 const (
 	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
 	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
-	mb                   = (1 << 20)       // 1MiB
+	mb                   = 1 << 20         // 1MiB
 )
 
 // Cluster is used to mock a cluster for test purpose.

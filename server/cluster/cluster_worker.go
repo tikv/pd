@@ -223,3 +223,8 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
+
+// HandleBucketHeartbeat processes RegionInfo reports from client
+func (c *RaftCluster) HandleBucketHeartbeat(buckets *metapb.Buckets) error {
+	return c.processBucketHeartbeat(buckets)
+}

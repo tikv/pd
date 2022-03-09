@@ -61,6 +61,7 @@ const (
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
 	persistLimitWaitTime   = 100 * time.Millisecond
+	retry                  = 3
 )
 
 // Server is the interface for cluster.
@@ -591,6 +592,27 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+// processBucketHeartbeat update the bucket information.
+func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
+	c.RLock()
+	region := c.core.GetRegion(buckets.GetRegionId())
+	c.RUnlock()
+	if region == nil {
+		return errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	for i := 0; i < retry; i++ {
+		old := region.GetBuckets()
+		// region should not update if the version of the buckets is less than the old one.
+		if old != nil && old.Version >= buckets.Version {
+			return errors.Errorf("the bucket version does not update, region-id:%d ", buckets.GetRegionId())
+		}
+		if ok := region.SetBuckets(buckets); ok {
+			break
+		}
+	}
+	return nil
+}
+
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -605,7 +627,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.CorrectApproximateSize(origin)
+	region.Inherit(origin)
 
 	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
