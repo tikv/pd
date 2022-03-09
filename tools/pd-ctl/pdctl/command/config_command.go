@@ -31,19 +31,20 @@ import (
 )
 
 var (
-	configPrefix          = "pd/api/v1/config"
-	schedulePrefix        = "pd/api/v1/config/schedule"
-	replicatePrefix       = "pd/api/v1/config/replicate"
-	labelPropertyPrefix   = "pd/api/v1/config/label-property"
-	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
-	rulesPrefix           = "pd/api/v1/config/rules"
-	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
-	rulePrefix            = "pd/api/v1/config/rule"
-	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
-	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
-	replicationModePrefix = "pd/api/v1/config/replication-mode"
-	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
-	pdServerPrefix        = "pd/api/v1/config/pd-server"
+	configPrefix           = "pd/api/v1/config"
+	schedulePrefix         = "pd/api/v1/config/schedule"
+	replicatePrefix        = "pd/api/v1/config/replicate"
+	labelPropertyPrefix    = "pd/api/v1/config/label-property"
+	clusterVersionPrefix   = "pd/api/v1/config/cluster-version"
+	rulesPrefix            = "pd/api/v1/config/rules"
+	rulesBatchPrefix       = "pd/api/v1/config/rules/batch"
+	rulePrefix             = "pd/api/v1/config/rule"
+	ruleGroupPrefix        = "pd/api/v1/config/rule_group"
+	ruleGroupsPrefix       = "pd/api/v1/config/rule_groups"
+	replicationModePrefix  = "pd/api/v1/config/replication-mode"
+	ruleBundlePrefix       = "pd/api/v1/config/placement-rule"
+	pdServerPrefix         = "pd/api/v1/config/pd-server"
+	regionLabelRulesPrefix = "pd/api/v1/config/region-label/rules"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -62,7 +63,7 @@ func NewConfigCommand() *cobra.Command {
 // NewShowConfigCommand return a show subcommand of configCmd
 func NewShowConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
-		Use:   "show [replication|label-property|all]",
+		Use:   "show [replication|label-property|region-label|all]",
 		Short: "show replication and schedule config of PD",
 		Run:   showConfigCommandFunc,
 	}
@@ -73,6 +74,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
+	sc.AddCommand(NewShowRegionLabelCommand())
 	return sc
 }
 
@@ -124,6 +126,16 @@ func NewShowClusterVersionCommand() *cobra.Command {
 		Run:   showClusterVersionCommandFunc,
 	}
 	return sc
+}
+
+// NewShowRegionLabelCommand returns a show region label subcommand of show subcommand.
+func NewShowRegionLabelCommand() *cobra.Command {
+	l := &cobra.Command{
+		Use:   "region-label",
+		Short: "show region labels config",
+		Run:   showRegionLabelsCommandFunc,
+	}
+	return l
 }
 
 func newShowReplicationModeCommand() *cobra.Command {
@@ -317,6 +329,15 @@ func showServerCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, pdServerPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get server config: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func showRegionLabelsCommandFunc(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, regionLabelRulesPrefix, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get region labels: %s\n", err)
 		return
 	}
 	cmd.Println(r)
