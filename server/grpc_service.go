@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -602,7 +603,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			}, nil
 		}
 
-		storeID := request.Stats.GetStoreId()
+		storeID := request.GetStats().GetStoreId()
 		store := rc.GetStore(storeID)
 		if store == nil {
 			return nil, errors.Errorf("store %v not found", storeID)
@@ -612,9 +613,13 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
 
-		err := rc.HandleStoreHeartbeat(request.Stats)
+		err := rc.HandleStoreHeartbeat(request.GetStats())
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
+		}
+		err = s.handleDamagedStore(request.GetStats())
+		if err != nil {
+			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
 		}
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
@@ -1795,4 +1800,22 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 // ReportBuckets receives region buckets from tikv.
 func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
 	panic("not implemented")
+}
+
+// Evict the leaders when the store is damaged. Damaged regions are emergency errors
+// and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
+func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
+	// TODO: regions have no special process for the time being
+	// and need to be removed in the future
+	damagedRegions := stats.GetDamagedRegionsId()
+	if len(damagedRegions) == 0 {
+		return nil
+	}
+
+	log.Error("store damaged and leaders will be evicted, you might fix the store and remove evict-leader-scheduler manually",
+		zap.Uint64("store-id", stats.GetStoreId()),
+		zap.Uint64s("region-ids", damagedRegions))
+
+	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
+	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
 }
