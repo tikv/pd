@@ -764,7 +764,7 @@ func parseStoreLimitType(typeName string) (storelimit.Type, error) {
 
 func checkProgressAction(action string) error {
 	switch action {
-	case "offline", "online":
+	case metapb.NodeState_Preparing.String(), metapb.NodeState_Removing.String():
 		return nil
 	default:
 		return errors.New("unknown type")

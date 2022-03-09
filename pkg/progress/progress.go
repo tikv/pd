@@ -45,10 +45,10 @@ type progressIndicator struct {
 func (m *Manager) AddProgressIndicator(progress string, total float64) {
 	m.Lock()
 	defer m.Unlock()
-
 	m.progesses[progress] = &progressIndicator{
-		total:     total,
-		startTime: time.Now(),
+		total:          total,
+		startTime:      time.Now(),
+		lastUpdateTime: time.Now(),
 	}
 }
 
@@ -61,22 +61,13 @@ func (m *Manager) RemoveProgressIndicator(progress string) {
 }
 
 // UpdateProgressIndicator updates the progress of a given name.
-func (m *Manager) UpdateProgressIndicator(progress string, count float64) {
+func (m *Manager) UpdateProgressIndicator(progress string, current float64) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.progesses[progress].current += count
-	m.progesses[progress].speedPerSec = count / time.Since(m.progesses[progress].lastUpdateTime).Seconds()
+	m.progesses[progress].current = current
+	m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].lastUpdateTime).Seconds()
 	m.progesses[progress].lastUpdateTime = time.Now()
-}
-
-// LeftSeconds returns the left seconds until finishing.
-func (m *Manager) LeftSeconds(progress string) float64 {
-	m.RLock()
-	defer m.RUnlock()
-
-	return time.Since(m.progesses[progress].startTime).Seconds() /
-		m.progesses[progress].current * (m.progesses[progress].total - m.progesses[progress].current)
 }
 
 // Process returns the current progress of a give name.
@@ -84,7 +75,15 @@ func (m *Manager) Process(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	return m.progesses[progress].current / m.progesses[progress].total
+	return 1 - m.progesses[progress].current/m.progesses[progress].total
+}
+
+// LeftSeconds returns the left seconds until finishing.
+func (m *Manager) LeftSeconds(progress string) float64 {
+	m.RLock()
+	defer m.RUnlock()
+
+	return m.progesses[progress].current / ((m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds())
 }
 
 // CurrentSpeed returns the current speed of a given name.

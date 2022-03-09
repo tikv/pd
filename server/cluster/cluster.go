@@ -224,6 +224,7 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 }
 
@@ -238,7 +239,6 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
-	c.progressManager = progress.NewManager()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -318,8 +318,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	for _, store := range c.GetStores() {
 		storeID := store.GetID()
 		c.hotStat.GetOrCreateRollingStoreStats(storeID)
-		if store.IsOffline() {
-			c.progressManager.AddProgressIndicator(fmt.Sprintf("offline-%d", storeID), float64(c.core.GetStoreRegionCount(storeID)))
+		if store.IsRemoving() {
+			c.progressManager.AddProgressIndicator(fmt.Sprintf("removing-%d", storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		}
 	}
 	return c, nil
@@ -1084,7 +1084,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddProgressIndicator(fmt.Sprintf("offline-%d", store.GetID()), float64(store.GetRegionCount()))
+		c.progressManager.AddProgressIndicator(fmt.Sprintf("removing-%d", store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
@@ -1127,7 +1127,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	if err == nil {
 		// clean up the residual information.
 		c.RemoveStoreLimit(storeID)
-		c.progressManager.RemoveProgressIndicator(fmt.Sprintf("offline-%d", storeID))
+		c.progressManager.RemoveProgressIndicator(fmt.Sprintf("removing-%d", storeID))
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1237,9 +1237,9 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		// If the store is empty, it can be buried.
 		id := offlineStore.GetId()
-		regionCount := c.core.GetStoreRegionCount(id)
-		c.progressManager.UpdateProgressIndicator(fmt.Sprintf("offline-%d", id), float64(regionCount))
-		if regionCount == 0 {
+		regionSize := c.core.GetStoreRegionSize(id)
+		c.progressManager.UpdateProgressIndicator(fmt.Sprintf("removing-%d", id), float64(regionSize))
+		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
