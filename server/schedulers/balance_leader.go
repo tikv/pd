@@ -139,6 +139,101 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
+type batchController struct {
+	cluster     schedule.Cluster
+	sources     []*core.StoreInfo
+	targets     []*core.StoreInfo
+	sourceIndex int
+	targetIndex int
+	plan        *balancePlan
+	usedRegions map[uint64]struct{}
+}
+
+func (bc *batchController) initSort() {
+	sort.Slice(bc.sources, func(i, j int) bool {
+		iOp := bc.plan.GetOpInfluence(bc.sources[i].GetID())
+		jOp := bc.plan.GetOpInfluence(bc.sources[j].GetID())
+		return bc.sources[i].LeaderScore(bc.plan.kind.Policy, iOp) >
+			bc.sources[j].LeaderScore(bc.plan.kind.Policy, jOp)
+	})
+	sort.Slice(bc.targets, func(i, j int) bool {
+		iOp := bc.plan.GetOpInfluence(bc.targets[i].GetID())
+		jOp := bc.plan.GetOpInfluence(bc.targets[j].GetID())
+		return bc.targets[i].LeaderScore(bc.plan.kind.Policy, iOp) <
+			bc.targets[j].LeaderScore(bc.plan.kind.Policy, jOp)
+	})
+}
+
+// hasOptionalStore returns whether there is remaining and optional stores
+func (bc *batchController) hasOptionalStore() bool {
+	return bc.sourceIndex < len(bc.sources) || bc.targetIndex < len(bc.targets)
+}
+
+// hasOptionalSourceStore returns whether there is remaining and optional source stores
+func (bc *batchController) hasOptionalSourceStore() bool {
+	return bc.sourceIndex < len(bc.sources)
+}
+
+// hasOptionalTargetStore returns whether there is remaining and optional target stores
+func (bc *batchController) hasOptionalTargetStore() bool {
+	return bc.targetIndex < len(bc.targets)
+}
+
+// getCurrentSourceStore returns processing source store
+func (bc *batchController) getCurrentSourceStore() *core.StoreInfo {
+	return bc.sources[bc.sourceIndex]
+}
+
+// getCurrentTargetStore returns processing target store
+func (bc *batchController) getCurrentTargetStore() *core.StoreInfo {
+	return bc.targets[bc.targetIndex]
+}
+
+// isRepeatedOperator is used to check whether the new operator is repeated
+func (bc *batchController) isRepeatedOperator(op *operator.Operator) bool {
+	// Currently only check whether region is used
+	_, ok := bc.usedRegions[op.RegionID()]
+	return ok
+}
+
+// nextSourceStore is used to change processing source store
+func (bc *batchController) nextSourceStore() {
+	bc.sourceIndex++
+}
+
+// nextTargeStore is used to change processing target store
+func (bc *batchController) nextTargetStore() {
+	bc.targetIndex++
+}
+
+// getProcessedSourceStores returns process source stores slice
+func (bc *batchController) getProcessedSourceStores() []*core.StoreInfo {
+	return bc.sources[:bc.sourceIndex]
+}
+
+// getProcessedTargetStores returns processed target stores slice
+func (bc *batchController) getProcessedTargetStores() []*core.StoreInfo {
+	return bc.targets[:bc.targetIndex]
+}
+
+// makeInfluence is used to make influence using new operator
+func (bc *batchController) makeInfluence(op *operator.Operator) {
+	bc.usedRegions[op.RegionID()] = struct{}{}
+	schedule.AddOpInfluence(op, bc.plan.opInfluence, bc.cluster)
+	resortStores(bc.sources, bc.sourceIndex, func(i, j int) bool {
+		iOp := bc.plan.GetOpInfluence(bc.sources[i].GetID())
+		jOp := bc.plan.GetOpInfluence(bc.sources[j].GetID())
+		return bc.sources[i].LeaderScore(bc.plan.kind.Policy, iOp) <=
+			bc.sources[j].LeaderScore(bc.plan.kind.Policy, jOp)
+	})
+	resortStores(bc.targets, bc.targetIndex, func(i, j int) bool {
+		iOp := bc.plan.GetOpInfluence(bc.targets[i].GetID())
+		jOp := bc.plan.GetOpInfluence(bc.targets[j].GetID())
+		return bc.targets[i].LeaderScore(bc.plan.kind.Policy, iOp) <=
+			bc.targets[j].LeaderScore(bc.plan.kind.Policy, jOp)
+	})
+}
+
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
@@ -148,35 +243,27 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	plan := newBalancePlan(kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
-	sources := filter.SelectSourceStores(stores, l.filters, cluster.GetOpts())
-	targets := filter.SelectTargetStores(stores, l.filters, cluster.GetOpts())
+	bc := &batchController{
+		cluster:     cluster,
+		sources:     filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()),
+		targets:     filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()),
+		plan:        plan,
+		usedRegions: make(map[uint64]struct{}),
+	}
+	bc.initSort()
 	result := make([]*operator.Operator, 0, l.conf.Batch)
-	sort.Slice(sources, func(i, j int) bool {
-		iOp := plan.GetOpInfluence(sources[i].GetID())
-		jOp := plan.GetOpInfluence(sources[j].GetID())
-		return sources[i].LeaderScore(leaderSchedulePolicy, iOp) >
-			sources[j].LeaderScore(leaderSchedulePolicy, jOp)
-	})
-	sort.Slice(targets, func(i, j int) bool {
-		iOp := plan.GetOpInfluence(targets[i].GetID())
-		jOp := plan.GetOpInfluence(targets[j].GetID())
-		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) <
-			targets[j].LeaderScore(leaderSchedulePolicy, jOp)
-	})
-
-	usedRegions := make(map[uint64]struct{})
 	// sourceIndex and targetIndex represent which store is currently processed
-	for sourceIndex, targetIndex := 0, 0; sourceIndex < len(sources) || targetIndex < len(targets); {
-		if sourceIndex < len(sources) {
+	for bc.hasOptionalStore() {
+		if bc.hasOptionalSourceStore() {
 			used := false
-			plan.source, plan.target = sources[sourceIndex], nil
+			plan.source, plan.target = bc.getCurrentSourceStore(), nil
 			retryLimit := l.retryQuota.GetLimit(plan.source)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
 			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if op := l.transferLeaderOut(plan); op != nil {
-					if _, ok := usedRegions[op.RegionID()]; ok {
+					if bc.isRepeatedOperator(op) {
 						continue
 					}
 					l.retryQuota.ResetLimit(plan.source)
@@ -185,36 +272,29 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 					if len(result) >= l.conf.Batch {
 						return result
 					}
-					// The follow is used to do influence
+					// The follow is used to make influence
 					used = true
-					usedRegions[op.RegionID()] = struct{}{}
-					schedule.AddOpInfluence(op, plan.opInfluence, cluster)
-					resortStores(sources, sourceIndex, func(i, j int) bool {
-						iOp := plan.GetOpInfluence(sources[i].GetID())
-						jOp := plan.GetOpInfluence(sources[j].GetID())
-						return sources[i].LeaderScore(leaderSchedulePolicy, iOp) <=
-							sources[j].LeaderScore(leaderSchedulePolicy, jOp)
-					})
+					bc.makeInfluence(op)
 					break
 				}
 			}
 			if !used {
 				// if current index store can't create operator, try to process on next store
-				sourceIndex++
+				bc.nextSourceStore()
 				l.Attenuate(plan.source)
 				log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("source", plan.SourceStoreID()))
 			}
 		}
-		if targetIndex < len(targets) {
+		if bc.hasOptionalTargetStore() {
 			used := false
-			plan.source, plan.target = nil, targets[targetIndex]
+			plan.source, plan.target = nil, bc.getCurrentTargetStore()
 			retryLimit := l.retryQuota.GetLimit(plan.target)
 			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", plan.TargetStoreID()))
 			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 			for j := 0; j < retryLimit; j++ {
 				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 				if op := l.transferLeaderIn(plan); op != nil {
-					if _, ok := usedRegions[op.RegionID()]; ok {
+					if bc.isRepeatedOperator(op) {
 						continue
 					}
 					l.retryQuota.ResetLimit(plan.target)
@@ -223,28 +303,21 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 					if len(result) >= l.conf.Batch {
 						return result
 					}
-					// The follow is used to do influence
+					// The follow is used to make influence
 					used = true
-					usedRegions[op.RegionID()] = struct{}{}
-					schedule.AddOpInfluence(op, plan.opInfluence, cluster)
-					resortStores(targets, targetIndex, func(i, j int) bool {
-						iOp := plan.GetOpInfluence(targets[i].GetID())
-						jOp := plan.GetOpInfluence(targets[j].GetID())
-						return targets[i].LeaderScore(leaderSchedulePolicy, iOp) >=
-							targets[j].LeaderScore(leaderSchedulePolicy, jOp)
-					})
+					bc.makeInfluence(op)
 					break
 				}
 			}
 			if !used {
 				// if current index store can't create operator, try to process on next store
-				targetIndex++
+				bc.nextTargetStore()
 				l.Attenuate(plan.target)
 				log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("target", plan.TargetStoreID()))
 			}
 		}
 	}
-	l.retryQuota.GC(append(sources, targets...))
+	l.retryQuota.GC(append(bc.getProcessedSourceStores(), bc.getProcessedTargetStores()...))
 	return result
 }
 
