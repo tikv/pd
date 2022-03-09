@@ -1164,6 +1164,38 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	c.Succeed()
 }
 
+func (s *testClientSuite) TestReportMinResolvedTS(c *C) {
+	storage := s.srv.GetStorage()
+	testData := []uint64{math.MaxUint64, 233333, 23333, 2333, 233, 1}
+	r, e := storage.LoadClusterMinResolvedTS()
+	c.Assert(r, Equals, uint64(0))
+	c.Assert(e, IsNil)
+	for i, minResolvedTS := range testData {
+		storeID := uint64(i + 1)
+		req := &pdpb.ReportMinResolvedTsRequest{
+			Header:        newHeader(s.srv),
+			StoreId:       storeID,
+			MinResolvedTs: minResolvedTS,
+		}
+		_, err := s.grpcSvr.ReportMinResolvedTS(context.Background(), req)
+		c.Assert(err, IsNil)
+		minResolvedTS1, err := storage.LoadMinResolvedTS(storeID)
+		c.Assert(err, IsNil)
+		c.Assert(minResolvedTS, Equals, minResolvedTS1)
+		min, err := storage.LoadClusterMinResolvedTS()
+		c.Assert(err, IsNil)
+		c.Assert(min, Equals, minResolvedTS)
+	}
+	for i := range testData {
+		storeID := uint64(i + 1)
+		err := storage.RemoveMinResolvedTS(storeID)
+		c.Assert(err, IsNil)
+	}
+	r, e = storage.LoadClusterMinResolvedTS()
+	c.Assert(r, Equals, uint64(0))
+	c.Assert(e, IsNil)
+}
+
 type testConfigTTLSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc

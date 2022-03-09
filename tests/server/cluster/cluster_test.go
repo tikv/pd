@@ -245,7 +245,7 @@ func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb
 	if state == metapb.StoreState_Offline {
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	} else if state == metapb.StoreState_Tombstone {
-		rc.RemoveStoreLimit(storeID)
+		rc.CleanTombstoneResidualInfo(storeID)
 	}
 }
 
@@ -1114,4 +1114,47 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
+}
+
+func (s *clusterTestSuite) TestMinResolvedTSWithTombstone(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	req := &pdpb.GetAllStoresRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+	}
+	resp, err := grpcPDClient.GetAllStores(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.Stores, HasLen, 1)
+	storeID := resp.Stores[0].GetId()
+
+	min := uint64(233)
+	req2 := &pdpb.ReportMinResolvedTsRequest{
+		Header:        testutil.NewRequestHeader(clusterID),
+		StoreId:       storeID,
+		MinResolvedTs: min,
+	}
+	_, err = grpcPDClient.ReportMinResolvedTS(context.Background(), req2)
+	c.Assert(err, IsNil)
+	ts0, err := rc.GetStorage().LoadMinResolvedTS(storeID)
+	c.Assert(err, IsNil)
+	c.Assert(ts0, Equals, min)
+	ts1, err := rc.GetStorage().LoadClusterMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts1, Equals, min)
+	resetStoreState(c, rc, storeID, metapb.StoreState_Tombstone)
+	ts2, err := rc.GetStorage().LoadClusterMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts2, Equals, uint64(0))
 }

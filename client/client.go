@@ -124,6 +124,8 @@ type Client interface {
 	StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns an stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error)
+	// ReportMinResolvedTS reports the min resolved ts to pd.
+	ReportMinResolvedTS(ctx context.Context, storeID, minResolvedTS uint64) error
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 	// Close closes the client.
@@ -1864,4 +1866,25 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 		}
 	}()
 	return globalConfigWatcherCh, err
+}
+
+func (c *client) ReportMinResolvedTS(ctx context.Context, storeID, minResolvedTS uint64) error {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.ReportMinResolvedTS", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.ReportMinResolvedTsRequest{
+		Header:        c.requestHeader(),
+		StoreId:       storeID,
+		MinResolvedTs: minResolvedTS,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	_, err := c.getClient().ReportMinResolvedTS(ctx, req)
+	cancel()
+
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
 }

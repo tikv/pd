@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
-	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,15 +24,15 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-var _ = Suite(&testServiceGCSafepointSuite{})
+var _ = Suite(&testMinResolvedTSSuite{})
 
-type testServiceGCSafepointSuite struct {
+type testMinResolvedTSSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testServiceGCSafepointSuite) SetUpSuite(c *C) {
+func (s *testMinResolvedTSSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -45,53 +43,35 @@ func (s *testServiceGCSafepointSuite) SetUpSuite(c *C) {
 	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
-func (s *testServiceGCSafepointSuite) TearDownSuite(c *C) {
+func (s *testMinResolvedTSSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testServiceGCSafepointSuite) TestServiceGCSafepoint(c *C) {
-	sspURL := s.urlPrefix + "/gc/safepoint"
-
+func (s *testMinResolvedTSSuite) TestMinResolvedTS(c *C) {
+	url := s.urlPrefix + "/min-resolved-ts"
 	storage := s.svr.GetStorage()
-	list := &listServiceGCSafepoint{
-		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
-			{
-				ServiceID: "a",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
-			},
-			{
-				ServiceID: "b",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
-			},
-			{
-				ServiceID: "c",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
-			},
-		},
-		GCSafePoint: 1,
+	testData := []uint64{233333, 23333, 2333, 233, 1}
+	result := &listMinResolvedTS{
+		MinResolvedTSList: make([]*endpoint.MinResolvedTSPoint, 0),
 	}
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+	for i, minResolvedTS := range testData {
+		storeID := uint64(i + 1)
+		err := storage.SaveMinResolvedTS(storeID, minResolvedTS)
 		c.Assert(err, IsNil)
+		result.MinResolvedTSList = append(result.MinResolvedTSList, &endpoint.MinResolvedTSPoint{
+			StoreID:       storeID,
+			MinResolvedTS: minResolvedTS,
+		})
 	}
-	storage.SaveGCSafePoint(1)
+	ts, err := storage.LoadClusterMinResolvedTS()
+	c.Assert(err, IsNil)
+	result.MinResolvedTSForCluster = ts
 
-	res, err := testDialClient.Get(sspURL)
+	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	listResp := &listServiceGCSafepoint{}
+	listResp := &listMinResolvedTS{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	c.Assert(err, IsNil)
-	c.Assert(listResp, DeepEquals, list)
-
-	statusCode, err := doDelete(testDialClient, sspURL+"/a")
-	c.Assert(err, IsNil)
-	c.Assert(statusCode, Equals, http.StatusOK)
-
-	left, err := storage.LoadAllServiceGCSafePoints()
-	c.Assert(err, IsNil)
-	c.Assert(left, DeepEquals, list.ServiceGCSafepoints[1:])
+	c.Assert(listResp, DeepEquals, result)
 }

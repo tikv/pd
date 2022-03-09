@@ -1067,10 +1067,16 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
-		c.RemoveStoreLimit(storeID)
+		c.CleanTombstoneResidualInfo(storeID)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
+}
+
+// CleanTombstoneResidualInfo clean up the residual information of tombstone store.
+func (c *RaftCluster) CleanTombstoneResidualInfo(storeID uint64) {
+	c.RemoveStoreLimit(storeID)
+	c.RemoveMinResolvedTSStorage(storeID)
 }
 
 // PauseLeaderTransfer prevents the store from been selected as source or
@@ -1219,7 +1225,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					errs.ZapError(err))
 				return err
 			}
-			c.RemoveStoreLimit(store.GetID())
+			c.CleanTombstoneResidualInfo(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1648,6 +1654,16 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
+}
+
+// RemoveMinResolvedTSStorage remove min resolved ts storage for a given store ID.
+func (c *RaftCluster) RemoveMinResolvedTSStorage(storeID uint64) error {
+	if c.storage != nil {
+		if err := c.storage.RemoveMinResolvedTS(storeID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.

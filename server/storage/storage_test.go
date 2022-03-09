@@ -279,3 +279,31 @@ func (s *testStorageSuite) TestLoadRegionsExceedRangeLimit(c *C) {
 	}
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"), IsNil)
 }
+
+func (s *testStorageSuite) TestMinResolvedTSStorage(c *C) {
+	storage := NewStorageWithMemoryBackend()
+	testData := []uint64{math.MaxUint64, 233333, 23333, 2333, 233, 1}
+
+	r, e := storage.LoadClusterMinResolvedTS()
+	c.Assert(r, Equals, uint64(0))
+	c.Assert(e, IsNil)
+	for i, minResolvedTS := range testData {
+		storeID := uint64(i + 1)
+		err := storage.SaveMinResolvedTS(storeID, minResolvedTS)
+		c.Assert(err, IsNil)
+		minResolvedTS1, err := storage.LoadMinResolvedTS(storeID)
+		c.Assert(err, IsNil)
+		c.Assert(minResolvedTS, Equals, minResolvedTS1)
+		min, err := storage.LoadClusterMinResolvedTS()
+		c.Assert(err, IsNil)
+		c.Assert(min, Equals, minResolvedTS)
+	}
+	for i := range testData {
+		storeID := uint64(i + 1)
+		err := storage.RemoveMinResolvedTS(storeID)
+		c.Assert(err, IsNil)
+	}
+	r, e = storage.LoadClusterMinResolvedTS()
+	c.Assert(r, Equals, uint64(0))
+	c.Assert(e, IsNil)
+}

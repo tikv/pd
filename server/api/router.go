@@ -351,6 +351,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "GetGCSafePoint", "/gc/safepoint", serviceGCSafepointHandler.List, setMethods("GET"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "DeleteGCSafePoint", "/gc/safepoint/{service_id}", serviceGCSafepointHandler.Delete, setMethods("DELETE"), setAuditBackend(localLog))
 
+	// min resolved ts API
+	MinResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
+	registerFunc(apiRouter, "GetMinResolvedTS", "/min-resolved-ts", MinResolvedTSHandler.List, setMethods("GET"), setAuditBackend(localLog))
+
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
 	registerFunc(clusterRouter, "RemoveFailedStoresUnsafely", "/admin/unsafe/remove-failed-stores",
