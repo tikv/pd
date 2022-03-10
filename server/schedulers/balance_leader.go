@@ -15,15 +15,19 @@
 package schedulers
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
+	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -50,7 +54,13 @@ func init() {
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			return conf.BuildWithArgs(args)
+			ranges, err := getKeyRanges(args)
+			if err != nil {
+				return err
+			}
+			conf.Ranges = ranges
+			conf.Name = BalanceLeaderName
+			return nil
 		}
 	})
 
@@ -71,23 +81,36 @@ type balanceLeaderSchedulerConfig struct {
 	Batch   int             `json:"batch"`
 }
 
-func (conf *balanceLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
-	ranges, err := getKeyRanges(args)
-	if err != nil {
-		return err
+
+	oldc, _ := json.Marshal(conf)
+
+	if err := json.Unmarshal(data, conf); err != nil {
+		return http.StatusInternalServerError, err.Error()
 	}
-	conf.Ranges = ranges
-	conf.Name = BalanceLeaderName
-	conf.Batch = 1
-	if len(args) > len(ranges)*2 {
-		conf.Batch, err = strconv.Atoi(args[len(ranges)*2])
-		if err != nil {
-			return err
+	newc, _ := json.Marshal(conf)
+	if !bytes.Equal(oldc, newc) {
+		conf.persistLocked()
+		return http.StatusOK, "success"
+	}
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(data, &m); err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+
+	t := reflect.TypeOf(conf).Elem()
+	for i := 0; i < t.NumField(); i++ {
+		jsonTag := t.Field(i).Tag.Get("json")
+		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:i]
+		}
+		if _, ok := m[jsonTag]; ok {
+			return http.StatusOK, "no changed"
 		}
 	}
-	return nil
+	return http.StatusBadRequest, "config item not found"
 }
 
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
@@ -100,14 +123,21 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 }
 
 func (conf *balanceLeaderSchedulerConfig) Persist() error {
-	name := conf.Name
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveScheduleConfig(conf.Name, data)
+}
+
+func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	return conf.storage.SaveScheduleConfig(conf.Name, data)
 }
 
 type balanceLeaderHandler struct {
@@ -127,23 +157,14 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 }
 
 func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var args []string
-	var input map[string]interface{}
-	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ranges, ok := (input["ranges"]).([]string)
-	if ok {
-		args = append(args, ranges...)
-	}
-	if batch, ok := input["batch"].(float64); ok {
-		args = append(args, strconv.FormatInt(int64(batch), 10))
-	}
-	err := handler.config.BuildWithArgs(args)
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	httpCode, v := handler.config.Update(data)
+	handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
