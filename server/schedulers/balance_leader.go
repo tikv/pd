@@ -141,13 +141,11 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-type compareOption func([]*core.StoreInfo, *balancePlan) func(int, int) bool
-
 type candidateStores struct {
 	stores        []*core.StoreInfo
 	storeIndexMap map[uint64]int
 	index         int
-	compareOption
+	compareOption func([]*core.StoreInfo, *balancePlan) func(int, int) bool
 	desc          string
 	actionDesc    string
 	schedulerName string
@@ -186,23 +184,16 @@ func (cs *candidateStores) next() {
 }
 
 func (cs *candidateStores) generateScheduleOperator(retryLimit int, usedRegions map[uint64]struct{}) *operator.Operator {
-	store := cs.getStore()
-	plan := cs.plan
-
-	cs.setPlanStore(plan, store)
+	cs.setPlanStore(cs.plan, cs.getStore())
 	for i := 0; i < retryLimit; i++ {
 		schedulerCounter.WithLabelValues(cs.schedulerName, "total").Inc()
-		if op := cs.opCreator(plan); op != nil {
+		if op := cs.opCreator(cs.plan); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				return op
 			}
 		}
 	}
 	return nil
-}
-
-func (cs *candidateStores) MetricLabel() string {
-	return strconv.FormatUint(cs.getStore().GetID(), 10)
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
@@ -257,10 +248,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	}
 	targetCandidate.initSort()
 	usedRegions := make(map[uint64]struct{})
-
-	result := make([]*operator.Operator, 0, l.conf.Batch)
 	candidates := []*candidateStores{sourceCandidate, targetCandidate}
 
+	result := make([]*operator.Operator, 0, l.conf.Batch)
 	for hasStore := true; hasStore; {
 		hasStore = false
 		for _, queue := range candidates {
@@ -269,7 +259,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 				store := queue.getStore()
 				retryLimit := l.retryQuota.GetLimit(store)
 				log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64(queue.desc, store.GetID()))
-				l.counter.WithLabelValues("high-score", queue.MetricLabel()).Inc()
+				l.counter.WithLabelValues("high-score", strconv.FormatUint(store.GetID(), 10)).Inc()
 				op := queue.generateScheduleOperator(retryLimit, usedRegions)
 				if op != nil {
 					l.retryQuota.ResetLimit(store)
@@ -300,7 +290,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 // resortStores is used to sort stores again after creating an operator.
 // It will repeatedly swap the specific store and next store if they are in wrong order.
 // In general, it has very few swaps. In the worst case, the time complexity is O(n).
-
 func resortStores(stores []*core.StoreInfo, index map[uint64]int, pos int, less func(i, j int) bool) {
 	swapper := func(i, j int) { stores[i], stores[j] = stores[j], stores[i] }
 	for ; pos+1 < len(stores) && !less(pos, pos+1); pos++ {
