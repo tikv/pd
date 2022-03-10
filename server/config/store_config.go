@@ -64,34 +64,14 @@ type StoreConfig struct {
 	} `json:"coprocessor"`
 }
 
-type getBytes = func() []byte
-
-func (c *StoreConfig) getMbSize(fn getBytes, value uint64) uint64 {
-	if c == nil {
-		return value
-	}
-	body := fn()
-	var bs typeutil.ByteSize
-	if err := json.Unmarshal(body, &bs); err != nil {
-		return value
-	}
-	return bs.ToMiB()
-}
-
 // GetRegionMaxSize returns the max region size in MB
 func (c *StoreConfig) GetRegionMaxSize() uint64 {
-	fn := func() []byte {
-		return []byte(`"` + c.Coprocessor.RegionMaxSize + `"`)
-	}
-	return c.getMbSize(fn, defaultRegionMaxSize)
+	return typeutil.ParseMBFromText(c.Coprocessor.RegionMaxSize, defaultRegionMaxSize)
 }
 
 // GetRegionSplitSize returns the region split size in MB
 func (c *StoreConfig) GetRegionSplitSize() uint64 {
-	fn := func() []byte {
-		return []byte(`"` + c.Coprocessor.RegionSplitSize + `"`)
-	}
-	return c.getMbSize(fn, defaultRegionSplitSize)
+	return typeutil.ParseMBFromText(c.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
 }
 
 // GetRegionSplitKeys returns the region split keys
