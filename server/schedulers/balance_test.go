@@ -907,7 +907,7 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance1(c *C) {
 	stats.Available = 20
 	stats.UsedSize = 28
 	store5 := origin.Clone(core.SetStoreStats(stats))
-	tc.PutStore(store5)
+	tc.PutStore(store5, tc.GetLocationLabels())
 	// remove op influence
 	oc.RemoveOperator(ops[1])
 	oc.RemoveOperator(ops[0])

@@ -290,7 +290,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	}
 
 	start := time.Now()
-	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
+	if err := c.storage.LoadStores(c.core.PutStore, c.opt.GetLocationLabels()); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -788,7 +788,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
 	regionSize := c.core.GetStoreRegionSize(id)
-	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
+	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, c.opt.GetLocationLabels())
 }
 
 func (c *RaftCluster) getClusterID() uint64 {
@@ -846,6 +846,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 // GetRegionCount returns total count of regions
 func (c *RaftCluster) GetRegionCount() int {
 	return c.core.GetRegionCount()
+}
+
+// GetRegionCount returns total size of regions
+func (c *RaftCluster) GetRegionSize() int64 {
+	return c.core.GetRegionSize()
 }
 
 // GetStoreRegions returns all regions' information with a given storeID.
@@ -1272,6 +1277,34 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	return err
 }
 
+// UpStore change store's node state to Serving.
+func (c *RaftCluster) ReadyToServe(store *core.StoreInfo) error {
+	c.Lock()
+	defer c.Unlock()
+	storeID := store.GetID()
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
+
+	if store.IsPhysicallyDestroyed() {
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
+	}
+
+	if store.IsServing() {
+		return errs.ErrStoreServing.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(core.UpStore())
+	log.Debug("store has changed to serving",
+		zap.Uint64("store-id", storeID),
+		zap.String("store-address", newStore.GetAddress()))
+	return c.putStoreLocked(newStore)
+}
+
 // SetStoreWeight sets up a store's leader/region balance weight.
 func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight float64) error {
 	store := c.GetStore(storeID)
@@ -1297,7 +1330,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	c.core.PutStore(store)
+	c.core.PutStore(store, c.opt.GetLocationLabels())
 	c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
 	return nil
 }
@@ -1310,6 +1343,30 @@ func (c *RaftCluster) checkStores() {
 		// the store has already been tombstone
 		if store.IsRemoved() {
 			continue
+		}
+
+		storeID := store.GetID()
+		if store.IsPreparing() {
+			regionSize := float64(c.GetRegionSize())
+			locationLabels := c.opt.GetLocationLabels()
+			topoWeight := c.core.GetStoreTopoWeight(storeID, locationLabels)
+			storeCount := 1.0
+			for _, otherStore := range stores {
+				if otherStore.GetID() == storeID || otherStore.GetNodeState() == metapb.NodeState_Removed || otherStore.GetNodeState() == metapb.NodeState_Removing {
+					continue
+				}
+				if store.CompareLocation(otherStore, locationLabels) == -1 {
+					storeCount++
+				}
+			}
+
+			if float64(store.GetRegionSize()) >= regionSize*topoWeight/storeCount*0.9 {
+				if err := c.ReadyToServe(store); err != nil {
+					log.Error("change store to serving failed",
+						zap.Stringer("store", store.GetMeta()),
+						errs.ZapError(err))
+				}
+			}
 		}
 
 		if store.IsPreparing() || store.IsServing() {

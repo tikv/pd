@@ -134,6 +134,13 @@ func (bc *BasicCluster) GetLeaderStore(region *RegionInfo) *StoreInfo {
 	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
+// GetStoreTopoWeight returns the weight of current label in topology.
+func (bc *BasicCluster) GetStoreTopoWeight(storeID uint64, locationLabels []string) float64 {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Stores.GetStoreTopoWeight(storeID, locationLabels)
+}
+
 // GetAdjacentRegions returns region's info that is adjacent with specific region.
 func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	bc.RLock()
@@ -187,10 +194,10 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, locationLabels []string) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize, locationLabels)
 }
 
 const randomRegionMaxRetry = 10
@@ -251,6 +258,17 @@ func (bc *BasicCluster) GetStoreCount() int {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Stores.GetStoreCount()
+}
+
+// GetRegionSize gets the total size of RegionInfo of regionMap.
+func (bc *BasicCluster) GetRegionSize() int64 {
+	bc.RLock()
+	defer bc.RUnlock()
+	var regionSize int64
+	for _, store := range bc.Stores.stores {
+		regionSize += store.GetRegionSize()
+	}
+	return regionSize
 }
 
 // GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID.
@@ -332,10 +350,10 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 }
 
 // PutStore put a store.
-func (bc *BasicCluster) PutStore(store *StoreInfo) {
+func (bc *BasicCluster) PutStore(store *StoreInfo, locationLabels []string) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.SetStore(store)
+	bc.Stores.SetStore(store, locationLabels)
 }
 
 // DeleteStore deletes a store.

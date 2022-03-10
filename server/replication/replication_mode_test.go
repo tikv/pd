@@ -437,7 +437,7 @@ func (s *testReplicationMode) setStoreState(cluster *mockcluster.Cluster, states
 		} else if state == "up" {
 			store.GetMeta().LastHeartbeat = time.Now().UnixNano()
 		}
-		cluster.PutStore(store)
+		cluster.PutStore(store, cluster.GetLocationLabels())
 	}
 }
 

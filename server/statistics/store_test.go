@@ -31,13 +31,13 @@ func (s *testStoreSuite) TestFilterUnhealtyStore(c *C) {
 	stats := NewStoresStats()
 	cluster := core.NewBasicCluster()
 	for i := uint64(1); i <= 5; i++ {
-		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: i}, core.SetLastHeartbeatTS(time.Now())))
+		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: i}, core.SetLastHeartbeatTS(time.Now())), []string{})
 		stats.Observe(i, &pdpb.StoreStats{})
 	}
 	c.Assert(stats.GetStoresLoads(), HasLen, 5)
 
-	cluster.PutStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-24 * time.Hour))))
-	cluster.PutStore(cluster.GetStore(2).Clone(core.TombstoneStore()))
+	cluster.PutStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-24*time.Hour))), []string{})
+	cluster.PutStore(cluster.GetStore(2).Clone(core.TombstoneStore()), []string{})
 	cluster.DeleteStore(cluster.GetStore(3))
 
 	stats.FilterUnhealthyStore(cluster)

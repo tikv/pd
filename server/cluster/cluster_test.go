@@ -1144,7 +1144,7 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 		id := store.GetID()
 		c.Assert(cache.GetStore(id), IsNil)
 		c.Assert(cache.PauseLeaderTransfer(id), NotNil)
-		cache.SetStore(store)
+		cache.SetStore(store, []string{})
 		c.Assert(cache.GetStore(id), DeepEquals, store)
 		c.Assert(cache.GetStoreCount(), Equals, i+1)
 		c.Assert(cache.PauseLeaderTransfer(id), IsNil)

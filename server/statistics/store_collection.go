@@ -43,6 +43,10 @@ type storeStatistics struct {
 	RegionCount     int
 	LeaderCount     int
 	LabelCounter    map[string]int
+	Preparing       int
+	Serving         int
+	Removing        int
+	Removed         int
 }
 
 func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
@@ -68,7 +72,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	switch store.GetNodeState() {
-	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
+	case metapb.NodeState_Preparing:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			s.Down++
 		} else if store.IsUnhealthy() {
@@ -80,10 +84,26 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		} else {
 			s.Up++
 		}
+		s.Preparing++
+	case metapb.NodeState_Serving:
+		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
+			s.Down++
+		} else if store.IsUnhealthy() {
+			s.Unhealthy++
+		} else if store.IsDisconnected() {
+			s.Disconnect++
+		} else if store.IsSlow() {
+			s.Slow++
+		} else {
+			s.Up++
+		}
+		s.Serving++
 	case metapb.NodeState_Removing:
 		s.Offline++
+		s.Removing++
 	case metapb.NodeState_Removed:
 		s.Tombstone++
+		s.Removed++
 		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
@@ -149,6 +169,10 @@ func (s *storeStatistics) Collect() {
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)
 	metrics["store_slow_count"] = float64(s.Slow)
+	metrics["store_preparing_count"] = float64(s.Preparing)
+	metrics["store_serving_count"] = float64(s.Serving)
+	metrics["store_removing_count"] = float64(s.Removing)
+	metrics["store_removed_count"] = float64(s.Removed)
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
 	metrics["storage_size"] = float64(s.StorageSize)

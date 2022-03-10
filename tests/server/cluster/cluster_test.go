@@ -312,7 +312,7 @@ func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb
 		newStore = newStore.Clone(core.TombstoneStore())
 	}
 
-	rc.GetBasicCluster().PutStore(newStore)
+	rc.GetBasicCluster().PutStore(newStore, rc.GetOpts().GetLocationLabels())
 	if state == metapb.StoreState_Offline {
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	} else if state == metapb.StoreState_Tombstone {

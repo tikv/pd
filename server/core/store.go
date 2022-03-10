@@ -567,13 +567,15 @@ L:
 
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
-	stores map[uint64]*StoreInfo
+	stores   map[uint64]*StoreInfo
+	topology map[string]interface{}
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
 func NewStoresInfo() *StoresInfo {
 	return &StoresInfo{
-		stores: make(map[uint64]*StoreInfo),
+		stores:   make(map[uint64]*StoreInfo),
+		topology: make(map[string]interface{}),
 	}
 }
 
@@ -587,8 +589,85 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 }
 
 // SetStore sets a StoreInfo with storeID.
-func (s *StoresInfo) SetStore(store *StoreInfo) {
-	s.stores[store.GetID()] = store
+func (s *StoresInfo) SetStore(store *StoreInfo, locationLabels []string) {
+	storeID := store.GetID()
+	if origin, ok := s.stores[storeID]; ok {
+		oldStoreLabels := getSortedLabels(origin.GetLabels(), locationLabels)
+		deleteTopology(s.topology, oldStoreLabels)
+	}
+	newStoreLabels := getSortedLabels(store.GetLabels(), locationLabels)
+	updateTopology(s, newStoreLabels)
+	s.stores[storeID] = store
+}
+
+func (s *StoresInfo) GetStoreTopoWeight(storeID uint64, locationLabels []string) float64 {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return 0
+	}
+	weight := 1.0
+	topo := s.topology
+	for _, l := range locationLabels {
+		for _, label := range store.GetLabels() {
+			if l != label.Key {
+				continue
+			}
+			if _, ok := topo[label.Value]; ok {
+				weight = weight / float64(len(topo))
+				topo, ok = topo[label.Value].(map[string]interface{})
+				if !ok {
+					return weight
+				}
+				break
+			}
+		}
+	}
+	return weight
+}
+
+func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
+	var sortedLabels []*metapb.StoreLabel
+	for _, ll := range locationLabels {
+		for _, sl := range storeLabels {
+			if ll == sl.Key {
+				sortedLabels = append(sortedLabels, sl)
+			}
+		}
+	}
+	return sortedLabels
+}
+
+func deleteTopology(topology interface{}, oldStoreLabels []*metapb.StoreLabel) bool {
+	topo, ok := topology.(map[string]interface{})
+	if !ok || len(oldStoreLabels) == 0 {
+		return true
+	}
+
+	label := oldStoreLabels[0].Value
+	if len(oldStoreLabels) == 1 {
+		if _, ok := topo[label]; ok {
+			delete(topo, label)
+		}
+		return len(topo) == 0
+	}
+
+	if deleteTopology(topo[label], oldStoreLabels[1:]) {
+		delete(topo, label)
+	}
+	return len(topo) == 0
+}
+
+func updateTopology(s *StoresInfo, newLabels []*metapb.StoreLabel) {
+	if len(newLabels) == 0 {
+		return
+	}
+	topo := s.topology
+	for _, l := range newLabels {
+		if _, exist := topo[l.Value]; !exist {
+			topo[l.Value] = make(map[string]interface{})
+		}
+		topo = topo[l.Value].(map[string]interface{})
+	}
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
@@ -712,14 +791,14 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, locationLabels []string) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))
-		s.SetStore(newStore)
+		s.SetStore(newStore, locationLabels)
 	}
 }
 

@@ -195,7 +195,7 @@ func (mc *Cluster) SetStoreUp(storeID uint64) {
 		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // SetStoreDisconnect changes a store's state to disconnected.
@@ -205,7 +205,7 @@ func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Now().Add(-time.Second*30)),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // SetStoreDown sets store down.
@@ -215,14 +215,14 @@ func (mc *Cluster) SetStoreDown(storeID uint64) {
 		core.UpStore(),
 		core.SetLastHeartbeatTS(time.Time{}),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // SetStoreOffline sets store state to be offline.
 func (mc *Cluster) SetStoreOffline(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.OfflineStore(false))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // SetStoreBusy sets store busy.
@@ -234,7 +234,7 @@ func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 		core.SetStoreStats(newStats),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // AddLeaderStore adds store with specified count of leader.
@@ -259,7 +259,7 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	mc.PutStore(store)
+	mc.PutStore(store, mc.GetLocationLabels())
 }
 
 // AddRegionStore adds store with specified count of region.
@@ -282,7 +282,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	mc.PutStore(store)
+	mc.PutStore(store, mc.GetLocationLabels())
 }
 
 // AddRegionStoreWithLeader adds store with specified count of region and leader.
@@ -320,7 +320,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
-	mc.PutStore(store)
+	mc.PutStore(store, mc.GetLocationLabels())
 }
 
 // AddLeaderRegion adds region with specified leader and followers.
@@ -457,16 +457,16 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetLeaderWeight(weight))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // SetStoreEvictLeader set store whether evict leader.
 func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
 	store := mc.GetStore(storeID)
 	if enableEvictLeader {
-		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+		mc.PutStore(store.Clone(core.PauseLeaderTransfer()), mc.GetLocationLabels())
 	} else {
-		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()), mc.GetLocationLabels())
 	}
 }
 
@@ -474,7 +474,7 @@ func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
 func (mc *Cluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetRegionWeight(weight))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateStoreLeaderSize updates store leader size.
@@ -486,7 +486,7 @@ func (mc *Cluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
 		core.SetStoreStats(newStats),
 		core.SetLeaderSize(size),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateStoreRegionSize updates store region size.
@@ -498,7 +498,7 @@ func (mc *Cluster) UpdateStoreRegionSize(storeID uint64, size int64) {
 		core.SetStoreStats(newStats),
 		core.SetRegionSize(size),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateLeaderCount updates store leader count.
@@ -508,7 +508,7 @@ func (mc *Cluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 		core.SetLeaderCount(leaderCount),
 		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/mb),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateRegionCount updates store region count.
@@ -518,7 +518,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 		core.SetRegionCount(regionCount),
 		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateSnapshotCount updates store snapshot count.
@@ -532,7 +532,7 @@ func (mc *Cluster) UpdateSnapshotCount(storeID uint64, snapshotCount int) {
 func (mc *Cluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetPendingPeerCount(pendingPeerCount))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateStorageRatio updates store storage ratio count.
@@ -620,7 +620,7 @@ func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.Sto
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
 	mc.Set(storeID, newStats)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // UpdateStoreStatus updates store status.
@@ -644,7 +644,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 		core.SetRegionSize(regionSize),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
@@ -734,7 +734,7 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}
 	newStore := store.Clone(core.SetStoreLabels(newLabels))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // AddSuspectRegions mock method
@@ -769,7 +769,7 @@ func (mc *Cluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
 func (mc *Cluster) SetStoreLastHeartbeatInterval(storeID uint64, interval time.Duration) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-interval)))
-	mc.PutStore(newStore)
+	mc.PutStore(newStore, mc.GetLocationLabels())
 }
 
 // CheckRegionRead checks region read info with all peers
