@@ -620,35 +620,43 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
 	s.tc.AddLeaderStore(5, 100)
 	s.tc.AddLeaderStore(6, 0)
 	stores := s.tc.Stores.GetStores()
-	sort.Slice(stores, func(i, j int) bool {
-		return stores[i].LeaderScore(0, 0) >
-			stores[j].LeaderScore(0, 0)
-	})
-	c.Assert(stores[0].GetID(), Equals, uint64(1))
+
 	deltaMap := make(map[uint64]int64)
-	deltaMap[1] = -1
-	resortStores(stores, 0, func(i, j int) bool {
+	less := func(i, j int) bool {
 		iOp := deltaMap[stores[i].GetID()]
 		jOp := deltaMap[stores[j].GetID()]
-		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
-	})
+		return stores[i].LeaderScore(0, iOp) > stores[j].LeaderScore(0, jOp)
+	}
+
+	sort.Slice(stores, less)
+	storeIndexMap := map[uint64]int{}
+	for i := 0; i < len(stores); i++ {
+		storeIndexMap[stores[i].GetID()] = i
+	}
 	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
+	deltaMap[1] = -1
+
+	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
+	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
 	deltaMap[1] = -4
-	resortStores(stores, 0, func(i, j int) bool {
-		iOp := deltaMap[stores[i].GetID()]
-		jOp := deltaMap[stores[j].GetID()]
-		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
-	})
+	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
 	c.Assert(stores[2].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 2)
 	topID := stores[0].GetID()
 	deltaMap[topID] = -1
-	resortStores(stores, 0, func(i, j int) bool {
-		iOp := deltaMap[stores[i].GetID()]
-		jOp := deltaMap[stores[j].GetID()]
-		return stores[i].LeaderScore(0, iOp) <= stores[j].LeaderScore(0, jOp)
-	})
+	resortStores(stores, storeIndexMap, storeIndexMap[topID], less)
 	c.Assert(stores[1].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 1)
 	c.Assert(stores[2].GetID(), Equals, topID)
+	c.Assert(storeIndexMap[topID], Equals, 2)
+
+	bottomID := stores[5].GetID()
+	deltaMap[bottomID] = 4
+	resortStores(stores, storeIndexMap, storeIndexMap[bottomID], less)
+	c.Assert(stores[3].GetID(), Equals, bottomID)
+	c.Assert(storeIndexMap[bottomID], Equals, 3)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})

@@ -141,99 +141,68 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-type batchController struct {
-	cluster     schedule.Cluster
-	sources     []*core.StoreInfo
-	targets     []*core.StoreInfo
-	sourceIndex int
-	targetIndex int
-	plan        *balancePlan
-	usedRegions map[uint64]struct{}
+type compareOption func([]*core.StoreInfo, *balancePlan) func(int, int) bool
+
+type candidateStores struct {
+	stores        []*core.StoreInfo
+	storeIndexMap map[uint64]int
+	index         int
+	compareOption
+	desc          string
+	actionDesc    string
+	schedulerName string
+	plan          *balancePlan
+	setPlanStore  func(*balancePlan, *core.StoreInfo)
+	opCreator     func(*balancePlan) *operator.Operator
 }
 
-func (bc *batchController) initSort() {
-	sort.Slice(bc.sources, func(i, j int) bool {
-		iOp := bc.plan.GetOpInfluence(bc.sources[i].GetID())
-		jOp := bc.plan.GetOpInfluence(bc.sources[j].GetID())
-		return bc.sources[i].LeaderScore(bc.plan.kind.Policy, iOp) >
-			bc.sources[j].LeaderScore(bc.plan.kind.Policy, jOp)
-	})
-	sort.Slice(bc.targets, func(i, j int) bool {
-		iOp := bc.plan.GetOpInfluence(bc.targets[i].GetID())
-		jOp := bc.plan.GetOpInfluence(bc.targets[j].GetID())
-		return bc.targets[i].LeaderScore(bc.plan.kind.Policy, iOp) <
-			bc.targets[j].LeaderScore(bc.plan.kind.Policy, jOp)
-	})
+func (cs *candidateStores) initSort() {
+	sort.Slice(cs.stores, cs.compareOption(cs.stores, cs.plan))
+	cs.storeIndexMap = map[uint64]int{}
+	for i := 0; i < len(cs.stores); i++ {
+		cs.storeIndexMap[cs.stores[i].GetID()] = i
+	}
 }
 
-// hasOptionalStore returns whether there is remaining and optional stores
-func (bc *batchController) hasOptionalStore() bool {
-	return bc.sourceIndex < len(bc.sources) || bc.targetIndex < len(bc.targets)
+func (cs *candidateStores) reSort(store *core.StoreInfo) {
+	index, ok := cs.storeIndexMap[store.GetID()]
+	if !ok {
+		return
+	}
+	resortStores(cs.stores, cs.storeIndexMap, index, cs.compareOption(cs.stores, cs.plan))
 }
 
-// hasOptionalSourceStore returns whether there is remaining and optional source stores
-func (bc *batchController) hasOptionalSourceStore() bool {
-	return bc.sourceIndex < len(bc.sources)
+// hasStore returns returns true when there are leftover stores.
+func (cs *candidateStores) hasStore() bool {
+	return cs.index < len(cs.stores)
 }
 
-// hasOptionalTargetStore returns whether there is remaining and optional target stores
-func (bc *batchController) hasOptionalTargetStore() bool {
-	return bc.targetIndex < len(bc.targets)
+func (cs *candidateStores) getStore() *core.StoreInfo {
+	return cs.stores[cs.index]
 }
 
-// getCurrentSourceStore returns processing source store
-func (bc *batchController) getCurrentSourceStore() *core.StoreInfo {
-	return bc.sources[bc.sourceIndex]
+func (cs *candidateStores) next() {
+	cs.index++
 }
 
-// getCurrentTargetStore returns processing target store
-func (bc *batchController) getCurrentTargetStore() *core.StoreInfo {
-	return bc.targets[bc.targetIndex]
+func (cs *candidateStores) generateScheduleOperator(retryLimit int, usedRegions map[uint64]struct{}) *operator.Operator {
+	store := cs.getStore()
+	plan := cs.plan
+
+	cs.setPlanStore(plan, store)
+	for i := 0; i < retryLimit; i++ {
+		schedulerCounter.WithLabelValues(cs.schedulerName, "total").Inc()
+		if op := cs.opCreator(plan); op != nil {
+			if _, ok := usedRegions[op.RegionID()]; !ok {
+				return op
+			}
+		}
+	}
+	return nil
 }
 
-// isRepeatedOperator is used to check whether the new operator is repeated
-func (bc *batchController) isRepeatedOperator(op *operator.Operator) bool {
-	// Currently only check whether region is used
-	_, ok := bc.usedRegions[op.RegionID()]
-	return ok
-}
-
-// nextSourceStore is used to change processing source store
-func (bc *batchController) nextSourceStore() {
-	bc.sourceIndex++
-}
-
-// nextTargeStore is used to change processing target store
-func (bc *batchController) nextTargetStore() {
-	bc.targetIndex++
-}
-
-// getProcessedSourceStores returns process source stores slice
-func (bc *batchController) getProcessedSourceStores() []*core.StoreInfo {
-	return bc.sources[:bc.sourceIndex]
-}
-
-// getProcessedTargetStores returns processed target stores slice
-func (bc *batchController) getProcessedTargetStores() []*core.StoreInfo {
-	return bc.targets[:bc.targetIndex]
-}
-
-// makeInfluence is used to make influence using new operator
-func (bc *batchController) makeInfluence(op *operator.Operator) {
-	bc.usedRegions[op.RegionID()] = struct{}{}
-	schedule.AddOpInfluence(op, bc.plan.opInfluence, bc.cluster)
-	resortStores(bc.sources, bc.sourceIndex, func(i, j int) bool {
-		iOp := bc.plan.GetOpInfluence(bc.sources[i].GetID())
-		jOp := bc.plan.GetOpInfluence(bc.sources[j].GetID())
-		return bc.sources[i].LeaderScore(bc.plan.kind.Policy, iOp) <=
-			bc.sources[j].LeaderScore(bc.plan.kind.Policy, jOp)
-	})
-	resortStores(bc.targets, bc.targetIndex, func(i, j int) bool {
-		iOp := bc.plan.GetOpInfluence(bc.targets[i].GetID())
-		jOp := bc.plan.GetOpInfluence(bc.targets[j].GetID())
-		return bc.targets[i].LeaderScore(bc.plan.kind.Policy, iOp) <=
-			bc.targets[j].LeaderScore(bc.plan.kind.Policy, jOp)
-	})
+func (cs *candidateStores) MetricLabel() string {
+	return strconv.FormatUint(cs.getStore().GetID(), 10)
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
@@ -245,92 +214,104 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	plan := newBalancePlan(kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
-	bc := &batchController{
-		cluster:     cluster,
-		sources:     filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()),
-		targets:     filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()),
-		plan:        plan,
-		usedRegions: make(map[uint64]struct{}),
+	greaterOption := func(stores []*core.StoreInfo, plan *balancePlan) func(int, int) bool {
+		return func(i, j int) bool {
+			iOp := plan.GetOpInfluence(stores[i].GetID())
+			jOp := plan.GetOpInfluence(stores[j].GetID())
+			return stores[i].LeaderScore(plan.kind.Policy, iOp) >
+				stores[j].LeaderScore(plan.kind.Policy, jOp)
+		}
 	}
-	bc.initSort()
+	lessOption := func(stores []*core.StoreInfo, plan *balancePlan) func(int, int) bool {
+		return func(i, j int) bool {
+			iOp := plan.GetOpInfluence(stores[i].GetID())
+			jOp := plan.GetOpInfluence(stores[j].GetID())
+			return stores[i].LeaderScore(plan.kind.Policy, iOp) <
+				stores[j].LeaderScore(plan.kind.Policy, jOp)
+		}
+	}
+	sourceCandidate := &candidateStores{
+		stores:        filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()),
+		desc:          "source",
+		actionDesc:    "transfer-out",
+		compareOption: greaterOption,
+		setPlanStore: func(bp *balancePlan, si *core.StoreInfo) {
+			plan.source, plan.target = si, nil
+		},
+		opCreator:     l.transferLeaderOut,
+		schedulerName: l.GetName(),
+		plan:          plan,
+	}
+	sourceCandidate.initSort()
+	targetCandidate := &candidateStores{
+		stores:        filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()),
+		desc:          "target",
+		actionDesc:    "transfer-in",
+		compareOption: lessOption,
+		setPlanStore: func(bp *balancePlan, si *core.StoreInfo) {
+			plan.source, plan.target = nil, si
+		},
+		opCreator:     l.transferLeaderIn,
+		schedulerName: l.GetName(),
+		plan:          plan,
+	}
+	targetCandidate.initSort()
+	usedRegions := make(map[uint64]struct{})
+
 	result := make([]*operator.Operator, 0, l.conf.Batch)
-	// sourceIndex and targetIndex represent which store is currently processed
-	for bc.hasOptionalStore() {
-		if bc.hasOptionalSourceStore() {
-			used := false
-			plan.source, plan.target = bc.getCurrentSourceStore(), nil
-			retryLimit := l.retryQuota.GetLimit(plan.source)
-			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("source-store", plan.SourceStoreID()))
-			l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
-			for j := 0; j < retryLimit; j++ {
-				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
-				if op := l.transferLeaderOut(plan); op != nil {
-					if bc.isRepeatedOperator(op) {
-						continue
-					}
-					l.retryQuota.ResetLimit(plan.source)
-					op.Counters = append(op.Counters, l.counter.WithLabelValues("transfer-out", plan.SourceMetricLabel()))
+	candidates := []*candidateStores{sourceCandidate, targetCandidate}
+
+	for hasStore := true; hasStore; {
+		hasStore = false
+		for _, queue := range candidates {
+			if queue.hasStore() {
+				hasStore = true
+				store := queue.getStore()
+				retryLimit := l.retryQuota.GetLimit(store)
+				log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64(queue.desc, store.GetID()))
+				l.counter.WithLabelValues("high-score", queue.MetricLabel()).Inc()
+				op := queue.generateScheduleOperator(retryLimit, usedRegions)
+				if op != nil {
+					l.retryQuota.ResetLimit(store)
+					op.Counters = append(op.Counters, l.counter.WithLabelValues(queue.actionDesc, plan.SourceMetricLabel()))
 					result = append(result, op)
 					if len(result) >= l.conf.Batch {
 						return result
 					}
-					// The follow is used to make influence
-					used = true
-					bc.makeInfluence(op)
-					break
-				}
-			}
-			if !used {
-				// if current index store can't create operator, try to process on next store
-				bc.nextSourceStore()
-				l.Attenuate(plan.source)
-				log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("source", plan.SourceStoreID()))
-			}
-		}
-		if bc.hasOptionalTargetStore() {
-			used := false
-			plan.source, plan.target = nil, bc.getCurrentTargetStore()
-			retryLimit := l.retryQuota.GetLimit(plan.target)
-			log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64("target-store", plan.TargetStoreID()))
-			l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
-			for j := 0; j < retryLimit; j++ {
-				schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
-				if op := l.transferLeaderIn(plan); op != nil {
-					if bc.isRepeatedOperator(op) {
-						continue
+					// the following is used to make influence
+					usedRegions[op.RegionID()] = struct{}{}
+					schedule.AddOpInfluence(op, plan.opInfluence, cluster)
+					for _, queue := range candidates {
+						queue.reSort(plan.source)
+						queue.reSort(plan.target)
 					}
-					l.retryQuota.ResetLimit(plan.target)
-					op.Counters = append(op.Counters, l.counter.WithLabelValues("transfer-in", plan.TargetMetricLabel()))
-					result = append(result, op)
-					if len(result) >= l.conf.Batch {
-						return result
-					}
-					// The follow is used to make influence
-					used = true
-					bc.makeInfluence(op)
-					break
+				} else {
+					l.Attenuate(store)
+					log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64(queue.desc, queue.getStore().GetID()))
+					queue.next()
 				}
-			}
-			if !used {
-				// if current index store can't create operator, try to process on next store
-				bc.nextTargetStore()
-				l.Attenuate(plan.target)
-				log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64("target", plan.TargetStoreID()))
 			}
 		}
 	}
-	l.retryQuota.GC(append(bc.getProcessedSourceStores(), bc.getProcessedTargetStores()...))
+	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result
 }
 
 // resortStores is used to sort stores again after creating an operator.
 // It will repeatedly swap the specific store and next store if they are in wrong order.
 // In general, it has very few swaps. In the worst case, the time complexity is O(n).
-func resortStores(stores []*core.StoreInfo, pos int, less func(i, j int) bool) {
+
+func resortStores(stores []*core.StoreInfo, index map[uint64]int, pos int, less func(i, j int) bool) {
 	swapper := func(i, j int) { stores[i], stores[j] = stores[j], stores[i] }
-	for ; pos+1 < len(stores) && less(pos, pos+1); pos++ {
+	for ; pos+1 < len(stores) && !less(pos, pos+1); pos++ {
 		swapper(pos, pos+1)
+		index[stores[pos].GetID()] = pos
 	}
+	for ; pos > 1 && less(pos, pos-1); pos-- {
+		swapper(pos, pos-1)
+		index[stores[pos].GetID()] = pos
+	}
+	index[stores[pos].GetID()] = pos
 }
 
 // transferLeaderOut transfers leader from the source store.
