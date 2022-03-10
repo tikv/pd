@@ -217,6 +217,9 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 		Build(0)
 }
 
+// OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.
+const OpDescLeaveJointState = "leave-joint-state"
+
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
 func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core.RegionInfo) (*Operator, error) {
 	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck)

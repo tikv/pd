@@ -15,20 +15,17 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const schedulerConfigPrefix = "pd/api/v1/scheduler-config"
@@ -221,45 +218,15 @@ func (h *schedulerHandler) Post(w http.ResponseWriter, r *http.Request) {
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
-func (h *schedulerHandler) redirectSchedulerUpdate(name string, storeID float64) error {
-	input := make(map[string]interface{})
-	input["name"] = name
-	input["store_id"] = storeID
-	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
-	body, err := json.Marshal(input)
-	if err != nil {
-		return err
-	}
-	return postJSON(h.svr.GetHTTPClient(), updateURL, body)
-}
-
 func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
 	storeID, ok := input["store_id"].(float64)
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing store id")
 		return
 	}
-	if exist, err := h.Handler.IsSchedulerExisted(name); !exist {
-		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		switch name {
-		case schedulers.EvictLeaderName:
-			err = h.AddEvictLeaderScheduler(uint64(storeID))
-		case schedulers.GrantLeaderName:
-			err = h.AddGrantLeaderScheduler(uint64(storeID))
-		}
-		if err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else {
-		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	err := h.AddEvictOrGrant(storeID, name)
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }
 

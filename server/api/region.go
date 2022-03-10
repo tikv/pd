@@ -41,6 +41,7 @@ import (
 )
 
 // MetaPeer is api compatible with *metapb.Peer.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetaPeer struct {
 	*metapb.Peer
 	// RoleName is `Role.String()`.
@@ -53,6 +54,7 @@ type MetaPeer struct {
 }
 
 // PDPeerStats is api compatible with *pdpb.PeerStats.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDPeerStats struct {
 	*pdpb.PeerStats
 	Peer MetaPeer `json:"peer"`
@@ -96,6 +98,7 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 }
 
 // RegionInfo records detail region info for api usage.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type RegionInfo struct {
 	ID          uint64              `json:"id"`
 	StartKey    string              `json:"start_key"`
@@ -117,6 +120,7 @@ type RegionInfo struct {
 }
 
 // ReplicationStatus represents the replication mode status of the region.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationStatus struct {
 	State   string `json:"state"`
 	StateID uint64 `json:"state_id"`
@@ -324,7 +328,7 @@ func (h *regionsHandler) GetAll(w http.ResponseWriter, r *http.Request) {
 // @Summary List regions in a given range [startKey, endKey).
 // @Param key query string true "Region range start key"
 // @Param endkey query string true "Region range end key"
-// @Param limit query integer false "Limit count" default(16) without endKey, default(-1) with endKey
+// @Param limit query integer false "Limit count" default(16)
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
@@ -335,10 +339,6 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	endKey := r.URL.Query().Get("end_key")
 
 	limit := defaultRegionLimit
-	// avoid incomplete results with end_key
-	if endKey != "" {
-		limit = noRegionLimit
-	}
 	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
 		var err error
 		limit, err = strconv.Atoi(limitStr)
@@ -650,7 +650,6 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 const (
 	defaultRegionLimit     = 16
 	maxRegionLimit         = 10240
-	noRegionLimit          = -1
 	minRegionHistogramSize = 1
 	minRegionHistogramKeys = 1000
 )

@@ -64,8 +64,9 @@ func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 	stores := []*core.StoreInfo{
 		core.NewStoreInfo(
 			&metapb.Store{
-				Id:    1,
-				State: metapb.StoreState_Offline,
+				Id:        1,
+				State:     metapb.StoreState_Offline,
+				NodeState: metapb.NodeState_Removing,
 			},
 			core.SetStoreStats(stats),
 			core.SetLastHeartbeatTS(time.Now()),
