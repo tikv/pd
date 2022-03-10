@@ -105,6 +105,8 @@
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"
+## set true if you want use bucket feature.
+# use-bucket = false
 
 [schedule]
 ## Controls the size limit of Region Merge.

@@ -196,6 +196,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.Log.Level, Equals, "info")
 	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
 	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
+	c.Assert(cfg.PDServerCfg.UseBucket, IsFalse)
 
 	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, DefaultTSOUpdatePhysicalInterval)
 
@@ -292,6 +293,7 @@ func (s *testConfigSuite) TestMigrateFlags(c *C) {
 	cfg, err := load(`
 [pd-server]
 trace-region-flow = false
+use-bucket = true
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false
@@ -300,6 +302,7 @@ enable-remove-extra-replica = false
 `)
 	c.Assert(err, IsNil)
 	c.Assert(cfg.PDServerCfg.FlowRoundByDigit, Equals, math.MaxInt8)
+	c.Assert(cfg.PDServerCfg.UseBucket, IsTrue)
 	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
 	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
 	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
