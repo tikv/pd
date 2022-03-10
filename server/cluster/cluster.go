@@ -70,6 +70,7 @@ const (
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
 	persistLimitWaitTime   = 100 * time.Millisecond
+	removingAction         = "removing"
 )
 
 // Server is the interface for cluster.
@@ -319,7 +320,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		storeID := store.GetID()
 		c.hotStat.GetOrCreateRollingStoreStats(storeID)
 		if store.IsRemoving() {
-			c.progressManager.AddProgressIndicator(fmt.Sprintf("removing-%d", storeID), float64(c.core.GetStoreRegionSize(storeID)))
+			c.progressManager.AddProgressIndicator(fmt.Sprintf("%s-%d", removingAction, storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		}
 	}
 	return c, nil
@@ -1084,7 +1085,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddProgressIndicator(fmt.Sprintf("removing-%d", store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
+		c.progressManager.AddProgressIndicator(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
@@ -1127,7 +1128,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	if err == nil {
 		// clean up the residual information.
 		c.RemoveStoreLimit(storeID)
-		c.progressManager.RemoveProgressIndicator(fmt.Sprintf("removing-%d", storeID))
+		c.resetProgress(storeID, store.GetAddress(), removingAction)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1238,7 +1239,7 @@ func (c *RaftCluster) checkStores() {
 		// If the store is empty, it can be buried.
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.progressManager.UpdateProgressIndicator(fmt.Sprintf("removing-%d", id), float64(regionSize))
+		c.updateProgress(id, store.GetAddress(), removingAction, regionSize)
 		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
@@ -1260,6 +1261,22 @@ func (c *RaftCluster) checkStores() {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
+}
+
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current int64) {
+	storeLabel := fmt.Sprintf("%d", storeID)
+	progress := fmt.Sprintf("%s-%s", action, storeLabel)
+	c.progressManager.UpdateProgressIndicator(progress, float64(current))
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.Process(progress))
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.LeftSeconds(progress))
+}
+
+func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
+	storeLabel := fmt.Sprintf("%d", storeID)
+	progress := fmt.Sprintf("%s-%s", action, storeLabel)
+	c.progressManager.RemoveProgressIndicator(progress)
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.
