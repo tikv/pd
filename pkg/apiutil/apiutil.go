@@ -212,6 +212,16 @@ func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 	return doJSON(client, req, checkOpts...)
 }
 
+// PostJSON is used to send the POST request to a specific URL and ignore resp status to test
+func PostJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return doJSONIgnoreRespStatus(client, req, checkOpts...)
+}
+
 // GetJSON is used to send GET requst to specific url
 func GetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
@@ -233,6 +243,22 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 	}
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
+	}
+	for _, opt := range checkOpts {
+		opt(res, resp.StatusCode)
+	}
+	return nil
+}
+
+func doJSONIgnoreRespStatus(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	defer resp.Body.Close()
+	res, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
 	}
 	for _, opt := range checkOpts {
 		opt(res, resp.StatusCode)

@@ -160,12 +160,8 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 }
 
 func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	data, err := io.ReadAll(r.Body)
+	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	httpCode, v := handler.config.Update(data)
 	handler.rd.JSON(w, httpCode, v)
 }
