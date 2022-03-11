@@ -58,6 +58,8 @@ type HotRegionStorage struct {
 
 // HistoryHotRegions wraps historyHotRegion
 // it will be returned to TiDB.
+//
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type HistoryHotRegions struct {
 	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
 }

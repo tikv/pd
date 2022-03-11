@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -121,13 +120,11 @@ type RaftCluster struct {
 
 	replicationMode *replication.ModeManager
 
-	// Deprecated: we do not use it anymore. See https://github.com/tikv/tikv/issues/11472.
-	componentManager *component.Manager
-
 	unsafeRecoveryController *unsafeRecoveryController
 }
 
 // Status saves some state information.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
@@ -240,12 +237,6 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
-	if err != nil {
-		return err
-	}
-
-	c.componentManager = component.NewManager(c.storage)
-	_, err = c.storage.LoadComponent(&c.componentManager)
 	if err != nil {
 		return err
 	}
@@ -931,7 +922,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	// Store address can not be the same as other stores.
 	for _, s := range c.GetStores() {
 		// It's OK to start a new store on the same address if the old store has been removed or physically destroyed.
-		if s.IsTombstone() || s.IsPhysicallyDestroyed() {
+		if s.IsRemoved() || s.IsPhysicallyDestroyed() {
 			continue
 		}
 		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
@@ -1016,12 +1007,12 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	}
 
 	// Remove an offline store should be OK, nothing to do.
-	if store.IsOffline() && store.IsPhysicallyDestroyed() == physicallyDestroyed {
+	if store.IsRemoving() && store.IsPhysicallyDestroyed() == physicallyDestroyed {
 		return nil
 	}
 
-	if store.IsTombstone() {
-		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	if store.IsPhysicallyDestroyed() {
@@ -1054,11 +1045,11 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	}
 
 	// Bury a tombstone store should be OK, nothing to do.
-	if store.IsTombstone() {
+	if store.IsRemoved() {
 		return nil
 	}
 
-	if store.IsUp() {
+	if store.IsPreparing() || store.IsServing() {
 		if !forceBury {
 			return errs.ErrStoreIsUp.FastGenByArgs()
 		} else if !store.IsDisconnected() {
@@ -1114,15 +1105,15 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	if store.IsTombstone() {
-		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 
 	if store.IsPhysicallyDestroyed() {
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
-	if store.IsUp() {
+	if store.IsPreparing() || store.IsServing() {
 		return nil
 	}
 
@@ -1172,11 +1163,11 @@ func (c *RaftCluster) checkStores() {
 	stores := c.GetStores()
 	for _, store := range stores {
 		// the store has already been tombstone
-		if store.IsTombstone() {
+		if store.IsRemoved() {
 			continue
 		}
 
-		if store.IsUp() {
+		if store.IsPreparing() || store.IsServing() {
 			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 				upStoreCount++
 			}
@@ -1215,7 +1206,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	defer c.Unlock()
 
 	for _, store := range c.GetStores() {
-		if store.IsTombstone() {
+		if store.IsRemoved() {
 			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
 				continue
@@ -1381,7 +1372,7 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	var minVersion *semver.Version
 	stores := c.GetStores()
 	for _, s := range stores {
-		if s.IsTombstone() {
+		if s.IsRemoved() {
 			continue
 		}
 		v := versioninfo.MustParseVersion(s.GetVersion())
@@ -1437,13 +1428,6 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	c.RLock()
 	defer c.RUnlock()
 	return c.coordinator.checkers.GetMergeChecker()
-}
-
-// GetComponentManager returns component manager.
-func (c *RaftCluster) GetComponentManager() *component.Manager {
-	c.RLock()
-	defer c.RUnlock()
-	return c.componentManager
 }
 
 // GetStoresLoads returns load stats of all stores.

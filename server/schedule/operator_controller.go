@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"go.uber.org/zap"
 )
@@ -257,6 +258,7 @@ func (oc *OperatorController) PushOperators() {
 func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int {
 	oc.Lock()
 	added := 0
+	needPromoted := 0
 
 	for i := 0; i < len(ops); i++ {
 		op := ops[i]
@@ -282,12 +284,12 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
-				next := ops[i+1]
+				i++
+				next := ops[i]
 				_ = next.Cancel()
 				oc.buryOperator(next)
 			}
-			oc.Unlock()
-			return added
+			continue
 		}
 		oc.wop.PutOperator(op)
 		if isMerge {
@@ -300,11 +302,14 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
+		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Inc()
-	oc.PromoteWaitingOperator()
+	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
+	for i := 0; i < needPromoted; i++ {
+		oc.PromoteWaitingOperator()
+	}
 	return added
 }
 
@@ -408,6 +413,18 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
+		}
+
+		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
+			continue
+		}
+		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+			l := cl.GetRegionLabeler()
+			if l.ScheduleDisabled(region) {
+				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
+				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
+				return false
+			}
 		}
 	}
 	expired := false
@@ -806,6 +823,14 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 	}
 }
 
+// AddOpInfluence add operator influence for cluster
+func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
+	region := cluster.GetRegion(op.RegionID())
+	if region != nil {
+		op.TotalInfluence(influence, region)
+	}
+}
+
 // NewTotalOpInfluence creates a OpInfluence.
 func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
@@ -901,7 +926,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if limiter.Available() < stepCost {
+			if !limiter.Available(stepCost) {
 				return true
 			}
 		}

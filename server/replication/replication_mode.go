@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -84,6 +86,7 @@ type ModeManager struct {
 	drTotalRegion        int // number of all regions
 
 	drMemberWaitAsyncTime map[uint64]time.Time // last sync time with follower nodes
+	drStoreStatus         sync.Map
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
@@ -110,22 +113,11 @@ func NewReplicationModeManager(config config.ReplicationModeConfig, storage endp
 func (m *ModeManager) UpdateConfig(config config.ReplicationModeConfig) error {
 	m.Lock()
 	defer m.Unlock()
-	// If mode change from 'majority' to 'dr-auto-sync', switch to 'sync_recover'.
+	// If mode change from 'majority' to 'dr-auto-sync', or label key is updated switch to 'sync_recover'.
 	if m.config.ReplicationMode == modeMajority && config.ReplicationMode == modeDRAutoSync {
 		old := m.config
 		m.config = config
 		err := m.drSwitchToSyncRecoverWithLock()
-		if err != nil {
-			// restore
-			m.config = old
-		}
-		return err
-	}
-	// If the label key is updated, switch to 'async' state.
-	if m.config.ReplicationMode == modeDRAutoSync && config.ReplicationMode == modeDRAutoSync && m.config.DRAutoSync.LabelKey != config.DRAutoSync.LabelKey {
-		old := m.config
-		m.config = config
-		err := m.drSwitchToAsyncWithLock()
 		if err != nil {
 			// restore
 			m.config = old
@@ -161,6 +153,7 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 			State:               pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
 			StateId:             m.drAutoSync.StateID,
 			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
+			AvailableStores:     m.drAutoSync.AvailableStores,
 		}
 	}
 	return p
@@ -206,6 +199,7 @@ func (m *ModeManager) getModeName() string {
 
 const (
 	drStateSync        = "sync"
+	drStateAsyncWait   = "async_wait"
 	drStateAsync       = "async"
 	drStateSyncRecover = "sync_recover"
 )
@@ -217,6 +211,7 @@ type drAutoSyncStatus struct {
 	TotalRegions     int        `json:"total_regions,omitempty"`
 	SyncedRegions    int        `json:"synced_regions,omitempty"`
 	RecoverProgress  float32    `json:"recover_progress,omitempty"`
+	AvailableStores  []uint64   `json:"available_stores,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutoSync() error {
@@ -248,19 +243,39 @@ func (m *ModeManager) drCheckAsyncTimeout() bool {
 	return time.Since(m.initTime) > timeout
 }
 
-func (m *ModeManager) drSwitchToAsync() error {
+func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
 	m.Lock()
 	defer m.Unlock()
-	return m.drSwitchToAsyncWithLock()
+
+	id, err := m.cluster.GetAllocator().Alloc()
+	if err != nil {
+		log.Warn("failed to switch to async wait state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
+		return err
+	}
+	dr := drAutoSyncStatus{State: drStateAsyncWait, StateID: id, AvailableStores: availableStores}
+	m.drPersistStatusWithLock(dr)
+	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
+		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
+		return err
+	}
+	m.drAutoSync = dr
+	log.Info("switched to async_wait state", zap.String("replicate-mode", modeDRAutoSync))
+	return nil
 }
 
-func (m *ModeManager) drSwitchToAsyncWithLock() error {
+func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.drSwitchToAsyncWithLock(availableStores)
+}
+
+func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {
 	id, err := m.cluster.GetAllocator().Alloc()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
 	}
-	dr := drAutoSyncStatus{State: drStateAsync, StateID: id}
+	dr := drAutoSyncStatus{State: drStateAsync, StateID: id, AvailableStores: availableStores}
 	m.drPersistStatusWithLock(dr)
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
@@ -396,78 +411,158 @@ func (m *ModeManager) tickDR() {
 	drTickCounter.Inc()
 
 	totalPrimaryPeers, totalDrPeers := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
-	downPrimaryStores, downDrStores, upPrimayStores, upDrStores := m.checkStoreStatus()
+	stores := m.checkStoreStatus()
 
 	// canSync is true when every region has at least 1 replica in each DC.
-	canSync := downPrimaryStores < totalPrimaryPeers && downDrStores < totalDrPeers &&
-		upPrimayStores > 0 && upDrStores > 0
+	canSync := len(stores[primaryDown]) < totalPrimaryPeers && len(stores[drDown]) < totalDrPeers &&
+		len(stores[primaryUp]) > 0 && len(stores[drUp]) > 0
 
 	// hasMajority is true when every region has majority peer online.
 	var upPeers int
-	if downPrimaryStores < totalPrimaryPeers {
-		upPeers += totalPrimaryPeers - downPrimaryStores
+	if len(stores[primaryDown]) < totalPrimaryPeers {
+		upPeers += totalPrimaryPeers - len(stores[primaryDown])
 	}
-	if downDrStores < totalDrPeers {
-		upPeers += totalDrPeers - downDrStores
+	if len(stores[drDown]) < totalDrPeers {
+		upPeers += totalDrPeers - len(stores[drDown])
 	}
 	hasMajority := upPeers*2 > totalPrimaryPeers+totalDrPeers
 
 	log.Debug("replication store status",
-		zap.Int("up-primary", upPrimayStores),
-		zap.Int("up-dr", upDrStores),
-		zap.Int("down-primary", downPrimaryStores),
-		zap.Int("down-dr", downDrStores),
+		zap.Uint64s("up-primary", stores[primaryUp]),
+		zap.Uint64s("up-dr", stores[drUp]),
+		zap.Uint64s("down-primary", stores[primaryDown]),
+		zap.Uint64s("down-dr", stores[drDown]),
 		zap.Bool("can-sync", canSync),
 		zap.Int("up-peers", upPeers),
 		zap.Bool("has-majority", hasMajority),
 	)
 
-	// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
-	if !canSync && hasMajority && m.drGetState() != drStateAsync && m.drCheckAsyncTimeout() {
-		m.drSwitchToAsync()
-	}
+	/*
 
-	if canSync && m.drGetState() == drStateAsync {
-		m.drSwitchToSyncRecover()
-	}
+	           +----+      all region sync     +------------+
+	           |SYNC| <----------------------- |SYNC_RECOVER|
+	           +----+                          +------------+
+	             |^                                 ^ |
+	      DR down||                                 | |DR down
+	             ||DR up                       DR up| |
+	             v|                                 | v
+	        +----------+     all tikv sync        +-----+
+	   +--> |ASYNC_WAIT|------------------------> |ASYNC|<------+
+	   |    +----------+                          +-----+       |
+	   |            |                              |            |
+	   |tikv up/down|                              |tikv up/down|
+	   +------------+                              +------------+
 
-	if m.drGetState() == drStateSyncRecover {
-		m.updateProgress()
-		progress := m.estimateProgress()
-		drRecoverProgressGauge.Set(float64(progress))
+	*/
 
-		if progress == 1.0 {
+	switch m.drGetState() {
+	case drStateSync:
+		// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
+		if !canSync && hasMajority && m.drCheckAsyncTimeout() {
+			m.drSwitchToAsyncWait(stores[primaryUp])
+		}
+	case drStateAsyncWait:
+		if canSync {
 			m.drSwitchToSync()
+			break
+		}
+		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, stores[primaryUp]) {
+			m.drSwitchToAsyncWait(stores[primaryUp])
+			break
+		}
+		if m.drCheckStoreStateUpdated(stores[primaryUp]) {
+			m.drSwitchToAsync(stores[primaryUp])
+		}
+	case drStateAsync:
+		if canSync {
+			m.drSwitchToSyncRecover()
+			break
+		}
+		if !reflect.DeepEqual(m.drGetAvailableStores(), stores[primaryUp]) && m.drCheckStoreStateUpdated(stores[primaryUp]) {
+			m.drSwitchToAsync(stores[primaryUp])
+		}
+	case drStateSyncRecover:
+		if !canSync {
+			m.drSwitchToAsync(stores[primaryUp])
 		} else {
-			m.updateRecoverProgress(progress)
+			m.updateProgress()
+			progress := m.estimateProgress()
+			drRecoverProgressGauge.Set(float64(progress))
+
+			if progress == 1.0 {
+				m.drSwitchToSync()
+			} else {
+				m.updateRecoverProgress(progress)
+			}
 		}
 	}
 
 	m.checkReplicateFile()
 }
 
-func (m *ModeManager) checkStoreStatus() (primaryDownCount, drDownCount, primaryUpCount, drUpCount int) {
+const (
+	primaryUp = iota
+	primaryDown
+	drUp
+	drDown
+	storeStatusTypeCount
+)
+
+func (m *ModeManager) checkStoreStatus() [][]uint64 {
 	m.RLock()
 	defer m.RUnlock()
+	stores := make([][]uint64, storeStatusTypeCount)
 	for _, s := range m.cluster.GetStores() {
-		down := !s.IsTombstone() && s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
+		if s.IsRemoved() {
+			continue
+		}
+		down := s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
 		labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
 		if labelValue == m.config.DRAutoSync.Primary {
 			if down {
-				primaryDownCount++
+				stores[primaryDown] = append(stores[primaryDown], s.GetID())
 			} else {
-				primaryUpCount++
+				stores[primaryUp] = append(stores[primaryUp], s.GetID())
 			}
 		}
 		if labelValue == m.config.DRAutoSync.DR {
 			if down {
-				drDownCount++
+				stores[drDown] = append(stores[drDown], s.GetID())
 			} else {
-				drUpCount++
+				stores[drUp] = append(stores[drUp], s.GetID())
 			}
 		}
 	}
-	return
+	for i := range stores {
+		sort.Slice(stores[i], func(a, b int) bool { return stores[i][a] < stores[i][b] })
+	}
+	return stores
+}
+
+// UpdateStoreDRStatus saves the dr-autosync status of a store.
+func (m *ModeManager) UpdateStoreDRStatus(id uint64, status *pb.StoreDRAutoSyncStatus) {
+	m.drStoreStatus.Store(id, status)
+}
+
+func (m *ModeManager) drGetAvailableStores() []uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.drAutoSync.AvailableStores
+}
+
+func (m *ModeManager) drCheckStoreStateUpdated(stores []uint64) bool {
+	state := m.GetReplicationStatus().GetDrAutoSync()
+	for _, s := range stores {
+		status, ok := m.drStoreStatus.Load(s)
+		if !ok {
+			return false
+		}
+		drStatus := status.(*pb.StoreDRAutoSyncStatus)
+		if drStatus.GetState() != state.GetState() || drStatus.GetStateId() != state.GetStateId() {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *ModeManager) checkReplicateFile() {

@@ -138,7 +138,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Ope
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
-		if store.IsUp() {
+		if store.IsPreparing() || store.IsServing() {
 			continue
 		}
 

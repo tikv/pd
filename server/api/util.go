@@ -24,6 +24,7 @@ import (
 	"net/url"
 
 	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/apiutil"
 )
 
 var (
@@ -91,20 +92,15 @@ func extractJSON(resp *http.Response, data interface{}) error {
 }
 
 func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, checkOpts...)
+	return apiutil.PostJSON(client, url, data, checkOpts...)
+}
+
+func postJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	return apiutil.PostJSONIgnoreRespStatus(client, url, data, checkOpts...)
 }
 
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	return doJSON(client, req, checkOpts...)
+	return apiutil.GetJSON(client, url, data, checkOpts...)
 }
 
 func patchJSON(client *http.Client, url string, body []byte) error {
@@ -154,23 +150,4 @@ func parseKey(name string, input map[string]interface{}) ([]byte, string, error)
 		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
 	}
 	return returned, rawKey, nil
-}
-
-func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	defer resp.Body.Close()
-	res, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return errors.New(string(res))
-	}
-	for _, opt := range checkOpts {
-		opt(res, resp.StatusCode)
-	}
-	return nil
 }

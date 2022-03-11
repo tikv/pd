@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "client"
+		},
+		{
+			"path": "tests/client"
+		},
+		{
+			"path": "tools/pd-tso-bench"
+		}
+	],
+	"settings": {}
+}
