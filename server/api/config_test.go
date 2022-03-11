@@ -284,7 +284,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 
 	ms := map[string]interface{}{
 		"metric-storage": "",
-		"use-bucket":     "true",
+		"enable-bucket":  "true",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -295,7 +295,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
 
 	c.Assert(sc.UseRegionStorage, IsFalse)
-	c.Assert(sc.UseBucket, IsTrue)
+	c.Assert(sc.EnableBucket, IsTrue)
 	c.Assert(sc.KeyType, Equals, "table")
 	c.Assert(sc.RuntimeServices, DeepEquals, typeutil.StringSlice([]string{}))
 	c.Assert(sc.MetricStorage, Equals, "")

@@ -252,7 +252,7 @@ const (
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
-	defaultUseBucket = false
+	defaultEnableBucket = false
 )
 
 // Special keys for Labels
@@ -1104,8 +1104,8 @@ type PDServerConfig struct {
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
-	// UseBucket is the switch to use bucket.
-	UseBucket bool `toml:"use-bucket" json:"use-bucket,string"`
+	// EnableBucket is the switch to use bucket.
+	EnableBucket bool `toml:"enable-bucket" json:"enable-bucket,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1128,8 +1128,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("flow-round-by-digit") {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
-	if !meta.IsDefined("use-bucket") {
-		c.UseBucket = defaultUseBucket
+	if !meta.IsDefined("enable-bucket") {
+		c.EnableBucket = defaultEnableBucket
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

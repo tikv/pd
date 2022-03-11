@@ -741,14 +741,14 @@ func (s *configTestSuite) TestPDServerConfig(c *C) {
 	c.Assert(conf.MetricStorage, Equals, "")
 	c.Assert(conf.DashboardAddress, Equals, "auto")
 	c.Assert(conf.FlowRoundByDigit, Equals, int(3))
-	c.Assert(conf.UseBucket, IsFalse)
+	c.Assert(conf.EnableBucket, IsFalse)
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "pd-server.use-bucket", "true")
 	c.Assert(err, IsNil)
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
 	c.Assert(err, IsNil)
 	json.Unmarshal(output, &conf)
-	c.Assert(conf.UseBucket, IsTrue)
+	c.Assert(conf.EnableBucket, IsTrue)
 }
 
 func assertBundles(a, b []placement.GroupBundle, c *C) {
