@@ -99,12 +99,7 @@ func gcSafePointServicePath(serviceID string) string {
 	return path.Join(gcSafePointPath(), "service", serviceID)
 }
 
-// MinResolvedTSPath returns the min resolved ts with the given store ID.
-func MinResolvedTSPath(storeID uint64) string {
-	return path.Join(minResolvedTS, fmt.Sprintf("%020d", storeID))
-}
-
-// MinResolvedTSPrefixPath returns the min resolved ts key path prefix.
-func MinResolvedTSPrefixPath() string {
-	return minResolvedTS + "/"
+// MinResolvedTSPath returns the min resolved ts path
+func MinResolvedTSPath() string {
+	return path.Join(minResolvedTS)
 }

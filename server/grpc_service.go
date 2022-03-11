@@ -1841,17 +1841,14 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.MinResolvedTSStorage = s.storage
 	storeID := request.StoreId
 	minResolvedTS := request.MinResolvedTs
-
-	if err := storage.SaveMinResolvedTS(storeID, minResolvedTS); err != nil {
+	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
 		return nil, err
 	}
 	log.Debug("updated min resolved-ts",
 		zap.Uint64("store", storeID),
 		zap.Uint64("min resolved-ts", minResolvedTS))
-
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: s.header(),
 	}, nil

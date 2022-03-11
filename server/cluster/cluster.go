@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -53,6 +54,7 @@ import (
 )
 
 var backgroundJobInterval = 10 * time.Second
+var saveMinResolvedTSInterval = 1 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -251,15 +253,17 @@ func (c *RaftCluster) Start(s Server) error {
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
-	c.wg.Add(5)
+	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
+		saveMinResolvedTSInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
+	go c.runMinResolvedTSJob(saveMinResolvedTSInterval)
 	c.running = true
 
 	return nil
@@ -1067,16 +1071,10 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
-		c.CleanTombstoneResidualInfo(storeID)
+		c.RemoveStoreLimit(storeID)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
-}
-
-// CleanTombstoneResidualInfo clean up the residual information of tombstone store.
-func (c *RaftCluster) CleanTombstoneResidualInfo(storeID uint64) {
-	c.RemoveStoreLimit(storeID)
-	c.RemoveMinResolvedTSStorage(storeID)
 }
 
 // PauseLeaderTransfer prevents the store from been selected as source or
@@ -1225,7 +1223,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					errs.ZapError(err))
 				return err
 			}
-			c.CleanTombstoneResidualInfo(store.GetID())
+			c.RemoveStoreLimit(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -1656,14 +1654,62 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-// RemoveMinResolvedTSStorage remove min resolved ts storage for a given store ID.
-func (c *RaftCluster) RemoveMinResolvedTSStorage(storeID uint64) error {
-	if c.storage != nil {
-		if err := c.storage.RemoveMinResolvedTS(storeID); err != nil {
-			return err
+// GetMinResolvedTS returns the min resolved ts of all stores.
+func (c *RaftCluster) GetMinResolvedTS() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() {
+		return math.MaxUint64
+	}
+	min := uint64(math.MaxUint64)
+	for _, s := range c.GetStores() {
+		if !core.IsAvailableForMinResolvedTS(s) {
+			continue
+		}
+		if min > s.GetMinResolvedTS() {
+			min = s.GetMinResolvedTS()
 		}
 	}
-	return nil
+	return min
+}
+
+// SetMinResolvedTS sets up a store with min resolved ts.
+func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(
+		core.SetMinResolvedTS(minResolvedTS),
+	)
+
+	return c.putStoreLocked(newStore)
+}
+
+func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(saveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("min resolved ts background jobs has been stopped")
+			return
+		case <-ticker.C:
+			minResolvedTS := c.GetMinResolvedTS()
+			if minResolvedTS != math.MaxUint64 {
+				c.Lock()
+				defer c.Unlock()
+				c.storage.SaveMinResolvedTS(minResolvedTS)
+			}
+		}
+	}
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.

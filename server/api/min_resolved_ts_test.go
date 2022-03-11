@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 var _ = Suite(&testMinResolvedTSSuite{})
@@ -50,23 +49,11 @@ func (s *testMinResolvedTSSuite) TearDownSuite(c *C) {
 func (s *testMinResolvedTSSuite) TestMinResolvedTS(c *C) {
 	url := s.urlPrefix + "/min-resolved-ts"
 	storage := s.svr.GetStorage()
-	testData := []uint64{233333, 23333, 2333, 233, 1}
+	min := uint64(233)
+	storage.SaveMinResolvedTS(min)
 	result := &listMinResolvedTS{
-		MinResolvedTSList: make([]*endpoint.MinResolvedTSPoint, 0),
+		MinResolvedTS: min,
 	}
-	for i, minResolvedTS := range testData {
-		storeID := uint64(i + 1)
-		err := storage.SaveMinResolvedTS(storeID, minResolvedTS)
-		c.Assert(err, IsNil)
-		result.MinResolvedTSList = append(result.MinResolvedTSList, &endpoint.MinResolvedTSPoint{
-			StoreID:       storeID,
-			MinResolvedTS: minResolvedTS,
-		})
-	}
-	ts, err := storage.LoadClusterMinResolvedTS()
-	c.Assert(err, IsNil)
-	result.MinResolvedTSForCluster = ts
-
 	res, err := testDialClient.Get(url)
 	c.Assert(err, IsNil)
 	defer res.Body.Close()

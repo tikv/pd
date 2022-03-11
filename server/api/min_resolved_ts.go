@@ -18,7 +18,6 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -36,8 +35,7 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type listMinResolvedTS struct {
-	MinResolvedTSList       []*endpoint.MinResolvedTSPoint `json:"list"`
-	MinResolvedTSForCluster uint64                         `json:"min_resolved_ts"`
+	MinResolvedTS uint64 `json:"min_resolved_ts"`
 }
 
 // @Tags minresolvedts
@@ -48,19 +46,13 @@ type listMinResolvedTS struct {
 // @Router /min-resolved-ts [get]
 func (h *minResolvedTSHandler) List(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
-	minResolvedTS, err := storage.LoadClusterMinResolvedTS()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	minResolvedTSList, err := storage.LoadAllMinResolvedTS()
+	minResolvedTS, err := storage.LoadMinResolvedTS()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	list := listMinResolvedTS{
-		MinResolvedTSList:       minResolvedTSList,
-		MinResolvedTSForCluster: minResolvedTS,
+		MinResolvedTS: minResolvedTS,
 	}
 	h.rd.JSON(w, http.StatusOK, list)
 }
