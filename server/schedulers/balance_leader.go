@@ -173,6 +173,9 @@ func (cs *candidateStores) initSort() {
 }
 
 func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
+	if !cs.hasStore() {
+		return
+	}
 	for _, store := range stores {
 		index, ok := cs.storeIndexMap[store.GetID()]
 		if !ok {
@@ -220,11 +223,9 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, l.conf.Batch)
-	for hasStore := true; hasStore; {
-		hasStore = false
+	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
-			hasStore = true
 			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, plan, usedRegions)
 			if op != nil {
 				result = append(result, op)
@@ -236,7 +237,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		}
 		// next choose target
 		if targetCandidate.hasStore() {
-			hasStore = true
 			op := createTransferLeaderOperator(targetCandidate, transferIn, l, plan, usedRegions)
 			if op != nil {
 				result = append(result, op)
@@ -274,6 +274,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
 			}
+			op = nil
 		}
 	}
 	if op != nil {
