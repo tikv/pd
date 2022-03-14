@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
 )
@@ -144,20 +145,30 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	store.Address = "127.0.0.1:1"
 	testPutStore(c, clusterID, rc, grpcPDClient, store)
 
+	// Trigger handling of damaged regions
+	c.Assert(len(rc.GetSchedulers()), Equals, 0)
+	req1 := &pdpb.StoreHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Stats:  &pdpb.StoreStats{StoreId: store.GetId(), DamagedRegionsId: []uint64{1}},
+	}
+	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
+	c.Assert(err1, IsNil)
+	c.Assert(rc.GetSchedulers()[0], Equals, schedulers.EvictLeaderName)
+
 	// Remove store.
 	testRemoveStore(c, clusterID, rc, grpcPDClient, store)
 
 	// Update cluster config.
-	req := &pdpb.PutClusterConfigRequest{
+	req2 := &pdpb.PutClusterConfigRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Cluster: &metapb.Cluster{
 			Id:           clusterID,
 			MaxPeerCount: 5,
 		},
 	}
-	resp, err := grpcPDClient.PutClusterConfig(context.Background(), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp, NotNil)
+	resp2, err2 := grpcPDClient.PutClusterConfig(context.Background(), req2)
+	c.Assert(err2, IsNil)
+	c.Assert(resp2, NotNil)
 	meta := getClusterConfig(c, clusterID, grpcPDClient)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }

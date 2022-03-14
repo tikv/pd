@@ -16,7 +16,6 @@ package typeutil
 
 import (
 	"encoding/json"
-	"fmt"
 	. "github.com/pingcap/check"
 )
 
@@ -55,8 +54,7 @@ func (s *testSizeSuite) TestParseMbFromText(c *C) {
 		size: uint64(1),
 	}}
 
-	for i, t := range testdata {
-		fmt.Println(i)
+	for _, t := range testdata {
 		for _, b := range t.body {
 			c.Assert(int(ParseMBFromText(b, 1)), Equals, int(t.size))
 		}
