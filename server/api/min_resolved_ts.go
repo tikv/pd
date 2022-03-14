@@ -34,25 +34,24 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 }
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type listMinResolvedTS struct {
+type minResolvedTS struct {
 	MinResolvedTS uint64 `json:"min_resolved_ts"`
 }
 
 // @Tags minresolvedts
 // @Summary Get min resolved ts.
 // @Produce json
-// @Success 200 {array} listMinResolvedTS
+// @Success 200 {array} minResolvedTS
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /min-resolved-ts [get]
-func (h *minResolvedTSHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *minResolvedTSHandler) Get(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
-	minResolvedTS, err := storage.LoadMinResolvedTS()
+	value, err := storage.LoadMinResolvedTS()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	list := listMinResolvedTS{
-		MinResolvedTS: minResolvedTS,
-	}
-	h.rd.JSON(w, http.StatusOK, list)
+	h.rd.JSON(w, http.StatusOK, minResolvedTS{
+		MinResolvedTS: value,
+	})
 }
