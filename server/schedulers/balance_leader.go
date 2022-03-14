@@ -151,6 +151,13 @@ type candidateStores struct {
 	compareOption func([]*core.StoreInfo) func(int, int) bool
 }
 
+func NewCandidateStores(stores []*core.StoreInfo, compareOption func([]*core.StoreInfo) func(int, int) bool) *candidateStores {
+	cs := &candidateStores{stores: stores, compareOption: compareOption}
+	cs.storeIndexMap = map[uint64]int{}
+	cs.initSort()
+	return cs
+}
+
 // hasStore returns returns true when there are leftover stores.
 func (cs *candidateStores) hasStore() bool {
 	return cs.index < len(cs.stores)
@@ -166,7 +173,6 @@ func (cs *candidateStores) next() {
 
 func (cs *candidateStores) initSort() {
 	sort.Slice(cs.stores, cs.compareOption(cs.stores))
-	cs.storeIndexMap = map[uint64]int{}
 	for i := 0; i < len(cs.stores); i++ {
 		cs.storeIndexMap[cs.stores[i].GetID()] = i
 	}
@@ -209,16 +215,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			return leaderScore(stores[i], plan) < leaderScore(stores[j], plan)
 		}
 	}
-	sourceCandidate := &candidateStores{
-		stores:        filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()),
-		compareOption: greaterOption,
-	}
-	sourceCandidate.initSort()
-	targetCandidate := &candidateStores{
-		stores:        filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()),
-		compareOption: lessOption,
-	}
-	targetCandidate.initSort()
+	sourceCandidate := NewCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), greaterOption)
+	targetCandidate := NewCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), lessOption)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, l.conf.Batch)
