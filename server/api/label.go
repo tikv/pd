@@ -42,7 +42,7 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 // @Produce json
 // @Success 200 {array} metapb.StoreLabel
 // @Router /labels [get]
-func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *labelsHandler) GetLabels(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	var labels []*metapb.StoreLabel
 	m := make(map[string]struct{})
@@ -67,7 +67,7 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} StoresInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /labels/stores [get]
-func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
+func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
