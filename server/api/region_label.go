@@ -44,7 +44,7 @@ func newRegionLabelHandler(s *server.Server, rd *render.Render) *regionLabelHand
 // @Produce json
 // @Success 200 {array} labeler.LabelRule
 // @Router /config/region-label/rules [get]
-func (h *regionLabelHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	rules := cluster.GetRegionLabeler().GetAllLabelRules()
 	h.rd.JSON(w, http.StatusOK, rules)
@@ -59,7 +59,7 @@ func (h *regionLabelHandler) GetAllRules(w http.ResponseWriter, r *http.Request)
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rules [patch]
-func (h *regionLabelHandler) Patch(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var patch labeler.LabelRulePatch
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &patch); err != nil {
@@ -84,7 +84,7 @@ func (h *regionLabelHandler) Patch(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rule/ids [get]
-func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) GetRegionLabelRulesByIDs(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var ids []string
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &ids); err != nil {
@@ -105,7 +105,7 @@ func (h *regionLabelHandler) GetRulesByIDs(w http.ResponseWriter, r *http.Reques
 // @Success 200 {object} labeler.LabelRule
 // @Failure 404 {string} string "The rule does not exist."
 // @Router /config/region-label/rule/{id} [get]
-func (h *regionLabelHandler) GetRule(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	id, err := url.PathUnescape(mux.Vars(r)["id"])
 	if err != nil {
@@ -128,7 +128,7 @@ func (h *regionLabelHandler) GetRule(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "The rule does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rule/{id} [delete]
-func (h *regionLabelHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	id, err := url.PathUnescape(mux.Vars(r)["id"])
 	if err != nil {
@@ -156,7 +156,7 @@ func (h *regionLabelHandler) DeleteRule(w http.ResponseWriter, r *http.Request) 
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /config/region-label/rule [post]
-func (h *regionLabelHandler) SetRule(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var rule labeler.LabelRule
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &rule); err != nil {
@@ -182,7 +182,7 @@ func (h *regionLabelHandler) SetRule(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The region does not exist."
 // @Router /region/id/{id}/label/{key} [get]
-func (h *regionLabelHandler) GetRegionLabel(w http.ResponseWriter, r *http.Request) {
+func (h *regionLabelHandler) GetRegionLabelByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	regionID, labelKey := mux.Vars(r)["id"], mux.Vars(r)["key"]
 	id, err := strconv.ParseUint(regionID, 10, 64)
