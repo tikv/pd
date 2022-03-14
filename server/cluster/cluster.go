@@ -54,6 +54,8 @@ import (
 
 var backgroundJobInterval = 10 * time.Second
 
+const regionLabelGCInterval = time.Hour
+
 const (
 	clientTimeout              = 3 * time.Second
 	defaultChangedRegionsLimit = 10000
@@ -236,7 +238,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, time.Hour)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
 	}

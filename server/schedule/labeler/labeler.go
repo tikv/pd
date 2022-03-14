@@ -60,16 +60,16 @@ func (l *RegionLabeler) doGC(gcInterval time.Duration) {
 	for {
 		select {
 		case <-ticker.C:
-			l.checkAndClearExpiredRulesWithLock()
+			l.checkAndClearExpiredLabels()
 			log.Debug("RegionLabeler GC")
 		case <-l.ctx.Done():
-			log.Debug("GC stopped")
+			log.Info("RegionLabeler GC stopped")
 			return
 		}
 	}
 }
 
-func (l *RegionLabeler) checkAndClearExpiredRulesWithLock() {
+func (l *RegionLabeler) checkAndClearExpiredLabels() {
 	now := time.Now()
 	l.Lock()
 	defer l.Unlock()
@@ -154,7 +154,7 @@ func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 
 // GetAllLabelRules returns all the rules.
 func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
-	l.checkAndClearExpiredRulesWithLock()
+	l.checkAndClearExpiredLabels()
 	l.RLock()
 	defer l.RUnlock()
 	rules := make([]*LabelRule, 0, len(l.labelRules))

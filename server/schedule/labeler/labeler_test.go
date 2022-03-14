@@ -351,17 +351,12 @@ func (s *testLabelerSuite) TestGC(c *C) {
 	// no rule was cleared because the gc interval is big.
 	c.Assert(labeler.labelRules, HasLen, len(ttls))
 
-	go labeler.doGC(time.Millisecond)
-	for {
-		time.Sleep(time.Millisecond * 5)
-		labeler.RLock()
-		currentRuleLen := len(labeler.labelRules)
-		labeler.RUnlock()
-		if currentRuleLen < len(ttls) {
-			c.Assert(currentRuleLen <= 5, IsTrue)
-			break
-		}
-	}
+	labeler.checkAndClearExpiredLabels()
+
+	labeler.RLock()
+	currentRuleLen := len(labeler.labelRules)
+	labeler.RUnlock()
+	c.Assert(currentRuleLen <= 5, IsTrue)
 }
 
 func makeKeyRanges(keys ...string) []interface{} {
