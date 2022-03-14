@@ -68,20 +68,20 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 		var rule labeler.LabelRule
 		err = readJSON(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
 		c.Assert(err, IsNil)
-		expectSameRule(c, &rule, rules[i])
+		c.Assert(&rule, DeepEquals, rules[i])
 	}
 
 	err = readJSONWithBody(testDialClient, s.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
 	c.Assert(err, IsNil)
 	expects := []*labeler.LabelRule{rules[0], rules[2]}
-	expectSameRules(c, resp, expects)
+	c.Assert(resp, DeepEquals, expects)
 
 	_, err = doDelete(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	expectSameRules(c, resp, []*labeler.LabelRule{rules[0], rules[2]})
+	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
@@ -95,21 +95,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	expectSameRules(c, resp, []*labeler.LabelRule{rules[1], rules[2]})
-}
-
-func expectSameRules(c *C, r1, r2 []*labeler.LabelRule) {
-	for id, r := range r1 {
-		expectSameRule(c, r, r2[id])
-	}
-}
-
-func expectSameRule(c *C, r1, r2 *labeler.LabelRule) {
-	// skip check of StartAt
-	if len(r1.TTL) != 0 {
-		r1.StartAt = r2.StartAt
-	}
-	c.Assert(r2, DeepEquals, r1)
+	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[1], rules[2]})
 }
 
 func makeKeyRanges(keys ...string) []interface{} {

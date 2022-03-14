@@ -202,7 +202,7 @@ func (s *testLabelerSuite) TestSaveLoadRule(c *C) {
 	}
 }
 
-func expectSameRules(c *C, r1, r2 *LabelRule) {
+func expectSameRegionLabels(c *C, r1, r2 *RegionLabel) {
 	r1.checkAndAdjustExpire()
 	r2.checkAndAdjustExpire()
 	if len(r1.TTL) == 0 {
@@ -211,6 +211,15 @@ func expectSameRules(c *C, r1, r2 *LabelRule) {
 
 	r2.StartAt = r1.StartAt
 	r2.checkAndAdjustExpire()
+
+	c.Assert(r2, DeepEquals, r1)
+}
+
+func expectSameRules(c *C, r1, r2 *LabelRule) {
+	c.Assert(r1.Labels, HasLen, len(r2.Labels))
+	for id := 0; id < len(r1.Labels); id++ {
+		expectSameRegionLabels(c, &r1.Labels[id], &r2.Labels[id])
+	}
 
 	c.Assert(r2, DeepEquals, r1)
 }
@@ -264,17 +273,16 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 		{
 			ID: "rule2",
 			Labels: []RegionLabel{
-				{Key: "k2", Value: "v2"},
+				{Key: "k2", Value: "v2", TTL: "5ms"}, // would expired first.},
 			},
 			RuleType: "key-range",
-			TTL:      "5ms", // would expired first.
-			Data:     makeKeyRanges("1234", "5678")},
+
+			Data: makeKeyRanges("1234", "5678")},
 
 		{
 			ID:       "rule3",
-			Labels:   []RegionLabel{{Key: "k3", Value: "v3"}},
+			Labels:   []RegionLabel{{Key: "k3", Value: "v3", TTL: "1h"}},
 			RuleType: "key-range",
-			TTL:      "1h",
 			Data:     makeKeyRanges("1234", "5678")},
 	}
 
@@ -317,12 +325,13 @@ func (s *testLabelerSuite) TestGC(c *C) {
 	// the region has no lable rule at the beginning.
 	c.Assert(labeler.GetRegionLabels(region), HasLen, 0)
 
+	labels := []RegionLabel{}
 	for id, ttl := range ttls {
+		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
 		rule := &LabelRule{
 			ID:       fmt.Sprintf("rule%d", id),
-			Labels:   []RegionLabel{{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id)}},
+			Labels:   labels,
 			RuleType: "key-range",
-			TTL:      ttl,
 			Data:     makeKeyRanges("1234", "5678")}
 		err := labeler.SetLabelRule(rule)
 		c.Assert(err, IsNil)

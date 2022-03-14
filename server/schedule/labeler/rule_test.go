@@ -25,48 +25,41 @@ var _ = Suite(&testRuleSuite{})
 
 type testRuleSuite struct{}
 
-func (s *testLabelerSuite) TestRuleTTL(c *C) {
-	rule := LabelRule{
-		ID: "foo",
-		Labels: []RegionLabel{
-			{Key: "k1", Value: "v1"},
-		},
-		RuleType: "key-range",
-		Data:     makeKeyRanges("12abcd", "34cdef", "56abcd", "78cdef"),
-	}
-	err := rule.checkAndAdjust()
+func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
+	label := RegionLabel{Key: "k1", Value: "v1"}
+
+	// test label with no ttl.
+
+	err := label.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
-	// test rule with no ttl.
-	err = rule.checkAndAdjustExpire()
-	c.Assert(err, IsNil)
-	c.Assert(rule.start.IsZero(), IsTrue)
-	c.Assert(rule.StartAt, Equals, "")
-	c.Assert(rule.expire, Equals, unlimittedExpire)
+	c.Assert(label.start.IsZero(), IsTrue)
+	c.Assert(label.StartAt, Equals, "")
+	c.Assert(label.expire, Equals, unlimittedExpire)
 
 	// test rule with illegal ttl.
-	rule.TTL = "ttl"
-	err = rule.checkAndAdjustExpire()
+	label.TTL = "ttl"
+	err = label.checkAndAdjustExpire()
 	c.Assert(err, NotNil)
 
 	// test legal rule with ttl
-	rule.TTL = "10h10m10s10ms"
-	err = rule.checkAndAdjustExpire()
+	label.TTL = "10h10m10s10ms"
+	err = label.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
-	c.Assert(rule.start.IsZero(), IsFalse)
-	c.Assert(rule.start.Format(time.UnixDate), Equals, rule.StartAt)
-	c.Assert(rule.expireBefore(time.Now().Add(time.Hour)), IsFalse)
-	c.Assert(rule.expireBefore(time.Now().Add(24*time.Hour)), IsTrue)
+	c.Assert(label.start.IsZero(), IsFalse)
+	c.Assert(label.start.Format(time.UnixDate), Equals, label.StartAt)
+	c.Assert(label.expireBefore(time.Now().Add(time.Hour)), IsFalse)
+	c.Assert(label.expireBefore(time.Now().Add(24*time.Hour)), IsTrue)
 
 	// test legal rule with ttl, rule unmarshal from json.
-	data, err := json.Marshal(rule)
+	data, err := json.Marshal(label)
 	c.Assert(err, IsNil)
-	var rule2 LabelRule
-	err = json.Unmarshal(data, &rule2)
+	var label2 RegionLabel
+	err = json.Unmarshal(data, &label2)
 	c.Assert(err, IsNil)
-	c.Assert(rule2.StartAt, Equals, rule.StartAt)
-	c.Assert(rule2.TTL, Equals, rule.TTL)
+	c.Assert(label2.StartAt, Equals, label.StartAt)
+	c.Assert(label2.TTL, Equals, label.TTL)
 	// the private field should be empty.
-	c.Assert(rule2.start.IsZero(), IsTrue)
-	expire := rule2.getExpire()
-	c.Assert(rule.expire.Format(time.UnixDate), Equals, expire.Format(time.UnixDate))
+	c.Assert(label2.start.IsZero(), IsTrue)
+	expire := label2.getExpire()
+	c.Assert(label.expire.Format(time.UnixDate), Equals, expire.Format(time.UnixDate))
 }
