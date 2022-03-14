@@ -202,6 +202,17 @@ func GetRouteName(req *http.Request) string {
 	return ""
 }
 
+// AccessPath is used to identify HTTP api access path including path and method
+type AccessPath struct {
+	Path   string
+	Method string
+}
+
+// NewAccessPath returns an AccessPath
+func NewAccessPath(path, method string) AccessPath {
+	return AccessPath{Path: path, Method: method}
+}
+
 // PostJSON is used to send the POST request to a specific URL
 func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
