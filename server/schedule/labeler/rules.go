@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
-	"sync"
 	"time"
 
 	"github.com/pingcap/log"
@@ -47,7 +46,6 @@ type LabelRule struct {
 	RuleType  string        `json:"rule_type"`
 	Data      interface{}   `json:"data"`
 	minExpire time.Time
-	sync.RWMutex
 }
 
 const (
@@ -145,7 +143,6 @@ func (rule *LabelRule) checkAndAdjust() error {
 	if len(rule.Labels) == 0 {
 		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
 	}
-	rule.minExpire = unlimittedExpire
 	for _, l := range rule.Labels {
 		if l.Key == "" {
 			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label key")
