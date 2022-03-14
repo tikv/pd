@@ -151,7 +151,7 @@ type candidateStores struct {
 	compareOption func([]*core.StoreInfo) func(int, int) bool
 }
 
-func NewCandidateStores(stores []*core.StoreInfo, compareOption func([]*core.StoreInfo) func(int, int) bool) *candidateStores {
+func newCandidateStores(stores []*core.StoreInfo, compareOption func([]*core.StoreInfo) func(int, int) bool) *candidateStores {
 	cs := &candidateStores{stores: stores, compareOption: compareOption}
 	cs.storeIndexMap = map[uint64]int{}
 	cs.initSort()
@@ -215,8 +215,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			return leaderScore(stores[i], plan) < leaderScore(stores[j], plan)
 		}
 	}
-	sourceCandidate := NewCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), greaterOption)
-	targetCandidate := NewCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), lessOption)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), greaterOption)
+	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), lessOption)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, l.conf.Batch)
