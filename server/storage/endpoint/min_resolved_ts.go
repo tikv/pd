@@ -21,7 +21,6 @@ import (
 // MinResolvedTSPoint is the min resolved ts for a store
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MinResolvedTSPoint struct {
-	StoreID       uint64 `json:"store_id"`
 	MinResolvedTS uint64 `json:"min_resolved_ts"`
 }
 

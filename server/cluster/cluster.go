@@ -54,7 +54,6 @@ import (
 )
 
 var backgroundJobInterval = 10 * time.Second
-var saveMinResolvedTSInterval = 1 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -252,6 +251,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
+	saveMinResolvedTSInterval := c.opt.GetSaveMinResolvedTSInterval()
 
 	c.wg.Add(6)
 	go c.runCoordinator()
@@ -1691,9 +1691,11 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 }
 
 func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
-	defer logutil.LogPanic()
 	defer c.wg.Done()
-
+	if saveInterval == 0 {
+		return
+	}
+	defer logutil.LogPanic()
 	ticker := time.NewTicker(saveInterval)
 	defer ticker.Stop()
 	for {
@@ -1705,8 +1707,8 @@ func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
 			minResolvedTS := c.GetMinResolvedTS()
 			if minResolvedTS != math.MaxUint64 {
 				c.Lock()
-				defer c.Unlock()
 				c.storage.SaveMinResolvedTS(minResolvedTS)
+				c.Unlock()
 			}
 		}
 	}
