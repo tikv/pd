@@ -185,6 +185,11 @@ func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
 	}
 }
 
+func leaderScore(store *core.StoreInfo, plan *balancePlan) float64 {
+	influence := plan.GetOpInfluence(store.GetID())
+	return store.LeaderScore(plan.kind.Policy, influence)
+}
+
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
@@ -196,18 +201,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	stores := cluster.GetStores()
 	greaterOption := func(stores []*core.StoreInfo) func(int, int) bool {
 		return func(i, j int) bool {
-			iOp := plan.GetOpInfluence(stores[i].GetID())
-			jOp := plan.GetOpInfluence(stores[j].GetID())
-			return stores[i].LeaderScore(plan.kind.Policy, iOp) >
-				stores[j].LeaderScore(plan.kind.Policy, jOp)
+			return leaderScore(stores[i], plan) > leaderScore(stores[j], plan)
 		}
 	}
 	lessOption := func(stores []*core.StoreInfo) func(int, int) bool {
 		return func(i, j int) bool {
-			iOp := plan.GetOpInfluence(stores[i].GetID())
-			jOp := plan.GetOpInfluence(stores[j].GetID())
-			return stores[i].LeaderScore(plan.kind.Policy, iOp) <
-				stores[j].LeaderScore(plan.kind.Policy, jOp)
+			return leaderScore(stores[i], plan) < leaderScore(stores[j], plan)
 		}
 	}
 	sourceCandidate := &candidateStores{
@@ -256,7 +255,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	store := cs.getStore()
 	retryLimit := l.retryQuota.GetLimit(store)
 	var creator func(*balancePlan) *operator.Operator
-	log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()))
+	log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()), zap.Float64("score", leaderScore(store, plan)))
 	switch dir {
 	case transferOut:
 		plan.source, plan.target = store, nil
@@ -267,7 +266,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 		l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 		creator = l.transferLeaderIn
 	}
-	var op *operator.Operator = nil
+	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
 		schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 		if op = creator(plan); op != nil {
