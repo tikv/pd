@@ -200,10 +200,10 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		var origin *RegionInfo
 		if d.originExist {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.SetBuckets(d.originBuckets)
+			origin.UpdateBuckets(d.originBuckets)
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.SetBuckets(d.buckets)
+		r.UpdateBuckets(d.buckets)
 		r.Inherit(origin)
 		if d.same {
 			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)

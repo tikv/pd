@@ -40,7 +40,8 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 }
 
 // RegionInfo records detail region info.
-// Read-Only once created.
+// most properties is Read-Only once created exclude buckets.
+// buckets should be modified through report buckets and the version is greater than the current.
 type RegionInfo struct {
 	term              uint64
 	meta              *metapb.Region
@@ -172,14 +173,13 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 //
 // See https://github.com/tikv/tikv/issues/11114
 func (r *RegionInfo) Inherit(origin *RegionInfo) {
-	if origin == nil {
-		if r.approximateSize == 0 {
+	// regionSize should not be zero if region is not empty.
+	if r.GetApproximateSize() == 0 {
+		if origin != nil {
+			r.approximateSize = origin.approximateSize
+		} else {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
-		return
-	}
-	if r.approximateSize == 0 {
-		r.approximateSize = origin.approximateSize
 	}
 	if r.buckets == nil {
 		r.buckets = origin.buckets
@@ -412,8 +412,8 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 	}
 }
 
-// SetBuckets sets the buckets of the region.
-func (r *RegionInfo) SetBuckets(buckets *metapb.Buckets) bool {
+// UpdateBuckets sets the buckets of the region.
+func (r *RegionInfo) UpdateBuckets(buckets *metapb.Buckets) bool {
 	// bucket is only nil in test cases.
 	if buckets == nil {
 		return true
