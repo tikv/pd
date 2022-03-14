@@ -181,7 +181,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	if r.buckets == nil {
+	if origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }

@@ -641,8 +641,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 const heartbeatSendTimeout = 5 * time.Second
 
-var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
-var errSendBucketHeartbeatTimeout = errors.New("send bucket heartbeat timeout")
+var errSendHeartbeatTimeout = errors.New("send heartbeat timeout")
 
 // bucketHeartServer wraps PD_ReportBucketsServer to ensure when any error
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
@@ -667,7 +666,7 @@ func (b *bucketHeartServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 		return err
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&b.closed, 1)
-		return errors.WithStack(errSendBucketHeartbeatTimeout)
+		return errors.WithStack(errSendHeartbeatTimeout)
 	}
 }
 
@@ -704,7 +703,7 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendBucketHeartbeatTimeout)
+		return errors.WithStack(errSendHeartbeatTimeout)
 	}
 }
 

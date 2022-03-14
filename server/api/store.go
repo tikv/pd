@@ -129,13 +129,13 @@ type StoresInfo struct {
 }
 
 type storeHandler struct {
-	*server.Handler
-	rd *render.Render
+	handler *server.Handler
+	rd      *render.Render
 }
 
 func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 	return &storeHandler{
-		Handler: handler,
+		handler: handler,
 		rd:      rd,
 	}
 }
@@ -149,7 +149,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 // @Failure 404 {string} string "The store does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [get]
-func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -164,7 +164,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := newStoreInfo(h.GetScheduleConfig(), store)
+	storeInfo := newStoreInfo(h.handler.GetScheduleConfig(), store)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -179,7 +179,7 @@ func (h *storeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Failure 410 {string} string "The store has already been removed."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id} [delete]
-func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -209,7 +209,7 @@ func (h *storeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Failure 404 {string} string "The store does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/state [post]
-func (h *storeHandler) SetState(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -262,7 +262,7 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/label [post]
-func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -308,7 +308,7 @@ func (h *storeHandler) SetLabels(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/weight [post]
-func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -362,7 +362,7 @@ func (h *storeHandler) SetWeight(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /store/{id}/limit [post]
-func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
+func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
@@ -413,10 +413,10 @@ func (h *storeHandler) SetLimit(w http.ResponseWriter, r *http.Request) {
 			if typ == storelimit.RemovePeer {
 				key = fmt.Sprintf("remove-peer-%v", storeID)
 			}
-			h.Handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
+			h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
 			continue
 		}
-		if err := h.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
+		if err := h.handler.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -463,7 +463,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [post]
-func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
+func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -504,7 +504,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			} else {
-				if err := h.SetAllStoresLimit(ratePerMin, typ); err != nil {
+				if err := h.Handler.SetAllStoresLimit(ratePerMin, typ); err != nil {
 					h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 					return
 				}
@@ -543,7 +543,7 @@ func (h *storesHandler) SetAllLimit(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} string
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/limit [get]
-func (h *storesHandler) GetAllLimit(w http.ResponseWriter, r *http.Request) {
+func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
 	limits := h.GetScheduleConfig().StoreLimit
 	includeTombstone := false
 	var err error
@@ -617,7 +617,7 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Success 200 {object} StoresInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores [get]
-func (h *storesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *storesHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
 	StoresInfo := &StoresInfo{

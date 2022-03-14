@@ -47,7 +47,7 @@ type listServiceGCSafepoint struct {
 // @Success 200 {array} listServiceGCSafepoint
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /gc/safepoint [get]
-func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
 	if err != nil {
@@ -74,7 +74,7 @@ func (h *serviceGCSafepointHandler) List(w http.ResponseWriter, r *http.Request)
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /gc/safepoint/{service_id} [delete]
 // @Tags rule
-func (h *serviceGCSafepointHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	serviceID := mux.Vars(r)["service_id"]
 	err := storage.RemoveServiceGCSafePoint(serviceID)
