@@ -142,24 +142,29 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.limiter != nil && s.limiter[limitType] != nil {
-		return s.limiter[limitType].Available() >= storelimit.RegionInfluence[limitType]
+		return s.limiter[limitType].Available(storelimit.RegionInfluence[limitType])
 	}
 	return true
 }
 
-// IsUp checks if the store's state is Up.
-func (s *StoreInfo) IsUp() bool {
-	return s.GetState() == metapb.StoreState_Up
+// IsPreparing checks if the store's state is preparing.
+func (s *StoreInfo) IsPreparing() bool {
+	return s.GetNodeState() == metapb.NodeState_Preparing
 }
 
-// IsOffline checks if the store's state is Offline.
-func (s *StoreInfo) IsOffline() bool {
-	return s.GetState() == metapb.StoreState_Offline
+// IsServing checks if the store's state is serving.
+func (s *StoreInfo) IsServing() bool {
+	return s.GetNodeState() == metapb.NodeState_Serving
 }
 
-// IsTombstone checks if the store's state is Tombstone.
-func (s *StoreInfo) IsTombstone() bool {
-	return s.GetState() == metapb.StoreState_Tombstone
+// IsRemoving checks if the store's state is removing.
+func (s *StoreInfo) IsRemoving() bool {
+	return s.GetNodeState() == metapb.NodeState_Removing
+}
+
+// IsRemoved checks if the store's state is removed.
+func (s *StoreInfo) IsRemoved() bool {
+	return s.GetNodeState() == metapb.NodeState_Removed
 }
 
 // GetSlowScore returns the slow score of the store.
@@ -194,6 +199,11 @@ func (s *StoreInfo) GetMeta() *metapb.Store {
 // GetState returns the state of the store.
 func (s *StoreInfo) GetState() metapb.StoreState {
 	return s.meta.GetState()
+}
+
+// GetNodeState returns the state of the node.
+func (s *StoreInfo) GetNodeState() metapb.NodeState {
+	return s.meta.GetNodeState()
 }
 
 // GetAddress returns the address of the store.

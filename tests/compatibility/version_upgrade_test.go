@@ -152,6 +152,7 @@ func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {
 	for i, store := range stores {
 		if i == 0 {
 			store.Store.State = metapb.StoreState_Tombstone
+			store.Store.NodeState = metapb.NodeState_Removed
 		}
 		store.Store.Version = "2.1.0"
 		resp, err := svr.PutStore(context.Background(), store)

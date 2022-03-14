@@ -111,7 +111,7 @@ error = '''
 store %v not found
 '''
 
-["PD:core:ErrStoreTombstone"]
+["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
 '''

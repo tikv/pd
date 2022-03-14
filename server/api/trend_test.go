@@ -36,7 +36,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 
 	mustBootstrapCluster(c, svr)
 	for i := 1; i <= 3; i++ {
-		mustPutStore(c, svr, uint64(i), metapb.StoreState_Up, nil)
+		mustPutStore(c, svr, uint64(i), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	}
 
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
