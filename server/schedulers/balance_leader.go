@@ -191,11 +191,6 @@ func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
 	}
 }
 
-func leaderScore(store *core.StoreInfo, plan *balancePlan) float64 {
-	influence := plan.GetOpInfluence(store.GetID())
-	return store.LeaderScore(plan.kind.Policy, influence)
-}
-
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
@@ -207,12 +202,18 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	stores := cluster.GetStores()
 	greaterOption := func(stores []*core.StoreInfo) func(int, int) bool {
 		return func(i, j int) bool {
-			return leaderScore(stores[i], plan) > leaderScore(stores[j], plan)
+			iOp := plan.GetOpInfluence(stores[i].GetID())
+			jOp := plan.GetOpInfluence(stores[j].GetID())
+			return stores[i].LeaderScore(plan.kind.Policy, iOp) >
+				stores[j].LeaderScore(plan.kind.Policy, jOp)
 		}
 	}
 	lessOption := func(stores []*core.StoreInfo) func(int, int) bool {
 		return func(i, j int) bool {
-			return leaderScore(stores[i], plan) < leaderScore(stores[j], plan)
+			iOp := plan.GetOpInfluence(stores[i].GetID())
+			jOp := plan.GetOpInfluence(stores[j].GetID())
+			return stores[i].LeaderScore(plan.kind.Policy, iOp) <
+				stores[j].LeaderScore(plan.kind.Policy, jOp)
 		}
 	}
 	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), greaterOption)
@@ -253,7 +254,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	store := cs.getStore()
 	retryLimit := l.retryQuota.GetLimit(store)
 	var creator func(*balancePlan) *operator.Operator
-	log.Debug("store leader score", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()), zap.Float64("score", leaderScore(store, plan)))
 	switch dir {
 	case transferOut:
 		plan.source, plan.target = store, nil
