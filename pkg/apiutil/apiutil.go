@@ -213,36 +213,37 @@ func NewAccessPath(path, method string) AccessPath {
 	return AccessPath{Path: path, Method: method}
 }
 
+type CheckOption func([]byte, int)
+
 // PostJSON is used to send the POST request to a specific URL
-func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, checkOpts...)
+func PostJSON(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
+	return postJSON(client, url, data, true, checkOpts...)
 }
 
 // PostJSONIgnoreRespStatus is used to send the POST request to a specific URL and ignore resp status to test
-func PostJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func PostJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
+	return postJSON(client, url, data, false, checkOpts...)
+}
+
+func postJSON(client *http.Client, url string, data []byte, neekOK bool, checkOpts ...CheckOption) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return doJSONIgnoreRespStatus(client, req, checkOpts...)
+	return doJSON(client, req, neekOK, checkOpts...)
 }
 
 // GetJSON is used to send GET requst to specific url
-func GetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func GetJSON(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
-	return doJSON(client, req, checkOpts...)
+	return doJSON(client, req, true, checkOpts...)
 }
 
-func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
+func doJSON(client *http.Client, req *http.Request, neekOK bool, checkOpts ...CheckOption) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.WithStack(err)
@@ -252,24 +253,8 @@ func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, in
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode != http.StatusOK {
+	if neekOK && resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
-	}
-	for _, opt := range checkOpts {
-		opt(res, resp.StatusCode)
-	}
-	return nil
-}
-
-func doJSONIgnoreRespStatus(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	defer resp.Body.Close()
-	res, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
 	}
 	for _, opt := range checkOpts {
 		opt(res, resp.StatusCode)

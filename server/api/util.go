@@ -91,15 +91,15 @@ func extractJSON(resp *http.Response, data interface{}) error {
 	return nil
 }
 
-func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func postJSON(client *http.Client, url string, data []byte, checkOpts ...apiutil.CheckOption) error {
 	return apiutil.PostJSON(client, url, data, checkOpts...)
 }
 
-func postJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func postJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...apiutil.CheckOption) error {
 	return apiutil.PostJSONIgnoreRespStatus(client, url, data, checkOpts...)
 }
 
-func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func getJSON(client *http.Client, url string, data []byte, checkOpts ...apiutil.CheckOption) error {
 	return apiutil.GetJSON(client, url, data, checkOpts...)
 }
 
