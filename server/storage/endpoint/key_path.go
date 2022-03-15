@@ -101,5 +101,5 @@ func gcSafePointServicePath(serviceID string) string {
 
 // MinResolvedTSPath returns the min resolved ts path
 func MinResolvedTSPath() string {
-	return path.Join(minResolvedTS)
+	return path.Join(clusterPath, minResolvedTS)
 }
