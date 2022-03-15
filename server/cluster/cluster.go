@@ -1189,7 +1189,9 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 
 	limiter := c.prevStoreLimit[storeID]
 	options := []core.StoreCreateOption{core.UpStore()}
-	// To prevent panic we check if the store limit is nil because it's initialized when scheduling.
+	// To prevent panic we check if the store limit is nil. There are two cases may cause this problem:
+	// 1. when we start a new cluster, the store limit is only initialized for the first time scheduling
+	// 2. once the PD leader transfer, the previous store limit may be lost, we suggest changing it manually
 	if limiter[storelimit.AddPeer] != nil {
 		options = append(options, core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer].Rate()))
 	}
