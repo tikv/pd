@@ -35,17 +35,10 @@ var _ MinResolvedTSStorage = (*StorageEndpoint)(nil)
 // LoadMinResolvedTS loads the min resolved ts from storage.
 func (se *StorageEndpoint) LoadMinResolvedTS() (uint64, error) {
 	value, err := se.Load(MinResolvedTSPath())
-	if err != nil {
+	if err != nil || value == "" {
 		return 0, err
 	}
-	if value == "" {
-		return 0, nil
-	}
-	minResolvedTS, err := strconv.ParseUint(value, 16, 64)
-	if err != nil {
-		return 0, err
-	}
-	return minResolvedTS, nil
+	return strconv.ParseUint(value, 16, 64)
 }
 
 // SaveMinResolvedTS saves the min resolved ts.
