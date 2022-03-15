@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -230,13 +231,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.AddLeaderStore(3, 0)
 	s.tc.AddLeaderStore(4, 0)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 
 	// Stores:     1    2    3    4
 	// Leaders:    16   0    0    0
 	// Region1:    L    F    F    F
 	s.tc.UpdateLeaderCount(1, 16)
-	c.Check(s.schedule(), NotNil)
+	c.Assert(len(s.schedule()), Greater, 0)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   10
@@ -246,7 +247,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLimit(c *C) {
 	s.tc.UpdateLeaderCount(3, 9)
 	s.tc.UpdateLeaderCount(4, 10)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   16
@@ -266,9 +267,9 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderSchedulePolicy(c *C) 
 	s.tc.AddLeaderStore(4, 10, 100*MB)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 	s.tc.SetLeaderSchedulePolicy(core.BySize.String())
-	c.Check(s.schedule(), NotNil)
+	c.Assert(len(s.schedule()), Greater, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
@@ -284,13 +285,13 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceLeaderTolerantRatio(c *C) {
 	s.tc.AddLeaderStore(4, 10, 100)
 	s.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 14)
 	s.tc.AddLeaderStore(1, 15, 100)
 	c.Assert(s.tc.GetStore(1).GetLeaderCount(), Equals, 15)
 	c.Check(s.schedule(), NotNil)
 	s.tc.SetTolerantSizeRatio(6) // (15-10)<6
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
@@ -312,7 +313,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	c.Assert(s.tc.GetScheduleConfig().LeaderSchedulePolicy, Equals, core.ByCount.String()) // default by count
 	c.Check(s.schedule(), NotNil)
 	s.tc.SetLeaderSchedulePolicy(core.BySize.String())
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 
 	// Stores:     1    2    3    4
 	// Leaders:    8    8    9   13
@@ -322,7 +323,7 @@ func (s *testBalanceLeaderSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	s.tc.UpdateLeaderCount(3, 9)
 	s.tc.UpdateLeaderCount(4, 13)
 	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	c.Check(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
 }
 
 func (s *testBalanceLeaderSchedulerSuite) TestTransferLeaderOut(c *C) {
@@ -475,8 +476,8 @@ func (s *testBalanceLeaderSchedulerSuite) TestBalanceSelector(c *C) {
 	s.tc.AddLeaderRegion(1, 4, 2, 3)
 	s.tc.AddLeaderRegion(2, 1, 2, 3)
 	// The cluster is balanced.
-	c.Assert(s.schedule(), IsNil)
-	c.Assert(s.schedule(), IsNil)
+	c.Assert(s.schedule(), HasLen, 0)
+	c.Assert(s.schedule(), HasLen, 0)
 
 	// store3's leader drops:
 	// Stores:     1    2    3    4
@@ -533,22 +534,22 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestSingleRangeBalance(c *C) {
 	c.Assert(ops[0].FinishedCounters, HasLen, 3)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"b", "f"}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", "a"}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"g", ""}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", "f"}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"b", ""}))
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 }
 
 func (s *testBalanceLeaderRangeSchedulerSuite) TestMultiRangeBalance(c *C) {
@@ -575,11 +576,87 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestMultiRangeBalance(c *C) {
 	s.tc.RemoveRegion(s.tc.GetRegion(2))
 	s.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
 	s.tc.RemoveRegion(s.tc.GetRegion(3))
 	s.tc.AddLeaderRegionWithRange(4, "", "", 1, 2, 3, 4)
 	c.Assert(err, IsNil)
-	c.Assert(lb.Schedule(s.tc), IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 0)
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
+	s.tc.AddLeaderStore(1, 100)
+	s.tc.AddLeaderStore(2, 0)
+	s.tc.AddLeaderStore(3, 0)
+	s.tc.AddLeaderStore(4, 100)
+	s.tc.AddLeaderStore(5, 100)
+	s.tc.AddLeaderStore(6, 0)
+
+	s.tc.AddLeaderRegionWithRange(uint64(102), "102a", "102z", 1, 2, 3)
+	s.tc.AddLeaderRegionWithRange(uint64(103), "103a", "103z", 4, 5, 6)
+	lb, err := schedule.CreateScheduler(BalanceLeaderType, s.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
+	c.Assert(err, IsNil)
+	c.Assert(lb.Schedule(s.tc), HasLen, 2)
+	for i := 1; i <= 50; i++ {
+		s.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 1, 2, 3)
+	}
+	for i := 51; i <= 100; i++ {
+		s.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 4, 5, 6)
+	}
+	s.tc.AddLeaderRegionWithRange(uint64(101), "101a", "101z", 5, 4, 3)
+	ops := lb.Schedule(s.tc)
+	c.Assert(ops, HasLen, 5)
+	regions := make(map[uint64]struct{})
+	for _, op := range ops {
+		regions[op.RegionID()] = struct{}{}
+	}
+	c.Assert(regions, HasLen, 5)
+}
+
+func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
+	s.tc.AddLeaderStore(1, 104)
+	s.tc.AddLeaderStore(2, 0)
+	s.tc.AddLeaderStore(3, 0)
+	s.tc.AddLeaderStore(4, 100)
+	s.tc.AddLeaderStore(5, 100)
+	s.tc.AddLeaderStore(6, 0)
+	stores := s.tc.Stores.GetStores()
+
+	deltaMap := make(map[uint64]int64)
+	less := func(i, j int) bool {
+		iOp := deltaMap[stores[i].GetID()]
+		jOp := deltaMap[stores[j].GetID()]
+		return stores[i].LeaderScore(0, iOp) > stores[j].LeaderScore(0, jOp)
+	}
+
+	sort.Slice(stores, less)
+	storeIndexMap := map[uint64]int{}
+	for i := 0; i < len(stores); i++ {
+		storeIndexMap[stores[i].GetID()] = i
+	}
+	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
+	deltaMap[1] = -1
+
+	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
+	c.Assert(stores[0].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
+	deltaMap[1] = -4
+	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
+	c.Assert(stores[2].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 2)
+	topID := stores[0].GetID()
+	deltaMap[topID] = -1
+	resortStores(stores, storeIndexMap, storeIndexMap[topID], less)
+	c.Assert(stores[1].GetID(), Equals, uint64(1))
+	c.Assert(storeIndexMap[uint64(1)], Equals, 1)
+	c.Assert(stores[2].GetID(), Equals, topID)
+	c.Assert(storeIndexMap[topID], Equals, 2)
+
+	bottomID := stores[5].GetID()
+	deltaMap[bottomID] = 4
+	resortStores(stores, storeIndexMap, storeIndexMap[bottomID], less)
+	c.Assert(stores[3].GetID(), Equals, bottomID)
+	c.Assert(storeIndexMap[bottomID], Equals, 3)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})
@@ -627,10 +704,10 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// store 2 becomes the store with least regions.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 4, 2)
 	opt.SetMaxReplicas(3)
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(sb.Schedule(tc), HasLen, 0)
 
 	opt.SetMaxReplicas(1)
-	c.Assert(sb.Schedule(tc), NotNil)
+	c.Assert(len(sb.Schedule(tc)), Greater, 0)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {
@@ -659,7 +736,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	// This schedule try to replace peer in store 1, but we have no other stores.
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(sb.Schedule(tc), HasLen, 0)
 
 	// Store 4 has smaller region score than store 2.
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -694,7 +771,7 @@ func (s *testBalanceRegionSchedulerSuite) checkReplica3(c *C, tc *mockcluster.Cl
 
 	// Store 9 has different zone with other stores but larger region score than store 1.
 	tc.AddLabelsStore(9, 20, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	c.Assert(sb.Schedule(tc), IsNil)
+	c.Assert(sb.Schedule(tc), HasLen, 0)
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas5(c *C) {
@@ -986,7 +1063,7 @@ func (s *testBalanceRegionSchedulerSuite) TestEmptyRegion(c *C) {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
 	operators = sb.Schedule(tc)
-	c.Assert(operators, IsNil)
+	c.Assert(operators, HasLen, 0)
 }
 
 var _ = Suite(&testRandomMergeSchedulerSuite{})
