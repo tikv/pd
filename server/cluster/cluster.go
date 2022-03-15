@@ -134,6 +134,9 @@ type RaftCluster struct {
 
 	unsafeRecoveryController *unsafeRecoveryController
 	progressManager          *progress.Manager
+
+	// Keep the previous store limit settings when removing a store.
+	prevStoreLimit map[uint64]map[storelimit.Type]*storelimit.StoreLimit
 }
 
 // Status saves some state information.
@@ -227,6 +230,7 @@ func (c *RaftCluster) InitCluster(
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
 }
 
 // Start starts a cluster.
@@ -1088,6 +1092,10 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		c.progressManager.AddProgressIndicator(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
+		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
+			storelimit.AddPeer:    store.GetStoreLimit(storelimit.AddPeer),
+			storelimit.RemovePeer: store.GetStoreLimit(storelimit.RemovePeer),
+		}
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
@@ -1127,6 +1135,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
+		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
 		c.resetProgress(storeID, store.GetAddress(), removingAction)
 		c.hotStat.RemoveRollingStoreStats(storeID)
@@ -1178,11 +1187,24 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return nil
 	}
 
-	newStore := store.Clone(core.UpStore())
+	limiter := c.prevStoreLimit[storeID]
+	options := []core.StoreCreateOption{core.UpStore()}
+	// To prevent panic we check if the store limit is nil because it's initialized when scheduling.
+	if limiter[storelimit.AddPeer] != nil {
+		options = append(options, core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer].Rate()))
+	}
+	if limiter[storelimit.RemovePeer] != nil {
+		options = append(options, core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer].Rate()))
+	}
+	newStore := store.Clone(options...)
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		c.resetProgress(storeID, store.GetAddress(), removingAction)
+	}
+	return err
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.

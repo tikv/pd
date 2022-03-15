@@ -321,7 +321,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 
 	// Put 3 stores.
-	for _, store := range newTestStores(3, "2.0.0") {
+	for _, store := range newTestStores(3, "5.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 
