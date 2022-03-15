@@ -228,13 +228,13 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage          = true
-	defaultTraceRegionFlow           = true
-	defaultFlowRoundByDigit          = 3 // KB
-	maxTraceFlowRoundByDigit         = 5 // 0.1 MB
-	defaultMaxResetTSGap             = 24 * time.Hour
-	defaultSaveMinResolvedTSInterval = 0
-	defaultKeyType                   = "table"
+	defaultUseRegionStorage                 = true
+	defaultTraceRegionFlow                  = true
+	defaultFlowRoundByDigit                 = 3 // KB
+	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
+	defaultMaxResetTSGap                    = 24 * time.Hour
+	defaultMinResolvedTSPersistenceInterval = 0
+	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -1103,8 +1103,8 @@ type PDServerConfig struct {
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
-	// SaveMinResolvedTSInterval is the interval to save the min resolved ts.
-	SaveMinResolvedTSInterval typeutil.Duration `toml:"save-min-resolved-ts-interval" json:"save-min-resolved-ts-interval"`
+	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
+	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1127,8 +1127,8 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("flow-round-by-digit") {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
-	if !meta.IsDefined("save-min-resolved-ts-interval") {
-		adjustDuration(&c.SaveMinResolvedTSInterval, defaultSaveMinResolvedTSInterval)
+	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
+		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

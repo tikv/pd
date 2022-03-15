@@ -39,7 +39,7 @@ type minResolvedTS struct {
 }
 
 // @Tags minresolvedts
-// @Summary Get min resolved ts.
+// @Summary Get cluster-level min resolved ts.
 // @Produce json
 // @Success 200 {array} minResolvedTS
 // @Failure 500 {string} string "PD server failed to proceed the request."

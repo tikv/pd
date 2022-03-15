@@ -299,7 +299,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.MetricStorage, Equals, "")
 	c.Assert(sc.DashboardAddress, Equals, "auto")
 	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
-	c.Assert(sc.SaveMinResolvedTSInterval, Equals, typeutil.NewDuration(0))
+	c.Assert(sc.MinResolvedTSPersistenceInterval, Equals, typeutil.NewDuration(0))
 	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
 }
 

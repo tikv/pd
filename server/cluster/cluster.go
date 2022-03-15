@@ -251,19 +251,19 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
-	saveMinResolvedTSInterval := c.opt.GetSaveMinResolvedTSInterval()
+	minResolvedTSPersistenceInterval := c.opt.GetMinResolvedTSPersistenceInterval()
 
 	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
-		saveMinResolvedTSInterval = 1 * time.Microsecond
+		minResolvedTSPersistenceInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
-	go c.runMinResolvedTSJob(saveMinResolvedTSInterval)
+	go c.runMinResolvedTSJob(minResolvedTSPersistenceInterval)
 	c.running = true
 
 	return nil
