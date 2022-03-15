@@ -188,8 +188,11 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
 	// TODO: supports strictly match check in placement rules
-	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusOK(c))
-	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
+	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusNotOK(c),
+		func(res string, _ int) {
+			c.Assert(strings.Contains(res, "key matching the label was not found"), IsTrue)
+		})
+	c.Assert(err, IsNil)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
 	err = checkPostJSON(testDialClient, s.urlPrefix+"/config", ll, checkStatusOK(c))

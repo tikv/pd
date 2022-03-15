@@ -91,7 +91,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 
 func (s *testAdminSuite) TestPersistFile(c *C) {
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := checkPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, checkStatusOK(c))
+	err := checkPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, checkStatusNotOK(c))
 	c.Assert(err, IsNil)
 	data = []byte(`{"foo":"bar"}`)
 	err = checkPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, checkStatusOK(c))

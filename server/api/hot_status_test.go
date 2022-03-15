@@ -66,8 +66,8 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
 	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest))
-	c.Assert(err, NotNil)
+	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {

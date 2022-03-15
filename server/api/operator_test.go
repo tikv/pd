@@ -148,9 +148,11 @@ func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
 	c.Assert(err, IsNil)
 	s.svr.GetHandler().RemoveOperator(10)
 	s.svr.GetHandler().RemoveOperator(20)
-	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`), checkStatusNotOK(c))
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
+		checkStatusNotOK(c), func(res string, _ int) {
+			c.Assert(strings.Contains(res, "not adjacent"), IsTrue)
+		})
 	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
 	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
 		func(res string, _ int) {
 			c.Assert(strings.Contains(res, "not adjacent"), IsTrue)

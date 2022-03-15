@@ -353,7 +353,9 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 
 	postData, err = json.Marshal(invalidTTLConfig)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
-	c.Assert(err, Not(IsNil))
-	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusNotOK(c),
+		func(res string, _ int) {
+			c.Assert(res, Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
+		})
+	c.Assert(err, IsNil)
 }
