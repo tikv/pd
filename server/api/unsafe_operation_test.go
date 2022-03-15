@@ -48,7 +48,7 @@ func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
 	input := map[uint64]string{1: ""}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	// Test show
 	var output []string

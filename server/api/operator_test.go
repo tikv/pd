@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -86,7 +87,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(records, "operator not found"), IsTrue)
 
 	mustPutStore(c, s.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
+	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "add learner peer 1 on store 3"), IsTrue)
@@ -97,7 +98,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	records = mustReadURL(c, recordURL)
 	c.Assert(strings.Contains(records, "admin-add-peer {add peer: store [3]}"), IsTrue)
 
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`))
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "RUNNING"), IsTrue)
@@ -109,7 +110,7 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	c.Assert(strings.Contains(records, "admin-remove-peer {rm peer: store [2]}"), IsTrue)
 
 	mustPutStore(c, s.svr, 4, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`))
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	operator = mustReadURL(c, regionURL)
 	c.Assert(strings.Contains(operator, "add learner peer 2 on store 4"), IsTrue)
@@ -117,12 +118,12 @@ func (s *testOperatorSuite) TestAddRemovePeer(c *C) {
 	// Fail to add peer to tombstone store.
 	err = s.svr.GetRaftCluster().RemoveStore(3, true)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`))
-	c.Assert(err, NotNil)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`))
-	c.Assert(err, NotNil)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`))
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), checkStatusNotOK(c))
+	c.Assert(err, IsNil)
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), checkStatusNotOK(c))
+	c.Assert(err, IsNil)
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
@@ -138,22 +139,23 @@ func (s *testOperatorSuite) TestMergeRegionOperator(c *C) {
 	r3 := newTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(c, s.svr, r3)
 
-	err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`))
+	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	s.svr.GetHandler().RemoveOperator(10)
 	s.svr.GetHandler().RemoveOperator(20)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`))
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	s.svr.GetHandler().RemoveOperator(10)
 	s.svr.GetHandler().RemoveOperator(20)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`))
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`), checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
-	err = postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`))
-
-	c.Assert(strings.Contains(err.Error(), "not adjacent"), IsTrue)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
+		func(res string, _ int) {
+			c.Assert(strings.Contains(res, "not adjacent"), IsTrue)
+		})
+	c.Assert(err, IsNil)
 }
 
 type testTransferRegionOperatorSuite struct {
@@ -374,13 +376,17 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			err = s.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
 			c.Assert(err, IsNil)
 		}
-		err := postJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), tc.input)
-		if tc.expectedError == nil {
-			c.Assert(err, IsNil)
-		} else {
-			c.Assert(err, NotNil)
-			c.Assert(strings.Contains(err.Error(), tc.expectedError.Error()), IsTrue)
-		}
+		err := checkPostJSON(testDialClient, fmt.Sprintf("%s/operators", s.urlPrefix), tc.input,
+			func(res string, code int) {
+				if tc.expectedError == nil {
+					c.Assert(code, Equals, http.StatusOK)
+				} else {
+					c.Assert(code == http.StatusOK, IsFalse)
+					c.Assert(strings.Contains(res, tc.expectedError.Error()), IsTrue)
+				}
+			})
+		c.Assert(err, IsNil)
+
 		if len(tc.expectSteps) > 0 {
 			operator = mustReadURL(c, regionURL)
 			c.Assert(strings.Contains(operator, tc.expectSteps), IsTrue)

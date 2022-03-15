@@ -59,7 +59,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
@@ -67,7 +67,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
@@ -75,7 +75,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	newCfg := &config.Config{}
@@ -99,7 +99,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	newCfg1 := &config.Config{}
 	err = readJSON(testDialClient, addr, newCfg1)
@@ -117,7 +117,7 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	// illegal prefix
@@ -126,8 +126,11 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
-	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusNotOK(c),
+		func(res string, _ int) {
+			c.Assert(strings.Contains(res, "not found"), IsTrue)
+		})
+	c.Assert(err, IsNil)
 
 	// update prefix directly
 	l = map[string]interface{}{
@@ -135,8 +138,11 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
-	c.Assert(strings.Contains(err.Error(), "cannot update config prefix"), IsTrue)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusNotOK(c),
+		func(res string, _ int) {
+			c.Assert(strings.Contains(res, "cannot update config prefix"), IsTrue)
+		})
+	c.Assert(err, IsNil)
 
 	// config item not found
 	l = map[string]interface{}{
@@ -144,8 +150,11 @@ func (s *testConfigSuite) TestConfigAll(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
-	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusNotOK(c),
+		func(res string, _ int) {
+			c.Assert(strings.Contains(res, "not found"), IsTrue)
+		})
+	c.Assert(err, IsNil)
 }
 
 func (s *testConfigSuite) TestConfigSchedule(c *C) {
@@ -156,7 +165,7 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	sc1 := &config.ScheduleConfig{}
@@ -174,21 +183,21 @@ func (s *testConfigSuite) TestConfigReplication(c *C) {
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	rc.LocationLabels = []string{"zone", "rack"}
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	rc.IsolationLevel = "zone"
 	rc3 := map[string]string{"isolation-level": "zone"}
 	postData, err = json.Marshal(rc3)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	rc4 := &config.ReplicationConfig{}
@@ -217,7 +226,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "set", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := postJSON(testDialClient, addr, []byte(cmd))
+		err := checkPostJSON(testDialClient, addr, []byte(cmd), checkStatusOK(c))
 		c.Assert(err, IsNil)
 	}
 
@@ -234,7 +243,7 @@ func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
 		`{"type": "bar", "action": "delete", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := postJSON(testDialClient, addr, []byte(cmd))
+		err := checkPostJSON(testDialClient, addr, []byte(cmd), checkStatusOK(c))
 		c.Assert(err, IsNil)
 	}
 
@@ -249,7 +258,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
@@ -257,7 +266,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
@@ -265,7 +274,7 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	}
 	postData, err = json.Marshal(l)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	addr = fmt.Sprintf("%s/config/default", s.urlPrefix)
@@ -287,7 +296,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addr, postData), IsNil)
+	c.Assert(checkPostJSON(testDialClient, addr, postData, checkStatusOK(c)), IsNil)
 
 	addr = fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
 	sc := &config.PDServerConfig{}
@@ -336,7 +345,7 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
 	time.Sleep(2 * time.Second)
@@ -344,7 +353,7 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 
 	postData, err = json.Marshal(invalidTTLConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = checkPostJSON(testDialClient, addr, postData, checkStatusOK(c))
 	c.Assert(err, Not(IsNil))
 	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }

@@ -1081,7 +1081,7 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	if err != nil {
 		return err
 	}
-	return apiutil.PostJSON(h.s.GetHTTPClient(), updateURL, body)
+	return apiutil.PostJSONIgnoreResp(h.s.GetHTTPClient(), updateURL, body)
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.

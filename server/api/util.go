@@ -91,32 +91,16 @@ func extractJSON(resp *http.Response, data interface{}) error {
 	return nil
 }
 
-func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	return apiutil.PostJSON(client, url, data, checkOpts...)
+func postJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	return apiutil.PostJSON(client, url, data)
 }
 
-func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	return apiutil.GetJSON(client, url, data, checkOpts...)
+func getJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	return apiutil.GetJSON(client, url, data)
 }
 
-func patchJSON(client *http.Client, url string, body []byte) error {
-	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	defer resp.Body.Close()
-	res, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return errors.New(string(res))
-	}
-	return nil
+func patchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	return apiutil.PatchJSON(client, url, data)
 }
 
 func doDelete(client *http.Client, url string) (int, error) {

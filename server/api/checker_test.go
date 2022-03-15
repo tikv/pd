@@ -72,28 +72,28 @@ func (s *testCheckerSuite) testErrCases(c *C) {
 	input := make(map[string]interface{})
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs, checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// negative delay
 	input["delay"] = -10
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs, checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// wrong name
 	name := "dummy"
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 }
 
 func (s *testCheckerSuite) testGetStatus(name string, c *C) {
@@ -129,7 +129,7 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err := handler.IsCheckerPaused(name)
 	c.Assert(err, IsNil)
@@ -137,7 +137,7 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	isPaused, err = handler.IsCheckerPaused(name)
@@ -149,12 +149,12 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err = handler.IsCheckerPaused(name)
 	c.Assert(err, IsNil)

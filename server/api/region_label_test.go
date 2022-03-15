@@ -61,7 +61,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
-		err = postJSON(testDialClient, s.urlPrefix+"rule", data)
+		err = checkPostJSON(testDialClient, s.urlPrefix+"rule", data, checkStatusOK(c))
 		c.Assert(err, IsNil)
 	}
 	for i, id := range ruleIDs {
@@ -89,7 +89,7 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 		DeleteRules: []string{"rule1"},
 	}
 	data, _ := json.Marshal(patch)
-	err = patchJSON(testDialClient, s.urlPrefix+"rules", data)
+	err = checkPatchJSON(testDialClient, s.urlPrefix+"rules", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)

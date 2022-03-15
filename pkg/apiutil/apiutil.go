@@ -214,39 +214,50 @@ func NewAccessPath(path, method string) AccessPath {
 }
 
 // PostJSON is used to send the POST request to a specific URL
-func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func PostJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, checkOpts...)
+	return client.Do(req)
 }
 
 // GetJSON is used to send GET requst to specific url
-func GetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func GetJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return doJSON(client, req, checkOpts...)
+	return client.Do(req)
 }
 
-func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
-	resp, err := client.Do(req)
+// PatchJSON
+func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+// PostJSONIgnoreResp
+func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
+	resp, err := PostJSON(client, url, data)
+	return checkResponse(resp, err)
+}
+
+func checkResponse(resp *http.Response, err error) error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	defer resp.Body.Close()
 	res, err := io.ReadAll(resp.Body)
+	defer resp.Body.Close()
 	if err != nil {
 		return err
 	}
 	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
-	}
-	for _, opt := range checkOpts {
-		opt(res, resp.StatusCode)
 	}
 	return nil
 }

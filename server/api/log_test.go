@@ -49,7 +49,7 @@ func (s *testLogSuite) TestSetLogLevel(c *C) {
 	level := "error"
 	data, err := json.Marshal(level)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/log", data)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/log", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	c.Assert(log.GetLevel().String(), Equals, level)
 }

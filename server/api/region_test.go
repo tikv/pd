@@ -307,7 +307,7 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 	mustRegionHeartbeat(c, s.svr, r3)
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
 
-	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body))
+	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	idList := s.svr.GetRaftCluster().GetSuspectRegions()
 	c.Assert(idList, HasLen, 2)
@@ -329,7 +329,7 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	mustPutStore(c, s.svr, 16, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 
-	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))
+	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), checkStatusOK(c))
 	c.Assert(err, IsNil)
 	op1 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(601)
 	op2 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(602)
@@ -338,7 +338,7 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	c.Assert(op1 != nil || op2 != nil || op3 != nil, IsTrue)
 
 	body = `{"regions_id": [601, 602, 603]}`
-	err = postJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body))
+	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), checkStatusOK(c))
 	c.Assert(err, IsNil)
 }
 
@@ -352,18 +352,18 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res []byte, code int) {
+	checkOpt := func(res string, code int) {
 		s := &struct {
 			ProcessedPercentage int      `json:"processed-percentage"`
 			NewRegionsID        []uint64 `json:"regions-id"`
 		}{}
-		err := json.Unmarshal(res, s)
+		err := json.Unmarshal([]byte(res), s)
 		c.Assert(err, IsNil)
 		c.Assert(s.ProcessedPercentage, Equals, 100)
 		c.Assert(s.NewRegionsID, DeepEquals, []uint64{newRegionID})
 	}
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v)", newRegionID)), IsNil)
-	err := postJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
+	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"), IsNil)
 	c.Assert(err, IsNil)
 }
@@ -568,9 +568,9 @@ func (s *testRegionsReplicatedSuite) TearDownSuite(c *C) {
 
 func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	// enable placement rule
-	c.Assert(postJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	c.Assert(checkPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`), checkStatusOK(c)), IsNil)
 	defer func() {
-		c.Assert(postJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`)), IsNil)
+		c.Assert(checkPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`), checkStatusOK(c)), IsNil)
 	}()
 
 	// add test region
@@ -607,7 +607,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	// test one rule
 	data, err := json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	err = readJSON(testDialClient, url, &status)
@@ -630,7 +630,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	})
 	data, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	err = readJSON(testDialClient, url, &status)
@@ -649,7 +649,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	})
 	data, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	err = readJSON(testDialClient, url, &status)

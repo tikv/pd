@@ -181,20 +181,20 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	// enable label match check.
 	labelCheck := map[string]string{"strictly-match-label": "true"}
 	lc, _ := json.Marshal(labelCheck)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", lc)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config", lc, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	c.Assert(err, IsNil)
 	// TODO: supports strictly match check in placement rules
-	err = postJSON(testDialClient, url+"/label", b)
+	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusOK(c))
 	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", ll)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config", ll, checkStatusOK(c))
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
+	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	err = readJSON(testDialClient, url, &info)
@@ -208,13 +208,13 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	// disable label match check.
 	labelCheck = map[string]string{"strictly-match-label": "false"}
 	lc, _ = json.Marshal(labelCheck)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", lc)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/config", lc, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
+	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
@@ -228,7 +228,7 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 	// delete label
 	b, err = json.Marshal(map[string]string{"host": ""})
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
+	err = checkPostJSON(testDialClient, url+"/label", b, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
@@ -305,7 +305,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// Set to Offline.
 	info = StoreInfo{}
-	err = postJSON(testDialClient, url+"/state?state=Offline", nil)
+	err = checkPostJSON(testDialClient, url+"/state?state=Offline", nil, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
@@ -313,15 +313,15 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// store not found
 	info = StoreInfo{}
-	err = postJSON(testDialClient, s.urlPrefix+"/store/10086/state?state=Offline", nil)
-	c.Assert(err, NotNil)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/store/10086/state?state=Offline", nil, checkStatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
 		info = StoreInfo{}
-		err = postJSON(testDialClient, url+"/state?state="+state, nil)
-		c.Assert(err, NotNil)
+		err = checkPostJSON(testDialClient, url+"/state?state="+state, nil, checkStatusNotOK(c))
+		c.Assert(err, IsNil)
 		err = readJSON(testDialClient, url, &info)
 		c.Assert(err, IsNil)
 		c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
@@ -329,7 +329,7 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 
 	// Set back to Up.
 	info = StoreInfo{}
-	err = postJSON(testDialClient, url+"/state?state=Up", nil)
+	err = checkPostJSON(testDialClient, url+"/state?state=Up", nil, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
@@ -456,7 +456,7 @@ func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
 	}
 	postData, err := json.Marshal(data)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
+	err = checkPostJSON(testDialClient, url, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	// remove peer
 	data = map[string]interface{}{
@@ -465,7 +465,7 @@ func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
 	}
 	postData, err = json.Marshal(data)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
+	err = checkPostJSON(testDialClient, url, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	// all store limit add peer
 	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", s.urlPrefix, 3)
@@ -475,7 +475,7 @@ func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
 	}
 	postData, err = json.Marshal(data)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
+	err = checkPostJSON(testDialClient, url, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	// all store limit remove peer
 	data = map[string]interface{}{
@@ -484,7 +484,7 @@ func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
 	}
 	postData, err = json.Marshal(data)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
+	err = checkPostJSON(testDialClient, url, postData, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Equals, float64(999))

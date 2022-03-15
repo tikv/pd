@@ -17,6 +17,7 @@ package api
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"net/http/httptest"
 
 	. "github.com/pingcap/check"
@@ -69,4 +70,52 @@ func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
 		defer result.Body.Close()
 		c.Assert(result.StatusCode, Equals, 400)
 	}
+}
+
+func checkStatusOK(c *C) func(string, int) {
+	return func(_ string, i int) {
+		c.Assert(i, Equals, http.StatusOK)
+	}
+}
+
+func checkStatusNotOK(c *C) func(string, int) {
+	return func(_ string, i int) {
+		c.Assert(i == http.StatusOK, IsFalse)
+	}
+}
+
+func checkPostJSON(client *http.Client, url string, data []byte, checkOpts ...func(string, int)) error {
+	resp, err := postJSON(client, url, data)
+	if err != nil {
+		return err
+	}
+	return checkResp(resp, checkOpts...)
+}
+
+func checkGetJSON(client *http.Client, url string, data []byte, checkOpts ...func(string, int)) error {
+	resp, err := getJSON(client, url, data)
+	if err != nil {
+		return err
+	}
+	return checkResp(resp, checkOpts...)
+}
+
+func checkPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func(string, int)) error {
+	resp, err := patchJSON(client, url, data)
+	if err != nil {
+		return err
+	}
+	return checkResp(resp, checkOpts...)
+}
+
+func checkResp(resp *http.Response, checkOpts ...func(string, int)) error {
+	res, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	for _, opt := range checkOpts {
+		opt(string(res), resp.StatusCode)
+	}
+	return nil
 }

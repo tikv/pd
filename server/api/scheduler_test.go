@@ -58,7 +58,7 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	input["store_id"] = 1
 	body, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addURL, body), IsNil)
+	c.Assert(checkPostJSON(testDialClient, addURL, body, checkStatusOK(c)), IsNil)
 	rc := s.svr.GetRaftCluster()
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	resp := make(map[string]interface{})
@@ -71,13 +71,13 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	body, err = json.Marshal(input1)
 	c.Assert(err, IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedulers/persistFail", "return(true)"), IsNil)
-	c.Assert(postJSON(testDialClient, addURL, body), NotNil)
+	c.Assert(checkPostJSON(testDialClient, addURL, body, checkStatusOK(c)), NotNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	resp = make(map[string]interface{})
 	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 	c.Assert(resp["store-id-ranges"], HasLen, 1)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedulers/persistFail"), IsNil)
-	c.Assert(postJSON(testDialClient, addURL, body), IsNil)
+	c.Assert(checkPostJSON(testDialClient, addURL, body, checkStatusOK(c)), IsNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	resp = make(map[string]interface{})
 	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
@@ -146,16 +146,15 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				c.Assert(err, IsNil)
-				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				c.Assert(checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c)), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				for key := range expectMap {
 					c.Assert(resp[key], DeepEquals, expectMap[key])
 				}
 				// update again
-				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
-					c.Assert(string(res), Equals, "no changed")
-					c.Assert(code, Equals, 200)
+				err = checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c), func(res string, code int) {
+					c.Assert(res, Equals, "no changed")
 				})
 				c.Assert(err, IsNil)
 			},
@@ -182,7 +181,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				c.Assert(err, IsNil)
-				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				c.Assert(checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c)), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				exceptMap["2"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
@@ -218,7 +217,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(resp)
 				c.Assert(err, IsNil)
-				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				c.Assert(checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c)), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				c.Assert(resp["start-key"], Equals, "a_00")
@@ -246,7 +245,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				c.Assert(err, IsNil)
-				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				c.Assert(checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c)), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				exceptMap["2"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
@@ -297,7 +296,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/all", pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/all", pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	handler := s.svr.GetHandler()
 	for _, ca := range cases {
@@ -312,7 +311,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/all", pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/all", pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	for _, ca := range cases {
@@ -329,12 +328,12 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/all", pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/all", pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/all", pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/all", pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	for _, ca := range cases {
 		createdName := ca.createdName
@@ -373,7 +372,7 @@ func (s *testScheduleSuite) TestDisable(c *C) {
 	scheduleConfig.Schedulers = config.SchedulerConfigs{config.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
 	body, err = json.Marshal(scheduleConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, u, body)
+	err = checkPostJSON(testDialClient, u, body, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	var schedulers []string
@@ -391,7 +390,7 @@ func (s *testScheduleSuite) TestDisable(c *C) {
 	scheduleConfig.Schedulers = originSchedulers
 	body, err = json.Marshal(scheduleConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, u, body)
+	err = checkPostJSON(testDialClient, u, body, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	s.deleteScheduler(name, c)
@@ -401,7 +400,7 @@ func (s *testScheduleSuite) addScheduler(name, createdName string, body []byte, 
 	if createdName == "" {
 		createdName = name
 	}
-	err := postJSON(testDialClient, s.urlPrefix, body)
+	err := checkPostJSON(testDialClient, s.urlPrefix, body, checkStatusOK(c))
 	c.Assert(err, IsNil)
 
 	if extraTest != nil {
@@ -419,7 +418,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	if createdName == "" {
 		createdName = name
 	}
-	err := postJSON(testDialClient, s.urlPrefix, body)
+	err := checkPostJSON(testDialClient, s.urlPrefix, body, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	handler := s.svr.GetHandler()
 	sches, err := handler.GetSchedulers()
@@ -431,7 +430,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err := handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)
@@ -439,7 +438,7 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	isPaused, err = handler.IsSchedulerPaused(createdName)
@@ -451,12 +450,12 @@ func (s *testScheduleSuite) testPauseOrResume(name, createdName string, body []b
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs)
+	err = checkPostJSON(testDialClient, s.urlPrefix+"/"+createdName, pauseArgs, checkStatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err = handler.IsSchedulerPaused(createdName)
 	c.Assert(err, IsNil)

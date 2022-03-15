@@ -54,6 +54,6 @@ func (s *testTsoSuite) TestTransferAllocator(c *C) {
 		return err == nil
 	}, testutil.WithRetryTimes(5), testutil.WithSleepInterval(3*time.Second))
 	addr := s.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
-	err := postJSON(testDialClient, addr, nil)
+	err := checkPostJSON(testDialClient, addr, nil, checkStatusOK(c))
 	c.Assert(err, IsNil)
 }
