@@ -84,7 +84,8 @@ type balanceLeaderSchedulerConfig struct {
 	storage endpoint.ConfigStorage
 	Name    string          `json:"name"`
 	Ranges  []core.KeyRange `json:"ranges"`
-	Batch   int             `json:"batch"`
+	// Batch is used to generate multiple operators by one scheduling
+	Batch int `json:"batch"`
 }
 
 func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
