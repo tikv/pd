@@ -456,7 +456,7 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 
 	c.AddCommand(&cobra.Command{
 		Use:   "show",
-		Short: "list the config item",
+		Short: "show the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",
