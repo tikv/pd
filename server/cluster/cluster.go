@@ -1360,7 +1360,15 @@ func (c *RaftCluster) checkStores() {
 				}
 			}
 
-			if float64(store.GetRegionSize()) >= regionSize*topoWeight/storeCount*0.9 {
+			threshold := regionSize * topoWeight / storeCount * 0.9
+			log.Debug("store scale out info",
+				zap.Float64("total-region-size", regionSize),
+				zap.Strings("label", locationLabels),
+				zap.Float64("topo-weight", topoWeight),
+				zap.Float64("store-count", storeCount),
+				zap.Float64("threshold", threshold),
+			)
+			if float64(store.GetRegionSize()) >= threshold {
 				if err := c.ReadyToServe(store); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),

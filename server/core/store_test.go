@@ -233,4 +233,19 @@ func (s *testStoreSuite) TestTopology(c *C) {
 		stores.SetStore(store, labels)
 	}
 	c.Assert(stores.GetStoreTopoWeight(3, labels), Equals, 1.0)
+
+	// change all labels
+	labels = []string{"r", "h"}
+	allStores = []*StoreInfo{
+		NewStoreInfoWithLabel(1, 1, map[string]string{"r": "r1", "h": "h1"}),
+		NewStoreInfoWithLabel(2, 1, map[string]string{"r": "r1", "h": "h2"}),
+		NewStoreInfoWithLabel(3, 1, map[string]string{"r": "r2", "h": "h1"}),
+		NewStoreInfoWithLabel(4, 1, map[string]string{"r": "r2", "h": "h2"}),
+		NewStoreInfoWithLabel(5, 1, map[string]string{"r": "r3", "h": "h1"}),
+		NewStoreInfoWithLabel(6, 1, map[string]string{"r": "r3", "h": "h2"}),
+	}
+	for _, store := range allStores {
+		stores.SetStore(store, labels)
+	}
+	c.Assert(stores.GetStoreTopoWeight(3, labels), Equals, 1.0/3.0/2.0)
 }

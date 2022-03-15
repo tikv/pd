@@ -595,34 +595,31 @@ func (s *StoresInfo) SetStore(store *StoreInfo, locationLabels []string) {
 		oldStoreLabels := getSortedLabels(origin.GetLabels(), locationLabels)
 		deleteTopology(s.topology, oldStoreLabels)
 	}
-	newStoreLabels := getSortedLabels(store.GetLabels(), locationLabels)
-	updateTopology(s, newStoreLabels)
+	if store.GetNodeState() != metapb.NodeState_Removed || store.GetNodeState() != metapb.NodeState_Removing {
+		newStoreLabels := getSortedLabels(store.GetLabels(), locationLabels)
+		updateTopology(s, newStoreLabels)
+	}
 	s.stores[storeID] = store
 }
 
-func (s *StoresInfo) GetStoreTopoWeight(storeID uint64, locationLabels []string) float64 {
+func (s *StoresInfo) GetStoreTopoWeight(storeID uint64, locationLabels []string) (weight float64) {
 	store, ok := s.stores[storeID]
 	if !ok {
 		return 0
 	}
-	weight := 1.0
+	weight = 1.0
 	topo := s.topology
-	for _, l := range locationLabels {
-		for _, label := range store.GetLabels() {
-			if l != label.Key {
-				continue
-			}
-			if _, ok := topo[label.Value]; ok {
-				weight = weight / float64(len(topo))
-				topo, ok = topo[label.Value].(map[string]interface{})
-				if !ok {
-					return weight
-				}
-				break
+	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
+	for _, label := range storeLabels {
+		if _, ok := topo[label.Value]; ok {
+			weight = weight / float64(len(topo))
+			topo, ok = topo[label.Value].(map[string]interface{})
+			if !ok {
+				return
 			}
 		}
 	}
-	return weight
+	return
 }
 
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
