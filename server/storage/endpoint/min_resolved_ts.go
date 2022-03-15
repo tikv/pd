@@ -16,6 +16,8 @@ package endpoint
 
 import (
 	"strconv"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // MinResolvedTSPoint is the min resolved ts for a store
@@ -38,7 +40,11 @@ func (se *StorageEndpoint) LoadMinResolvedTS() (uint64, error) {
 	if err != nil || value == "" {
 		return 0, err
 	}
-	return strconv.ParseUint(value, 16, 64)
+	minResolvedTS, err := strconv.ParseUint(value, 16, 64)
+	if err != nil {
+		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
+	}
+	return minResolvedTS, nil
 }
 
 // SaveMinResolvedTS saves the min resolved ts.
