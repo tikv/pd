@@ -34,11 +34,10 @@ func NewManager() *Manager {
 
 // progressIndicator reflects a specified progress.
 type progressIndicator struct {
-	total          float64
-	current        float64
-	startTime      time.Time
-	lastUpdateTime time.Time
-	speedPerSec    float64
+	total       float64
+	current     float64
+	startTime   time.Time
+	speedPerSec float64
 }
 
 // AddProgressIndicator adds a progress into manager.
@@ -46,9 +45,8 @@ func (m *Manager) AddProgressIndicator(progress string, total float64) {
 	m.Lock()
 	defer m.Unlock()
 	m.progesses[progress] = &progressIndicator{
-		total:          total,
-		startTime:      time.Now(),
-		lastUpdateTime: time.Now(),
+		total:     total,
+		startTime: time.Now(),
 	}
 }
 
@@ -66,8 +64,7 @@ func (m *Manager) UpdateProgressIndicator(progress string, current float64) {
 	defer m.Unlock()
 
 	m.progesses[progress].current = current
-	m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].lastUpdateTime).Seconds()
-	m.progesses[progress].lastUpdateTime = time.Now()
+	m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
 }
 
 // Process returns the current progress of a give name.
