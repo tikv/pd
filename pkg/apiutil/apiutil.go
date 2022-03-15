@@ -213,37 +213,26 @@ func NewAccessPath(path, method string) AccessPath {
 	return AccessPath{Path: path, Method: method}
 }
 
-type CheckOption func([]byte, int)
-
 // PostJSON is used to send the POST request to a specific URL
-func PostJSON(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
-	return processPostJSON(client, url, data, true, checkOpts...)
-}
-
-// PostJSONIgnoreRespStatus is used tprocessPostJSONo send the POST request to a specific URL and ignore resp status to test
-func PostJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
-	return processPostJSON(client, url, data, false, checkOpts...)
-}
-
-func processPostJSON(client *http.Client, url string, data []byte, neekOK bool, checkOpts ...CheckOption) error {
+func PostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return doJSON(client, req, neekOK, checkOpts...)
+	return doJSON(client, req, checkOpts...)
 }
 
 // GetJSON is used to send GET requst to specific url
-func GetJSON(client *http.Client, url string, data []byte, checkOpts ...CheckOption) error {
+func GetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {
 		return err
 	}
-	return doJSON(client, req, true, checkOpts...)
+	return doJSON(client, req, checkOpts...)
 }
 
-func doJSON(client *http.Client, req *http.Request, neekOK bool, checkOpts ...CheckOption) error {
+func doJSON(client *http.Client, req *http.Request, checkOpts ...func([]byte, int)) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return errors.WithStack(err)
@@ -253,7 +242,7 @@ func doJSON(client *http.Client, req *http.Request, neekOK bool, checkOpts ...Ch
 	if err != nil {
 		return err
 	}
-	if neekOK && resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		return errors.New(string(res))
 	}
 	for _, opt := range checkOpts {

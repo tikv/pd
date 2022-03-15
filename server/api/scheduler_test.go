@@ -141,21 +141,21 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				})
 				c.Assert(err, IsNil)
 				// empty body
-				err = postJSONIgnoreRespStatus(testDialClient, updateURL, nil, func(res []byte, code int) {
-					c.Assert(string(res), Equals, "\"unexpected end of JSON input\"\n")
+				err = postJSON(testDialClient, updateURL, nil, func(res []byte, code int) {
 					c.Assert(code, Equals, 500)
 				})
-				c.Assert(err, IsNil)
+				c.Assert(err, NotNil)
+				c.Assert(err.Error(), Equals, "\"unexpected end of JSON input\"\n")
 				// config item not found
 				dataMap = map[string]interface{}{}
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				c.Assert(err, IsNil)
-				err = postJSONIgnoreRespStatus(testDialClient, updateURL, body, func(res []byte, code int) {
-					c.Assert(string(res), Equals, "\"config item not found\"\n")
+				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
 					c.Assert(code, Equals, 400)
 				})
-				c.Assert(err, IsNil)
+				c.Assert(err, NotNil)
+				c.Assert(err.Error(), Equals, "\"config item not found\"\n")
 			},
 		},
 		{
