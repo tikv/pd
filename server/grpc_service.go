@@ -60,18 +60,13 @@ var (
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
-// Header returns header metadata.
-type Header interface {
-	GetHeader() *pdpb.RequestHeader
-}
-
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
-func (s *GrpcServer) unaryMiddleware(ctx context.Context, header Header, fn forwardFn) (rsp interface{}, err error) {
+func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHeader, fn forwardFn) (rsp interface{}, err error) {
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
-	if err := s.validateRequest(header.GetHeader()); err != nil {
+	if err := s.validateRequest(header); err != nil {
 		return nil, err
 	}
 	forwardedHost := getForwardedHost(ctx)
@@ -379,7 +374,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).Bootstrap(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.BootstrapResponse), err
 	}
 
@@ -412,7 +407,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).IsBootstrapped(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.IsBootstrappedResponse), err
 	}
 
@@ -428,7 +423,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AllocID(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.AllocIDResponse), err
 	}
 
@@ -449,7 +444,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetStore(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.GetStoreResponse), err
 	}
 
@@ -490,7 +485,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).PutStore(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.PutStoreResponse), err
 	}
 
@@ -529,7 +524,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.GetAllStoresResponse), err
 	}
 
@@ -561,7 +556,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).StoreHeartbeat(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.StoreHeartbeatResponse), err
 	}
 
@@ -791,7 +786,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
@@ -817,7 +812,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
@@ -844,7 +839,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
@@ -870,7 +865,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.ScanRegionsResponse), err
 	}
 
@@ -903,7 +898,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.AskSplitResponse), err
 	}
 
@@ -934,7 +929,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.AskBatchSplitResponse), err
 	}
 
@@ -969,7 +964,7 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.ReportSplitResponse), err
 	}
 
@@ -992,7 +987,7 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportBatchSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil && rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil && rsp != nil {
 		return rsp.(*pdpb.ReportBatchSplitResponse), err
 	}
 
@@ -1016,7 +1011,7 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetClusterConfig(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.GetClusterConfigResponse), err
 	}
 
@@ -1035,7 +1030,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).PutClusterConfig(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.PutClusterConfigResponse), err
 	}
 
@@ -1060,7 +1055,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.ScatterRegionResponse), err
 	}
 
@@ -1123,7 +1118,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.GetGCSafePointResponse), err
 	}
 
@@ -1161,7 +1156,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.UpdateGCSafePointResponse), err
 	}
 
@@ -1205,7 +1200,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
 	}
 
@@ -1268,7 +1263,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetOperator(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.GetOperatorResponse), err
 	}
 
@@ -1426,7 +1421,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SplitRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil || rsp != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil || rsp != nil {
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
