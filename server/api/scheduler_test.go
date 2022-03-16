@@ -150,6 +150,9 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				})
 				c.Assert(err, NotNil)
 				c.Assert(err.Error(), Equals, "\"invalid batch size which should be an integer between 1 and 10\"\n")
+				resp = make(map[string]interface{})
+				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+				c.Assert(resp["batch"], Equals, 3.0)
 				// empty body
 				err = postJSON(testDialClient, updateURL, nil, func(res []byte, code int) {
 					c.Assert(code, Equals, 500)

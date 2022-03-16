@@ -100,6 +100,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		if !conf.validate() {
+			json.Unmarshal(oldc, conf)
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
