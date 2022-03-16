@@ -62,7 +62,6 @@ func init() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = BalanceLeaderName
 			conf.Batch = BalanceLeaderBatchSize
 			return nil
 		}
@@ -80,7 +79,6 @@ func init() {
 type balanceLeaderSchedulerConfig struct {
 	mu      sync.RWMutex
 	storage endpoint.ConfigStorage
-	Name    string          `json:"name"`
 	Ranges  []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
@@ -117,7 +115,6 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 	return &balanceLeaderSchedulerConfig{
 		Ranges: conf.Ranges,
 		Batch:  conf.Batch,
-		Name:   conf.Name,
 	}
 }
 
@@ -126,7 +123,7 @@ func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(conf.Name, data)
+	return conf.storage.SaveScheduleConfig(BalanceLeaderName, data)
 }
 
 type balanceLeaderHandler struct {
@@ -160,6 +157,7 @@ func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.R
 type balanceLeaderScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	name         string
 	conf         *balanceLeaderSchedulerConfig
 	handler      http.Handler
 	opController *schedule.OperatorController
@@ -174,6 +172,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
 		opController:  opController,
@@ -206,12 +205,12 @@ func WithBalanceLeaderCounter(counter *prometheus.CounterVec) BalanceLeaderCreat
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
-		s.conf.Name = name
+		s.name = name
 	}
 }
 
 func (l *balanceLeaderScheduler) GetName() string {
-	return l.conf.Name
+	return l.name
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
