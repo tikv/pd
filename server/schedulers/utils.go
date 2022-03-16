@@ -16,7 +16,9 @@ package schedulers
 
 import (
 	"net/url"
+	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/log"
@@ -340,4 +342,18 @@ func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
 			delete(q.limits, id)
 		}
 	}
+}
+
+func findSameField(v interface{}, m map[string]interface{}) bool {
+	t := reflect.TypeOf(v).Elem()
+	for i := 0; i < t.NumField(); i++ {
+		jsonTag := t.Field(i).Tag.Get("json")
+		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:i]
+		}
+		if _, ok := m[jsonTag]; ok {
+			return true
+		}
+	}
+	return false
 }
