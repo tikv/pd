@@ -15,9 +15,15 @@
 package schedulers
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 
+	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
@@ -26,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
@@ -55,14 +62,13 @@ func init() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = BalanceLeaderName
 			conf.Batch = BalanceLeaderBatchSize
 			return nil
 		}
 	})
 
 	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceLeaderSchedulerConfig{}
+		conf := &balanceLeaderSchedulerConfig{storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
@@ -71,15 +77,89 @@ func init() {
 }
 
 type balanceLeaderSchedulerConfig struct {
-	Name   string          `json:"name"`
-	Ranges []core.KeyRange `json:"ranges"`
-	Batch  int             `json:"batch"`
+	mu      sync.RWMutex
+	storage endpoint.ConfigStorage
+	Ranges  []core.KeyRange `json:"ranges"`
+	// Batch is used to generate multiple operators by one scheduling
+	Batch int `json:"batch"`
+}
+
+func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
+	conf.mu.Lock()
+	defer conf.mu.Unlock()
+
+	oldc, _ := json.Marshal(conf)
+
+	if err := json.Unmarshal(data, conf); err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+	newc, _ := json.Marshal(conf)
+	if !bytes.Equal(oldc, newc) {
+		conf.persistLocked()
+		return http.StatusOK, "success"
+	}
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(data, &m); err != nil {
+		return http.StatusInternalServerError, err.Error()
+	}
+	ok := findSameField(conf, m)
+	if ok {
+		return http.StatusOK, "no changed"
+	}
+	return http.StatusBadRequest, "config item not found"
+}
+
+func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	return &balanceLeaderSchedulerConfig{
+		Ranges: conf.Ranges,
+		Batch:  conf.Batch,
+	}
+}
+
+func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	return conf.storage.SaveScheduleConfig(BalanceLeaderName, data)
+}
+
+type balanceLeaderHandler struct {
+	rd     *render.Render
+	config *balanceLeaderSchedulerConfig
+}
+
+func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
+	handler := &balanceLeaderHandler{
+		config: conf,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", handler.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", handler.ListConfig).Methods("GET")
+	return router
+}
+
+func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	data, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	httpCode, v := handler.config.Update(data)
+	handler.rd.JSON(w, httpCode, v)
+}
+
+func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type balanceLeaderScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	name         string
 	conf         *balanceLeaderSchedulerConfig
+	handler      http.Handler
 	opController *schedule.OperatorController
 	filters      []filter.Filter
 	counter      *prometheus.CounterVec
@@ -89,11 +169,12 @@ type balanceLeaderScheduler struct {
 // each store balanced.
 func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
-
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		name:          BalanceLeaderName,
 		conf:          conf,
+		handler:       newBalanceLeaderHandler(conf),
 		opController:  opController,
 		counter:       balanceLeaderCounter,
 	}
@@ -105,6 +186,10 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s
+}
+
+func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l.handler.ServeHTTP(w, r)
 }
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
@@ -120,12 +205,12 @@ func WithBalanceLeaderCounter(counter *prometheus.CounterVec) BalanceLeaderCreat
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
-		s.conf.Name = name
+		s.name = name
 	}
 }
 
 func (l *balanceLeaderScheduler) GetName() string {
-	return l.conf.Name
+	return l.name
 }
 
 func (l *balanceLeaderScheduler) GetType() string {
@@ -192,6 +277,9 @@ func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+	l.conf.mu.RLock()
+	batch := l.conf.Batch
+	l.conf.mu.RUnlock()
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
@@ -220,14 +308,14 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), lessOption)
 	usedRegions := make(map[uint64]struct{})
 
-	result := make([]*operator.Operator, 0, l.conf.Batch)
+	result := make([]*operator.Operator, 0, batch)
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
 			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, plan, usedRegions)
 			if op != nil {
 				result = append(result, op)
-				if len(result) >= l.conf.Batch {
+				if len(result) >= batch {
 					return result
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
@@ -238,7 +326,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			op := createTransferLeaderOperator(targetCandidate, transferIn, l, plan, usedRegions)
 			if op != nil {
 				result = append(result, op)
-				if len(result) >= l.conf.Batch {
+				if len(result) >= batch {
 					return result
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)

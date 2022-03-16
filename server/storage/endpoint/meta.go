@@ -149,11 +149,8 @@ func (se *StorageEndpoint) DeleteStore(store *metapb.Store) error {
 // LoadRegion loads one region from the backend storage.
 func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
 	value, err := se.Load(RegionPath(regionID))
-	if err != nil {
+	if err != nil || value == "" {
 		return false, err
-	}
-	if value == "" {
-		return false, nil
 	}
 	err = proto.Unmarshal([]byte(value), region)
 	if err != nil {
