@@ -99,7 +99,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		if !conf.Validate() {
+		if !conf.validate() {
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
@@ -116,10 +116,8 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	return http.StatusBadRequest, "config item not found"
 }
 
-func (conf *balanceLeaderSchedulerConfig) Validate() bool {
-	if conf.Batch < 1 {
-		return false
-	} else if conf.Batch > MaxBalanceLeaderBatchSize {
+func (conf *balanceLeaderSchedulerConfig) validate() bool {
+	if conf.Batch < 1 || conf.Batch > MaxBalanceLeaderBatchSize {
 		return false
 	}
 	return true
