@@ -48,7 +48,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [get]
-func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
@@ -73,7 +73,7 @@ func (h *operatorHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {array} operator.Operator
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators [get]
-func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	var (
 		results []*operator.Operator
 		ops     []*operator.Operator
@@ -82,7 +82,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	kinds, ok := r.URL.Query()["kind"]
 	if !ok {
-		results, err = h.GetOperators()
+		results, err = h.Handler.GetOperators()
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -120,7 +120,7 @@ func (h *operatorHandler) List(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators [post]
-func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
@@ -328,7 +328,7 @@ func (h *operatorHandler) Post(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/{region_id} [delete]
-func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
@@ -353,7 +353,7 @@ func (h *operatorHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The request is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /operators/records [get]
-func (h *operatorHandler) Records(w http.ResponseWriter, r *http.Request) {
+func (h *operatorHandler) GetOperatorRecords(w http.ResponseWriter, r *http.Request) {
 	var from time.Time
 	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
 		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)

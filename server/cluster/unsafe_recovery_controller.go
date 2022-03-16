@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/google/btree"
@@ -35,6 +36,11 @@ import (
 type unsafeRecoveryStage int
 
 const (
+	storeReportRequestInterval = time.Second * 60
+	storePlanRequestInterval   = time.Second * 60
+)
+
+const (
 	ready unsafeRecoveryStage = iota
 	collectingClusterInfo
 	recovering
@@ -47,8 +53,10 @@ type unsafeRecoveryController struct {
 	cluster               *RaftCluster
 	stage                 unsafeRecoveryStage
 	failedStores          map[uint64]string
+	storeReportExpires    map[uint64]time.Time
 	storeReports          map[uint64]*pdpb.StoreReport // Store info proto
 	numStoresReported     int
+	storePlanExpires      map[uint64]time.Time
 	storeRecoveryPlans    map[uint64]*pdpb.RecoveryPlan // StoreRecoveryPlan proto
 	executionResults      map[uint64]bool               // Execution reports for tracking purpose
 	executionReports      map[uint64]*pdpb.StoreReport  // Execution reports for tracking purpose
@@ -60,8 +68,10 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 		cluster:               cluster,
 		stage:                 ready,
 		failedStores:          make(map[uint64]string),
+		storeReportExpires:    make(map[uint64]time.Time),
 		storeReports:          make(map[uint64]*pdpb.StoreReport),
 		numStoresReported:     0,
+		storePlanExpires:      make(map[uint64]time.Time),
 		storeRecoveryPlans:    make(map[uint64]*pdpb.RecoveryPlan),
 		executionResults:      make(map[uint64]bool),
 		executionReports:      make(map[uint64]*pdpb.StoreReport),
@@ -82,7 +92,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	u.reset()
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
-		if store != nil && store.IsUp() && !store.IsDisconnected() {
+		if store != nil && (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
 			return errors.Errorf("Store %v is up and connected", failedStore)
 		}
 	}
@@ -94,7 +104,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	}
 	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
-		if s.IsTombstone() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
 		}
 		if _, exists := failedStores[s.GetID()]; exists {
@@ -117,9 +127,17 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	switch u.stage {
 	case collectingClusterInfo:
 		if heartbeat.StoreReport == nil {
-			if _, failedStore := u.failedStores[heartbeat.Stats.StoreId]; !failedStore {
+			if _, isFailedStore := u.failedStores[heartbeat.Stats.StoreId]; isFailedStore {
+				// This should be unreachable.
+				return
+			}
+
+			expire, requested := u.storeReportExpires[heartbeat.Stats.StoreId]
+			now := time.Now()
+			if !requested || expire.Before(now) {
 				// Inform the store to send detailed report in the next heartbeat.
 				resp.RequireDetailedReport = true
+				u.storeReportExpires[heartbeat.Stats.StoreId] = now.Add(storeReportRequestInterval)
 			}
 		} else if report, exist := u.storeReports[heartbeat.Stats.StoreId]; exist && report == nil {
 			u.storeReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
@@ -132,8 +150,13 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	case recovering:
 		if plan, tasked := u.storeRecoveryPlans[heartbeat.Stats.StoreId]; tasked {
 			if heartbeat.StoreReport == nil {
-				// Sends the recovering plan to the store for execution.
-				resp.Plan = plan
+				expire, requested := u.storePlanExpires[heartbeat.Stats.StoreId]
+				now := time.Now()
+				if !requested || expire.Before(now) {
+					// Sends the recovering plan to the store for execution.
+					resp.Plan = plan
+					u.storePlanExpires[heartbeat.Stats.StoreId] = now.Add(storePlanRequestInterval)
+				}
 			} else if !u.isPlanExecuted(heartbeat.Stats.StoreId, heartbeat.StoreReport) {
 				resp.Plan = plan
 				u.executionReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
@@ -158,8 +181,10 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 func (u *unsafeRecoveryController) reset() {
 	u.stage = ready
 	u.failedStores = make(map[uint64]string)
+	u.storeReportExpires = make(map[uint64]time.Time)
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
+	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	u.executionResults = make(map[uint64]bool)
 	u.executionReports = make(map[uint64]*pdpb.StoreReport)

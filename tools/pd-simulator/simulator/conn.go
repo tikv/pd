@@ -49,5 +49,5 @@ func (c *Connection) nodeHealth(storeID uint64) bool {
 		return false
 	}
 
-	return n.GetState() == metapb.StoreState_Up
+	return n.GetNodeState() == metapb.NodeState_Preparing || n.GetNodeState() == metapb.NodeState_Serving
 }

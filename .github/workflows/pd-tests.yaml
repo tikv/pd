@@ -10,6 +10,9 @@ on:
       - master
       - release-4.0
       - release-5.*
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
 jobs:
   chunks:
     runs-on: ubuntu-latest
@@ -20,9 +23,9 @@ jobs:
     outputs:
       job-total: 10
     steps:
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v3
         with:
-          go-version: 1.17
+          go-version: '1.18.0-rc.1'
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache

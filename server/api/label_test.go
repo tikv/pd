@@ -39,9 +39,10 @@ type testLabelsStoreSuite struct {
 func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 	s.stores = []*metapb.Store{
 		{
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -55,9 +56,10 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 		{
-			Id:      4,
-			Address: "tikv4",
-			State:   metapb.StoreState_Up,
+			Id:        4,
+			Address:   "tikv4",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -71,9 +73,10 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 		{
-			Id:      6,
-			Address: "tikv6",
-			State:   metapb.StoreState_Up,
+			Id:        6,
+			Address:   "tikv6",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -87,9 +90,10 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 			Version: "2.0.0",
 		},
 		{
-			Id:      7,
-			Address: "tikv7",
-			State:   metapb.StoreState_Up,
+			Id:        7,
+			Address:   "tikv7",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
 				{
 					Key:   "zone",
@@ -118,7 +122,7 @@ func (s *testLabelsStoreSuite) SetUpSuite(c *C) {
 
 	mustBootstrapCluster(c, s.svr)
 	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store.Id, store.State, store.Labels)
+		mustPutStore(c, s.svr, store.Id, store.State, store.NodeState, store.Labels)
 	}
 }
 

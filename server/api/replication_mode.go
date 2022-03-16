@@ -38,6 +38,6 @@ func newReplicationModeHandler(svr *server.Server, rd *render.Render) *replicati
 // @Produce json
 // @Success 200 {object} replication.HTTPReplicationStatus
 // @Router /replication_mode/status [get]
-func (h *replicationModeHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+func (h *replicationModeHandler) GetReplicationModeStatus(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, getCluster(r).GetReplicationMode().GetReplicationStatusHTTP())
 }

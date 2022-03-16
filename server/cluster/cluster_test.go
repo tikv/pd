@@ -222,13 +222,13 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	// store 1: up -> offline
 	c.Assert(cluster.RemoveStore(1, false), IsNil)
 	store := cluster.GetStore(1)
-	c.Assert(store.IsOffline(), IsTrue)
+	c.Assert(store.IsRemoving(), IsTrue)
 	c.Assert(store.IsPhysicallyDestroyed(), IsFalse)
 
 	// store 1: set physically to true success
 	c.Assert(cluster.RemoveStore(1, true), IsNil)
 	store = cluster.GetStore(1)
-	c.Assert(store.IsOffline(), IsTrue)
+	c.Assert(store.IsRemoving(), IsTrue)
 	c.Assert(store.IsPhysicallyDestroyed(), IsTrue)
 
 	// store 2:up -> offline & physically destroyed
@@ -244,12 +244,12 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	cluster.checkStores()
 	// store 1,2,3 shuold be to tombstone
 	for storeID := uint64(1); storeID <= 3; storeID++ {
-		c.Assert(cluster.GetStore(storeID).IsTombstone(), IsTrue)
+		c.Assert(cluster.GetStore(storeID).IsRemoved(), IsTrue)
 	}
 	// test bury store
 	for storeID := uint64(0); storeID <= 4; storeID++ {
 		store := cluster.GetStore(storeID)
-		if store == nil || store.IsUp() {
+		if store == nil || store.IsPreparing() || store.IsServing() {
 			c.Assert(cluster.BuryStore(storeID, false), NotNil)
 		} else {
 			c.Assert(cluster.BuryStore(storeID, false), IsNil)
@@ -300,7 +300,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 			DeployPath: getTestDeployPath(storeID),
 		}
 
-		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsTombstone() {
+		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsRemoved() {
 			// try to start a new store with the same address with store which is physically destryed or tombstone should be success
 			c.Assert(cluster.PutStore(newStore), IsNil)
 		} else {
@@ -336,7 +336,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	cluster.checkStores()
 	// store is tombstone
 	err = cluster.UpStore(2)
-	c.Assert(errors.ErrorEqual(err, errs.ErrStoreTombstone.FastGenByArgs(2)), IsTrue)
+	c.Assert(errors.ErrorEqual(err, errs.ErrStoreRemoved.FastGenByArgs(2)), IsTrue)
 
 	// store 3 is up
 	c.Assert(cluster.UpStore(3), IsNil)
@@ -891,7 +891,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	// store 1: up -> offline
 	c.Assert(cluster.RemoveStore(1, false), IsNil)
 	store := cluster.GetStore(1)
-	c.Assert(store.IsOffline(), IsTrue)
+	c.Assert(store.IsRemoving(), IsTrue)
 
 	// Split.
 	n := 7

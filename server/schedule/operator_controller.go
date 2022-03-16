@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"go.uber.org/zap"
 )
@@ -413,6 +414,18 @@ func (oc *OperatorController) checkAddOperator(ops ...*operator.Operator) bool {
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
 		}
+
+		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
+			continue
+		}
+		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+			l := cl.GetRegionLabeler()
+			if l.ScheduleDisabled(region) {
+				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
+				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
+				return false
+			}
+		}
 	}
 	expired := false
 	for _, op := range ops {
@@ -782,10 +795,7 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluen
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
-			region := cluster.GetRegion(op.RegionID())
-			if region != nil {
-				op.UnfinishedInfluence(influence, region)
-			}
+			AddOpInfluence(op, influence, cluster)
 		}
 	}
 	return influence
@@ -810,6 +820,14 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 	}
 }
 
+// AddOpInfluence add operator influence for cluster
+func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
+	region := cluster.GetRegion(op.RegionID())
+	if region != nil {
+		op.TotalInfluence(influence, region)
+	}
+}
+
 // NewTotalOpInfluence creates a OpInfluence.
 func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
 	influence := operator.OpInfluence{
@@ -817,10 +835,7 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operat
 	}
 
 	for _, op := range operators {
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
 	}
 
 	return influence
@@ -905,7 +920,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if limiter.Available() < stepCost {
+			if !limiter.Available(stepCost) {
 				return true
 			}
 		}
