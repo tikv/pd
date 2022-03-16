@@ -24,11 +24,8 @@ import (
 
 func (se *StorageEndpoint) loadProto(key string, msg proto.Message) (bool, error) {
 	value, err := se.Load(key)
-	if err != nil {
+	if err != nil || value == "" {
 		return false, err
-	}
-	if value == "" {
-		return false, nil
 	}
 	err = proto.Unmarshal([]byte(value), msg)
 	if err != nil {
