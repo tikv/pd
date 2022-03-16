@@ -46,7 +46,8 @@ const (
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
-	BalanceLeaderBatchSize    = 4
+	BalanceLeaderBatchSize = 4
+	// MaxBalanceLeaderBatchSize is maximum of balance leader batch size
 	MaxBalanceLeaderBatchSize = 10
 
 	transferIn  = "transfer-in"
@@ -98,7 +99,9 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		conf.Adjust()
+		if !conf.Validate() {
+			return http.StatusBadRequest, "invalidate input and batch size is between 1 and 10"
+		}
 		conf.persistLocked()
 		return http.StatusOK, "success"
 	}
@@ -113,12 +116,13 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	return http.StatusBadRequest, "config item not found"
 }
 
-func (conf *balanceLeaderSchedulerConfig) Adjust() {
+func (conf *balanceLeaderSchedulerConfig) Validate() bool {
 	if conf.Batch < 1 {
-		conf.Batch = 1
+		return false
 	} else if conf.Batch > MaxBalanceLeaderBatchSize {
-		conf.Batch = MaxBalanceLeaderBatchSize
+		return false
 	}
+	return true
 }
 
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {

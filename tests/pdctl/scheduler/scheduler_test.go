@@ -368,13 +368,9 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	// test balance leader config
 	conf = make(map[string]interface{})
 	conf1 = make(map[string]interface{})
-	expectedLeader := map[string]interface{}{
-		"batch": 5,
-	}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "show"}, &conf)
-	c.Assert(conf["batch"], Equals, 5.)
+	c.Assert(conf["batch"], Equals, 4.)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "set", "batch", "3"}, nil)
-	expectedLeader["batch"] = 3
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, &conf1)
 	c.Assert(conf1["batch"], Equals, 3.)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
@@ -383,8 +379,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "404"), IsTrue)
+	c.Assert(strings.Contains(echo, "PD:scheduler:ErrSchedulerNotFound]scheduler not found"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "404"), IsTrue)
+	c.Assert(strings.Contains(echo, "scheduler not found"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 
