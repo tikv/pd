@@ -117,10 +117,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 }
 
 func (conf *balanceLeaderSchedulerConfig) validate() bool {
-	if conf.Batch < 1 || conf.Batch > MaxBalanceLeaderBatchSize {
-		return false
-	}
-	return true
+	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
