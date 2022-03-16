@@ -132,10 +132,9 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values,
-		func(res string, code int) {
+	err = checkPostJSON(testDialClient, url, values, checkStatusOK(c),
+		func(res string, _ int) {
 			c.Assert(res, Equals, "\"Reset ts successfully.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
 		})
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
@@ -204,10 +203,9 @@ func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/audit-middleware", s.svr.GetAddr(), apiPrefix)
 
 	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
-	err := checkPostJSON(testDialClient, enableURL, nil,
-		func(res string, code int) {
+	err := checkPostJSON(testDialClient, enableURL, nil, checkStatusOK(c),
+		func(res string, _ int) {
 			c.Assert(res, Equals, "\"Switching audit middleware is successful.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
 		})
 
 	c.Assert(err, IsNil)

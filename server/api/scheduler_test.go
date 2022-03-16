@@ -71,7 +71,7 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	body, err = json.Marshal(input1)
 	c.Assert(err, IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedulers/persistFail", "return(true)"), IsNil)
-	c.Assert(checkPostJSON(testDialClient, addURL, body, checkStatusNotOK(c)), NotNil)
+	c.Assert(checkPostJSON(testDialClient, addURL, body, checkStatusNotOK(c)), IsNil)
 	c.Assert(rc.GetSchedulers(), HasLen, 1)
 	resp = make(map[string]interface{})
 	c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)

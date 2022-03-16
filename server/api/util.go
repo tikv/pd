@@ -15,7 +15,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -57,7 +56,7 @@ func collectStringOption(option string, input map[string]interface{}, collectors
 }
 
 func readJSON(client *http.Client, url string, data interface{}) error {
-	resp, err := client.Get(url)
+	resp, err := apiutil.GetJSON(client, url, nil)
 	if err != nil {
 		return err
 	}
@@ -65,11 +64,7 @@ func readJSON(client *http.Client, url string, data interface{}) error {
 }
 
 func readJSONWithBody(client *http.Client, url string, body []byte, data interface{}) error {
-	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-	resp, err := client.Do(req)
+	resp, err := apiutil.GetJSON(client, url, body)
 	if err != nil {
 		return err
 	}
