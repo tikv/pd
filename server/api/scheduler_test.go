@@ -130,14 +130,13 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				c.Assert(err, IsNil)
-				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				c.Assert(checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c)), IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				c.Assert(resp["batch"], Equals, 3.0)
 				// update again
-				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+				err = checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c), func(res string, _ int) {
 					c.Assert(string(res), Equals, "\"no changed\"\n")
-					c.Assert(code, Equals, 200)
 				})
 				c.Assert(err, IsNil)
 				// update invalidate batch
@@ -145,30 +144,31 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				dataMap["batch"] = 100
 				body, err = json.Marshal(dataMap)
 				c.Assert(err, IsNil)
-				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+				err = checkPostJSON(testDialClient, updateURL, body, func(res string, code int) {
 					c.Assert(code, Equals, 400)
+					c.Assert(res, Equals, "\"invalid batch size which should be an integer between 1 and 10\"\n")
+
 				})
-				c.Assert(err, NotNil)
-				c.Assert(err.Error(), Equals, "\"invalid batch size which should be an integer between 1 and 10\"\n")
+				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
 				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
 				c.Assert(resp["batch"], Equals, 3.0)
 				// empty body
-				err = postJSON(testDialClient, updateURL, nil, func(res []byte, code int) {
+				err = checkPostJSON(testDialClient, updateURL, nil, func(res string, code int) {
 					c.Assert(code, Equals, 500)
+					c.Assert(res, Equals, "\"unexpected end of JSON input\"\n")
 				})
-				c.Assert(err, NotNil)
-				c.Assert(err.Error(), Equals, "\"unexpected end of JSON input\"\n")
+				c.Assert(err, IsNil)
 				// config item not found
 				dataMap = map[string]interface{}{}
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				c.Assert(err, IsNil)
-				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+				err = checkPostJSON(testDialClient, updateURL, body, func(res string, code int) {
 					c.Assert(code, Equals, 400)
+					c.Assert(res, Equals, "\"config item not found\"\n")
 				})
-				c.Assert(err, NotNil)
-				c.Assert(err.Error(), Equals, "\"config item not found\"\n")
+				c.Assert(err, IsNil)
 			},
 		},
 		{
