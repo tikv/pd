@@ -268,7 +268,7 @@ func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo)
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()
 		store := cluster.GetStore(storeID)
-		if store == nil || store.IsOffline() {
+		if store == nil || store.IsRemoving() {
 			if _, ok := regionStoreIDs[storeID]; !ok {
 				return false
 			}

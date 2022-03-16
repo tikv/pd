@@ -40,7 +40,7 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 // @Produce json
 // @Success 200 {object} statistics.RegionStats
 // @Router /stats/region [get]
-func (h *statsHandler) Region(w http.ResponseWriter, r *http.Request) {
+func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	stats := rc.GetRegionStats([]byte(startKey), []byte(endKey))

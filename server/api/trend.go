@@ -88,7 +88,7 @@ func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 // @Failure 400 {string} string "The request is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /trend [get]
-func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *trendHandler) GetTrend(w http.ResponseWriter, r *http.Request) {
 	var from time.Time
 	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
 		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)

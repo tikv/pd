@@ -42,7 +42,7 @@ func (s *testServiceGCSafepointSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, nil)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
 func (s *testServiceGCSafepointSuite) TearDownSuite(c *C) {

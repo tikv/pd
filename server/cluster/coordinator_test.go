@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -348,6 +349,34 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 	c.Assert(op.Len(), Equals, 1)
 	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
 	s.checkRegion(c, tc, co, 1, 0)
+}
+
+func (s *testCoordinatorSuite) TestCheckRegionWithScheduleDeny(c *C) {
+	tc, co, cleanup := prepare(nil, nil, nil, c)
+
+	defer cleanup()
+
+	c.Assert(tc.addRegionStore(4, 4), IsNil)
+	c.Assert(tc.addRegionStore(3, 3), IsNil)
+	c.Assert(tc.addRegionStore(2, 2), IsNil)
+	c.Assert(tc.addRegionStore(1, 1), IsNil)
+	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	region := tc.GetRegion(1)
+	c.Assert(region, NotNil)
+	// test with label schedule=deny
+	labelerManager := tc.GetRegionLabeler()
+	labelerManager.SetLabelRule(&labeler.LabelRule{
+		ID:       "schedulelabel",
+		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+		RuleType: labeler.KeyRange,
+		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+	})
+
+	c.Assert(labelerManager.ScheduleDisabled(region), IsTrue)
+	s.checkRegion(c, tc, co, 1, 0)
+	labelerManager.DeleteLabelRule("schedulelabel")
+	c.Assert(labelerManager.ScheduleDisabled(region), IsFalse)
+	s.checkRegion(c, tc, co, 1, 1)
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
@@ -977,7 +1006,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 		if time.Since(start) > time.Second {
 			break
 		}
-		c.Assert(ops, IsNil)
+		c.Assert(ops, HasLen, 0)
 	}
 
 	// reset all stores' limit
@@ -995,7 +1024,7 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
-		c.Assert(lb.Schedule(tc), NotNil)
+		c.Assert(len(lb.Schedule(tc)), Greater, 0)
 	}
 }
 
@@ -1023,10 +1052,10 @@ func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
 	c.Assert(oc.AddOperator(op2), IsTrue)
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	c.Assert(oc.AddOperator(op3), IsFalse)
-	c.Assert(lb.Schedule(tc), IsNil)
+	c.Assert(lb.Schedule(tc), HasLen, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(lb.Schedule(tc), NotNil)
+	c.Assert(len(lb.Schedule(tc)), Greater, 0)
 }
 
 func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
@@ -1117,7 +1146,7 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		c.Assert(sc.GetInterval(), Equals, i)
-		c.Assert(sc.Schedule(), IsNil)
+		c.Assert(sc.Schedule(), HasLen, 0)
 	}
 	// limit = 2
 	lb.limit = 2
@@ -1198,7 +1227,7 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			c.Assert(sc.Schedule(), IsNil)
+			c.Assert(sc.Schedule(), HasLen, 0)
 		}
 		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
 	}
