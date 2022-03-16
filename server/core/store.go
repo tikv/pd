@@ -71,7 +71,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:  1.0,
 		regionWeight:  1.0,
 		limiter:       make(map[storelimit.Type]*storelimit.StoreLimit),
-		minResolvedTS: math.MaxUint64,
+		minResolvedTS: 0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)

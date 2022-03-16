@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
@@ -1118,6 +1119,23 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	c.Assert(err, IsNil)
 }
 
+func (s *clusterTestSuite) putRegionWithLeader(c *C, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
+	for i := 0; i < 3; i++ {
+		regionID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		peerID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		region := &metapb.Region{
+			Id:       regionID,
+			Peers:    []*metapb.Peer{{Id: peerID, StoreId: storeID}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+	c.Assert(rc.GetStore(storeID).GetLeaderCount(), Equals, 3)
+}
+
 func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
@@ -1127,6 +1145,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	c.Assert(err, IsNil)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
+	id := leaderServer.GetAllocator()
 	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(c, clusterID, grpcPDClient)
@@ -1163,18 +1182,9 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	status, err := rc.LoadClusterStatus()
 	c.Assert(status.IsInitialized, IsFalse)
 	addStoreWithMinResolvedTS(c, store1, false, store1TS, math.MaxUint64)
-	// case2: add region
+	// case2: add leader to store1
 	// min resolved ts should be available
-	for i := 0; i < 3; i++ {
-		region := &metapb.Region{
-			Id:       uint64(4 + i),
-			Peers:    []*metapb.Peer{{Id: uint64(10 + i), StoreId: store1}},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-	}
-	c.Assert(rc.GetStore(store1).GetLeaderCount(), Equals, 3)
+	s.putRegionWithLeader(c, rc, id, store1)
 	ts := rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store1TS)
 	// case2: add tiflash store
@@ -1185,16 +1195,9 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	// min resolved ts should no change
 	store3 := uint64(3)
 	addStoreWithMinResolvedTS(c, store3, false, store3TS, store1TS)
-	// case5: transfer region leader to store 3
+	// case5: add leader to store 3, store 3 has less ts than store 1.
 	// min resolved ts should change to store 3
-	region := &metapb.Region{
-		Id:       uint64(20),
-		Peers:    []*metapb.Peer{{Id: uint64(21), StoreId: store3}},
-		StartKey: []byte{byte(20)},
-		EndKey:   []byte{byte(21)},
-	}
-	rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
-	c.Assert(rc.GetStore(store3).GetLeaderCount(), Equals, 1)
+	s.putRegionWithLeader(c, rc, id, store3)
 	ts = rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store3TS)
 	// case6: set tombstone
@@ -1204,4 +1207,17 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	ts = rc.GetMinResolvedTS()
 	c.Assert(err, IsNil)
 	c.Assert(ts, Equals, store1TS)
+	// case7: add a store with leader but no report min resolved ts
+	// min resolved ts should be zero
+	store4 := uint64(4)
+	_, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      store4,
+		Version: "v6.0.0",
+		Address: "127.0.0.1:" + strconv.Itoa(int(store4)),
+	})
+	c.Assert(err, IsNil)
+	s.putRegionWithLeader(c, rc, id, store4)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts, Equals, uint64(0))
 }
