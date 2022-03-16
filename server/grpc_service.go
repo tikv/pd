@@ -1799,7 +1799,7 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 
 // ReportBuckets receives region buckets from tikv.
 func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
-	panic("not implemented")
+	return status.Errorf(codes.Unimplemented, "not implemented")
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
