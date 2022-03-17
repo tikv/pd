@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -250,16 +251,19 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
+	minResolvedTSPersistenceInterval := c.opt.GetMinResolvedTSPersistenceInterval()
 
-	c.wg.Add(5)
+	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
+		minResolvedTSPersistenceInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
+	go c.runMinResolvedTSJob(minResolvedTSPersistenceInterval)
 	c.running = true
 
 	return nil
@@ -1648,6 +1652,66 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
+}
+
+// GetMinResolvedTS returns the min resolved ts of all stores.
+func (c *RaftCluster) GetMinResolvedTS() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() {
+		return math.MaxUint64
+	}
+	min := uint64(math.MaxUint64)
+	for _, s := range c.GetStores() {
+		if !core.IsAvailableForMinResolvedTS(s) {
+			continue
+		}
+		if min > s.GetMinResolvedTS() {
+			min = s.GetMinResolvedTS()
+		}
+	}
+	return min
+}
+
+// SetMinResolvedTS sets up a store with min resolved ts.
+func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(
+		core.SetMinResolvedTS(minResolvedTS),
+	)
+
+	return c.putStoreLocked(newStore)
+}
+
+func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
+	defer c.wg.Done()
+	if saveInterval == 0 {
+		return
+	}
+	defer logutil.LogPanic()
+	ticker := time.NewTicker(saveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("min resolved ts background jobs has been stopped")
+			return
+		case <-ticker.C:
+			minResolvedTS := c.GetMinResolvedTS()
+			if minResolvedTS != math.MaxUint64 {
+				c.Lock()
+				c.storage.SaveMinResolvedTS(minResolvedTS)
+				c.Unlock()
+			}
+		}
+	}
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
