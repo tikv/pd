@@ -29,6 +29,13 @@ type RegionOption func(region *RegionInfo) bool
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 
+// WithBuckets sets the buckets for the region.
+func WithBuckets(buckets *metapb.Buckets) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.buckets = buckets
+	}
+}
+
 // WithDownPeers sets the down peers for the region.
 func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 	return func(region *RegionInfo) {
