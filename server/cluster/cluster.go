@@ -1727,13 +1727,13 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 }
 
 func (c *RaftCluster) loadMinResolvedTS() {
+	c.Lock()
+	defer c.Unlock()
 	minResolvedTS, err := c.storage.LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
 	}
-	c.Lock()
-	defer c.Unlock()
 	c.minResolvedTS = minResolvedTS
 }
 
