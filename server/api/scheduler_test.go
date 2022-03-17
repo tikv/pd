@@ -136,7 +136,7 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				c.Assert(resp["batch"], Equals, 3.0)
 				// update again
 				err = checkPostJSON(testDialClient, updateURL, body, checkStatusOK(c), func(res string, _ int) {
-					c.Assert(string(res), Equals, "\"no changed\"\n")
+					c.Assert(res, Equals, "\"no changed\"\n")
 				})
 				c.Assert(err, IsNil)
 				// update invalidate batch
@@ -147,7 +147,6 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 				err = checkPostJSON(testDialClient, updateURL, body, func(res string, code int) {
 					c.Assert(code, Equals, 400)
 					c.Assert(res, Equals, "\"invalid batch size which should be an integer between 1 and 10\"\n")
-
 				})
 				c.Assert(err, IsNil)
 				resp = make(map[string]interface{})
