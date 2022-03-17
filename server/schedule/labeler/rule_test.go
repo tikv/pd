@@ -29,11 +29,9 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	label := RegionLabel{Key: "k1", Value: "v1"}
 
 	// test label with no ttl.
-
 	err := label.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
-	c.Assert(label.start.IsZero(), IsTrue)
-	c.Assert(label.StartAt, Equals, "")
+	c.Assert(label.StartAt, HasLen, 0)
 	c.Assert(label.expire, Equals, unlimittedExpire)
 
 	// test rule with illegal ttl.
@@ -45,8 +43,7 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	label.TTL = "10h10m10s10ms"
 	err = label.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
-	c.Assert(label.start.IsZero(), IsFalse)
-	c.Assert(label.start.Format(time.UnixDate), Equals, label.StartAt)
+	c.Assert(len(label.StartAt) > 0, IsTrue)
 	c.Assert(label.expireBefore(time.Now().Add(time.Hour)), IsFalse)
 	c.Assert(label.expireBefore(time.Now().Add(24*time.Hour)), IsTrue)
 
@@ -58,8 +55,6 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(label2.StartAt, Equals, label.StartAt)
 	c.Assert(label2.TTL, Equals, label.TTL)
-	// the private field should be empty.
-	c.Assert(label2.start.IsZero(), IsTrue)
 	expire := label2.getExpire()
 	c.Assert(label.expire.Format(time.UnixDate), Equals, expire.Format(time.UnixDate))
 }

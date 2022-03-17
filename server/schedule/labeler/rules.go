@@ -33,7 +33,6 @@ type RegionLabel struct {
 	Value   string `json:"value"`
 	TTL     string `json:"ttl,omitempty"`
 	StartAt string `json:"start_at,omitempty"`
-	start   time.Time
 	expire  time.Time
 }
 
@@ -87,22 +86,23 @@ func init() {
 func (l *RegionLabel) checkAndAdjustExpire() (err error) {
 	if len(l.TTL) == 0 {
 		l.expire = unlimittedExpire
-		return nil
+		return
 	}
 	ttl, err := time.ParseDuration(l.TTL)
 	if err != nil {
 		return err
 	}
+	var startAt time.Time
 	if len(l.StartAt) == 0 {
-		l.start = time.Now()
-		l.StartAt = l.start.Format(time.UnixDate)
+		startAt = time.Now()
+		l.StartAt = startAt.Format(time.UnixDate)
 	} else {
-		l.start, err = time.Parse(time.UnixDate, l.StartAt)
+		startAt, err = time.Parse(time.UnixDate, l.StartAt)
 		if err != nil {
 			return err
 		}
 	}
-	l.expire = l.start.Add(ttl)
+	l.expire = startAt.Add(ttl)
 	return nil
 }
 
@@ -157,8 +157,7 @@ func (rule *LabelRule) checkAndAdjust() error {
 	}
 	rule.checkAndRemoveExpireLabels(time.Now())
 	if len(rule.Labels) == 0 {
-		err := fmt.Errorf("region label with expired ttl")
-		return errs.ErrRegionRuleContent.FastGenByArgs(err)
+		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
 	}
 
 	// TODO: change it to switch statement once we support more types.
