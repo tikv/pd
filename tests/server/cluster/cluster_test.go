@@ -1151,6 +1151,8 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
+	err = rc.Start(leaderServer.GetServer())
+	c.Assert(err, IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	addStoreWithMinResolvedTS := func(c *C, storeID uint64, isTiflash bool, minResolvedTS, expect uint64) {
 		store := &metapb.Store{
@@ -1205,10 +1207,14 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	resetStoreState(c, rc, store3, metapb.StoreState_Tombstone)
 	time.Sleep(time.Millisecond * 10)
 	ts = rc.GetMinResolvedTS()
+	time.Sleep(time.Millisecond * 10)
+	c.Assert(ts, Equals, store1TS)
+	ts, err = rc.GetStorage().LoadMinResolvedTS()
 	c.Assert(err, IsNil)
 	c.Assert(ts, Equals, store1TS)
 	// case7: add a store with leader but no report min resolved ts
-	// min resolved ts should be zero
+	// min resolved ts should be zero by function
+	// but it is the same with the last round by storage
 	store4 := uint64(4)
 	_, err = putStore(grpcPDClient, clusterID, &metapb.Store{
 		Id:      store4,
@@ -1220,4 +1226,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	ts = rc.GetMinResolvedTS()
 	c.Assert(err, IsNil)
 	c.Assert(ts, Equals, uint64(0))
+	ts, err = rc.GetStorage().LoadMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts, Equals, store1TS)
 }

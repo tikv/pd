@@ -97,12 +97,13 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core    *core.BasicCluster
-	meta    *metapb.Cluster
-	opt     *config.PersistOptions
-	storage storage.Storage
-	id      id.Allocator
-	limiter *StoreLimiter
+	core          *core.BasicCluster
+	meta          *metapb.Cluster
+	opt           *config.PersistOptions
+	storage       storage.Storage
+	id            id.Allocator
+	limiter       *StoreLimiter
+	minResolvedTS uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -1696,6 +1697,7 @@ func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
 		return
 	}
 	defer logutil.LogPanic()
+	c.LoadOldMinResolvedTS()
 	ticker := time.NewTicker(saveInterval)
 	defer ticker.Stop()
 	for {
@@ -1704,14 +1706,27 @@ func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
 			log.Info("min resolved ts background jobs has been stopped")
 			return
 		case <-ticker.C:
-			minResolvedTS := c.GetMinResolvedTS()
-			if minResolvedTS != math.MaxUint64 {
-				c.Lock()
-				c.storage.SaveMinResolvedTS(minResolvedTS)
-				c.Unlock()
+			minResolvedTSRealtime := c.GetMinResolvedTS()
+			c.Lock()
+			if minResolvedTSRealtime != math.MaxUint64 && minResolvedTSRealtime > c.minResolvedTS {
+				c.minResolvedTS = minResolvedTSRealtime
+				c.storage.SaveMinResolvedTS(minResolvedTSRealtime)
 			}
+			c.Unlock()
 		}
 	}
+}
+
+// LoadOldMinResolvedTS loads the min resolved ts from the storage.
+func (c *RaftCluster) LoadOldMinResolvedTS() {
+	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	if err != nil {
+		log.Error("load min resolved ts meet error", errs.ZapError(err))
+		return
+	}
+	c.RLock()
+	defer c.RUnlock()
+	c.minResolvedTS = minResolvedTS
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
