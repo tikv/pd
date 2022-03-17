@@ -1691,6 +1691,12 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	return c.putStoreLocked(newStore)
 }
 
+func (c *RaftCluster) isOldMinResolvedTSSmaller(minResolvedTSRealtime uint64) bool {
+	c.RLock()
+	defer c.RUnlock()
+	return minResolvedTSRealtime != math.MaxUint64 && minResolvedTSRealtime > c.minResolvedTS
+}
+
 func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
 	defer c.wg.Done()
 	if saveInterval == 0 {
@@ -1707,12 +1713,12 @@ func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
 			return
 		case <-ticker.C:
 			minResolvedTSRealtime := c.GetMinResolvedTS()
-			c.Lock()
-			if minResolvedTSRealtime != math.MaxUint64 && minResolvedTSRealtime > c.minResolvedTS {
+			if c.isOldMinResolvedTSSmaller(minResolvedTSRealtime) {
+				c.Lock()
 				c.minResolvedTS = minResolvedTSRealtime
 				c.storage.SaveMinResolvedTS(minResolvedTSRealtime)
+				c.Unlock()
 			}
-			c.Unlock()
 		}
 	}
 }

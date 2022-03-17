@@ -1182,6 +1182,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	// min resolved ts should be not available
 	store1 := uint64(1)
 	status, err := rc.LoadClusterStatus()
+	c.Assert(err, IsNil)
 	c.Assert(status.IsInitialized, IsFalse)
 	addStoreWithMinResolvedTS(c, store1, false, store1TS, math.MaxUint64)
 	// case2: add leader to store1
