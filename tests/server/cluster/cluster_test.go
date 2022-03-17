@@ -1144,6 +1144,14 @@ func (s *clusterTestSuite) checkMinResolvedTSFromStorage(c *C, rc *cluster.RaftC
 	c.Assert(ts2, Equals, expect)
 }
 
+func (s *clusterTestSuite) setMinResolvedTSPersistenceInterval(c *C, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
+	cfg := rc.GetOpts().GetPDServerConfig()
+	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
+	err := svr.SetPDServerConfig(*cfg)
+	c.Assert(err, IsNil)
+	time.Sleep(time.Millisecond + interval)
+}
+
 func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Microsecond
 	tc, err := tests.NewTestCluster(s.ctx, 1)
@@ -1217,9 +1225,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	// case6: set min resolved ts persist interval to 1μs
 	// min resolved ts should be equal to read from storage
 	s.checkMinResolvedTSFromStorage(c, rc, 0)
-	cfg := rc.GetOpts().GetPDServerConfig()
-	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(time.Microsecond)
-	svr.SetPDServerConfig(*cfg)
+	s.setMinResolvedTSPersistenceInterval(c, rc, svr, time.Microsecond)
 	s.checkMinResolvedTSFromStorage(c, rc, ts)
 
 	// case7: set store3 to tombstone
@@ -1242,10 +1248,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	// case9: set min resolved ts persist interval to zero
 	// although min resolved ts increase, it should be not persisted
 	store5TS := store1TS + 10
-	cfg = rc.GetOpts().GetPDServerConfig()
-	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(0)
-	svr.SetPDServerConfig(*cfg)
-	time.Sleep(time.Millisecond * 10)
+	s.setMinResolvedTSPersistenceInterval(c, rc, svr, 0)
 	store5 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store5TS, store1TS)
 	resetStoreState(c, rc, store1, metapb.StoreState_Tombstone)
 	s.putRegionWithLeader(c, rc, id, store5)
