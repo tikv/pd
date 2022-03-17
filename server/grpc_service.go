@@ -1957,3 +1957,37 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
 	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
 }
+
+// ReportMinResolvedTS implements gRPC PDServer.
+func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	storeID := request.StoreId
+	minResolvedTS := request.MinResolvedTs
+	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
+		return nil, err
+	}
+	log.Debug("updated min resolved-ts",
+		zap.Uint64("store", storeID),
+		zap.Uint64("min resolved-ts", minResolvedTS))
+	return &pdpb.ReportMinResolvedTsResponse{
+		Header: s.header(),
+	}, nil
+}
