@@ -130,10 +130,11 @@ func (l *RegionLabeler) loadRules() error {
 
 func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
-	l.earlistExpireTime = unlimittedExpire
+	minExpireInitted := false
 	for _, rule := range l.labelRules {
-		if rule.minExpire.Before(l.earlistExpireTime) {
+		if !minExpireInitted || rule.minExpire.Before(l.earlistExpireTime) {
 			l.earlistExpireTime = rule.minExpire
+			minExpireInitted = true
 		}
 		if rule.RuleType == KeyRange {
 			rs := rule.Data.([]*KeyRangeRule)
@@ -141,6 +142,9 @@ func (l *RegionLabeler) buildRangeList() {
 				builder.AddItem(r.StartKey, r.EndKey, rule)
 			}
 		}
+	}
+	if !minExpireInitted {
+		l.earlistExpireTime = unlimittedExpire
 	}
 	l.rangeList = builder.Build()
 }

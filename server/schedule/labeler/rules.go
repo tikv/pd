@@ -128,7 +128,7 @@ func (rule *LabelRule) checkAndRemoveExpireLabels(now time.Time) bool {
 		}
 	}
 
-	if len(labels) == len(rule.Labels) && rule.minExpire.Equal(minExpire) {
+	if rule.minExpire.Equal(minExpire) {
 		return false
 	}
 	rule.minExpire = minExpire
