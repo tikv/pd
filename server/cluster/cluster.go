@@ -1693,7 +1693,7 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	return c.putStoreLocked(newStore)
 }
 
-func (c *RaftCluster) isOldMinResolvedTSSmaller(minResolvedTSRealtime uint64) bool {
+func (c *RaftCluster) isLarger(minResolvedTSRealtime uint64) bool {
 	c.RLock()
 	defer c.RUnlock()
 	return minResolvedTSRealtime != math.MaxUint64 && minResolvedTSRealtime > c.minResolvedTS
@@ -1710,7 +1710,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	c.LoadOldMinResolvedTS()
+	c.LoadMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -1720,7 +1720,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 			interval = c.opt.GetMinResolvedTSPersistenceInterval()
 			if interval != 0 {
 				minResolvedTSRealtime := c.GetMinResolvedTS()
-				if c.isOldMinResolvedTSSmaller(minResolvedTSRealtime) {
+				if c.isLarger(minResolvedTSRealtime) {
 					c.Lock()
 					c.minResolvedTS = minResolvedTSRealtime
 					c.storage.SaveMinResolvedTS(minResolvedTSRealtime)
@@ -1734,15 +1734,15 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 	}
 }
 
-// LoadOldMinResolvedTS loads the min resolved ts from the storage.
-func (c *RaftCluster) LoadOldMinResolvedTS() {
+// LoadMinResolvedTS loads the min resolved ts from the storage.
+func (c *RaftCluster) LoadMinResolvedTS() {
 	minResolvedTS, err := c.storage.LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
 	}
-	c.RLock()
-	defer c.RUnlock()
+	c.Lock()
+	defer c.Unlock()
 	c.minResolvedTS = minResolvedTS
 }
 

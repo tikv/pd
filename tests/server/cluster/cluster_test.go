@@ -1161,6 +1161,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	c.Assert(rc, NotNil)
 	addStoreAndCheckMinResolvedTS := func(c *C, isTiflash bool, minResolvedTS, expect uint64) uint64 {
 		storeID, err := id.Alloc()
+		c.Assert(err, IsNil)
 		store := &metapb.Store{
 			Id:      storeID,
 			Version: "v6.0.0",
@@ -1182,14 +1183,13 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 		c.Assert(ts, Equals, expect)
 		return storeID
 	}
-	store1TS := uint64(233)
-	store3TS := store1TS - 10
 
 	// case1: cluster is no initialized
 	// min resolved ts should be not available
 	status, err := rc.LoadClusterStatus()
 	c.Assert(err, IsNil)
 	c.Assert(status.IsInitialized, IsFalse)
+	store1TS := uint64(233)
 	store1 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store1TS, math.MaxUint64)
 
 	// case2: add leader peer to store1
@@ -1204,6 +1204,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 
 	// case4: add new store with smaller min resolved ts but without leader peer
 	// min resolved ts should no change
+	store3TS := store1TS - 10
 	store3 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store3TS, store1TS)
 
 	// case5: add leader peer to store 3, min resolved ts of store3 is smaller than store 1.
