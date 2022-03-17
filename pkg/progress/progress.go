@@ -90,3 +90,11 @@ func (m *Manager) CurrentSpeed(progress string) float64 {
 
 	return m.progesses[progress].speedPerSec
 }
+
+// IsProgressExist returns if a progress has already record in manager.
+func (m *Manager) IsProgressExist(progress string) bool {
+	m.RLock()
+	defer m.RUnlock()
+	_, ok := m.progesses[progress]
+	return ok
+}

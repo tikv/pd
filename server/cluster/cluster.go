@@ -323,9 +323,6 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	for _, store := range c.GetStores() {
 		storeID := store.GetID()
 		c.hotStat.GetOrCreateRollingStoreStats(storeID)
-		if store.IsRemoving() {
-			c.progressManager.AddProgressIndicator(fmt.Sprintf("%s-%d", removingAction, storeID), float64(c.core.GetStoreRegionSize(storeID)))
-		}
 	}
 	return c, nil
 }
@@ -560,22 +557,22 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
-			zap.Uint64("store-id", newStore.GetID()),
+			zap.Uint64("store-id", storeID),
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(err))
+			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
-	if store := c.core.GetStore(newStore.GetID()); store != nil {
+	if store := c.core.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
 	c.core.PutStore(newStore)
-	c.hotStat.Observe(newStore.GetID(), newStore.GetStoreStats())
+	c.hotStat.Observe(storeID, newStore.GetStoreStats())
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -1084,7 +1081,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
-		zap.Uint64("store-id", newStore.GetID()),
+		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
@@ -1127,7 +1124,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 
 	newStore := store.Clone(core.TombstoneStore())
 	log.Warn("store has been Tombstone",
-		zap.Uint64("store-id", newStore.GetID()),
+		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
@@ -1290,6 +1287,10 @@ func (c *RaftCluster) checkStores() {
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current int64) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
+	if !c.progressManager.IsProgressExist(progress) {
+		c.progressManager.AddProgressIndicator(progress, float64(current))
+		return
+	}
 	c.progressManager.UpdateProgressIndicator(progress, float64(current))
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.Process(progress))
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.LeftSeconds(progress))
@@ -1298,9 +1299,11 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
-	c.progressManager.RemoveProgressIndicator(progress)
-	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+	if c.progressManager.IsProgressExist(progress) {
+		c.progressManager.RemoveProgressIndicator(progress)
+		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+	}
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.
