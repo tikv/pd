@@ -58,6 +58,7 @@ type RegionInfo struct {
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
+	buckets           *metapb.Buckets
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -212,6 +213,14 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// GetBuckets returns the buckets of the region.
+func (r *RegionInfo) GetBuckets() *metapb.Buckets {
+	if r == nil {
+		return nil
+	}
+	return r.buckets
 }
 
 // GetTerm returns the current term of the region
