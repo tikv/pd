@@ -217,9 +217,6 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 
 // GetBuckets returns the buckets of the region.
 func (r *RegionInfo) GetBuckets() *metapb.Buckets {
-	if r == nil {
-		return nil
-	}
 	return r.buckets
 }
 
