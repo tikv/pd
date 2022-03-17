@@ -53,7 +53,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// backgroundJobInterval is the interval to run background jobs.
 var backgroundJobInterval = 10 * time.Second
+
+// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
+var DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -252,19 +256,17 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
-	minResolvedTSPersistenceInterval := c.opt.GetMinResolvedTSPersistenceInterval()
 
 	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
-		minResolvedTSPersistenceInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
-	go c.runMinResolvedTSJob(minResolvedTSPersistenceInterval)
+	go c.runMinResolvedTSJob()
 	c.running = true
 
 	return nil
@@ -1697,28 +1699,37 @@ func (c *RaftCluster) isOldMinResolvedTSSmaller(minResolvedTSRealtime uint64) bo
 	return minResolvedTSRealtime != math.MaxUint64 && minResolvedTSRealtime > c.minResolvedTS
 }
 
-func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
-	defer c.wg.Done()
-	if saveInterval == 0 {
-		return
-	}
+func (c *RaftCluster) runMinResolvedTSJob() {
 	defer logutil.LogPanic()
-	c.LoadOldMinResolvedTS()
-	ticker := time.NewTicker(saveInterval)
+	defer c.wg.Done()
+
+	interval := c.opt.GetMinResolvedTSPersistenceInterval()
+	if interval == 0 {
+		interval = DefaultMinResolvedTSPersistenceInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	c.LoadOldMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("min resolved ts background jobs has been stopped")
 			return
 		case <-ticker.C:
-			minResolvedTSRealtime := c.GetMinResolvedTS()
-			if c.isOldMinResolvedTSSmaller(minResolvedTSRealtime) {
-				c.Lock()
-				c.minResolvedTS = minResolvedTSRealtime
-				c.storage.SaveMinResolvedTS(minResolvedTSRealtime)
-				c.Unlock()
+			interval = c.opt.GetMinResolvedTSPersistenceInterval()
+			if interval != 0 {
+				minResolvedTSRealtime := c.GetMinResolvedTS()
+				if c.isOldMinResolvedTSSmaller(minResolvedTSRealtime) {
+					c.Lock()
+					c.minResolvedTS = minResolvedTSRealtime
+					c.storage.SaveMinResolvedTS(minResolvedTSRealtime)
+					c.Unlock()
+				}
+			} else {
+				interval = DefaultMinResolvedTSPersistenceInterval
 			}
+			ticker.Reset(interval)
 		}
 	}
 }
