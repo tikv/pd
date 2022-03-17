@@ -217,6 +217,13 @@ func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
+// SetMinResolvedTS sets min resolved ts for the store.
+func SetMinResolvedTS(minResolvedTS uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.minResolvedTS = minResolvedTS
+	}
+}
+
 // ResetStoreLimit resets the store limit for a store.
 func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCreateOption {
 	return func(store *StoreInfo) {

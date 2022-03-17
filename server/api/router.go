@@ -316,7 +316,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/trend", trendHandler.GetTrend, setMethods("GET"), setAuditBackend(prometheus))
 
 	adminHandler := newAdminHandler(svr, rd)
-
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
@@ -363,6 +362,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
 	registerFunc(apiRouter, "/gc/safepoint", serviceGCSafepointHandler.GetGCSafePoint, setMethods("GET"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/gc/safepoint/{service_id}", serviceGCSafepointHandler.DeleteGCSafePoint, setMethods("DELETE"), setAuditBackend(localLog))
+
+	// min resolved ts API
+	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
+	registerFunc(apiRouter, "/min-resolved-ts", minResolvedTSHandler.Get, setMethods("GET"))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
