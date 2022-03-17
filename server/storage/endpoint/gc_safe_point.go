@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -48,15 +49,12 @@ var _ GCSafePointStorage = (*StorageEndpoint)(nil)
 // LoadGCSafePoint loads current GC safe point from storage.
 func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
 	value, err := se.Load(gcSafePointPath())
-	if err != nil {
+	if err != nil || value == "" {
 		return 0, err
-	}
-	if value == "" {
-		return 0, nil
 	}
 	safePoint, err := strconv.ParseUint(value, 16, 64)
 	if err != nil {
-		return 0, err
+		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
 	}
 	return safePoint, nil
 }
