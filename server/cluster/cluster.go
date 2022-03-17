@@ -1737,7 +1737,7 @@ func (c *RaftCluster) loadMinResolvedTS() {
 	c.minResolvedTS = minResolvedTS
 }
 
-//
+// GetMinResolvedTS returns the min resolved ts of the cluster.
 func (c *RaftCluster) GetMinResolvedTS() uint64 {
 	c.RLock()
 	defer c.RUnlock()

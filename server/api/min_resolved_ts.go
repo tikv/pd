@@ -17,6 +17,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -35,7 +36,9 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type minResolvedTS struct {
-	MinResolvedTS uint64 `json:"min_resolved_ts"`
+	IsRealTime      bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS   uint64            `json:"min_resolved_ts"`
+	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
 }
 
 // @Tags minresolvedts
@@ -45,13 +48,12 @@ type minResolvedTS struct {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
-	storage := h.svr.GetStorage()
-	value, err := storage.LoadMinResolvedTS()
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
+	c := h.svr.GetRaftCluster()
+	value := c.GetMinResolvedTS()
+	persistInterval := c.GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
-		MinResolvedTS: value,
+		MinResolvedTS:   value,
+		PersistInterval: persistInterval,
+		IsRealTime:      persistInterval.Duration != 0,
 	})
 }
