@@ -1159,6 +1159,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
+	svr := leaderServer.GetServer()
 	addStoreAndCheckMinResolvedTS := func(c *C, isTiflash bool, minResolvedTS, expect uint64) uint64 {
 		storeID, err := id.Alloc()
 		c.Assert(err, IsNil)
@@ -1218,7 +1219,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	s.checkMinResolvedTSFromStorage(c, rc, 0)
 	cfg := rc.GetOpts().GetPDServerConfig()
 	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(time.Microsecond)
-	rc.GetOpts().SetPDServerConfig(cfg)
+	svr.SetPDServerConfig(*cfg)
 	s.checkMinResolvedTSFromStorage(c, rc, ts)
 
 	// case7: set store3 to tombstone
@@ -1243,7 +1244,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	store5TS := store1TS + 10
 	cfg = rc.GetOpts().GetPDServerConfig()
 	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(0)
-	rc.GetOpts().SetPDServerConfig(cfg)
+	svr.SetPDServerConfig(*cfg)
 	time.Sleep(time.Millisecond * 10)
 	store5 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store5TS, store1TS)
 	resetStoreState(c, rc, store1, metapb.StoreState_Tombstone)
