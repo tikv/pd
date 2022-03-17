@@ -44,7 +44,7 @@ type minResolvedTS struct {
 // @Success 200 {array} minResolvedTS
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /min-resolved-ts [get]
-func (h *minResolvedTSHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	value, err := storage.LoadMinResolvedTS()
 	if err != nil {
