@@ -17,6 +17,8 @@ package cluster_test
 import (
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
@@ -1114,4 +1117,107 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, IsNil)
+}
+
+func (s *clusterTestSuite) putRegionWithLeader(c *C, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
+	for i := 0; i < 3; i++ {
+		regionID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		peerID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		region := &metapb.Region{
+			Id:       regionID,
+			Peers:    []*metapb.Peer{{Id: peerID, StoreId: storeID}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+	c.Assert(rc.GetStore(storeID).GetLeaderCount(), Equals, 3)
+}
+
+func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	id := leaderServer.GetAllocator()
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
+	addStoreWithMinResolvedTS := func(c *C, storeID uint64, isTiflash bool, minResolvedTS, expect uint64) {
+		store := &metapb.Store{
+			Id:      storeID,
+			Version: "v6.0.0",
+			Address: "127.0.0.1:" + strconv.Itoa(int(storeID)),
+		}
+		if isTiflash {
+			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		_, err := putStore(grpcPDClient, clusterID, store)
+		c.Assert(err, IsNil)
+		req := &pdpb.ReportMinResolvedTsRequest{
+			Header:        testutil.NewRequestHeader(clusterID),
+			StoreId:       storeID,
+			MinResolvedTs: minResolvedTS,
+		}
+		_, err = grpcPDClient.ReportMinResolvedTS(context.Background(), req)
+		c.Assert(err, IsNil)
+		time.Sleep(time.Millisecond * 10)
+		ts := rc.GetMinResolvedTS()
+		c.Assert(ts, Equals, expect)
+	}
+	store1TS := uint64(233)
+	store3TS := store1TS - 10
+	// case1: no init
+	// min resolved ts should be not available
+	store1 := uint64(1)
+	status, err := rc.LoadClusterStatus()
+	c.Assert(status.IsInitialized, IsFalse)
+	addStoreWithMinResolvedTS(c, store1, false, store1TS, math.MaxUint64)
+	// case2: add leader to store1
+	// min resolved ts should be available
+	s.putRegionWithLeader(c, rc, id, store1)
+	ts := rc.GetMinResolvedTS()
+	c.Assert(ts, Equals, store1TS)
+	// case2: add tiflash store
+	// min resolved ts should no change
+	store2 := uint64(2)
+	addStoreWithMinResolvedTS(c, store2, true, 0, store1TS)
+	// case4: add new store with less ts but without leader
+	// min resolved ts should no change
+	store3 := uint64(3)
+	addStoreWithMinResolvedTS(c, store3, false, store3TS, store1TS)
+	// case5: add leader to store 3, store 3 has less ts than store 1.
+	// min resolved ts should change to store 3
+	s.putRegionWithLeader(c, rc, id, store3)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(ts, Equals, store3TS)
+	// case6: set tombstone
+	// min resolved ts should change to store 1
+	resetStoreState(c, rc, store3, metapb.StoreState_Tombstone)
+	time.Sleep(time.Millisecond * 10)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts, Equals, store1TS)
+	// case7: add a store with leader but no report min resolved ts
+	// min resolved ts should be zero
+	store4 := uint64(4)
+	_, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      store4,
+		Version: "v6.0.0",
+		Address: "127.0.0.1:" + strconv.Itoa(int(store4)),
+	})
+	c.Assert(err, IsNil)
+	s.putRegionWithLeader(c, rc, id, store4)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts, Equals, uint64(0))
 }
