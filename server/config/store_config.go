@@ -17,10 +17,13 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/pkg/typeutil"
 	"io/ioutil"
 	"net/http"
 	"sync"
+
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/typeutil"
+	"go.uber.org/zap"
 )
 
 var (
@@ -119,6 +122,7 @@ func (m *StoreConfigManager) Load(url string) error {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return err
 	}
+	log.Info("load store config", zap.Any("config", string(body)))
 	m.SetConfig(&cfg)
 	return nil
 }
