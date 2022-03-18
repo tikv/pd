@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -154,6 +155,9 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
+	serviceLabels      map[string][]apiutil.AccessPath
+	apiServiceLabelMap map[apiutil.AccessPath]string
+
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
 	auditBackends []audit.Backend
@@ -251,6 +255,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceLabels = make(map[string][]apiutil.AccessPath)
+	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -1122,6 +1128,42 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return cluster.GetRegions()
 	}
 	return nil
+}
+
+// GetServiceLabels returns ApiAccessPaths by given service label
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
+	if apis, ok := s.serviceLabels[serviceLabel]; ok {
+		return apis
+	}
+	return nil
+}
+
+// GetAPIAccessServiceLabel returns service label by given access path
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.AccessPath) string {
+	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
+		return servicelabel
+	}
+	accessPathNoMethod := apiutil.NewAccessPath(accessPath.Path, "")
+	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
+		return servicelabel
+	}
+	return ""
+}
+
+// AddServiceLabel is used to add the relationship between service label and api access path
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.AccessPath) {
+	if slice, ok := s.serviceLabels[serviceLabel]; ok {
+		slice = append(slice, accessPath)
+		s.serviceLabels[serviceLabel] = slice
+	} else {
+		slice = []apiutil.AccessPath{accessPath}
+		s.serviceLabels[serviceLabel] = slice
+	}
+
+	s.apiServiceLabelMap[accessPath] = serviceLabel
 }
 
 // GetAuditBackend returns audit backends
