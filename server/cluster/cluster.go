@@ -1674,12 +1674,12 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	return c.putStoreLocked(newStore)
 }
 
-func (c *RaftCluster) checkAndUpdateMinResolvedTS() {
+func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
 	c.Lock()
 	defer c.Unlock()
 
 	if !c.isInitialized() {
-		return
+		return math.MaxUint64, false
 	}
 	curMinResolvedTS := uint64(math.MaxUint64)
 	for _, s := range c.GetStores() {
@@ -1691,10 +1691,10 @@ func (c *RaftCluster) checkAndUpdateMinResolvedTS() {
 		}
 	}
 	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
-		return
+		return c.minResolvedTS, false
 	}
 	c.minResolvedTS = curMinResolvedTS
-	c.storage.SaveMinResolvedTS(curMinResolvedTS)
+	return c.minResolvedTS, true
 }
 
 func (c *RaftCluster) runMinResolvedTSJob() {
@@ -1717,7 +1717,9 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 		case <-ticker.C:
 			interval = c.opt.GetMinResolvedTSPersistenceInterval()
 			if interval != 0 {
-				c.checkAndUpdateMinResolvedTS()
+				if current, needPersist := c.checkAndUpdateMinResolvedTS(); needPersist {
+					c.storage.SaveMinResolvedTS(current)
+				}
 			} else {
 				interval = DefaultMinResolvedTSPersistenceInterval
 			}
@@ -1727,13 +1729,13 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 }
 
 func (c *RaftCluster) loadMinResolvedTS() {
-	c.Lock()
-	defer c.Unlock()
 	minResolvedTS, err := c.storage.LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
 	}
+	c.Lock()
+	defer c.Unlock()
 	c.minResolvedTS = minResolvedTS
 }
 
