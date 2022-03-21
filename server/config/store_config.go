@@ -41,11 +41,22 @@ var (
 type StoreConfigManager struct {
 	mu     sync.RWMutex
 	config *StoreConfig
+	client http.Client
+	schema string
 }
 
 // NewStoreConfigManager creates a new StoreConfigManager.
-func NewStoreConfigManager() *StoreConfigManager {
-	return &StoreConfigManager{}
+func NewStoreConfigManager(config SecurityConfig) *StoreConfigManager {
+	manager := &StoreConfigManager{
+		schema: "http",
+	}
+	if cfg, err := config.ToTLSConfig(); err == nil {
+		manager.client = http.Client{
+			Transport: &http.Transport{TLSClientConfig: cfg},
+		}
+		manager.schema = "https"
+	}
+	return manager
 }
 
 // StoreConfig is the config of store like TiKV.
@@ -108,8 +119,9 @@ func (m *StoreConfigManager) SetConfig(c *StoreConfig) {
 
 // Load Loads the store configuration.
 // the lasted config will be saved to the file.
-func (m *StoreConfigManager) Load(url string) error {
-	resp, err := http.DefaultClient.Get(fmt.Sprintf("%s/config", url))
+func (m *StoreConfigManager) Load(statusAddress string) error {
+	url := fmt.Sprintf("%s://%s/config", m.schema, statusAddress)
+	resp, err := m.client.Get(fmt.Sprintf(url))
 	if err != nil {
 		return err
 	}
