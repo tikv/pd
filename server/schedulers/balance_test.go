@@ -604,12 +604,12 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestBatchBalance(c *C) {
 	}
 	s.tc.AddLeaderRegionWithRange(uint64(101), "101a", "101z", 5, 4, 3)
 	ops := lb.Schedule(s.tc)
-	c.Assert(ops, HasLen, 5)
+	c.Assert(ops, HasLen, 4)
 	regions := make(map[uint64]struct{})
 	for _, op := range ops {
 		regions[op.RegionID()] = struct{}{}
 	}
-	c.Assert(regions, HasLen, 5)
+	c.Assert(regions, HasLen, 4)
 }
 
 func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
