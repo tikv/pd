@@ -47,6 +47,15 @@ func setQueries(pairs ...string) createRouteOption {
 	}
 }
 
+// routeCreateFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) *mux.Route {
+	route = route.Handler(handler).Name(name)
+	for _, opt := range opts {
+		opt(route)
+	}
+	return route
+}
+
 func createStreamingRender() *render.Render {
 	return render.New(render.Options{
 		StreamingJSON: true,
@@ -57,14 +66,6 @@ func createIndentRender() *render.Render {
 	return render.New(render.Options{
 		IndentJSON: true,
 	})
-}
-
-func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) *mux.Route {
-	route = route.Handler(handler).Name(name)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
 }
 
 func getFunctionName(f interface{}) string {
@@ -84,7 +85,6 @@ func getFunctionName(f interface{}) string {
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
-	// registerXXX is used to registers a new route which will be registered matcher or service by opts for the URL path
 	registerPrefix := func(router *mux.Router, prefix string,
 		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
 		return routeCreateFunc(router.PathPrefix(prefix), serviceMiddle.createHandler(handleFunc),
