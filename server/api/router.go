@@ -48,12 +48,11 @@ func setQueries(pairs ...string) createRouteOption {
 }
 
 // routeCreateFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
-func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) *mux.Route {
+func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) {
 	route = route.Handler(handler).Name(name)
 	for _, opt := range opts {
 		opt(route)
 	}
-	return route
 }
 
 func createStreamingRender() *render.Render {
@@ -85,14 +84,14 @@ func getFunctionName(f interface{}) string {
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
-	registerPrefix := func(router *mux.Router, prefix string,
-		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-		return routeCreateFunc(router.PathPrefix(prefix), serviceMiddle.createHandler(handleFunc),
+	registerPrefix := func(router *mux.Router, prefixPath string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.PathPrefix(prefixPath), serviceMiddle.createHandler(handleFunc),
 			getFunctionName(handleFunc), opts...)
 	}
-	registerFunc := func(router *mux.Router, prefix string,
-		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-		return routeCreateFunc(router.Path(prefix), serviceMiddle.createHandler(handleFunc),
+	registerFunc := func(router *mux.Router, path string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.Path(path), serviceMiddle.createHandler(handleFunc),
 			getFunctionName(handleFunc), opts...)
 	}
 	setAuditBackend := func(labels ...string) createRouteOption {
