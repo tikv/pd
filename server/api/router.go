@@ -62,25 +62,21 @@ func createIndentRender() *render.Render {
 
 // middlewareBuilder is used to build service middleware for HTTP api
 type serviceMiddlewareBuilder struct {
-	svr     *server.Server
-	handler http.Handler
+	svr      *server.Server
+	handlers []negroni.Handler
 }
 
 func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 	return &serviceMiddlewareBuilder{
-		svr: s,
-		handler: negroni.New(
-			newRequestInfoMiddleware(s),
-			newAuditMiddleware(s),
-			newRateLimitMiddleware(s),
-		),
+		svr:      s,
+		handlers: []negroni.Handler{newAuditMiddleware(s), newRequestInfoMiddleware(s), newRateLimitMiddleware(s)},
 	}
 }
 
 // registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
 func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, path string,
 	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.HandleFunc(path, s.middlewareFunc(handleFunc))
+	route := router.Handle(path, s.createHandler(handleFunc))
 	handleFuncName := getFunctionName(handleFunc)
 	route = route.Name(handleFuncName)
 	for _, opt := range opts {
@@ -92,7 +88,7 @@ func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, p
 // registerPathPrefixRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
 func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandleFunc(router *mux.Router, prefix string,
 	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.PathPrefix(prefix).HandlerFunc(s.middlewareFunc(handleFunc))
+	route := router.PathPrefix(prefix).Handler(s.createHandler(handleFunc))
 	handleFuncName := getFunctionName(handleFunc)
 	route = route.Name(handleFuncName)
 	for _, opt := range opts {
@@ -101,11 +97,8 @@ func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandleFunc(router *mux
 	return route
 }
 
-func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.handler.ServeHTTP(w, r)
-		next(w, r)
-	}
+func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, *http.Request)) http.Handler {
+	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
 }
 
 func getFunctionName(f interface{}) string {

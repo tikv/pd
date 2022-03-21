@@ -246,7 +246,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	input := make(map[string]interface{})
 	input["type"] = "label"
 	input["label"] = "SetLogLevel"
-	input["qps"] = 1
+	input["qps"] = 0.5
 	input["concurrency"] = 1
 	jsonBody, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -262,14 +262,45 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
 		c.Assert(err, IsNil)
-		_, err = io.ReadAll(resp.Body)
+		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		c.Assert(err, IsNil)
 		if i > 0 {
 			c.Assert(resp.StatusCode, Equals, http.StatusTooManyRequests)
+			c.Assert(string(data), Equals, fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 		} else {
 			c.Assert(resp.StatusCode, Equals, http.StatusOK)
 		}
+	}
+
+	// qps = 0.5, so sleep 2s
+	time.Sleep(time.Second * 2)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		c.Assert(err, IsNil)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		c.Assert(err, IsNil)
+		if i > 0 {
+			c.Assert(resp.StatusCode, Equals, http.StatusTooManyRequests)
+			c.Assert(string(data), Equals, fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+		} else {
+			c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		}
+	}
+
+	// test only sleep 1s
+	time.Sleep(time.Second)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		c.Assert(err, IsNil)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		c.Assert(err, IsNil)
+		c.Assert(resp.StatusCode, Equals, http.StatusTooManyRequests)
+		c.Assert(string(data), Equals, fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=false", nil)
