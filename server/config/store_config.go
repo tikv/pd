@@ -71,6 +71,13 @@ type StoreConfig struct {
 	} `json:"coprocessor"`
 }
 
+func (c *StoreConfig) String() string {
+	if body, err := json.Marshal(c); err != nil {
+		return string(body)
+	}
+	return "<nil>"
+}
+
 // GetRegionMaxSize returns the max region size in MB
 func (c *StoreConfig) GetRegionMaxSize() uint64 {
 	if c == nil || len(c.Coprocessor.RegionMaxSize) == 0 {
@@ -130,11 +137,11 @@ func (m *StoreConfigManager) Load(statusAddress string) error {
 	if err != nil {
 		return err
 	}
-	var cfg StoreConfig
+	var cfg *StoreConfig
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return err
 	}
-	log.Info("load store config", zap.Any("config", string(body)))
-	m.SetConfig(&cfg)
+	log.Info("load store config", zap.String("status-url", url), zap.Stringer("config", cfg))
+	m.SetConfig(cfg)
 	return nil
 }
