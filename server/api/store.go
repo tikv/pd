@@ -767,6 +767,6 @@ func checkProgressAction(action string) error {
 	case metapb.NodeState_Preparing.String(), metapb.NodeState_Removing.String():
 		return nil
 	default:
-		return errors.New("unknown type")
+		return errors.New("unknown action type")
 	}
 }

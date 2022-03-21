@@ -40,7 +40,7 @@ type progressIndicator struct {
 	speedPerSec float64
 }
 
-// RemoveProgressIndicator removes a progress from manager.
+// Reset resets the progress manager.
 func (m *Manager) Reset() {
 	m.Lock()
 	defer m.Unlock()
