@@ -29,6 +29,23 @@ import (
 	"github.com/urfave/negroni"
 )
 
+// serviceMiddlewareBuilder is used to build service middleware for HTTP api
+type serviceMiddlewareBuilder struct {
+	svr      *server.Server
+	handlers []negroni.Handler
+}
+
+func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
+	return &serviceMiddlewareBuilder{
+		svr:      s,
+		handlers: []negroni.Handler{newRequestInfoMiddleware(s), newAuditMiddleware(s), newRateLimitMiddleware(s)},
+	}
+}
+
+func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, *http.Request)) http.Handler {
+	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
+}
+
 // requestInfoMiddleware is used to gather info from requsetInfo
 type requestInfoMiddleware struct {
 	svr *server.Server
