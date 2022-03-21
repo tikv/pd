@@ -17,6 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+
 	. "github.com/pingcap/check"
 )
 
