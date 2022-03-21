@@ -64,7 +64,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:            statistics.NewHotStat(ctx),
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
-		StoreConfigManager: config.NewStoreConfigManager(),
+		StoreConfigManager: config.NewStoreConfigManager(nil),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()

@@ -245,7 +245,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		ctx:                ctx,
 		startTimestamp:     time.Now().Unix(),
 		DiagnosticsServer:  sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		storeConfigManager: config.NewStoreConfigManager(cfg.Security),
+		storeConfigManager: config.NewStoreConfigManager(&cfg.Security),
 	}
 	s.handler = newHandler(s)
 

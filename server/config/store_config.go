@@ -46,7 +46,7 @@ type StoreConfigManager struct {
 }
 
 // NewStoreConfigManager creates a new StoreConfigManager.
-func NewStoreConfigManager(config SecurityConfig) *StoreConfigManager {
+func NewStoreConfigManager(config *SecurityConfig) *StoreConfigManager {
 	manager := &StoreConfigManager{
 		schema: "http",
 	}
