@@ -40,6 +40,16 @@ type progressIndicator struct {
 	speedPerSec float64
 }
 
+// RemoveProgressIndicator removes a progress from manager.
+func (m *Manager) Reset() {
+	m.Lock()
+	defer m.Unlock()
+
+	for progress := range m.progesses {
+		delete(m.progesses, progress)
+	}
+}
+
 // AddProgressIndicator adds a progress into manager.
 func (m *Manager) AddProgressIndicator(progress string, total float64) {
 	m.Lock()
@@ -64,6 +74,9 @@ func (m *Manager) UpdateProgressIndicator(progress string, current float64) {
 	defer m.Unlock()
 
 	m.progesses[progress].current = current
+	if m.progesses[progress].total < current {
+		m.progesses[progress].total = current
+	}
 	m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
 }
 

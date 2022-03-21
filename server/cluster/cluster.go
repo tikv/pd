@@ -1365,6 +1365,7 @@ func (c *RaftCluster) resetMetrics() {
 	c.coordinator.resetHotSpotMetrics()
 	c.resetClusterMetrics()
 	c.resetHealthStatus()
+	c.resetProgressIndicator()
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
@@ -1412,6 +1413,12 @@ func (c *RaftCluster) collectHealthStatus() {
 
 func (c *RaftCluster) resetHealthStatus() {
 	healthStatusGauge.Reset()
+}
+
+func (c *RaftCluster) resetProgressIndicator() {
+	c.progressManager.Reset()
+	storesProgressGauge.Reset()
+	storesETAGauge.Reset()
 }
 
 // GetRegionStatsByType gets the status of the region by types.
