@@ -5,11 +5,13 @@ on:
       - master
       - release-4.0
       - release-5.*
+      - release-6.*
   pull_request:
     branches:
       - master
       - release-4.0
       - release-5.*
+      - release-6.*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -25,7 +27,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v3
         with:
-          go-version: '1.18.0-rc.1'
+          go-version: "1.18.0"
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache
