@@ -50,7 +50,7 @@ func NewStoreConfigManager(config *SecurityConfig) *StoreConfigManager {
 	manager := &StoreConfigManager{
 		schema: "http",
 	}
-	if cfg, err := config.ToTLSConfig(); err == nil {
+	if cfg, err := config.ToTLSConfig(); err == nil && cfg != nil {
 		manager.client = http.Client{
 			Transport: &http.Transport{TLSClientConfig: cfg},
 		}
@@ -125,7 +125,6 @@ func (m *StoreConfigManager) SetConfig(c *StoreConfig) {
 }
 
 // Load Loads the store configuration.
-// the lasted config will be saved to the file.
 func (m *StoreConfigManager) Load(statusAddress string) error {
 	url := fmt.Sprintf("%s://%s/config", m.schema, statusAddress)
 	resp, err := m.client.Get(fmt.Sprintf(url))
