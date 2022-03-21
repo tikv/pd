@@ -95,8 +95,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		return routeCreateFunc(router.Path(prefix), serviceMiddle.createHandler(handleFunc),
 			getFunctionName(handleFunc), opts...)
 	}
-
-	rd := createIndentRender()
 	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
 			if len(labels) > 0 {
@@ -107,16 +105,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	localLog := audit.LocalLogLabel
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
-
 	setRateLimit := func(opts ...ratelimit.Option) createRouteOption {
 		return func(route *mux.Route) {
-			if len(opts) > 0 {
-				svr.UpdateServiceRateLimiter(route.GetName(), opts...)
-			}
+			svr.UpdateServiceRateLimiter(route.GetName(), opts...)
 		}
 	}
 	allowList := ratelimit.AddLabelAllowList()
 
+	rd := createIndentRender()
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
 
