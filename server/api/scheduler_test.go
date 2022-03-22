@@ -104,8 +104,7 @@ func (s *testScheduleSuite) TestOriginAPI(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(statusCode, Equals, 200)
 	c.Assert(rc.GetSchedulers(), HasLen, 0)
-	resp2 := make(map[string]interface{})
-	c.Assert(cu.ReadGetJSON(testDialClient, listURL, &resp2), IsNil)
+	c.Assert(cu.CheckGetJSON(testDialClient, listURL, nil, cu.Status(404)), IsNil)
 
 	statusCode, _ = apiutil.DoDelete(testDialClient, deleteURL)
 	c.Assert(statusCode, Equals, 404)

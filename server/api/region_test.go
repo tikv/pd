@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"sort"
 	"testing"
@@ -607,12 +608,13 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	// invalid url
 	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, "_", "t")
-	err := cu.ReadGetJSON(testDialClient, url, &status)
-	c.Assert(err, NotNil)
+	err := cu.CheckGetJSON(testDialClient, url, nil, cu.Status(http.StatusBadRequest))
+
+	c.Assert(err, IsNil)
 
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")
-	err = cu.ReadGetJSON(testDialClient, url, &status)
-	c.Assert(err, NotNil)
+	err = cu.CheckGetJSON(testDialClient, url, nil, cu.Status(http.StatusBadRequest))
+	c.Assert(err, IsNil)
 
 	// correct test
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), hex.EncodeToString(r1.GetEndKey()))

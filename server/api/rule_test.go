@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/apiutil"
@@ -192,33 +191,32 @@ func (s *testRuleSuite) TestGet(c *C) {
 		name  string
 		rule  placement.Rule
 		found bool
-		code  string
+		code  int
 	}{
 		{
 			name:  "found",
 			rule:  rule,
 			found: true,
-			code:  "",
+			code:  200,
 		},
 		{
 			name:  "not found",
 			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 			found: false,
-			code:  "404",
+			code:  404,
 		},
 	}
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		var resp placement.Rule
 		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.rule.GroupID, testcase.rule.ID)
-		err = cu.ReadGetJSON(testDialClient, url, &resp)
 		if testcase.found {
-			c.Assert(err, IsNil)
+			err = cu.ReadGetJSON(testDialClient, url, &resp)
 			compareRule(c, &resp, &testcase.rule)
 		} else {
-			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
+			err = cu.CheckGetJSON(testDialClient, url, nil, cu.Status(testcase.code))
 		}
+		c.Assert(err, IsNil)
 	}
 }
 
@@ -406,7 +404,7 @@ func (s *testRuleSuite) TestGetAllByRegion(c *C) {
 		name     string
 		regionID string
 		success  bool
-		code     string
+		code     int
 	}{
 		{
 			name:     "found region",
@@ -417,31 +415,31 @@ func (s *testRuleSuite) TestGetAllByRegion(c *C) {
 			name:     "parse regionId failed",
 			regionID: "abc",
 			success:  false,
-			code:     "400",
+			code:     400,
 		},
 		{
 			name:     "region not found",
 			regionID: "5",
 			success:  false,
-			code:     "404",
+			code:     404,
 		},
 	}
 	for _, testcase := range testcases {
 		c.Log(testcase.name)
 		var resp []*placement.Rule
 		url := fmt.Sprintf("%s/rules/region/%s", s.urlPrefix, testcase.regionID)
-		err = cu.ReadGetJSON(testDialClient, url, &resp)
+
 		if testcase.success {
-			c.Assert(err, IsNil)
+			err = cu.ReadGetJSON(testDialClient, url, &resp)
 			for _, r := range resp {
 				if r.GroupID == "e" {
 					compareRule(c, r, &rule)
 				}
 			}
 		} else {
-			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
+			err = cu.CheckGetJSON(testDialClient, url, nil, cu.Status(testcase.code))
 		}
+		c.Assert(err, IsNil)
 	}
 }
 
@@ -458,7 +456,7 @@ func (s *testRuleSuite) TestGetAllByKey(c *C) {
 		key      string
 		success  bool
 		respSize int
-		code     string
+		code     int
 	}{
 		{
 			name:     "key in range",
@@ -470,7 +468,7 @@ func (s *testRuleSuite) TestGetAllByKey(c *C) {
 			name:     "parse key failed",
 			key:      "abc",
 			success:  false,
-			code:     "400",
+			code:     400,
 			respSize: 0,
 		},
 		{
@@ -485,14 +483,13 @@ func (s *testRuleSuite) TestGetAllByKey(c *C) {
 		c.Log(testcase.name)
 		var resp []*placement.Rule
 		url := fmt.Sprintf("%s/rules/key/%s", s.urlPrefix, testcase.key)
-		err = cu.ReadGetJSON(testDialClient, url, &resp)
 		if testcase.success {
-			c.Assert(err, IsNil)
+			err = cu.ReadGetJSON(testDialClient, url, &resp)
 			c.Assert(resp, HasLen, testcase.respSize)
 		} else {
-			c.Assert(err, NotNil)
-			c.Assert(strings.HasSuffix(err.Error(), testcase.code), IsTrue)
+			err = cu.CheckGetJSON(testDialClient, url, nil, cu.Status(testcase.code))
 		}
+		c.Assert(err, IsNil)
 	}
 }
 
@@ -782,7 +779,7 @@ func (s *testRuleSuite) TestBundle(c *C) {
 	b4.Rules[0].GroupID = b4.ID
 
 	// Get
-	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, &bundles)
+	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"/placement-rule/"+id, &bundle)
 	c.Assert(err, IsNil)
 	compareBundle(c, bundle, b4)
 
