@@ -1464,6 +1464,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
+	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
