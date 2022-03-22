@@ -19,7 +19,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"sync"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -39,8 +40,7 @@ var (
 
 // StoreConfigManager is used to manage the store config.
 type StoreConfigManager struct {
-	mu     sync.RWMutex
-	config *StoreConfig
+	config unsafe.Pointer
 	client http.Client
 	schema string
 }
@@ -110,13 +110,6 @@ func (c *StoreConfig) GetRegionSplitKeys() uint64 {
 	return uint64(c.Coprocessor.RegionSplitKeys)
 }
 
-// GetStoreConfig returns the current store configuration.
-func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.config
-}
-
 // GetRegionMaxKeys returns the region split keys
 func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	if c == nil || c.Coprocessor.RegionMaxKeys == 0 {
@@ -125,11 +118,21 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
-// SetConfig updates the config with given config map.
-func (m *StoreConfigManager) SetConfig(c *StoreConfig) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.config = c
+// UpdateConfig updates the config with given config map.
+func (m *StoreConfigManager) UpdateConfig(c *StoreConfig) {
+	if c == nil || m == nil {
+		return
+	}
+	atomic.StorePointer(&m.config, unsafe.Pointer(c))
+}
+
+// GetStoreConfig returns the current store configuration.
+func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
+	if m == nil || m.config == nil {
+		return nil
+	}
+	config := atomic.LoadPointer(&m.config)
+	return (*StoreConfig)(config)
 }
 
 // Load Loads the store configuration.
@@ -149,6 +152,6 @@ func (m *StoreConfigManager) Load(statusAddress string) error {
 		return err
 	}
 	log.Info("update store config successful", zap.String("status-url", url), zap.Stringer("config", &cfg))
-	m.SetConfig(&cfg)
+	m.UpdateConfig(&cfg)
 	return nil
 }

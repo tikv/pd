@@ -60,3 +60,23 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 		c.Assert(config.GetRegionSplitSize(), Equals, uint64(96))
 	}
 }
+
+func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
+	manager := NewStoreConfigManager(nil)
+	c.Assert(manager.schema, Equals, "http")
+	var tlsConfig *SecurityConfig
+	manager = NewStoreConfigManager(tlsConfig)
+	c.Assert(manager.schema, Equals, "http")
+	config := &StoreConfig{
+		Coprocessor{
+			RegionMaxSize: "15GiB",
+		},
+	}
+	manager.UpdateConfig(nil)
+	c.Assert(manager.GetStoreConfig(), IsNil)
+	manager.UpdateConfig(config)
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
+	var m StoreConfigManager
+	m.UpdateConfig(nil)
+	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+}

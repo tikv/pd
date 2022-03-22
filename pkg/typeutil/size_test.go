@@ -16,6 +16,7 @@ package typeutil
 
 import (
 	"encoding/json"
+
 	. "github.com/pingcap/check"
 )
 
