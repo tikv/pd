@@ -595,14 +595,14 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+		return &pdpb.StoreHeartbeatResponse{
+			Header: s.errorHeader(pberr),
+		}, nil
+	}
+
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
-		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-			return &pdpb.StoreHeartbeatResponse{
-				Header: s.errorHeader(pberr),
-			}, nil
-		}
-
 		storeID := request.GetStats().GetStoreId()
 		store := rc.GetStore(storeID)
 		if store == nil {

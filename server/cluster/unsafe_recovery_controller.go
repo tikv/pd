@@ -43,54 +43,71 @@ const (
 	collectingClusterInfo
 	forceLeader
 	recovering
-	finished
 )
 
 type unsafeRecoveryController struct {
 	sync.RWMutex
 
-	cluster               *RaftCluster
-	stage                 unsafeRecoveryStage
-	failedStores          map[uint64]interface{}
-	storeReportExpires    map[uint64]time.Time
-	storeReports          map[uint64]*pdpb.StoreReport // Store info proto
-	numStoresReported     int
-	storePlanExpires      map[uint64]time.Time
-	storeRecoveryPlans    map[uint64]*pdpb.RecoveryPlan // StoreRecoveryPlan proto
-	executionResults      map[uint64]bool               // Execution results for tracking purpose
-	executionReports      map[uint64]*pdpb.StoreReport  // Execution reports for tracking purpose
-	numStoresPlanExecuted int
+	cluster      *RaftCluster
+	stage        unsafeRecoveryStage
+	failedStores map[uint64]interface{}
+
+	storeReportExpires map[uint64]time.Time
+	storeReports       map[uint64]*pdpb.StoreReport // collected reports from store, if not reported yet, it would be nil
+	numStoresReported  int
+
+	storePlanExpires   map[uint64]time.Time
+	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan // StoreRecoveryPlan proto
+
+	executionResults map[uint64]bool              // Execution results for tracking purpose
+	executionReports map[uint64]*pdpb.StoreReport // Execution reports for tracking purpose
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
 	return &unsafeRecoveryController{
-		cluster:               cluster,
-		stage:                 ready,
-		failedStores:          make(map[uint64]interface{}),
-		storeReportExpires:    make(map[uint64]time.Time),
-		numStoresReported:     0,
-		storePlanExpires:      make(map[uint64]time.Time),
-		storeRecoveryPlans:    make(map[uint64]*pdpb.RecoveryPlan),
-		executionResults:      make(map[uint64]bool),
-		executionReports:      make(map[uint64]*pdpb.StoreReport),
-		numStoresPlanExecuted: 0,
+		cluster:            cluster,
+		stage:              ready,
+		failedStores:       make(map[uint64]interface{}),
+		storeReportExpires: make(map[uint64]time.Time),
+		storeReports:       make(map[uint64]*pdpb.StoreReport),
+		numStoresReported:  0,
+		storePlanExpires:   make(map[uint64]time.Time),
+		storeRecoveryPlans: make(map[uint64]*pdpb.RecoveryPlan),
+		executionResults:   make(map[uint64]bool),
+		executionReports:   make(map[uint64]*pdpb.StoreReport),
 	}
+}
+
+func (u *unsafeRecoveryController) reset() {
+	u.stage = ready
+	u.failedStores = make(map[uint64]interface{})
+	u.storeReportExpires = make(map[uint64]time.Time)
+	u.storeReports = make(map[uint64]*pdpb.StoreReport)
+	u.numStoresReported = 0
+	u.storePlanExpires = make(map[uint64]time.Time)
+	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+	u.executionResults = make(map[uint64]bool)
+	u.executionReports = make(map[uint64]*pdpb.StoreReport)
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
 func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]interface{}) error {
 	u.Lock()
 	defer u.Unlock()
+
 	if len(failedStores) == 0 {
 		return errors.Errorf("No store specified")
 	}
-	if u.stage != ready && u.stage != finished {
+	if u.stage != ready {
 		return errors.Errorf("Another request is working in progress")
 	}
-	u.reset()
+
+	// validate the stores and mark the store as tombstone forcibly
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
-		if store != nil && (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
+		if store == nil {
+			return errors.Errorf("Store %v doesn't exist", failedStore)
+		} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
 			return errors.Errorf("Store %v is up and connected", failedStore)
 		}
 	}
@@ -100,6 +117,8 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 			return err
 		}
 	}
+
+	u.reset()
 	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
@@ -114,64 +133,46 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	return nil
 }
 
-// Collects and checks if store reports have been fully collected.
-func (u *unsafeRecoveryController) collectAndCheckStoreReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) bool {
-	if heartbeat.StoreReport == nil {
-		if _, isFailedStore := u.failedStores[heartbeat.Stats.StoreId]; isFailedStore {
-			// This should be unreachable.
-			return false
-		}
-
-		expire, requested := u.storeReportExpires[heartbeat.Stats.StoreId]
-		now := time.Now()
-		if !requested || expire.Before(now) {
-			// Inform the store to send detailed report in the next heartbeat.
-			resp.RequireDetailedReport = true
-			u.storeReportExpires[heartbeat.Stats.StoreId] = now.Add(storeRequestInterval)
-		}
-	} else if report, exist := u.storeReports[heartbeat.Stats.StoreId]; exist && report == nil {
-		u.storeReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
-		u.numStoresReported++
-		if u.numStoresReported == len(u.storeReports) {
-			return true
-		}
-	}
-	return false
-}
-
 // HandleStoreHeartbeat handles the store heartbeat requests and checks whether the stores need to
 // send detailed report back.
 func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
 	u.Lock()
 	defer u.Unlock()
-	if len(u.failedStores) == 0 {
-		return
-	}
+
 	switch u.stage {
+	case ready:
+		// no recovery in progress, do nothing
+		return
 	case collectingClusterInfo:
-		if u.collectAndCheckStoreReport(heartbeat, resp) {
+		if u.dispatchPlanAndCollectReport(heartbeat, resp) {
 			go func() {
 				if !u.generateForceLeaderPlan() {
 					u.finishRecovery()
+				} else {
+					u.changeStage(forceLeader)
 				}
 			}()
 		}
 	case forceLeader:
-		if u.collectAndCheckStoreReport(heartbeat, resp) {
+		if u.dispatchPlanAndCollectReport(heartbeat, resp) {
 			go func() {
 				if !u.generateRecoveryPlan() {
 					u.finishRecovery()
+				} else {
+					u.changeStage(recovering)
 				}
 			}()
 		}
 	case recovering:
-		if u.collectAndCheckStoreReport(heartbeat, resp) {
+		if u.dispatchPlanAndCollectReport(heartbeat, resp) {
 			go func() {
 				if u.generateForceLeaderPlan() {
 					// still have plan to do
+					u.changeStage(forceLeader)
 					return
 				}
 				if u.generateRecoveryPlan() {
+					u.changeStage(recovering)
 					// still have plan to do
 					return
 				}
@@ -181,28 +182,68 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	}
 }
 
+// It dispatches recovery plan if any, collects and checks if store reports have been fully collected.
+func (u *unsafeRecoveryController) dispatchPlanAndCollectReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) bool {
+	storeID := heartbeat.Stats.StoreId
+	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
+		// This should be unreachable.
+		// TODO: abort the process directly
+		return false
+	}
+
+	if _, find := u.storeReports[storeID]; !find {
+		// No need to collect the report of the store
+		return false
+	}
+
+	now := time.Now()
+	if expire, requested := u.storePlanExpires[storeID]; !requested || expire.Before(now) {
+		// Dispatch the recovery plan to the store, and the plan may be empty.
+		resp.Plan = u.getRecoveryPlan(storeID)
+		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
+	}
+
+	if heartbeat.StoreReport == nil {
+		expire, requested := u.storeReportExpires[storeID]
+		now := time.Now()
+		if !requested || expire.Before(now) {
+			// Inform the store to send detailed report in the next heartbeat.
+			resp.RequireDetailedReport = true
+			u.storeReportExpires[storeID] = now.Add(storeRequestInterval)
+		}
+	} else if report, exists := u.storeReports[storeID]; exists && report == nil {
+		u.storeReports[storeID] = heartbeat.StoreReport
+		u.numStoresReported++
+		if u.numStoresReported == len(u.storeReports) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (u *unsafeRecoveryController) finishRecovery() {
 	log.Info("Recover finished.")
 	for _, history := range u.History() {
 		log.Info(history)
 	}
-
-	u.Lock()
-	defer u.Unlock()
-	u.stage = finished
+	u.changeStage(ready)
 }
 
-func (u *unsafeRecoveryController) reset() {
-	u.stage = ready
-	u.failedStores = make(map[uint64]interface{})
-	u.storeReportExpires = make(map[uint64]time.Time)
-	u.storeReports = make(map[uint64]*pdpb.StoreReport)
-	u.numStoresReported = 0
+func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
+	u.Lock()
+	defer u.Unlock()
+
+	u.stage = stage
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-	u.executionResults = make(map[uint64]bool)
-	u.executionReports = make(map[uint64]*pdpb.StoreReport)
-	u.numStoresPlanExecuted = 0
+	u.storeReportExpires = make(map[uint64]time.Time)
+	// reset store reports to nil instead of delete, because it relays on the item
+	// to decide which store it needs to collect the report from.
+	for k := range u.storeReports {
+		u.storeReports[k] = nil
+	}
+	u.numStoresReported = 0
 }
 
 func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
@@ -236,7 +277,6 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
 	}
 
 	return hasQuorum(incomingVoters) && hasQuorum(outgoingVoters)
-
 }
 
 func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*metapb.Peer {
@@ -447,7 +487,6 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	// it's hard to distinguish it with unfinished split region
 	// and it's rare, so won't do it now
 
-	u.stage = recovering
 	return hasPlan
 }
 
@@ -537,7 +576,6 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 	for store, plan := range u.storeRecoveryPlans {
 		log.Info("Store plan", zap.String("store", strconv.FormatUint(store, 10)), zap.String("plan", proto.MarshalTextString(plan)))
 	}
-	u.stage = recovering
 	return hasPlan
 }
 
@@ -592,10 +630,10 @@ func (u *unsafeRecoveryController) Show() []string {
 		status = append(status, "Stores that have not reported to PD: "+unreported)
 		return status
 	case forceLeader:
-
+		// TODO:
 	case recovering:
 		var status []string
-		status = append(status, fmt.Sprintf("Waiting for recover commands being applied, %d/%d", u.numStoresPlanExecuted, len(u.storeRecoveryPlans)))
+		status = append(status, fmt.Sprintf("Waiting for recover commands being applied, %d/%d", u.numStoresReported, len(u.storeRecoveryPlans)))
 		status = append(status, "Recovery plan:")
 		for storeID, plan := range u.storeRecoveryPlans {
 			planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
@@ -608,7 +646,7 @@ func (u *unsafeRecoveryController) Show() []string {
 				for _, peer := range remove.Peers {
 					peers += "(" + getPeerDigest(peer) + "), "
 				}
-				planDigest += fmt.Sprintf("region %s {%s}", remove.RegionId, peers) + ", "
+				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
 			}
 			planDigest += "; deletes: "
 			for _, deletion := range plan.Deletes {
@@ -623,8 +661,6 @@ func (u *unsafeRecoveryController) Show() []string {
 			}
 		}
 		return status
-	case finished:
-		return []string{"Last recovery has finished."}
 	}
 	return []string{"Undefined status"}
 }
@@ -660,7 +696,7 @@ func (u *unsafeRecoveryController) History() []string {
 				for _, peer := range remove.Peers {
 					peers += "(" + getPeerDigest(peer) + "), "
 				}
-				planDigest += fmt.Sprintf("region %s {%s}", remove.RegionId, peers) + ", "
+				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
 			}
 			planDigest += "; deletes: "
 			for _, deletion := range plan.Deletes {
