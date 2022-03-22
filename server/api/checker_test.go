@@ -104,14 +104,14 @@ func (s *testCheckerSuite) testGetStatus(name string, c *C) {
 
 	// normal run
 	resp := make(map[string]interface{})
-	err := cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), resp)
+	err := cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsFalse)
 	// paused
 	err = handler.PauseOrResumeChecker(name, 30)
 	c.Assert(err, IsNil)
 	resp = make(map[string]interface{})
-	err = cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), resp)
+	err = cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsTrue)
 	// resumed
@@ -119,7 +119,7 @@ func (s *testCheckerSuite) testGetStatus(name string, c *C) {
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	resp = make(map[string]interface{})
-	err = cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), resp)
+	err = cu.ReadGetJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsFalse)
 }
