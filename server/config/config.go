@@ -252,6 +252,8 @@ const (
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+
+	defaultLogFormat = "text"
 )
 
 // Special keys for Labels
@@ -594,6 +596,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Security.Encryption.Adjust()
+
+	if len(c.Log.Format) == 0 {
+		c.Log.Format = defaultLogFormat
+	}
 
 	return nil
 }
