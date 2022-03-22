@@ -48,12 +48,13 @@ func (s *testTsoSuite) TearDownSuite(c *C) {
 }
 
 func (s *testTsoSuite) TestTransferAllocator(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	testutil.WaitUntil(c, func() bool {
 		s.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
 		_, err := s.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
 		return err == nil
 	}, testutil.WithRetryTimes(5), testutil.WithSleepInterval(3*time.Second))
 	addr := s.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
-	err := checkPostJSON(testDialClient, addr, nil, checkStatusOK(c))
+	err := cu.CheckPostJSON(testDialClient, addr, nil, cu.StatusOK())
 	c.Assert(err, IsNil)
 }

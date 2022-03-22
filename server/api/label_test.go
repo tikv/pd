@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -131,13 +132,15 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 }
 
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err := readJSON(testDialClient, url, &labels)
+	err := cu.ReadGetJSON(testDialClient, url, &labels)
 	c.Assert(err, IsNil)
 }
 
 func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	var table = []struct {
 		name, value string
 		want        []*metapb.Store
@@ -174,7 +177,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(StoresInfo)
-		err := readJSON(testDialClient, url, info)
+		err := cu.ReadGetJSON(testDialClient, url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}
@@ -205,6 +208,7 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 }
 
 func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	cases := []struct {
 		store       *metapb.Store
 		valid       bool
@@ -285,7 +289,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	// enable placement rules. Report no error any more.
-	c.Assert(checkPostJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`), checkStatusOK(c)), IsNil)
+	c.Assert(cu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`), cu.StatusOK()), IsNil)
 	for _, t := range cases {
 		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},

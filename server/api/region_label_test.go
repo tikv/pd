@@ -21,6 +21,8 @@ import (
 	"sort"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/labeler"
 )
@@ -48,8 +50,9 @@ func (s *testRegionLabelSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRegionLabelSuite) TestGetSet(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	var resp []*labeler.LabelRule
-	err := readJSON(testDialClient, s.urlPrefix+"rules", &resp)
+	err := cu.ReadGetJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp, HasLen, 0)
 
@@ -61,23 +64,23 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
-		err = checkPostJSON(testDialClient, s.urlPrefix+"rule", data, checkStatusOK(c))
+		err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"rule", data, cu.StatusOK())
 		c.Assert(err, IsNil)
 	}
 	for i, id := range ruleIDs {
 		var rule labeler.LabelRule
-		err = readJSON(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
+		err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
 		c.Assert(err, IsNil)
 		c.Assert(&rule, DeepEquals, rules[i])
 	}
 
-	err = readJSONWithBody(testDialClient, s.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
+	err = cu.ReadGetJSONWithBody(testDialClient, s.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
 
-	_, err = doDelete(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
+	_, err = apiutil.DoDelete(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
 	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
+	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
@@ -89,9 +92,9 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 		DeleteRules: []string{"rule1"},
 	}
 	data, _ := json.Marshal(patch)
-	err = checkPatchJSON(testDialClient, s.urlPrefix+"rules", data, checkStatusOK(c))
+	err = cu.CheckPatchJSON(testDialClient, s.urlPrefix+"rules", data, cu.StatusOK())
 	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
+	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"rules", &resp)
 	c.Assert(err, IsNil)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[1], rules[2]})

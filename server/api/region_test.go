@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -129,15 +130,16 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core
 }
 
 func (s *testRegionSuite) TestRegion(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
 	r1m := make(map[string]interface{})
-	c.Assert(readJSON(testDialClient, url, r1), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r1), IsNil)
 	r1.Adjust()
 	c.Assert(r1, DeepEquals, NewRegionInfo(r))
-	c.Assert(readJSON(testDialClient, url, &r1m), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, &r1m), IsNil)
 	c.Assert(r1m["written_bytes"].(float64), Equals, float64(r.GetBytesWritten()))
 	c.Assert(r1m["written_keys"].(float64), Equals, float64(r.GetKeysWritten()))
 	c.Assert(r1m["read_bytes"].(float64), Equals, float64(r.GetBytesRead()))
@@ -145,37 +147,38 @@ func (s *testRegionSuite) TestRegion(c *C) {
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
 	r2 := &RegionInfo{}
-	c.Assert(readJSON(testDialClient, url, r2), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r2), IsNil)
 	r2.Adjust()
 	c.Assert(r2, DeepEquals, NewRegionInfo(r))
 }
 
 func (s *testRegionSuite) TestRegionCheck(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
 	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
-	c.Assert(readJSON(testDialClient, url, r1), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r1), IsNil)
 	r1.Adjust()
 	c.Assert(r1, DeepEquals, NewRegionInfo(r))
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "down-peer")
 	r2 := &RegionsInfo{}
-	c.Assert(readJSON(testDialClient, url, r2), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r2), IsNil)
 	r2.Adjust()
 	c.Assert(r2, DeepEquals, &RegionsInfo{Count: 1, Regions: []RegionInfo{*NewRegionInfo(r)}})
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "pending-peer")
 	r3 := &RegionsInfo{}
-	c.Assert(readJSON(testDialClient, url, r3), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r3), IsNil)
 	r3.Adjust()
 	c.Assert(r3, DeepEquals, &RegionsInfo{Count: 1, Regions: []RegionInfo{*NewRegionInfo(r)}})
 
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "offline-peer")
 	r4 := &RegionsInfo{}
-	c.Assert(readJSON(testDialClient, url, r4), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r4), IsNil)
 	r4.Adjust()
 	c.Assert(r4, DeepEquals, &RegionsInfo{Count: 0, Regions: []RegionInfo{}})
 
@@ -183,7 +186,7 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "empty-region")
 	r5 := &RegionsInfo{}
-	c.Assert(readJSON(testDialClient, url, r5), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, r5), IsNil)
 	r5.Adjust()
 	c.Assert(r5, DeepEquals, &RegionsInfo{Count: 1, Regions: []RegionInfo{*NewRegionInfo(r)}})
 
@@ -191,7 +194,7 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	c.Assert(readJSON(testDialClient, url, &r6), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, &r6), IsNil)
 	histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
 	c.Assert(r6, DeepEquals, histSizes)
 
@@ -199,12 +202,13 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", s.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	c.Assert(readJSON(testDialClient, url, &r7), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, &r7), IsNil)
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
 	c.Assert(r7, DeepEquals, histKeys)
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
@@ -217,7 +221,7 @@ func (s *testRegionSuite) TestRegions(c *C) {
 	}
 	url := fmt.Sprintf("%s/regions", s.urlPrefix)
 	RegionsInfo := &RegionsInfo{}
-	err := readJSON(testDialClient, url, RegionsInfo)
+	err := cu.ReadGetJSON(testDialClient, url, RegionsInfo)
 	c.Assert(err, IsNil)
 	c.Assert(RegionsInfo.Count, Equals, len(regions))
 	sort.Slice(RegionsInfo.Regions, func(i, j int) bool {
@@ -231,6 +235,7 @@ func (s *testRegionSuite) TestRegions(c *C) {
 }
 
 func (s *testRegionSuite) TestStoreRegions(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
 	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
@@ -241,7 +246,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 	regionIDs := []uint64{2, 3}
 	url := fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 1)
 	r4 := &RegionsInfo{}
-	err := readJSON(testDialClient, url, r4)
+	err := cu.ReadGetJSON(testDialClient, url, r4)
 	c.Assert(err, IsNil)
 	c.Assert(r4.Count, Equals, len(regionIDs))
 	sort.Slice(r4.Regions, func(i, j int) bool { return r4.Regions[i].ID < r4.Regions[j].ID })
@@ -252,7 +257,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 2)
 	r5 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r5)
+	err = cu.ReadGetJSON(testDialClient, url, r5)
 	c.Assert(err, IsNil)
 	c.Assert(r5.Count, Equals, len(regionIDs))
 	for i, r := range r5.Regions {
@@ -262,7 +267,7 @@ func (s *testRegionSuite) TestStoreRegions(c *C) {
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", s.urlPrefix, 3)
 	r6 := &RegionsInfo{}
-	err = readJSON(testDialClient, url, r6)
+	err = cu.ReadGetJSON(testDialClient, url, r6)
 	c.Assert(err, IsNil)
 	c.Assert(r6.Count, Equals, len(regionIDs))
 }
@@ -299,6 +304,7 @@ func (s *testRegionSuite) TestTopSize(c *C) {
 }
 
 func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	r1 := newTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
 	r2 := newTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
 	r3 := newTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
@@ -307,13 +313,14 @@ func (s *testRegionSuite) TestAccelerateRegionsScheduleInRange(c *C) {
 	mustRegionHeartbeat(c, s.svr, r3)
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
 
-	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body), checkStatusOK(c))
+	err := cu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", s.urlPrefix), []byte(body), cu.StatusOK())
 	c.Assert(err, IsNil)
 	idList := s.svr.GetRaftCluster().GetSuspectRegions()
 	c.Assert(idList, HasLen, 2)
 }
 
 func (s *testRegionSuite) TestScatterRegions(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	r1 := newTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
 	r2 := newTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
@@ -329,7 +336,7 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	mustPutStore(c, s.svr, 16, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 
-	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), checkStatusOK(c))
+	err := cu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), cu.StatusOK())
 	c.Assert(err, IsNil)
 	op1 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(601)
 	op2 := s.svr.GetRaftCluster().GetOperatorController().GetOperator(602)
@@ -338,7 +345,7 @@ func (s *testRegionSuite) TestScatterRegions(c *C) {
 	c.Assert(op1 != nil || op2 != nil || op3 != nil, IsTrue)
 
 	body = `{"regions_id": [601, 602, 603]}`
-	err = checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", s.urlPrefix), []byte(body), cu.StatusOK())
 	c.Assert(err, IsNil)
 }
 
@@ -352,25 +359,27 @@ func (s *testRegionSuite) TestSplitRegions(c *C) {
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res string, code int) {
+	checkOpt := func(res []byte, code int) {
 		s := &struct {
 			ProcessedPercentage int      `json:"processed-percentage"`
 			NewRegionsID        []uint64 `json:"regions-id"`
 		}{}
-		err := json.Unmarshal([]byte(res), s)
+		err := json.Unmarshal(res, s)
 		c.Assert(err, IsNil)
 		c.Assert(s.ProcessedPercentage, Equals, 100)
 		c.Assert(s.NewRegionsID, DeepEquals, []uint64{newRegionID})
 	}
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v)", newRegionID)), IsNil)
-	err := checkPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
+	cu := testutil.NewAPICheckerUtil(c)
+	err := cu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", s.urlPrefix), []byte(body), checkOpt)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"), IsNil)
 	c.Assert(err, IsNil)
 }
 
 func (s *testRegionSuite) checkTopRegions(c *C, url string, regionIDs []uint64) {
+	cu := testutil.NewAPICheckerUtil(c)
 	regions := &RegionsInfo{}
-	err := readJSON(testDialClient, url, regions)
+	err := cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(regions.Count, Equals, len(regionIDs))
 	for i, r := range regions.Regions {
@@ -425,8 +434,9 @@ func (s *testGetRegionSuite) TestRegionKey(c *C) {
 	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/key/%s", s.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xBB})))
+	cu := testutil.NewAPICheckerUtil(c)
 	RegionInfo := &RegionInfo{}
-	err := readJSON(testDialClient, url, RegionInfo)
+	err := cu.ReadGetJSON(testDialClient, url, RegionInfo)
 	c.Assert(err, IsNil)
 	c.Assert(r.GetID(), Equals, RegionInfo.ID)
 }
@@ -443,10 +453,11 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	mustRegionHeartbeat(c, s.svr, r4)
 	mustRegionHeartbeat(c, s.svr, r)
 
+	cu := testutil.NewAPICheckerUtil(c)
 	url := fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "b")
 	regionIds := []uint64{3, 4, 5, 99}
 	regions := &RegionsInfo{}
-	err := readJSON(testDialClient, url, regions)
+	err := cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
@@ -455,7 +466,7 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	url = fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "d")
 	regionIds = []uint64{4, 5, 99}
 	regions = &RegionsInfo{}
-	err = readJSON(testDialClient, url, regions)
+	err = cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
@@ -464,7 +475,7 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	url = fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "g")
 	regionIds = []uint64{5, 99}
 	regions = &RegionsInfo{}
-	err = readJSON(testDialClient, url, regions)
+	err = cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(regionIds, HasLen, regions.Count)
 	for i, v := range regionIds {
@@ -473,7 +484,7 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	url = fmt.Sprintf("%s/regions/key?end_key=%s", s.urlPrefix, "e")
 	regionIds = []uint64{2, 3, 4}
 	regions = &RegionsInfo{}
-	err = readJSON(testDialClient, url, regions)
+	err = cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
@@ -482,7 +493,7 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", "g")
 	regionIds = []uint64{3, 4}
 	regions = &RegionsInfo{}
-	err = readJSON(testDialClient, url, regions)
+	err = cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
@@ -491,7 +502,7 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
 	regionIds = []uint64{3, 4, 5, 99}
 	regions = &RegionsInfo{}
-	err = readJSON(testDialClient, url, regions)
+	err = cu.ReadGetJSON(testDialClient, url, regions)
 	c.Assert(err, IsNil)
 	c.Assert(len(regionIds), Equals, regions.Count)
 	for i, v := range regionIds {
@@ -533,9 +544,10 @@ func (s *testGetRegionRangeHolesSuite) TestRegionRangeHoles(c *C) {
 	mustRegionHeartbeat(c, s.svr, r4)
 	mustRegionHeartbeat(c, s.svr, r6)
 
+	cu := testutil.NewAPICheckerUtil(c)
 	url := fmt.Sprintf("%s/regions/range-holes", s.urlPrefix)
 	rangeHoles := new([][]string)
-	c.Assert(readJSON(testDialClient, url, rangeHoles), IsNil)
+	c.Assert(cu.ReadGetJSON(testDialClient, url, rangeHoles), IsNil)
 	c.Assert(*rangeHoles, DeepEquals, [][]string{
 		{"", core.HexRegionKeyStr(r1.GetStartKey())},
 		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
@@ -567,10 +579,11 @@ func (s *testRegionsReplicatedSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	// enable placement rule
-	c.Assert(checkPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`), checkStatusOK(c)), IsNil)
+	c.Assert(cu.CheckPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`), cu.StatusOK()), IsNil)
 	defer func() {
-		c.Assert(checkPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`), checkStatusOK(c)), IsNil)
+		c.Assert(cu.CheckPostJSON(testDialClient, s.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`), cu.StatusOK()), IsNil)
 	}()
 
 	// add test region
@@ -594,11 +607,11 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 
 	// invalid url
 	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, "_", "t")
-	err := readJSON(testDialClient, url, &status)
+	err := cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, NotNil)
 
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, NotNil)
 
 	// correct test
@@ -607,15 +620,15 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	// test one rule
 	data, err := json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "REPLICATED")
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/mockPending", "return(true)"), IsNil)
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "PENDING")
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/mockPending"), IsNil)
@@ -630,10 +643,10 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	})
 	data, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "REPLICATED")
 
@@ -649,10 +662,10 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	})
 	data, err = json.Marshal(bundle)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/config/placement-rule", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "INPROGRESS")
 
@@ -660,7 +673,7 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
 	mustRegionHeartbeat(c, s.svr, r1)
 
-	err = readJSON(testDialClient, url, &status)
+	err = cu.ReadGetJSON(testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status, Equals, "REPLICATED")
 }

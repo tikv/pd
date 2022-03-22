@@ -18,11 +18,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -90,11 +90,12 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 }
 
 func (s *testAdminSuite) TestPersistFile(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := checkPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, checkStatusNotOK(c))
+	err := cu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, cu.StatusNotOK())
 	c.Assert(err, IsNil)
 	data = []byte(`{"foo":"bar"}`)
-	err = checkPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 }
 
@@ -132,51 +133,43 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values, checkStatusOK(c),
-		func(res string, _ int) {
-			c.Assert(res, Equals, "\"Reset ts successfully.\"\n")
-		})
+	cu := testutil.NewAPICheckerUtil(c)
+	err = cu.CheckPostJSON(testDialClient, url, values,
+		cu.StatusOK(),
+		cu.StringEqual("\"Reset ts successfully.\"\n"))
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values,
-		func(res string, code int) {
-			c.Assert(code, Equals, http.StatusForbidden)
-			c.Assert(strings.Contains(res, "too large"), IsTrue)
-		})
+	err = cu.CheckPostJSON(testDialClient, url, values,
+		cu.Status(http.StatusForbidden),
+		cu.StringContain("too large"))
 	c.Assert(err, IsNil)
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values,
-		func(res string, code int) {
-			c.Assert(code, Equals, http.StatusForbidden)
-			c.Assert(strings.Contains(res, "small"), IsTrue)
-		})
+	err = cu.CheckPostJSON(testDialClient, url, values,
+		cu.Status(http.StatusForbidden),
+		cu.StringContain("small"))
 	c.Assert(err, IsNil)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values,
-		func(res string, code int) {
-			c.Assert(code, Equals, http.StatusBadRequest)
-			c.Assert(res, Equals, "\"invalid tso value\"\n")
-		})
+	err = cu.CheckPostJSON(testDialClient, url, values,
+		cu.Status(http.StatusBadRequest),
+		cu.StringEqual("\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, url, values,
-		func(res string, code int) {
-			c.Assert(code, Equals, http.StatusBadRequest)
-			c.Assert(res, Equals, "\"invalid tso value\"\n")
-		})
+	err = cu.CheckPostJSON(testDialClient, url, values,
+		cu.Status(http.StatusBadRequest),
+		cu.StringEqual("\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 }
 
@@ -200,24 +193,20 @@ func (s *testServiceSuite) TearDownSuite(c *C) {
 }
 
 func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/audit-middleware", s.svr.GetAddr(), apiPrefix)
 
 	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
-	err := checkPostJSON(testDialClient, enableURL, nil, checkStatusOK(c),
-		func(res string, _ int) {
-			c.Assert(res, Equals, "\"Switching audit middleware is successful.\"\n")
-		})
-
+	err := cu.CheckPostJSON(testDialClient, enableURL, nil,
+		cu.StatusOK(),
+		cu.StringEqual("\"Switching audit middleware is successful.\"\n"))
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, true)
 
 	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
-	err = checkPostJSON(testDialClient, disableURL, nil,
-		func(res string, code int) {
-			c.Assert(res, Equals, "\"Switching audit middleware is successful.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
-
+	err = cu.CheckPostJSON(testDialClient, disableURL, nil,
+		cu.StatusOK(),
+		cu.StringEqual("\"Switching audit middleware is successful.\"\n"))
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, false)
 }

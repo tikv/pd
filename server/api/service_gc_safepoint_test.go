@@ -87,7 +87,7 @@ func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(listResp, DeepEquals, list)
 
-	statusCode, err := doDelete(testDialClient, sspURL+"/a")
+	statusCode, err := apiutil.DoDelete(testDialClient, sspURL+"/a")
 	c.Assert(err, IsNil)
 	c.Assert(statusCode, Equals, http.StatusOK)
 

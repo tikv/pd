@@ -22,6 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
@@ -51,26 +52,29 @@ func (s *testHotStatusSuite) TearDownSuite(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHotStore(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	stat := HotStoreStats{}
-	err := readJSON(testDialClient, s.urlPrefix+"/stores", &stat)
+	err := cu.ReadGetJSON(testDialClient, s.urlPrefix+"/stores", &stat)
 	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	request := HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, checkStatusOK(c))
+	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), checkStatusNotOK(c))
+	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), cu.StatusNotOK())
 	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	hotRegionStorage := s.svr.GetHistoryHotRegionStorage()
 	now := time.Now()
 	hotRegions := []*storage.HistoryHotRegion{
@@ -87,10 +91,10 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 		StartTime: now.UnixNano() / int64(time.Millisecond),
 		EndTime:   now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 	}
-	check := func(res string, statusCode int) {
+	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
 		historyHotRegions := &storage.HistoryHotRegions{}
-		json.Unmarshal([]byte(res), historyHotRegions)
+		json.Unmarshal(res, historyHotRegions)
 		for _, region := range historyHotRegions.HistoryHotRegion {
 			c.Assert(region.UpdateTime, GreaterEqual, request.StartTime)
 			c.Assert(region.UpdateTime, LessEqual, request.EndTime)
@@ -100,7 +104,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -172,10 +176,10 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 		IsLearners:     []bool{false},
 		EndTime:        now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 	}
-	check := func(res string, statusCode int) {
+	check := func(res []byte, statusCode int) {
 		c.Assert(statusCode, Equals, 200)
 		historyHotRegions := &storage.HistoryHotRegions{}
-		json.Unmarshal([]byte(res), historyHotRegions)
+		json.Unmarshal(res, historyHotRegions)
 		c.Assert(historyHotRegions.HistoryHotRegion, HasLen, 1)
 		c.Assert(reflect.DeepEqual(historyHotRegions.HistoryHotRegion[0], hotRegions[0]), IsTrue)
 	}
@@ -183,7 +187,8 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = checkGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	cu := testutil.NewAPICheckerUtil(c)
+	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 

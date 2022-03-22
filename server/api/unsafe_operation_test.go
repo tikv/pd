@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )
 
@@ -45,16 +46,17 @@ func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
 }
 
 func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	input := map[uint64]string{1: ""}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = checkPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, checkStatusOK(c))
+	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, cu.StatusOK())
 	c.Assert(err, IsNil)
 	// Test show
 	var output []string
-	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
+	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
 	c.Assert(err, IsNil)
 	// Test history
-	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/history", &output)
+	err = cu.ReadGetJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/history", &output)
 	c.Assert(err, IsNil)
 }

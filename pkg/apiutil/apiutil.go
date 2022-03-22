@@ -17,11 +17,9 @@ package apiutil
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -61,62 +59,6 @@ func tagJSONError(err error) error {
 	case *json.SyntaxError, *json.UnmarshalTypeError:
 		return JSONError{err}
 	}
-	return err
-}
-
-// ReadJSON reads a JSON data from r and then closes it.
-// An error due to invalid json will be returned as a JSONError
-func ReadJSON(r io.ReadCloser, data interface{}) error {
-	var err error
-	defer DeferClose(r, &err)
-	b, err := io.ReadAll(r)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
-	err = json.Unmarshal(b, data)
-	if err != nil {
-		return tagJSONError(err)
-	}
-
-	return err
-}
-
-// FieldError connects an error to a particular field
-type FieldError struct {
-	error
-	field string
-}
-
-// ParseUint64VarsField connects strconv.ParseUint with request variables
-// It hardcodes the base to 10 and bit size to 64
-// Any error returned will connect the requested field to the error via FieldError
-func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *FieldError) {
-	str, ok := vars[varName]
-	if !ok {
-		return 0, &FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
-	}
-	parsed, err := strconv.ParseUint(str, 10, 64)
-	if err == nil {
-		return parsed, nil
-	}
-	return parsed, &FieldError{field: varName, error: err}
-}
-
-// ReadJSONRespondError writes json into data.
-// On error respond with a 400 Bad Request
-func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
-	err := ReadJSON(body, data)
-	if err == nil {
-		return nil
-	}
-	var errCode errcode.ErrorCode
-	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
-		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-	} else {
-		errCode = errcode.NewInternalErr(err)
-	}
-	ErrorResp(rd, w, errCode)
 	return err
 }
 
@@ -232,7 +174,7 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
-// PatchJSON
+// PatchJSON is used to do patch requeset
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
 	if err != nil {
@@ -241,10 +183,24 @@ func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, er
 	return client.Do(req)
 }
 
-// PostJSONIgnoreResp
+// PostJSONIgnoreResp is used to do post requeset with JSON body and ignore response.
 func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 	resp, err := PostJSON(client, url, data)
 	return checkResponse(resp, err)
+}
+
+// DoDelete
+func DoDelete(client *http.Client, url string) (int, error) {
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return http.StatusBadRequest, err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	return res.StatusCode, nil
 }
 
 func checkResponse(resp *http.Response, err error) error {

@@ -16,10 +16,9 @@ package api
 
 import (
 	"encoding/json"
-	"net/http"
-	"strings"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/testutil"
 )
 
 var _ = Suite(&testEtcdAPISuite{})
@@ -27,20 +26,20 @@ var _ = Suite(&testEtcdAPISuite{})
 type testEtcdAPISuite struct{}
 
 func (s *testEtcdAPISuite) TestGRPCGateway(c *C) {
+	cu := testutil.NewAPICheckerUtil(c)
 	svr, clean := mustNewServer(c)
 	defer clean()
 
 	addr := svr.GetConfig().ClientUrls + "/v3/kv/put"
 	putKey := map[string]string{"key": "Zm9v", "value": "YmFy"}
 	v, _ := json.Marshal(putKey)
-	err := checkPostJSON(testDialClient, addr, v, checkStatusOK(c))
+	err := cu.CheckPostJSON(testDialClient, addr, v, cu.StatusOK())
 	c.Assert(err, IsNil)
 	addr = svr.GetConfig().ClientUrls + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
 	v, _ = json.Marshal(getKey)
-	err = checkPostJSON(testDialClient, addr, v, func(res string, code int) {
-		c.Assert(strings.Contains(res, "Zm9v"), IsTrue)
-		c.Assert(code, Equals, http.StatusOK)
-	})
+	err = cu.CheckPostJSON(testDialClient, addr, v,
+		cu.StatusOK(),
+		cu.StringContain("Zm9v"))
 	c.Assert(err, IsNil)
 }
