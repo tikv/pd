@@ -320,10 +320,10 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 
 func (h *schedulerConfigHandler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	sh := handler.GetSchedulerConfigHandler()
-	if sh != nil {
+	sh, err := handler.GetSchedulerConfigHandler()
+	if err == nil && sh != nil {
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, errs.ErrSchedulerConfigNoImplement.FastGenByArgs().Error())
+	h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
 }

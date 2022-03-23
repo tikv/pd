@@ -24,22 +24,26 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 )
 
+// Status is used to check whether http response code is equal given code
 func Status(c *check.C, code int) func([]byte, int) {
 	return func(_ []byte, i int) {
 		c.Assert(i, check.Equals, code)
 	}
 }
 
+// Status is used to check whether http response code is equal http.StatusOK
 func StatusOK(c *check.C) func([]byte, int) {
 	return Status(c, http.StatusOK)
 }
 
+// StatusNotOK is used to check whether http response code is not equal http.StatusOK
 func StatusNotOK(c *check.C) func([]byte, int) {
 	return func(_ []byte, i int) {
 		c.Assert(i == http.StatusOK, check.IsFalse)
 	}
 }
 
+// ExtractJSON is used to check whether given data can be extracted successfully
 func ExtractJSON(c *check.C, data interface{}) func([]byte, int) {
 	return func(res []byte, _ int) {
 		err := json.Unmarshal(res, data)
@@ -47,18 +51,21 @@ func ExtractJSON(c *check.C, data interface{}) func([]byte, int) {
 	}
 }
 
+// StringContain is used to check whether response context contains given string
 func StringContain(c *check.C, sub string) func([]byte, int) {
 	return func(res []byte, _ int) {
 		c.Assert(strings.Contains(string(res), sub), check.IsTrue)
 	}
 }
 
+// StringEqual is used to check whether response context equal given string
 func StringEqual(c *check.C, str string) func([]byte, int) {
 	return func(res []byte, _ int) {
 		c.Assert(strings.Contains(string(res), str), check.IsTrue)
 	}
 }
 
+// ReadGetJSON is used to do get request and check whether given data can be extracted successfully
 func ReadGetJSON(c *check.C, client *http.Client, url string, data interface{}) error {
 	resp, err := apiutil.GetJSON(client, url, nil)
 	if err != nil {
@@ -67,6 +74,7 @@ func ReadGetJSON(c *check.C, client *http.Client, url string, data interface{}) 
 	return checkResp(resp, StatusOK(c), ExtractJSON(c, data))
 }
 
+// ReadGetJSONWithBody is used to do get request with input and check whether given data can be extracted successfully
 func ReadGetJSONWithBody(c *check.C, client *http.Client, url string, input []byte, data interface{}) error {
 	resp, err := apiutil.GetJSON(client, url, input)
 	if err != nil {
@@ -75,6 +83,7 @@ func ReadGetJSONWithBody(c *check.C, client *http.Client, url string, input []by
 	return checkResp(resp, StatusOK(c), ExtractJSON(c, data))
 }
 
+// CheckPostJSON is used to do post request and do check options
 func CheckPostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.PostJSON(client, url, data)
 	if err != nil {
@@ -83,6 +92,7 @@ func CheckPostJSON(client *http.Client, url string, data []byte, checkOpts ...fu
 	return checkResp(resp, checkOpts...)
 }
 
+// CheckGetJSON is used to do get request and do check options
 func CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.GetJSON(client, url, data)
 	if err != nil {
@@ -91,6 +101,7 @@ func CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...fun
 	return checkResp(resp, checkOpts...)
 }
 
+// CheckPatchJSON is used to do patch request and do check options
 func CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.PatchJSON(client, url, data)
 	if err != nil {

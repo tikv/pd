@@ -889,10 +889,10 @@ func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
-func (h *Handler) GetSchedulerConfigHandler() http.Handler {
+func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
@@ -900,7 +900,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
-	return mux
+	return mux, nil
 }
 
 // GetOfflinePeer gets the region with offline peer.

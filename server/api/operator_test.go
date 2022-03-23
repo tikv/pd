@@ -265,7 +265,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			expectSteps:         "",
 		},
 		{
-			name:                "tustomized placement rule with invalid peer role",
+			name:                "customized placement rule with invalid peer role",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
@@ -289,7 +289,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			expectSteps:   "",
 		},
 		{
-			name:                "tustomized placement rule with valid peer role1",
+			name:                "customized placement rule with valid peer role1",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
@@ -318,7 +318,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			}, ", "),
 		},
 		{
-			name:                "tustomized placement rule with valid peer role2",
+			name:                "customized placement rule with valid peer role2",
 			placementRuleEnable: true,
 			rules: []*placement.Rule{
 				{
@@ -368,7 +368,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			c.Assert(err, IsNil)
 		}
 		if len(tc.rules) > 0 {
-			// add tustomized rule first and then remove default rule
+			// add customized rule first and then remove default rule
 			err := s.svr.GetRaftCluster().GetRuleManager().SetRules(tc.rules)
 			c.Assert(err, IsNil)
 			err = s.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
@@ -382,7 +382,6 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 				tu.StatusNotOK(c), tu.StringContain(c, tc.expectedError.Error()))
 		}
 		c.Assert(err, IsNil)
-
 		if len(tc.expectSteps) > 0 {
 			operator = mustReadURL(c, regionURL)
 			c.Assert(strings.Contains(operator, tc.expectSteps), IsTrue)

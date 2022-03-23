@@ -597,7 +597,6 @@ func (s *testRegionsReplicatedSuite) TestCheckRegionsReplicated(c *C) {
 	// invalid url
 	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, "_", "t")
 	err := tu.CheckGetJSON(testDialClient, url, nil, tu.Status(c, http.StatusBadRequest))
-
 	c.Assert(err, IsNil)
 
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, s.urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")

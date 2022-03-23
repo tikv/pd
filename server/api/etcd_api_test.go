@@ -37,8 +37,6 @@ func (s *testEtcdAPISuite) TestGRPCGateway(c *C) {
 	addr = svr.GetConfig().ClientUrls + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
 	v, _ = json.Marshal(getKey)
-	err = tu.CheckPostJSON(testDialClient, addr, v,
-		tu.StatusOK(c),
-		tu.StringContain(c, "Zm9v"))
+	err = tu.CheckPostJSON(testDialClient, addr, v, tu.StatusOK(c), tu.StringContain(c, "Zm9v"))
 	c.Assert(err, IsNil)
 }
