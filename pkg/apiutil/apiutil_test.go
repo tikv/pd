@@ -18,10 +18,15 @@ import (
 	"bytes"
 	"io"
 	"net/http/httptest"
+	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/unrolled/render"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 var _ = Suite(&testUtilSuite{})
 
