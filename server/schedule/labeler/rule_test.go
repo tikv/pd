@@ -32,7 +32,7 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	err := label.checkAndAdjustExpire()
 	c.Assert(err, IsNil)
 	c.Assert(label.StartAt, HasLen, 0)
-	c.Assert(label.expire, Equals, unlimittedExpire)
+	c.Assert(label.expire, IsNil)
 
 	// test rule with illegal ttl.
 	label.TTL = "ttl"
@@ -55,6 +55,6 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(label2.StartAt, Equals, label.StartAt)
 	c.Assert(label2.TTL, Equals, label.TTL)
-	expire := label2.getExpire()
-	c.Assert(label.expire.Format(time.UnixDate), Equals, expire.Format(time.UnixDate))
+	label2.checkAndAdjustExpire()
+	c.Assert(label.expire.Format(time.UnixDate), Equals, label2.expire.Format(time.UnixDate))
 }

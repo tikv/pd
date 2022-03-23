@@ -33,10 +33,10 @@ import (
 type RegionLabeler struct {
 	storage endpoint.RuleStorage
 	sync.RWMutex
-	labelRules        map[string]*LabelRule
-	rangeList         rangelist.List // sorted LabelRules of the type `KeyRange`
-	ctx               context.Context
-	earlistExpireTime time.Time
+	labelRules map[string]*LabelRule
+	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
+	ctx        context.Context
+	minExpire  *time.Time
 }
 
 // NewRegionLabeler creates a Labeler instance.
@@ -45,6 +45,7 @@ func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInter
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),
 		ctx:        ctx,
+		minExpire:  nil,
 	}
 
 	if err := l.loadRules(); err != nil {
@@ -74,7 +75,7 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 	l.Lock()
 	defer l.Unlock()
 
-	if l.earlistExpireTime.After(now) {
+	if l.minExpire == nil || l.minExpire.After(now) {
 		return
 	}
 	var err error
@@ -130,11 +131,10 @@ func (l *RegionLabeler) loadRules() error {
 
 func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
-	minExpireInitted := false
+	l.minExpire = nil
 	for _, rule := range l.labelRules {
-		if !minExpireInitted || rule.minExpire.Before(l.earlistExpireTime) {
-			l.earlistExpireTime = rule.minExpire
-			minExpireInitted = true
+		if l.minExpire == nil || rule.expireBefore(*l.minExpire) {
+			l.minExpire = rule.minExpire
 		}
 		if rule.RuleType == KeyRange {
 			rs := rule.Data.([]*KeyRangeRule)
@@ -142,9 +142,6 @@ func (l *RegionLabeler) buildRangeList() {
 				builder.AddItem(r.StartKey, r.EndKey, rule)
 			}
 		}
-	}
-	if !minExpireInitted {
-		l.earlistExpireTime = unlimittedExpire
 	}
 	l.rangeList = builder.Build()
 }
