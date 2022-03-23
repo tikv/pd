@@ -24,66 +24,58 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 )
 
-type APICheckerUtil struct {
-	c *check.C
-}
-
-func NewAPICheckerUtil(c *check.C) *APICheckerUtil {
-	return &APICheckerUtil{c: c}
-}
-
-func (ut *APICheckerUtil) Status(code int) func([]byte, int) {
+func Status(c *check.C, code int) func([]byte, int) {
 	return func(_ []byte, i int) {
-		ut.c.Assert(i, check.Equals, code)
+		c.Assert(i, check.Equals, code)
 	}
 }
 
-func (ut *APICheckerUtil) StatusOK() func([]byte, int) {
-	return ut.Status(http.StatusOK)
+func StatusOK(c *check.C) func([]byte, int) {
+	return Status(c, http.StatusOK)
 }
 
-func (ut *APICheckerUtil) StatusNotOK() func([]byte, int) {
+func StatusNotOK(c *check.C) func([]byte, int) {
 	return func(_ []byte, i int) {
-		ut.c.Assert(i == http.StatusOK, check.IsFalse)
+		c.Assert(i == http.StatusOK, check.IsFalse)
 	}
 }
 
-func (ut *APICheckerUtil) ExtractJSON(data interface{}) func([]byte, int) {
+func ExtractJSON(c *check.C, data interface{}) func([]byte, int) {
 	return func(res []byte, _ int) {
 		err := json.Unmarshal(res, data)
-		ut.c.Assert(err, check.IsNil)
+		c.Assert(err, check.IsNil)
 	}
 }
 
-func (ut *APICheckerUtil) StringContain(sub string) func([]byte, int) {
+func StringContain(c *check.C, sub string) func([]byte, int) {
 	return func(res []byte, _ int) {
-		ut.c.Assert(strings.Contains(string(res), sub), check.IsTrue)
+		c.Assert(strings.Contains(string(res), sub), check.IsTrue)
 	}
 }
 
-func (ut *APICheckerUtil) StringEqual(sub string) func([]byte, int) {
+func StringEqual(c *check.C, str string) func([]byte, int) {
 	return func(res []byte, _ int) {
-		ut.c.Assert(strings.Contains(string(res), sub), check.IsTrue)
+		c.Assert(strings.Contains(string(res), str), check.IsTrue)
 	}
 }
 
-func (ut *APICheckerUtil) ReadGetJSON(client *http.Client, url string, data interface{}) error {
+func ReadGetJSON(c *check.C, client *http.Client, url string, data interface{}) error {
 	resp, err := apiutil.GetJSON(client, url, nil)
 	if err != nil {
 		return err
 	}
-	return checkResp(resp, ut.StatusOK(), ut.ExtractJSON(data))
+	return checkResp(resp, StatusOK(c), ExtractJSON(c, data))
 }
 
-func (ut *APICheckerUtil) ReadGetJSONWithBody(client *http.Client, url string, input []byte, data interface{}) error {
+func ReadGetJSONWithBody(c *check.C, client *http.Client, url string, input []byte, data interface{}) error {
 	resp, err := apiutil.GetJSON(client, url, input)
 	if err != nil {
 		return err
 	}
-	return checkResp(resp, ut.StatusOK(), ut.ExtractJSON(data))
+	return checkResp(resp, StatusOK(c), ExtractJSON(c, data))
 }
 
-func (ut *APICheckerUtil) CheckPostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func CheckPostJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.PostJSON(client, url, data)
 	if err != nil {
 		return err
@@ -91,7 +83,7 @@ func (ut *APICheckerUtil) CheckPostJSON(client *http.Client, url string, data []
 	return checkResp(resp, checkOpts...)
 }
 
-func (ut *APICheckerUtil) CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.GetJSON(client, url, data)
 	if err != nil {
 		return err
@@ -99,7 +91,7 @@ func (ut *APICheckerUtil) CheckGetJSON(client *http.Client, url string, data []b
 	return checkResp(resp, checkOpts...)
 }
 
-func (ut *APICheckerUtil) CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+func CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	resp, err := apiutil.PatchJSON(client, url, data)
 	if err != nil {
 		return err

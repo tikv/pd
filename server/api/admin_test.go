@@ -22,7 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -90,12 +90,11 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 }
 
 func (s *testAdminSuite) TestPersistFile(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := cu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, cu.StatusNotOK())
+	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(c))
 	c.Assert(err, IsNil)
 	data = []byte(`{"foo":"bar"}`)
-	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, cu.StatusOK())
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 }
 
@@ -133,43 +132,42 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	cu := testutil.NewAPICheckerUtil(c)
-	err = cu.CheckPostJSON(testDialClient, url, values,
-		cu.StatusOK(),
-		cu.StringEqual("\"Reset ts successfully.\"\n"))
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.StatusOK(c),
+		tu.StringEqual(c, "\"Reset ts successfully.\"\n"))
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = cu.CheckPostJSON(testDialClient, url, values,
-		cu.Status(http.StatusForbidden),
-		cu.StringContain("too large"))
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "too large"))
 	c.Assert(err, IsNil)
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = cu.CheckPostJSON(testDialClient, url, values,
-		cu.Status(http.StatusForbidden),
-		cu.StringContain("small"))
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "small"))
 	c.Assert(err, IsNil)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = cu.CheckPostJSON(testDialClient, url, values,
-		cu.Status(http.StatusBadRequest),
-		cu.StringEqual("\"invalid tso value\"\n"))
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = cu.CheckPostJSON(testDialClient, url, values,
-		cu.Status(http.StatusBadRequest),
-		cu.StringEqual("\"invalid tso value\"\n"))
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 }
 
@@ -193,20 +191,19 @@ func (s *testServiceSuite) TearDownSuite(c *C) {
 }
 
 func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/audit-middleware", s.svr.GetAddr(), apiPrefix)
 
 	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
-	err := cu.CheckPostJSON(testDialClient, enableURL, nil,
-		cu.StatusOK(),
-		cu.StringEqual("\"Switching audit middleware is successful.\"\n"))
+	err := tu.CheckPostJSON(testDialClient, enableURL, nil,
+		tu.StatusOK(c),
+		tu.StringEqual(c, "\"Switching audit middleware is successful.\"\n"))
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, true)
 
 	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
-	err = cu.CheckPostJSON(testDialClient, disableURL, nil,
-		cu.StatusOK(),
-		cu.StringEqual("\"Switching audit middleware is successful.\"\n"))
+	err = tu.CheckPostJSON(testDialClient, disableURL, nil,
+		tu.StatusOK(c),
+		tu.StringEqual(c, "\"Switching audit middleware is successful.\"\n"))
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.IsAuditMiddlewareEnabled(), Equals, false)
 }

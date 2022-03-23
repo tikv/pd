@@ -20,7 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )
 
@@ -47,11 +47,10 @@ func (s *testLogSuite) TearDownSuite(c *C) {
 }
 
 func (s *testLogSuite) TestSetLogLevel(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	level := "error"
 	data, err := json.Marshal(level)
 	c.Assert(err, IsNil)
-	err = cu.CheckPostJSON(testDialClient, s.urlPrefix+"/log", data, cu.StatusOK())
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/log", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	c.Assert(log.GetLevel().String(), Equals, level)
 }

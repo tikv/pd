@@ -22,7 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
@@ -52,29 +52,26 @@ func (s *testHotStatusSuite) TearDownSuite(c *C) {
 }
 
 func (s testHotStatusSuite) TestGetHotStore(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	stat := HotStoreStats{}
-	err := cu.ReadGetJSON(testDialClient, s.urlPrefix+"/stores", &stat)
+	err := tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/stores", &stat)
 	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	request := HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, cu.StatusOK())
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), cu.StatusNotOK())
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), tu.StatusNotOK(c))
 	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
-	cu := testutil.NewAPICheckerUtil(c)
 	hotRegionStorage := s.svr.GetHistoryHotRegionStorage()
 	now := time.Now()
 	hotRegions := []*storage.HistoryHotRegion{
@@ -104,7 +101,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -187,8 +184,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	cu := testutil.NewAPICheckerUtil(c)
-	err = cu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 

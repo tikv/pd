@@ -16,16 +16,21 @@ package apiutil
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/unrolled/render"
 )
 
@@ -174,7 +179,7 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
-// PatchJSON is used to do patch requeset
+// PatchJSON is used to do patch request
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
 	if err != nil {
@@ -183,13 +188,13 @@ func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, er
 	return client.Do(req)
 }
 
-// PostJSONIgnoreResp is used to do post requeset with JSON body and ignore response.
+// PostJSONIgnoreResp is used to do post request with JSON body and ignore response.
 func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 	resp, err := PostJSON(client, url, data)
 	return checkResponse(resp, err)
 }
 
-// DoDelete
+// DoDelete is used to send delete requeset and return http response code.
 func DoDelete(client *http.Client, url string) (int, error) {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
@@ -216,4 +221,103 @@ func checkResponse(resp *http.Response, err error) error {
 		return errors.New(string(res))
 	}
 	return nil
+}
+
+// FieldError connects an error to a particular field
+type FieldError struct {
+	error
+	field string
+}
+
+// ParseUint64VarsField connects strconv.ParseUint with request variables
+// It hardcodes the base to 10 and bit size to 64
+// Any error returned will connect the requested field to the error via FieldError
+func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *FieldError) {
+	str, ok := vars[varName]
+	if !ok {
+		return 0, &FieldError{field: varName, error: fmt.Errorf("field %s not present", varName)}
+	}
+	parsed, err := strconv.ParseUint(str, 10, 64)
+	if err == nil {
+		return parsed, nil
+	}
+	return parsed, &FieldError{field: varName, error: err}
+}
+
+// CollectEscapeStringOption is used to collect string using escaping from input map for given option
+func CollectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if v, ok := input[option].(string); ok {
+		value, err := url.QueryUnescape(v)
+		if err != nil {
+			return err
+		}
+		for _, c := range collectors {
+			c(value)
+		}
+		return nil
+	}
+	return errs.ErrOptionNotExist.FastGenByArgs(option)
+}
+
+// CollectStringOption is used to collect string using from input map for given option
+func CollectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+	if v, ok := input[option].(string); ok {
+		for _, c := range collectors {
+			c(v)
+		}
+		return nil
+	}
+	return errs.ErrOptionNotExist.FastGenByArgs(option)
+}
+
+// ParseKey is used to parse interface into []byte and string
+func ParseKey(name string, input map[string]interface{}) ([]byte, string, error) {
+	k, ok := input[name]
+	if !ok {
+		return nil, "", fmt.Errorf("missing %s", name)
+	}
+	rawKey, ok := k.(string)
+	if !ok {
+		return nil, "", fmt.Errorf("bad format %s", name)
+	}
+	returned, err := hex.DecodeString(rawKey)
+	if err != nil {
+		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
+	}
+	return returned, rawKey, nil
+}
+
+// ReadJSON reads a JSON data from r and then closes it.
+// An error due to invalid json will be returned as a JSONError
+func ReadJSON(r io.ReadCloser, data interface{}) error {
+	var err error
+	defer DeferClose(r, &err)
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	err = json.Unmarshal(b, data)
+	if err != nil {
+		return tagJSONError(err)
+	}
+
+	return err
+}
+
+// ReadJSONRespondError writes json into data.
+// On error respond with a 400 Bad Request
+func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+	err := ReadJSON(body, data)
+	if err == nil {
+		return nil
+	}
+	var errCode errcode.ErrorCode
+	if jsonErr, ok := errors.Cause(err).(JSONError); ok {
+		errCode = errcode.NewInvalidInputErr(jsonErr.Err)
+	} else {
+		errCode = errcode.NewInternalErr(err)
+	}
+	ErrorResp(rd, w, errCode)
+	return err
 }
