@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -539,6 +544,11 @@ the config does not exist
 ["PD:scheduler:ErrSchedulerConfig"]
 error = '''
 wrong scheduler config %s
+'''
+
+["PD:scheduler:ErrSchedulerConfigNoImplement"]
+error = '''
+schedulers config no implement
 '''
 
 ["PD:scheduler:ErrSchedulerCreateFuncNotRegistered"]
