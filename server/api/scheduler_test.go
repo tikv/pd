@@ -118,7 +118,59 @@ func (s *testScheduleSuite) TestAPI(c *C) {
 		args          []arg
 		extraTestFunc func(name string, c *C)
 	}{
-		{name: "balance-leader-scheduler"},
+		{
+			name: "balance-leader-scheduler",
+			extraTestFunc: func(name string, c *C) {
+				resp := make(map[string]interface{})
+				listURL := fmt.Sprintf("%s%s%s/%s/list", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+				c.Assert(resp["batch"], Equals, 4.0)
+				dataMap := make(map[string]interface{})
+				dataMap["batch"] = 3
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", s.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				body, err := json.Marshal(dataMap)
+				c.Assert(err, IsNil)
+				c.Assert(postJSON(testDialClient, updateURL, body), IsNil)
+				resp = make(map[string]interface{})
+				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+				c.Assert(resp["batch"], Equals, 3.0)
+				// update again
+				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+					c.Assert(string(res), Equals, "\"no changed\"\n")
+					c.Assert(code, Equals, 200)
+				})
+				c.Assert(err, IsNil)
+				// update invalidate batch
+				dataMap = map[string]interface{}{}
+				dataMap["batch"] = 100
+				body, err = json.Marshal(dataMap)
+				c.Assert(err, IsNil)
+				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+					c.Assert(code, Equals, 400)
+				})
+				c.Assert(err, NotNil)
+				c.Assert(err.Error(), Equals, "\"invalid batch size which should be an integer between 1 and 10\"\n")
+				resp = make(map[string]interface{})
+				c.Assert(readJSON(testDialClient, listURL, &resp), IsNil)
+				c.Assert(resp["batch"], Equals, 3.0)
+				// empty body
+				err = postJSON(testDialClient, updateURL, nil, func(res []byte, code int) {
+					c.Assert(code, Equals, 500)
+				})
+				c.Assert(err, NotNil)
+				c.Assert(err.Error(), Equals, "\"unexpected end of JSON input\"\n")
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				c.Assert(err, IsNil)
+				err = postJSON(testDialClient, updateURL, body, func(res []byte, code int) {
+					c.Assert(code, Equals, 400)
+				})
+				c.Assert(err, NotNil)
+				c.Assert(err.Error(), Equals, "\"config item not found\"\n")
+			},
+		},
 		{
 			name: "balance-hot-region-scheduler",
 			extraTestFunc: func(name string, c *C) {

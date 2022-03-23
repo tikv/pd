@@ -482,7 +482,7 @@ func (m *ModeManager) tickDR() {
 			m.drSwitchToAsync(stores[primaryUp])
 		}
 	case drStateSyncRecover:
-		if !canSync {
+		if !canSync && hasMajority {
 			m.drSwitchToAsync(stores[primaryUp])
 		} else {
 			m.updateProgress()

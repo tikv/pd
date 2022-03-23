@@ -653,6 +653,11 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	return false
 }
 
+// GetMinResolvedTSPersistenceInterval gets the interval for PD to save min resolved ts.
+func (o *PersistOptions) GetMinResolvedTSPersistenceInterval() time.Duration {
+	return o.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration
+}
+
 const ttlConfigPrefix = "/config/ttl"
 
 // SetTTLData set temporary configuration

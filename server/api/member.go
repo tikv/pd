@@ -50,7 +50,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 // @Success 200 {object} pdpb.GetMembersResponse
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members [get]
-func (h *memberHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) GetMembers(w http.ResponseWriter, r *http.Request) {
 	members, err := getMembers(h.svr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -124,7 +124,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 // @Failure 404 {string} string "The member does not exist."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members/name/{name} [delete]
-func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
 
 	// Get etcd ID by name.
@@ -177,7 +177,7 @@ func (h *memberHandler) DeleteByName(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /members/id/{id} [delete]
-func (h *memberHandler) DeleteByID(w http.ResponseWriter, r *http.Request) {
+func (h *memberHandler) DeleteMemberByID(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -278,7 +278,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 // @Produce json
 // @Success 200 {object} pdpb.Member
 // @Router /leader [get]
-func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *leaderHandler) GetLeader(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
 }
 
@@ -288,7 +288,7 @@ func (h *leaderHandler) Get(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The resign command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/resign [post]
-func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
+func (h *leaderHandler) ResignLeader(w http.ResponseWriter, r *http.Request) {
 	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), "")
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -305,7 +305,7 @@ func (h *leaderHandler) Resign(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {string} string "The transfer command is submitted."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /leader/transfer/{nextLeader} [post]
-func (h *leaderHandler) Transfer(w http.ResponseWriter, r *http.Request) {
+func (h *leaderHandler) TransferLeader(w http.ResponseWriter, r *http.Request) {
 	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

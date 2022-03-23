@@ -4,10 +4,12 @@ on:
     branches:
       - master
       - release-5.*
+      - release-6.*
   pull_request:
     branches:
       - master
       - release-5.*
+      - release-6.*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -15,9 +17,9 @@ jobs:
   tso-function-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v2
+      - uses: actions/setup-go@v3
         with:
-          go-version: 1.17
+          go-version: "1.18.0"
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Make TSO Function Test

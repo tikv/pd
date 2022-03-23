@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -327,16 +325,10 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	t := reflect.TypeOf(conf).Elem()
-	for i := 0; i < t.NumField(); i++ {
-		jsonTag := t.Field(i).Tag.Get("json")
-		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
-			jsonTag = jsonTag[:i]
-		}
-		if _, ok := m[jsonTag]; ok {
-			rd.Text(w, http.StatusOK, "no changed")
-			return
-		}
+	ok := findSameField(conf, m)
+	if ok {
+		rd.Text(w, http.StatusOK, "no changed")
+		return
 	}
 
 	rd.Text(w, http.StatusBadRequest, "config item not found")
