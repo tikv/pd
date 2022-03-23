@@ -31,7 +31,7 @@ func Status(c *check.C, code int) func([]byte, int) {
 	}
 }
 
-// Status is used to check whether http response code is equal http.StatusOK
+// StatusOK is used to check whether http response code is equal http.StatusOK
 func StatusOK(c *check.C) func([]byte, int) {
 	return Status(c, http.StatusOK)
 }
