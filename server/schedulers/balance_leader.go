@@ -76,6 +76,9 @@ func init() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		if conf.Batch == 0 {
+			conf.Batch = BalanceLeaderBatchSize
+		}
 		return newBalanceLeaderScheduler(opController, conf), nil
 	})
 }
