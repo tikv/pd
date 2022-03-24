@@ -146,15 +146,20 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
-	data, _ := json.Marshal(labels)
+	data, _ = json.Marshal(labels)
 	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
@@ -169,11 +174,16 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
 
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
@@ -189,7 +199,11 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -208,7 +222,11 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input := map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -231,11 +249,16 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -246,11 +269,16 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -266,11 +294,16 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 	timeUnix := time.Now().Unix() - 20
 	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
@@ -287,11 +320,16 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	output := string(content)
 	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
@@ -302,11 +340,16 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)
@@ -329,11 +372,12 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
-	resp, _ = dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -351,11 +395,12 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
-	resp, _ = dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
