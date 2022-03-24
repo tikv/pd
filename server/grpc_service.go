@@ -600,15 +600,14 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			Header: s.errorHeader(pberr),
 		}, nil
 	}
+	storeID := request.GetStats().GetStoreId()
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return nil, errors.Errorf("store %v not found", storeID)
+	}
 
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
-		storeID := request.GetStats().GetStoreId()
-		store := rc.GetStore(storeID)
-		if store == nil {
-			return nil, errors.Errorf("store %v not found", storeID)
-		}
-
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()

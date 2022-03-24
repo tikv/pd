@@ -113,13 +113,12 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	}
 	for failedStore := range failedStores {
 		err := u.cluster.BuryStore(failedStore, true)
-		if !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
+		if err != nil && errors.ErrorNotEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
 			return err
 		}
 	}
 
 	u.reset()
-	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
@@ -129,6 +128,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 		}
 		u.storeReports[s.GetID()] = nil
 	}
+	u.failedStores = failedStores
 	u.stage = collectingClusterInfo
 	return nil
 }
