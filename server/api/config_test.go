@@ -322,7 +322,6 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	sc = &config.PDServerConfig{}
 	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, false)
-
 }
 
 var ttlConfig = map[string]interface{}{
