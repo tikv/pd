@@ -735,7 +735,6 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		forwardStream     pdpb.PD_ReportBucketsClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
-		lastBind          time.Time
 		errCh             chan error
 	)
 	defer func() {
@@ -789,11 +788,8 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err := s.validateRequest(request.GetHeader()); err != nil {
 			return err
 		}
-		if time.Since(lastBind) > s.cfg.HeartbeatStreamBindInterval.Duration {
-			bucketReportCounter.WithLabelValues("report", "bind").Inc()
-			lastBind = time.Now()
-		}
 		start := time.Now()
+		bucketReportCounter.WithLabelValues("report", "recv").Inc()
 		buckets := request.GetBuckets()
 		if buckets == nil || len(buckets.Keys) == 0 {
 			continue

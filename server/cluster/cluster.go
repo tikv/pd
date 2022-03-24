@@ -613,17 +613,21 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 	region := c.core.GetRegion(buckets.GetRegionId())
 	c.RUnlock()
 	if region == nil {
+		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
+
 	for i := 0; i < retry; i++ {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && old.Version >= buckets.Version {
+			bucketEventCounter.WithLabelValues("version_not_match").Inc()
 			return nil
 		}
 		if ok := region.UpdateBuckets(buckets); ok {
 			log.Info("update buckets successful", zap.Uint64("region-id", buckets.GetRegionId()),
 				zap.Uint64("version", buckets.Version))
+			bucketEventCounter.WithLabelValues("update_cache").Inc()
 			return nil
 		}
 	}
