@@ -804,7 +804,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			regionHeartbeatCounter.WithLabelValues("report", "err").Inc()
 			continue
 		}
-		regionHeartbeatHandleDuration.WithLabelValues().Observe(time.Since(start).Seconds())
+		bucketReportHandleDuration.WithLabelValues().Observe(time.Since(start).Seconds())
 		bucketReportCounter.WithLabelValues("report", "ok").Inc()
 	}
 }
