@@ -129,7 +129,7 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
 	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
@@ -259,6 +259,20 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
+
+	oldLeaderName := leader.GetServer().Name()
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	mustWaitLeader(c, s.cluster.GetServers())
+	leader = s.cluster.GetServer(s.cluster.GetLeader())
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -515,4 +529,18 @@ func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header
+}
+
+func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {
+	var leader *server.Server
+	testutil.WaitUntil(c, func() bool {
+		for _, s := range svrs {
+			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
+				leader = s.GetServer()
+				return true
+			}
+		}
+		return false
+	})
+	return leader
 }
