@@ -611,7 +611,8 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 			return errors.Errorf("the bucket version does not update, region-id:%d ", buckets.GetRegionId())
 		}
 		if ok := region.UpdateBuckets(buckets); ok {
-			log.Info("update buckets successful", zap.Uint64("region-id", buckets.GetRegionId()), zap.Uint64("version", buckets.Version))
+			log.Info("update buckets successful", zap.Uint64("region-id", buckets.GetRegionId()),
+				zap.Uint64("version", buckets.Version))
 			break
 		}
 	}
