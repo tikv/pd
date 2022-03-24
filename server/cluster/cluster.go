@@ -53,7 +53,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// backgroundJobInterval is the interval to run background jobs.
 var backgroundJobInterval = 10 * time.Second
+
+// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
+var DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -97,12 +101,13 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core    *core.BasicCluster
-	meta    *metapb.Cluster
-	opt     *config.PersistOptions
-	storage storage.Storage
-	id      id.Allocator
-	limiter *StoreLimiter
+	core          *core.BasicCluster
+	meta          *metapb.Cluster
+	opt           *config.PersistOptions
+	storage       storage.Storage
+	id            id.Allocator
+	limiter       *StoreLimiter
+	minResolvedTS uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -251,19 +256,17 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
-	minResolvedTSPersistenceInterval := c.opt.GetMinResolvedTSPersistenceInterval()
 
 	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
-		minResolvedTSPersistenceInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
-	go c.runMinResolvedTSJob(minResolvedTSPersistenceInterval)
+	go c.runMinResolvedTSJob()
 	c.running = true
 
 	return nil
@@ -1654,25 +1657,6 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-// GetMinResolvedTS returns the min resolved ts of all stores.
-func (c *RaftCluster) GetMinResolvedTS() uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	if !c.isInitialized() {
-		return math.MaxUint64
-	}
-	min := uint64(math.MaxUint64)
-	for _, s := range c.GetStores() {
-		if !core.IsAvailableForMinResolvedTS(s) {
-			continue
-		}
-		if min > s.GetMinResolvedTS() {
-			min = s.GetMinResolvedTS()
-		}
-	}
-	return min
-}
-
 // SetMinResolvedTS sets up a store with min resolved ts.
 func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	c.Lock()
@@ -1690,28 +1674,79 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	return c.putStoreLocked(newStore)
 }
 
-func (c *RaftCluster) runMinResolvedTSJob(saveInterval time.Duration) {
-	defer c.wg.Done()
-	if saveInterval == 0 {
-		return
+func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	if !c.isInitialized() {
+		return math.MaxUint64, false
 	}
+	curMinResolvedTS := uint64(math.MaxUint64)
+	for _, s := range c.GetStores() {
+		if !core.IsAvailableForMinResolvedTS(s) {
+			continue
+		}
+		if curMinResolvedTS > s.GetMinResolvedTS() {
+			curMinResolvedTS = s.GetMinResolvedTS()
+		}
+	}
+	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
+		return c.minResolvedTS, false
+	}
+	c.minResolvedTS = curMinResolvedTS
+	return c.minResolvedTS, true
+}
+
+func (c *RaftCluster) runMinResolvedTSJob() {
 	defer logutil.LogPanic()
-	ticker := time.NewTicker(saveInterval)
+	defer c.wg.Done()
+
+	interval := c.opt.GetMinResolvedTSPersistenceInterval()
+	if interval == 0 {
+		interval = DefaultMinResolvedTSPersistenceInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	c.loadMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("min resolved ts background jobs has been stopped")
 			return
 		case <-ticker.C:
-			minResolvedTS := c.GetMinResolvedTS()
-			if minResolvedTS != math.MaxUint64 {
-				c.Lock()
-				c.storage.SaveMinResolvedTS(minResolvedTS)
-				c.Unlock()
+			interval = c.opt.GetMinResolvedTSPersistenceInterval()
+			if interval != 0 {
+				if current, needPersist := c.checkAndUpdateMinResolvedTS(); needPersist {
+					c.storage.SaveMinResolvedTS(current)
+				}
+			} else {
+				interval = DefaultMinResolvedTSPersistenceInterval
 			}
+			ticker.Reset(interval)
 		}
 	}
+}
+
+func (c *RaftCluster) loadMinResolvedTS() {
+	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	if err != nil {
+		log.Error("load min resolved ts meet error", errs.ZapError(err))
+		return
+	}
+	c.Lock()
+	defer c.Unlock()
+	c.minResolvedTS = minResolvedTS
+}
+
+// GetMinResolvedTS returns the min resolved ts of the cluster.
+func (c *RaftCluster) GetMinResolvedTS() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() {
+		return math.MaxUint64
+	}
+	return c.minResolvedTS
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.

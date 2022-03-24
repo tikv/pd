@@ -1200,8 +1200,8 @@ func (s *Server) DeteleServiceConcurrencyLimiter(serviceLabel string) {
 	s.serviceRateLimiter.DeleteConcurrencyLimiter(serviceLabel)
 }
 
-// DeleteeServiceQPSLimiter is used to delete qps limiter
-func (s *Server) DeleteeServiceQPSLimiter(serviceLabel string) {
+// DeleteServiceQPSLimiter is used to delete qps limiter
+func (s *Server) DeleteServiceQPSLimiter(serviceLabel string) {
 	s.serviceRateLimiter.DeleteQPSLimiter(serviceLabel)
 }
 

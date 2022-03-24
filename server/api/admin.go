@@ -252,7 +252,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(qps, brust))
 			qpsRateUpdatedFlag = "QPS rate limiter is changed."
 		} else {
-			h.svr.DeleteeServiceQPSLimiter(serviceLabel)
+			h.svr.DeleteServiceQPSLimiter(serviceLabel)
 			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
 		}
 	}

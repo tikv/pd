@@ -328,7 +328,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// min resolved ts API
 	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
-	registerFunc(apiRouter, "/min-resolved-ts", minResolvedTSHandler.Get, setMethods("GET"))
+	registerFunc(apiRouter, "/min-resolved-ts", minResolvedTSHandler.GetMinResolvedTS, setMethods("GET"))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)

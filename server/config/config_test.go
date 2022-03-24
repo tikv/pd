@@ -159,6 +159,8 @@ func (s *testConfigSuite) TestValidation(c *C) {
 	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
 	// check request bytes
 	c.Assert(cfg.MaxRequestBytes, Equals, defaultMaxRequestBytes)
+
+	c.Assert(cfg.Log.Format, Equals, defaultLogFormat)
 }
 
 func (s *testConfigSuite) TestAdjust(c *C) {
