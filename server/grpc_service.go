@@ -800,8 +800,8 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		}
 		err = rc.HandleBucketHeartbeat(request.Buckets)
 		if err != nil {
-			log.Warn("update bucket failed ", zap.Error(err))
-			regionHeartbeatCounter.WithLabelValues("report", "err").Inc()
+			log.Warn("update bucket failed", zap.Error(err))
+			bucketReportCounter.WithLabelValues("report", "err").Inc()
 			continue
 		}
 		bucketReportHandleDuration.WithLabelValues().Observe(time.Since(start).Seconds())

@@ -619,12 +619,12 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && old.Version >= buckets.Version {
-			return errors.Errorf("the bucket version does not update, region-id:%d ", buckets.GetRegionId())
+			return nil
 		}
 		if ok := region.UpdateBuckets(buckets); ok {
 			log.Info("update buckets successful", zap.Uint64("region-id", buckets.GetRegionId()),
 				zap.Uint64("version", buckets.Version))
-			break
+			return nil
 		}
 	}
 	return nil
