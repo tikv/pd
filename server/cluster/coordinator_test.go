@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"sync"
 	"testing"
@@ -675,6 +676,18 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
+
+	// test ConfigJSONDecoder create
+	bl, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
+	c.Assert(err, IsNil)
+	conf, err := bl.EncodeConfig()
+	c.Assert(err, IsNil)
+	data := make(map[string]interface{})
+	err = json.Unmarshal(conf, &data)
+	c.Assert(err, IsNil)
+	batch := data["batch"].(float64)
+	c.Assert(int(batch), Equals, 4)
+
 	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)

@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -659,7 +660,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetStoreConfigManager())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
@@ -700,7 +701,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 	c.Assert(storage.Flush(), IsNil)
 
-	raftCluster = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	raftCluster = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetStoreConfigManager())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
@@ -1136,11 +1137,26 @@ func (s *clusterTestSuite) putRegionWithLeader(c *C, rc *cluster.RaftCluster, id
 	c.Assert(rc.GetStore(storeID).GetLeaderCount(), Equals, 3)
 }
 
+func (s *clusterTestSuite) checkMinResolvedTSFromStorage(c *C, rc *cluster.RaftCluster, expect uint64) {
+	time.Sleep(time.Millisecond * 10)
+	ts2, err := rc.GetStorage().LoadMinResolvedTS()
+	c.Assert(err, IsNil)
+	c.Assert(ts2, Equals, expect)
+}
+
+func (s *clusterTestSuite) setMinResolvedTSPersistenceInterval(c *C, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
+	cfg := rc.GetOpts().GetPDServerConfig().Clone()
+	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
+	err := svr.SetPDServerConfig(*cfg)
+	c.Assert(err, IsNil)
+	time.Sleep(time.Millisecond + interval)
+}
+
 func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
+	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
 	c.Assert(err, IsNil)
-
 	err = tc.RunInitialServers()
 	c.Assert(err, IsNil)
 	tc.WaitLeader()
@@ -1151,8 +1167,10 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	bootstrapCluster(c, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	c.Assert(rc, NotNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
-	addStoreWithMinResolvedTS := func(c *C, storeID uint64, isTiflash bool, minResolvedTS, expect uint64) {
+	svr := leaderServer.GetServer()
+	addStoreAndCheckMinResolvedTS := func(c *C, isTiflash bool, minResolvedTS, expect uint64) uint64 {
+		storeID, err := id.Alloc()
+		c.Assert(err, IsNil)
 		store := &metapb.Store{
 			Id:      storeID,
 			Version: "v6.0.0",
@@ -1161,7 +1179,7 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 		if isTiflash {
 			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
 		}
-		_, err := putStore(grpcPDClient, clusterID, store)
+		_, err = putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
 		req := &pdpb.ReportMinResolvedTsRequest{
 			Header:        testutil.NewRequestHeader(clusterID),
@@ -1170,54 +1188,68 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 		}
 		_, err = grpcPDClient.ReportMinResolvedTS(context.Background(), req)
 		c.Assert(err, IsNil)
-		time.Sleep(time.Millisecond * 10)
 		ts := rc.GetMinResolvedTS()
 		c.Assert(ts, Equals, expect)
+		return storeID
 	}
-	store1TS := uint64(233)
-	store3TS := store1TS - 10
-	// case1: no init
+
+	// case1: cluster is no initialized
 	// min resolved ts should be not available
-	store1 := uint64(1)
 	status, err := rc.LoadClusterStatus()
+	c.Assert(err, IsNil)
 	c.Assert(status.IsInitialized, IsFalse)
-	addStoreWithMinResolvedTS(c, store1, false, store1TS, math.MaxUint64)
-	// case2: add leader to store1
-	// min resolved ts should be available
+	store1TS := uint64(233)
+	store1 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store1TS, math.MaxUint64)
+
+	// case2: add leader peer to store1 but no run job
+	// min resolved ts should be zero
 	s.putRegionWithLeader(c, rc, id, store1)
 	ts := rc.GetMinResolvedTS()
+	c.Assert(ts, Equals, uint64(0))
+
+	// case3: add leader peer to store1 and run job
+	// min resolved ts should be store1TS
+	s.setMinResolvedTSPersistenceInterval(c, rc, svr, time.Millisecond)
+	ts = rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store1TS)
-	// case2: add tiflash store
+	s.checkMinResolvedTSFromStorage(c, rc, ts)
+
+	// case4: add tiflash store
 	// min resolved ts should no change
-	store2 := uint64(2)
-	addStoreWithMinResolvedTS(c, store2, true, 0, store1TS)
-	// case4: add new store with less ts but without leader
+	addStoreAndCheckMinResolvedTS(c, true /* is tiflash */, 0, store1TS)
+
+	// case5: add new store with lager min resolved ts
 	// min resolved ts should no change
-	store3 := uint64(3)
-	addStoreWithMinResolvedTS(c, store3, false, store3TS, store1TS)
-	// case5: add leader to store 3, store 3 has less ts than store 1.
-	// min resolved ts should change to store 3
+	store3TS := store1TS + 10
+	store3 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store3TS, store1TS)
 	s.putRegionWithLeader(c, rc, id, store3)
+
+	// case6: set store1 to tombstone
+	// min resolved ts should change to store 3
+	resetStoreState(c, rc, store1, metapb.StoreState_Tombstone)
 	ts = rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store3TS)
-	// case6: set tombstone
-	// min resolved ts should change to store 1
-	resetStoreState(c, rc, store3, metapb.StoreState_Tombstone)
-	time.Sleep(time.Millisecond * 10)
-	ts = rc.GetMinResolvedTS()
-	c.Assert(err, IsNil)
-	c.Assert(ts, Equals, store1TS)
-	// case7: add a store with leader but no report min resolved ts
-	// min resolved ts should be zero
-	store4 := uint64(4)
-	_, err = putStore(grpcPDClient, clusterID, &metapb.Store{
-		Id:      store4,
-		Version: "v6.0.0",
-		Address: "127.0.0.1:" + strconv.Itoa(int(store4)),
-	})
-	c.Assert(err, IsNil)
+
+	// case7: add a store with leader peer but no report min resolved ts
+	// min resolved ts should be no change
+	s.checkMinResolvedTSFromStorage(c, rc, store3TS)
+	store4 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, 0, store3TS)
 	s.putRegionWithLeader(c, rc, id, store4)
 	ts = rc.GetMinResolvedTS()
-	c.Assert(err, IsNil)
-	c.Assert(ts, Equals, uint64(0))
+	c.Assert(ts, Equals, store3TS)
+	s.checkMinResolvedTSFromStorage(c, rc, store3TS)
+	resetStoreState(c, rc, store4, metapb.StoreState_Tombstone)
+
+	// case8: set min resolved ts persist interval to zero
+	// although min resolved ts increase, it should be not persisted until job running.
+	store5TS := store3TS + 10
+	s.setMinResolvedTSPersistenceInterval(c, rc, svr, 0)
+	store5 := addStoreAndCheckMinResolvedTS(c, false /* not tiflash */, store5TS, store3TS)
+	resetStoreState(c, rc, store3, metapb.StoreState_Tombstone)
+	s.putRegionWithLeader(c, rc, id, store5)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(ts, Equals, store3TS)
+	s.setMinResolvedTSPersistenceInterval(c, rc, svr, time.Millisecond)
+	ts = rc.GetMinResolvedTS()
+	c.Assert(ts, Equals, store5TS)
 }
