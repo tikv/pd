@@ -1203,7 +1203,8 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			FinishedPercentage: uint64(percentage),
 		}, nil
 	}
-
+	// TODO: Deprecate it use `request.GetRegionsID`.
+	//nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
