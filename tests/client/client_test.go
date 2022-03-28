@@ -1168,7 +1168,6 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	testutil.WaitUntil(c, func() bool {
 		err := s.client.ScatterRegion(context.Background(), regionID)
 		if c.Check(err, NotNil) {
-			fmt.Println(err)
 			return false
 		}
 		resp, err := s.client.GetOperator(context.Background(), regionID)
