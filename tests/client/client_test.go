@@ -1147,6 +1147,7 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 	err := s.regionHeartbeat.Send(req)
 	regionsID := []uint64{regionID}
 	c.Assert(err, IsNil)
+	// Test interface `ScatterRegions`.
 	testutil.WaitUntil(c, func() bool {
 		scatterResp, err := s.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if c.Check(err, NotNil) {
@@ -1161,6 +1162,22 @@ func (s *testClientSuite) TestScatterRegion(c *C) {
 		}
 		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
 	}, testutil.WithSleepInterval(1*time.Second))
+
+	// Test interface `ScatterRegion`.
+	// TODO: Deprecate interface `ScatterRegion`.
+	testutil.WaitUntil(c, func() bool {
+		err := s.client.ScatterRegion(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			fmt.Println(err)
+			return false
+		}
+		resp, err := s.client.GetOperator(context.Background(), regionID)
+		if c.Check(err, NotNil) {
+			return false
+		}
+		return c.Check(resp.GetRegionId(), Equals, regionID) && c.Check(string(resp.GetDesc()), Equals, "scatter-region") && c.Check(resp.GetStatus(), Equals, pdpb.OperatorStatus_RUNNING)
+	}, testutil.WithSleepInterval(1*time.Second))
+
 	c.Succeed()
 }
 
