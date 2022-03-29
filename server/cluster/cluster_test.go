@@ -455,7 +455,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
 
 	// case3: the bucket version is same.
-	c.Assert(cluster.processBucketHeartbeat(buckets), NotNil)
+	c.Assert(cluster.processBucketHeartbeat(buckets), IsNil)
 	// case4: the bucket version is changed.
 	buckets.Version = 3
 	c.Assert(cluster.processBucketHeartbeat(buckets), IsNil)
