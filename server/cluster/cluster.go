@@ -104,13 +104,14 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core          *core.BasicCluster
-	meta          *metapb.Cluster
-	opt           *config.PersistOptions
-	storage       storage.Storage
-	id            id.Allocator
-	limiter       *StoreLimiter
-	minResolvedTS uint64
+	core               *core.BasicCluster
+	meta               *metapb.Cluster
+	opt                *config.PersistOptions
+	storeConfigManager *config.StoreConfigManager
+	storage            storage.Storage
+	id                 id.Allocator
+	limiter            *StoreLimiter
+	minResolvedTS      uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -141,15 +142,22 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:    ctx,
-		running:      false,
-		clusterID:    clusterID,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		serverCtx:          ctx,
+		running:            false,
+		clusterID:          clusterID,
+		regionSyncer:       regionSyncer,
+		httpClient:         httpClient,
+		etcdClient:         etcdClient,
+		storeConfigManager: manager,
 	}
+}
+
+// GetStoreConfig returns the store config.
+func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
+	return c.storeConfigManager.GetStoreConfig()
 }
 
 // LoadClusterStatus loads the cluster status.
