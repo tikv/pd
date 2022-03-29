@@ -12,6 +12,7 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
+	github.com/gin-gonic/gin v1.7.4
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang/protobuf v1.3.4

@@ -113,7 +113,7 @@ docker-image:
 
 swagger-spec: install-tools
 	go mod vendor
-	swag init --parseVendor -generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
+	swag init --parseVendor --generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
 	go mod tidy
 	rm -rf vendor
 
