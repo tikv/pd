@@ -154,7 +154,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
-		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
+		return updatePDServerConfig(h.svr, cfg, kp[len(kp)-1], value)
 	case "log":
 		return h.updateLogLevel(kp, value)
 	case "cluster-version":
@@ -193,7 +193,7 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value in
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.Schedule, data)
+	updated, found, err := mergeConfig(&config.Schedule, data)
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (h *confHandler) updateReplication(config *config.Config, key string, value
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.Replication, data)
+	updated, found, err := mergeConfig(&config.Replication, data)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.ReplicationMode, data)
+	updated, found, err := mergeConfig(&config.ReplicationMode, data)
 	if err != nil {
 		return err
 	}
@@ -252,13 +252,13 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	return err
 }
 
-func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value interface{}) error {
+func updatePDServerConfig(svr *server.Server, config *config.Config, key string, value interface{}) error {
 	data, err := json.Marshal(map[string]interface{}{key: value})
 	if err != nil {
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.PDServerCfg, data)
+	updated, found, err := mergeConfig(&config.PDServerCfg, data)
 	if err != nil {
 		return err
 	}
@@ -268,7 +268,7 @@ func (h *confHandler) updatePDServerConfig(config *config.Config, key string, va
 	}
 
 	if updated {
-		err = h.svr.SetPDServerConfig(config.PDServerCfg)
+		err = svr.SetPDServerConfig(config.PDServerCfg)
 	}
 	return err
 }
@@ -310,7 +310,7 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 	return cfg
 }
 
-func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
+func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
 		return false, false, err

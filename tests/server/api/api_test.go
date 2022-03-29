@@ -283,12 +283,7 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
 
-	input = map[string]interface{}{
-		"enable-audit": false,
-	}
-	data, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()

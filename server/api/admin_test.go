@@ -192,3 +192,27 @@ func (s *testServiceSuite) SetUpSuite(c *C) {
 func (s *testServiceSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
+
+func (s *testServiceSuite) TestSwitchAuditMiddleware(c *C) {
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/audit-middleware", s.svr.GetAddr(), apiPrefix)
+
+	enableURL := fmt.Sprintf("%s?enable=true", urlPrefix)
+	err := postJSON(testDialClient, enableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching audit middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetPersistOptions().IsAuditEnabled(), Equals, true)
+
+	disableURL := fmt.Sprintf("%s?enable=false", urlPrefix)
+	err = postJSON(testDialClient, disableURL, nil,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Switching audit middleware is successful.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetPersistOptions().IsAuditEnabled(), Equals, false)
+}
