@@ -38,7 +38,7 @@ func newClusterHandler(svr *server.Server, rd *render.Render) *clusterHandler {
 // @Produce json
 // @Success 200 {object} metapb.Cluster
 // @Router /cluster [get]
-func (h *clusterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *clusterHandler) GetCluster(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetCluster())
 }
 

@@ -60,16 +60,18 @@ type StoreInfo struct {
 	leaderWeight        float64
 	regionWeight        float64
 	limiter             map[storelimit.Type]*storelimit.StoreLimit
+	minResolvedTS       uint64
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:         store,
-		storeStats:   newStoreStats(),
-		leaderWeight: 1.0,
-		regionWeight: 1.0,
-		limiter:      make(map[storelimit.Type]*storelimit.StoreLimit),
+		meta:          store,
+		storeStats:    newStoreStats(),
+		leaderWeight:  1.0,
+		regionWeight:  1.0,
+		limiter:       make(map[storelimit.Type]*storelimit.StoreLimit),
+		minResolvedTS: 0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -94,6 +96,7 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
 		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
 	}
 
 	for _, opt := range opts {
@@ -118,6 +121,7 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:        s.leaderWeight,
 		regionWeight:        s.regionWeight,
 		limiter:             s.limiter,
+		minResolvedTS:       s.minResolvedTS,
 	}
 
 	for _, opt := range opts {
@@ -142,7 +146,7 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.limiter != nil && s.limiter[limitType] != nil {
-		return s.limiter[limitType].Available() >= storelimit.RegionInfluence[limitType]
+		return s.limiter[limitType].Available(storelimit.RegionInfluence[limitType])
 	}
 	return true
 }
@@ -472,6 +476,11 @@ func (s *StoreInfo) GetUptime() time.Duration {
 	return 0
 }
 
+// GetMinResolvedTS returns min resolved ts.
+func (s *StoreInfo) GetMinResolvedTS() uint64 {
+	return s.minResolvedTS
+}
+
 var (
 	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
 	// be marked as disconnected state. The value should be greater than tikv's
@@ -714,7 +723,7 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCo
 	}
 }
 
-// IsStoreContainLabel return if the store contains the given label.
+// IsStoreContainLabel returns if the store contains the given label.
 func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	for _, l := range store.GetLabels() {
 		if l.GetKey() == key && l.GetValue() == value {
@@ -722,4 +731,11 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 		}
 	}
 	return false
+}
+
+// IsAvailableForMinResolvedTS returns if the store is available for min resolved ts.
+func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
+	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
+	// And we will skip tiflash, because it does not report min resolved ts.
+	return !s.IsRemoved() && !IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash) && s.GetLeaderCount() != 0
 }

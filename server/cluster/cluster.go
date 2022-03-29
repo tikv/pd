@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -52,7 +53,11 @@ import (
 	"go.uber.org/zap"
 )
 
+// backgroundJobInterval is the interval to run background jobs.
 var backgroundJobInterval = 10 * time.Second
+
+// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
+var DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 
 const (
 	clientTimeout              = 3 * time.Second
@@ -96,12 +101,14 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core    *core.BasicCluster
-	meta    *metapb.Cluster
-	opt     *config.PersistOptions
-	storage storage.Storage
-	id      id.Allocator
-	limiter *StoreLimiter
+	core               *core.BasicCluster
+	meta               *metapb.Cluster
+	opt                *config.PersistOptions
+	storeConfigManager *config.StoreConfigManager
+	storage            storage.Storage
+	id                 id.Allocator
+	limiter            *StoreLimiter
+	minResolvedTS      uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -132,15 +139,22 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:    ctx,
-		running:      false,
-		clusterID:    clusterID,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		serverCtx:          ctx,
+		running:            false,
+		clusterID:          clusterID,
+		regionSyncer:       regionSyncer,
+		httpClient:         httpClient,
+		etcdClient:         etcdClient,
+		storeConfigManager: manager,
 	}
+}
+
+// GetStoreConfig returns the store config.
+func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
+	return c.storeConfigManager.GetStoreConfig()
 }
 
 // LoadClusterStatus loads the cluster status.
@@ -251,7 +265,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
-	c.wg.Add(5)
+	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 100 * time.Microsecond
@@ -260,6 +274,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runStatsBackgroundJobs()
 	go c.syncRegions()
 	go c.runReplicationMode()
+	go c.runMinResolvedTSJob()
 	c.running = true
 
 	return nil
@@ -1648,6 +1663,98 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 		time.Sleep(persistLimitWaitTime)
 	}
 	log.Error("persist store limit meet error", errs.ZapError(err))
+}
+
+// SetMinResolvedTS sets up a store with min resolved ts.
+func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(
+		core.SetMinResolvedTS(minResolvedTS),
+	)
+
+	return c.putStoreLocked(newStore)
+}
+
+func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
+	c.Lock()
+	defer c.Unlock()
+
+	if !c.isInitialized() {
+		return math.MaxUint64, false
+	}
+	curMinResolvedTS := uint64(math.MaxUint64)
+	for _, s := range c.GetStores() {
+		if !core.IsAvailableForMinResolvedTS(s) {
+			continue
+		}
+		if curMinResolvedTS > s.GetMinResolvedTS() {
+			curMinResolvedTS = s.GetMinResolvedTS()
+		}
+	}
+	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
+		return c.minResolvedTS, false
+	}
+	c.minResolvedTS = curMinResolvedTS
+	return c.minResolvedTS, true
+}
+
+func (c *RaftCluster) runMinResolvedTSJob() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	interval := c.opt.GetMinResolvedTSPersistenceInterval()
+	if interval == 0 {
+		interval = DefaultMinResolvedTSPersistenceInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	c.loadMinResolvedTS()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("min resolved ts background jobs has been stopped")
+			return
+		case <-ticker.C:
+			interval = c.opt.GetMinResolvedTSPersistenceInterval()
+			if interval != 0 {
+				if current, needPersist := c.checkAndUpdateMinResolvedTS(); needPersist {
+					c.storage.SaveMinResolvedTS(current)
+				}
+			} else {
+				interval = DefaultMinResolvedTSPersistenceInterval
+			}
+			ticker.Reset(interval)
+		}
+	}
+}
+
+func (c *RaftCluster) loadMinResolvedTS() {
+	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	if err != nil {
+		log.Error("load min resolved ts meet error", errs.ZapError(err))
+		return
+	}
+	c.Lock()
+	defer c.Unlock()
+	c.minResolvedTS = minResolvedTS
+}
+
+// GetMinResolvedTS returns the min resolved ts of the cluster.
+func (c *RaftCluster) GetMinResolvedTS() uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() {
+		return math.MaxUint64
+	}
+	return c.minResolvedTS
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.

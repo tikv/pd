@@ -47,7 +47,7 @@ func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /admin/log [post]
-func (h *logHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *logHandler) SetLogLevel(w http.ResponseWriter, r *http.Request) {
 	var level string
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()

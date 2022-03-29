@@ -113,7 +113,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	op = bs.Schedule(tc)
-	c.Assert(op, IsNil)
+	c.Assert(op, HasLen, 0)
 
 	// Can't evict leader from store2, neither.
 	el, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
@@ -603,7 +603,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		if testcase.schedule {
 			c.Check(len(s.schedule()), Equals, 1)
 		} else {
-			c.Check(s.schedule(), IsNil)
+			c.Assert(s.schedule(), HasLen, 0)
 		}
 	}
 }
@@ -645,7 +645,7 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 	// Cannot balance leaders to store 1
 	op = bs.Schedule(tc)
-	c.Check(op, IsNil)
+	c.Assert(op, HasLen, 0)
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
 	})
