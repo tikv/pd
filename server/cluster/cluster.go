@@ -66,7 +66,6 @@ const (
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
 	persistLimitWaitTime   = 100 * time.Millisecond
-	retry                  = 3
 )
 
 // Server is the interface for cluster.
@@ -615,18 +614,12 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 
-	for i := 0; i < retry; i++ {
-		old := region.GetBuckets()
-		// region should not update if the version of the buckets is less than the old one.
-		if old != nil && old.Version >= buckets.Version {
-			bucketEventCounter.WithLabelValues("version_not_match").Inc()
-			return nil
-		}
-		if ok := region.UpdateBuckets(buckets); ok {
-			bucketEventCounter.WithLabelValues("update_cache").Inc()
-			return nil
-		}
+	// region should not update if the version of the buckets is less than the old one.
+	if old := region.GetBuckets(); old != nil && old.Version >= buckets.Version {
+		bucketEventCounter.WithLabelValues("version_not_match").Inc()
+		return nil
 	}
+	region.UpdateBuckets(buckets)
 	return nil
 }
 
