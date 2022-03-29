@@ -27,7 +27,7 @@ var (
 	bucketReportCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
+			Subsystem: "server",
 			Name:      "bucket_report",
 			Help:      "Counter of bucket report.",
 		}, []string{"type", "status"})
@@ -94,7 +94,7 @@ var (
 	bucketReportHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
-			Subsystem: "scheduler",
+			Subsystem: "server",
 			Name:      "handle_bucket_report_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled bucket report requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours

@@ -652,14 +652,14 @@ const heartbeatSendTimeout = 5 * time.Second
 
 var errSendHeartbeatTimeout = errors.New("send heartbeat timeout")
 
-// bucketHeartServer wraps PD_ReportBucketsServer to ensure when any error
+// bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
-type bucketHeartServer struct {
+type bucketHeartbeatServer struct {
 	stream pdpb.PD_ReportBucketsServer
 	closed int32
 }
 
-func (b *bucketHeartServer) Send(bucket *pdpb.ReportBucketsResponse) error {
+func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return status.Errorf(codes.Canceled, "stream is closed")
 	}
@@ -679,7 +679,7 @@ func (b *bucketHeartServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	}
 }
 
-func (b *bucketHeartServer) Recv() (*pdpb.ReportBucketsRequest, error) {
+func (b *bucketHeartbeatServer) Recv() (*pdpb.ReportBucketsRequest, error) {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -731,7 +731,7 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	var (
-		server            = &bucketHeartServer{stream: stream}
+		server            = &bucketHeartbeatServer{stream: stream}
 		forwardStream     pdpb.PD_ReportBucketsClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
@@ -1836,7 +1836,7 @@ func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (
 	return forwardStream, cancel, err
 }
 
-func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartServer, errCh chan error) {
+func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
 	defer close(errCh)
 	for {
 		resp, err := forwardStream.CloseAndRecv()

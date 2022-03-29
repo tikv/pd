@@ -609,9 +609,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 
 // processBucketHeartbeat update the bucket information.
 func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
-	c.RLock()
 	region := c.core.GetRegion(buckets.GetRegionId())
-	c.RUnlock()
 	if region == nil {
 		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
@@ -625,8 +623,6 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 			return nil
 		}
 		if ok := region.UpdateBuckets(buckets); ok {
-			log.Info("update buckets successful", zap.Uint64("region-id", buckets.GetRegionId()),
-				zap.Uint64("version", buckets.Version))
 			bucketEventCounter.WithLabelValues("update_cache").Inc()
 			return nil
 		}
