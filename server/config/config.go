@@ -228,12 +228,13 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
-	defaultFlowRoundByDigit  = 3 // KB
-	maxTraceFlowRoundByDigit = 5 // 0.1 MB
-	defaultMaxResetTSGap     = 24 * time.Hour
-	defaultKeyType           = "table"
+	defaultUseRegionStorage                 = true
+	defaultTraceRegionFlow                  = true
+	defaultFlowRoundByDigit                 = 3 // KB
+	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
+	defaultMaxResetTSGap                    = 24 * time.Hour
+	defaultMinResolvedTSPersistenceInterval = 0
+	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -251,6 +252,8 @@ const (
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+
+	defaultLogFormat = "text"
 )
 
 // Special keys for Labels
@@ -593,6 +596,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Security.Encryption.Adjust()
+
+	if len(c.Log.Format) == 0 {
+		c.Log.Format = defaultLogFormat
+	}
 
 	return nil
 }
@@ -1102,6 +1109,8 @@ type PDServerConfig struct {
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
+	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
+	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1123,6 +1132,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
+	}
+	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
+		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

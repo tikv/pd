@@ -512,6 +512,15 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
+	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
+		go func(url string) {
+			// tikv may not ready to server.
+			time.Sleep(5 * time.Second)
+			if err := s.storeConfigManager.Load(url); err != nil {
+				log.Error("load store config failed", zap.String("url", url), zap.Error(err))
+			}
+		}(store.GetStatusAddress())
+	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -1090,11 +1099,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			FinishedPercentage: uint64(percentage),
 		}, nil
 	}
-
-	region := rc.GetRegion(request.GetRegion().GetId())
+	// TODO: Deprecate it use `request.GetRegionsID`.
+	//nolint
+	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			return nil, errors.Errorf("region %d not found", request.GetRegion().GetId())
+			//nolint
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
@@ -1660,7 +1671,7 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 
 // ReportBuckets receives region buckets from tikv.
 func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
-	panic("not implemented")
+	return status.Errorf(codes.Unimplemented, "not implemented")
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
@@ -1679,4 +1690,38 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
 	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
+}
+
+// ReportMinResolvedTS implements gRPC PDServer.
+func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	storeID := request.StoreId
+	minResolvedTS := request.MinResolvedTs
+	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
+		return nil, err
+	}
+	log.Debug("updated min resolved-ts",
+		zap.Uint64("store", storeID),
+		zap.Uint64("min resolved-ts", minResolvedTS))
+	return &pdpb.ReportMinResolvedTsResponse{
+		Header: s.header(),
+	}, nil
 }
