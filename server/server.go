@@ -811,7 +811,7 @@ func (s *Server) StartTimestamp() int64 {
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	if s.IsClosed() {
-		return nil, errors.New("server not started")
+		return nil, errs.ErrServerNotStarted.FastGenByArgs()
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	return members, err
