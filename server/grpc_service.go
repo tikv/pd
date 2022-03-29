@@ -512,6 +512,15 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
+	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
+		go func(url string) {
+			// tikv may not ready to server.
+			time.Sleep(5 * time.Second)
+			if err := s.storeConfigManager.Load(url); err != nil {
+				log.Error("load store config failed", zap.String("url", url), zap.Error(err))
+			}
+		}(store.GetStatusAddress())
+	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -1090,11 +1099,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			FinishedPercentage: uint64(percentage),
 		}, nil
 	}
-
-	region := rc.GetRegion(request.GetRegion().GetId())
+	// TODO: Deprecate it use `request.GetRegionsID`.
+	//nolint
+	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			return nil, errors.Errorf("region %d not found", request.GetRegion().GetId())
+			//nolint
+			return nil, errors.Errorf("region %d not found", request.GetRegionId())
 		}
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
