@@ -848,7 +848,7 @@ func (c *RaftCluster) GetRegionCount() int {
 	return c.core.GetRegionCount()
 }
 
-// GetRegionCount returns total size of regions
+// GetRegionSize returns total size of regions
 func (c *RaftCluster) GetRegionSize() int64 {
 	return c.core.GetRegionSize()
 }
@@ -1277,7 +1277,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	return err
 }
 
-// UpStore change store's node state to Serving.
+// ReadyToServe change store's node state to Serving.
 func (c *RaftCluster) ReadyToServe(store *core.StoreInfo) error {
 	c.Lock()
 	defer c.Unlock()
@@ -1299,7 +1299,7 @@ func (c *RaftCluster) ReadyToServe(store *core.StoreInfo) error {
 	}
 
 	newStore := store.Clone(core.UpStore())
-	log.Debug("store has changed to serving",
+	log.Info("store has changed to serving",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
 	return c.putStoreLocked(newStore)
@@ -1339,6 +1339,8 @@ func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
 	stores := c.GetStores()
+
+	keys := c.ruleManager.GetSplitKeys([]byte(""), []byte(""))
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
@@ -1346,28 +1348,8 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		storeID := store.GetID()
-		if store.IsPreparing() {
-			regionSize := float64(c.GetRegionSize())
-			locationLabels := c.opt.GetLocationLabels()
-			topoWeight := c.core.GetStoreTopoWeight(storeID, locationLabels)
-			storeCount := 1.0
-			for _, otherStore := range stores {
-				if otherStore.GetID() == storeID || otherStore.GetNodeState() == metapb.NodeState_Removed || otherStore.GetNodeState() == metapb.NodeState_Removing {
-					continue
-				}
-				if store.CompareLocation(otherStore, locationLabels) == -1 {
-					storeCount++
-				}
-			}
-
-			threshold := regionSize * topoWeight / storeCount * 0.9
-			log.Debug("store scale out info",
-				zap.Float64("total-region-size", regionSize),
-				zap.Strings("label", locationLabels),
-				zap.Float64("topo-weight", topoWeight),
-				zap.Float64("store-count", storeCount),
-				zap.Float64("threshold", threshold),
-			)
+		if store.IsPreparing() && store.GetUptime() > 1*time.Minute {
+			threshold := c.getThreshold(stores, store, keys)
 			if float64(store.GetRegionSize()) >= threshold {
 				if err := c.ReadyToServe(store); err != nil {
 					log.Error("change store to serving failed",

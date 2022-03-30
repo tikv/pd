@@ -134,13 +134,6 @@ func (bc *BasicCluster) GetLeaderStore(region *RegionInfo) *StoreInfo {
 	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
-// GetStoreTopoWeight returns the weight of current label in topology.
-func (bc *BasicCluster) GetStoreTopoWeight(storeID uint64, locationLabels []string) float64 {
-	bc.RLock()
-	defer bc.RUnlock()
-	return bc.Stores.GetStoreTopoWeight(storeID, locationLabels)
-}
-
 // GetAdjacentRegions returns region's info that is adjacent with specific region.
 func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	bc.RLock()
