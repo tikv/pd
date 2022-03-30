@@ -18,6 +18,7 @@ require (
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
+	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
@@ -40,6 +41,7 @@ require (
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
