@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
@@ -213,12 +214,16 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 
 func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
+	opt.SetPlacementRuleEnabled(false)
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
+
 	// store 1: up -> offline
 	c.Assert(cluster.RemoveStore(1, false), IsNil)
 	store := cluster.GetStore(1)
@@ -232,9 +237,15 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	c.Assert(store.IsPhysicallyDestroyed(), IsTrue)
 
 	// store 2:up -> offline & physically destroyed
+	// should be failed since no enough store to accommodate the extra replica.
+	c.Assert(cluster.RemoveStore(2, true), NotNil)
+
+	cluster.opt.SetPlacementRuleEnabled(true)
+	// When placement rules feature is enabled. It is hard to determine required replica count precisely. So the store should be removed successfully.
 	c.Assert(cluster.RemoveStore(2, true), IsNil)
 	// store 2: set physically destroyed to false failed
 	c.Assert(cluster.RemoveStore(2, false), NotNil)
+
 	c.Assert(cluster.RemoveStore(2, true), IsNil)
 
 	// store 3: up to offline
@@ -257,6 +268,40 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	}
 }
 
+func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictScheduler schedule.Scheduler, err error) {
+	args := []string{fmt.Sprintf("%d", storeID)}
+	evictScheduler, err = schedule.CreateScheduler(schedulers.EvictLeaderType, cluster.GetOperatorController(), cluster.storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, args))
+	if err != nil {
+		return
+	}
+	if err = cluster.AddScheduler(evictScheduler, args...); err != nil {
+		return
+	} else if err = cluster.opt.Persist(cluster.GetStorage()); err != nil {
+		return
+	}
+	return
+}
+func (s *testClusterInfoSuite) TestSetOfflineStoreWithEvictLeader(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+
+	// Put 4 stores.
+	for _, store := range newTestStores(4, "2.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	_, err = addEvictLeaderScheduler(cluster, 1)
+
+	c.Assert(err, IsNil)
+	c.Assert(cluster.RemoveStore(2, true), IsNil)
+	c.Assert(cluster.RemoveStore(3, true), IsNil)
+	// should be failed since there is only 1 store left and it is the evict-leader store.
+	c.Assert(cluster.RemoveStore(4, true), NotNil)
+	c.Assert(cluster.RemoveScheduler(schedulers.EvictLeaderName), IsNil)
+	c.Assert(cluster.RemoveStore(4, true), IsNil)
+}
+
 func (s *testClusterInfoSuite) TestForceBuryStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -276,6 +321,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -317,6 +363,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// Put 3 stores.
 	for _, store := range newTestStores(3, "2.0.0") {
@@ -350,6 +397,7 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// Put 3 new 4.0.9 stores.
 	for _, store := range newTestStores(3, "4.0.9") {
@@ -861,6 +909,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 		}
 	}
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// Put 3 stores.
 	for _, store := range newTestStores(4, "5.0.0") {

@@ -59,6 +59,7 @@ func init() {
 			if err != nil {
 				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 			}
+
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
 				return err
@@ -83,6 +84,16 @@ type evictLeaderSchedulerConfig struct {
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           schedule.Cluster
+}
+
+func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	stores := make([]uint64, 0, len(conf.StoreIDWithRanges))
+	for storeID := range conf.StoreIDWithRanges {
+		stores = append(stores, storeID)
+	}
+	return stores
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -187,6 +198,11 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		conf:          conf,
 		handler:       handler,
 	}
+}
+
+// EvictStores returns the IDs of the evict-stores.
+func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
+	return s.conf.getStores()
 }
 
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
