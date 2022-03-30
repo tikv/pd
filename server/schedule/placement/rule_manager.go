@@ -78,17 +78,29 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
-		defaultRule := &Rule{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Voter,
-			Count:          maxReplica,
-			LocationLabels: locationLabels,
+		defaultRules := []*Rule{
+			{
+				GroupID:        "pd",
+				ID:             "meta",
+				EndKeyHex:      "6e00000000000000f8",
+				Role:           Voter,
+				Count:          maxReplica,
+				LocationLabels: locationLabels,
+			}, {
+				GroupID:        "pd",
+				ID:             "default",
+				StartKeyHex:    "6e00000000000000f8",
+				Role:           Voter,
+				Count:          maxReplica,
+				LocationLabels: locationLabels,
+			},
 		}
-		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
-			return err
+		for _, rule := range defaultRules {
+			if err := m.storage.SaveRule(rule.StoreKey(), rule); err != nil {
+				return err
+			}
+			m.ruleConfig.setRule(rule)
 		}
-		m.ruleConfig.setRule(defaultRule)
 	}
 	m.ruleConfig.adjust()
 	ruleList, err := buildRuleList(m.ruleConfig)
