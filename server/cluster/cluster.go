@@ -894,6 +894,11 @@ func (c *RaftCluster) GetStores() []*core.StoreInfo {
 	return c.core.GetStores()
 }
 
+// GetLeaderStoreByRegionID returns the leader store of the given region.
+func (c *RaftCluster) GetLeaderStoreByRegionID(regionID uint64) *core.StoreInfo {
+	return c.core.GetLeaderStoreByRegionID(regionID)
+}
+
 // GetStore gets store from cluster.
 func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
 	return c.core.GetStore(storeID)

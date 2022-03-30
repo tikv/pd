@@ -60,7 +60,8 @@ type RegionInfo struct {
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
-	buckets           unsafe.Pointer
+	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	buckets unsafe.Pointer
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.

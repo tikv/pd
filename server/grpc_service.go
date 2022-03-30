@@ -788,19 +788,26 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err := s.validateRequest(request.GetHeader()); err != nil {
 			return err
 		}
-		start := time.Now()
-		bucketReportCounter.WithLabelValues("report", "recv").Inc()
 		buckets := request.GetBuckets()
 		if buckets == nil || len(buckets.Keys) == 0 {
 			continue
 		}
-		err = rc.HandleBucketHeartbeat(request.Buckets)
+		store := rc.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			return errors.Errorf("the store of the bucket in region %v is not found ", buckets.GetRegionId())
+		}
+		storeLabel := strconv.FormatUint(store.GetID(), 10)
+		storeAddress := store.GetAddress()
+		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
+
+		start := time.Now()
+		err = rc.HandleBucketHeartbeat(buckets)
 		if err != nil {
-			bucketReportCounter.WithLabelValues("report", "err").Inc()
+			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue
 		}
-		bucketReportHandleDuration.WithLabelValues().Observe(time.Since(start).Seconds())
-		bucketReportCounter.WithLabelValues("report", "ok").Inc()
+		bucketReportLatency.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
 }
 

@@ -471,7 +471,6 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	n, np := uint64(3), uint64(3)
