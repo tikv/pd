@@ -220,6 +220,13 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	// Put 6 stores.
 	for _, store := range newTestStores(6, "2.0.0") {
@@ -384,6 +391,13 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	// Put 5 stores.
 	for _, store := range newTestStores(5, "5.0.0") {
@@ -470,6 +484,13 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
 
 	// Put 3 new 4.0.9 stores.
 	for _, store := range newTestStores(3, "4.0.9") {
@@ -1252,7 +1273,7 @@ func (s *testStoresInfoSuite) TestStores(c *C) {
 		id := store.GetID()
 		c.Assert(cache.GetStore(id), IsNil)
 		c.Assert(cache.PauseLeaderTransfer(id), NotNil)
-		cache.SetStore(store, []string{})
+		cache.SetStore(store)
 		c.Assert(cache.GetStore(id), DeepEquals, store)
 		c.Assert(cache.GetStoreCount(), Equals, i+1)
 		c.Assert(cache.PauseLeaderTransfer(id), IsNil)

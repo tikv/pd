@@ -133,7 +133,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 	// Test the store is normal.
-	s.cluster.PutStore(store, s.cluster.GetLocationLabels())
+	s.cluster.PutStore(store)
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())
@@ -157,7 +157,7 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 	// Test the store is normal.
-	s.cluster.PutStore(store, s.cluster.GetLocationLabels())
+	s.cluster.PutStore(store)
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
 	c.Assert(ops[0].RegionID(), Equals, s.regions[2].GetID())

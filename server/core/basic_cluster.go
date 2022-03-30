@@ -187,10 +187,10 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, locationLabels []string) {
+func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize, locationLabels)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize)
 }
 
 const randomRegionMaxRetry = 10
@@ -343,10 +343,10 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 }
 
 // PutStore put a store.
-func (bc *BasicCluster) PutStore(store *StoreInfo, locationLabels []string) {
+func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.SetStore(store, locationLabels)
+	bc.Stores.SetStore(store)
 }
 
 // DeleteStore deletes a store.
@@ -406,6 +406,13 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
+}
+
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	bc.Lock()
+	defer bc.Unlock()
+	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
 }
 
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.

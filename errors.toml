@@ -121,6 +121,11 @@ error = '''
 store %v has been removed
 '''
 
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
+'''
+
 ["PD:core:ErrStoreUnhealthy"]
 error = '''
 store %v is unhealthy

@@ -290,7 +290,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	}
 
 	start := time.Now()
-	if err := c.storage.LoadStores(c.core.PutStore, c.opt.GetLocationLabels()); err != nil {
+	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -788,7 +788,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
 	regionSize := c.core.GetStoreRegionSize(id)
-	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, c.opt.GetLocationLabels())
+	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 func (c *RaftCluster) getClusterID() uint64 {
@@ -1330,7 +1330,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	c.core.PutStore(store, c.opt.GetLocationLabels())
+	c.core.PutStore(store)
 	c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
 	return nil
 }

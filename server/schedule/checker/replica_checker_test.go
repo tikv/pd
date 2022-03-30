@@ -88,7 +88,7 @@ func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 		),
 	}
 	for _, store := range stores {
-		s.cluster.PutStore(store, s.cluster.GetLocationLabels())
+		s.cluster.PutStore(store)
 	}
 	s.cluster.AddLabelsStore(2, 1, map[string]string{"noleader": "true"})
 }

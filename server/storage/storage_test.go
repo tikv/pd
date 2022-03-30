@@ -105,7 +105,7 @@ func (s *testStorageSuite) TestLoadStores(c *C) {
 
 	n := 10
 	stores := mustSaveStores(c, storage, n)
-	c.Assert(storage.LoadStores(cache.SetStore, []string{}), IsNil)
+	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
 
 	c.Assert(cache.GetStoreCount(), Equals, n)
 	for _, store := range cache.GetMetaStores() {
@@ -121,7 +121,7 @@ func (s *testStorageSuite) TestStoreWeight(c *C) {
 	mustSaveStores(c, storage, n)
 	c.Assert(storage.SaveStoreWeight(1, 2.0, 3.0), IsNil)
 	c.Assert(storage.SaveStoreWeight(2, 0.2, 0.3), IsNil)
-	c.Assert(storage.LoadStores(cache.SetStore, []string{}), IsNil)
+	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {

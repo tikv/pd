@@ -587,7 +587,7 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 }
 
 // SetStore sets a StoreInfo with storeID.
-func (s *StoresInfo) SetStore(store *StoreInfo, locationLabels []string) {
+func (s *StoresInfo) SetStore(store *StoreInfo) {
 	storeID := store.GetID()
 	s.stores[storeID] = store
 }
@@ -713,14 +713,14 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, locationLabels []string) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))
-		s.SetStore(newStore, locationLabels)
+		s.SetStore(newStore)
 	}
 }
 

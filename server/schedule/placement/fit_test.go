@@ -41,7 +41,7 @@ func (s *testFitSuite) makeStores() StoreSet {
 						"host": fmt.Sprintf("host%d", host),
 						"id":   fmt.Sprintf("id%d", x),
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels), []string{})
+					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels))
 				}
 			}
 		}
