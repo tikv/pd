@@ -176,6 +176,13 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, NotNil)
+
+	sc.MaxMergeRegionSize = 20
+	sc.MaxMergeRegionKeys = 200000
+	postData, err = json.Marshal(sc)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 }
 
 func (s *testConfigSuite) TestConfigReplication(c *C) {

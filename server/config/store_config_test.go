@@ -83,35 +83,58 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 
 func (s *testUtilSuite) TestCheckMaxMergeSize(c *C) {
 	config := &StoreConfig{
-		Coprocessor: Coprocessor{
-			RegionMaxSize:   "144Mb",
-			RegionSplitSize: "96Mb",
-		},
+		Coprocessor: Coprocessor{},
 	}
-	c.Assert(config.CheckMaxMergeSize(48-1), IsNil)
-	c.Assert(config.CheckMaxMergeSize(48), NotNil)
-
-	config.Coprocessor.RegionMaxSize = "181Mb"
-	config.Coprocessor.RegionSplitSize = "100Mb"
-	c.Assert(config.CheckMaxMergeSize(19-1), IsNil)
-	c.Assert(config.CheckMaxMergeSize(19), NotNil)
-	config.Coprocessor.RegionMaxSize = "199Mb"
-	c.Assert(config.CheckMaxMergeSize(1-1), IsNil)
-	c.Assert(config.CheckMaxMergeSize(1), NotNil)
+	testdata := []struct {
+		maxSize   string
+		splitSize string
+		mergeSize uint64
+	}{{
+		maxSize:   "144MB",
+		splitSize: "96MB",
+		mergeSize: 48,
+	}, {
+		maxSize:   "181Mb",
+		splitSize: "100Mb",
+		mergeSize: 19,
+	}, {
+		maxSize:   "199Mb",
+		splitSize: "100Mb",
+		mergeSize: 1,
+	}}
+	for _, v := range testdata {
+		config.Coprocessor.RegionMaxSize = v.maxSize
+		config.Coprocessor.RegionSplitSize = v.splitSize
+		c.Assert(config.CheckMaxMergeSize(v.mergeSize-1), IsNil)
+		c.Assert(config.CheckMaxMergeSize(v.mergeSize), NotNil)
+	}
 }
 
 func (s *testUtilSuite) TestCheckMaxMergeSplitKeys(c *C) {
 	config := &StoreConfig{
 		Coprocessor: Coprocessor{},
 	}
-	c.Assert(config.CheckMaxMergeRegionKeys(480000-1), IsNil)
-	c.Assert(config.CheckMaxMergeRegionKeys(480000), NotNil)
-
-	config.Coprocessor.RegionMaxKeys = 1810000
-	config.Coprocessor.RegionSplitKeys = 1000000
-	c.Assert(config.CheckMaxMergeRegionKeys(190000-1), IsNil)
-	c.Assert(config.CheckMaxMergeRegionKeys(190000), NotNil)
-	config.Coprocessor.RegionMaxKeys = 1990000
-	c.Assert(config.CheckMaxMergeRegionKeys(10000-1), IsNil)
-	c.Assert(config.CheckMaxMergeRegionKeys(10000), NotNil)
+	testdata := []struct {
+		maxKeys   int
+		splitKeys int
+		mergeKeys uint64
+	}{{
+		maxKeys:   144000000,
+		splitKeys: 96000000,
+		mergeKeys: 48000000,
+	}, {
+		maxKeys:   1810000,
+		splitKeys: 1000000,
+		mergeKeys: 190000,
+	}, {
+		maxKeys:   1990000,
+		splitKeys: 1000000,
+		mergeKeys: 10000,
+	}}
+	for _, v := range testdata {
+		config.Coprocessor.RegionMaxKeys = v.maxKeys
+		config.Coprocessor.RegionSplitKeys = v.splitKeys
+		c.Assert(config.CheckMaxMergeRegionKeys(v.mergeKeys-1), IsNil)
+		c.Assert(config.CheckMaxMergeRegionKeys(v.mergeKeys), NotNil)
+	}
 }
