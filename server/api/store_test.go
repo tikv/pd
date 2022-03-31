@@ -242,6 +242,10 @@ func (s *testStoreSuite) TestStoreLabel(c *C) {
 }
 
 func (s *testStoreSuite) TestStoreDelete(c *C) {
+	// prepare enough online stores to store replica.
+	for id := 1111; id <= 1115; id++ {
+		mustPutStore(c, s.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	}
 	table := []struct {
 		id     int
 		status int
@@ -297,6 +301,10 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 }
 
 func (s *testStoreSuite) TestStoreSetState(c *C) {
+	// prepare enough online stores to store replica.
+	for id := 1111; id <= 1115; id++ {
+		mustPutStore(c, s.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	}
 	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
 	info := StoreInfo{}
 	err := readJSON(testDialClient, url, &info)
@@ -334,6 +342,8 @@ func (s *testStoreSuite) TestStoreSetState(c *C) {
 	err = readJSON(testDialClient, url, &info)
 	c.Assert(err, IsNil)
 	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+	s.cleanup()
+	s.SetUpSuite(c)
 }
 
 func (s *testStoreSuite) TestUrlStoreFilter(c *C) {

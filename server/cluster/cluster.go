@@ -1038,7 +1038,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
-	if store.IsPreparing() || store.IsServing() {
+	if (store.IsPreparing() || store.IsServing()) && !physicallyDestroyed {
 		if err := c.checkReplicaBeforeOfflineStore(storeID); err != nil {
 			return err
 		}

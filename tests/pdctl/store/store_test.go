@@ -298,14 +298,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store delete addr <address>
 	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(string(output), Equals, "Success!\n")
+	// should be failed since no store left.
+	c.Assert(strings.EqualFold(string(output), "Success!\n"), IsFalse)
 	c.Assert(err, IsNil)
+
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
