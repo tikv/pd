@@ -860,6 +860,9 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	if maxSize := s.GetStoreConfigManager().GetStoreConfig().GetMaxMergeSize(); cfg.MaxMergeRegionSize >= maxSize {
+		return errors.Errorf("max-merge-region-size should be less than %d", maxSize)
+	}
 	if err := cfg.Deprecated(); err != nil {
 		return err
 	}

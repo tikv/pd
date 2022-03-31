@@ -118,6 +118,24 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
+// GetMaxMergeSize returns the max merge size in MB
+func (c *StoreConfig) GetMaxMergeSize() uint64 {
+	maxRegionSize := c.GetRegionMaxSize()
+	splitRegionSize := c.GetRegionSplitSize()
+	mergeRegionSize := splitRegionSize
+	splitCount := maxRegionSize / splitRegionSize
+
+	// the merge size should be less the min region size
+	if size := maxRegionSize - splitRegionSize*splitCount; size < mergeRegionSize {
+		mergeRegionSize = size
+	}
+	// the sum of merge-region-size+max-region-size should be less than splitCount * max-split-size
+	if size := splitRegionSize*(splitCount+1) - maxRegionSize; size < mergeRegionSize {
+		mergeRegionSize = size
+	}
+	return mergeRegionSize
+}
+
 // UpdateConfig updates the config with given config map.
 func (m *StoreConfigManager) UpdateConfig(c *StoreConfig) {
 	if c == nil || m == nil {

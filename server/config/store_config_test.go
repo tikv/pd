@@ -80,3 +80,19 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	m.UpdateConfig(nil)
 	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
 }
+
+func (s *testUtilSuite) TestGetMaxMergeSize(c *C) {
+	config := &StoreConfig{
+		Coprocessor: Coprocessor{
+			RegionMaxSize:   "144Mb",
+			RegionSplitSize: "96Mb",
+		},
+	}
+	c.Assert(int(config.GetMaxMergeSize()), Equals, 48)
+
+	config.Coprocessor.RegionMaxSize = "181Mb"
+	config.Coprocessor.RegionSplitSize = "100Mb"
+	c.Assert(int(config.GetMaxMergeSize()), Equals, 19)
+	config.Coprocessor.RegionMaxSize = "199Mb"
+	c.Assert(config.GetMaxMergeSize(), Equals, uint64(1))
+}
