@@ -48,45 +48,36 @@ func (m *Manager) Reset() {
 	m.progesses = make(map[string]*progressIndicator)
 }
 
-// AddProgressIndicator adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgressIndicator(progress string, total float64) bool {
+// AddOrUpdateProgress adds a progress into manager if it doesn't exist.
+func (m *Manager) AddOrUpdateProgress(progress string, current float64) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, exist := m.progesses[progress]; exist {
-		return true
-	}
-	m.progesses[progress] = &progressIndicator{
-		total:     total,
-		startTime: time.Now(),
-	}
-	return false
-}
-
-// RemoveProgressIndicator removes a progress from manager.
-func (m *Manager) RemoveProgressIndicator(progress string) bool {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, exist := m.progesses[progress]; exist {
-		delete(m.progesses, progress)
-		return true
-	}
-	return false
-}
-
-// UpdateProgressIndicator updates the progress of a given name.
-func (m *Manager) UpdateProgressIndicator(progress string, current float64) {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, exist := m.progesses[progress]; exist {
+	if _, exist = m.progesses[progress]; exist {
 		m.progesses[progress].current = current
 		if m.progesses[progress].total < current {
 			m.progesses[progress].total = current
 		}
 		m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
+		return
 	}
+	m.progesses[progress] = &progressIndicator{
+		total:     current,
+		startTime: time.Now(),
+	}
+	return
+}
+
+// RemoveProgress removes a progress from manager.
+func (m *Manager) RemoveProgress(progress string) (exist bool) {
+	m.Lock()
+	defer m.Unlock()
+
+	if _, exist = m.progesses[progress]; exist {
+		delete(m.progesses, progress)
+		return
+	}
+	return
 }
 
 // Process returns the current progress of a give name.

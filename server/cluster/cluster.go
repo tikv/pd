@@ -1086,7 +1086,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddProgressIndicator(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
+		c.progressManager.AddOrUpdateProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
@@ -1288,11 +1288,9 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
 
-	if exist := c.progressManager.AddProgressIndicator(progress, float64(current)); !exist {
+	if exist := c.progressManager.AddOrUpdateProgress(progress, float64(current)); !exist {
 		return
 	}
-
-	c.progressManager.UpdateProgressIndicator(progress, float64(current))
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.Process(progress))
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.LeftSeconds(progress))
 }
@@ -1301,7 +1299,7 @@ func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action 
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
 
-	if exist := c.progressManager.RemoveProgressIndicator(progress); exist {
+	if exist := c.progressManager.RemoveProgress(progress); exist {
 		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 	}
