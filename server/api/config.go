@@ -201,9 +201,15 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value in
 	if !found {
 		return errors.Errorf("config item %s not found", key)
 	}
-
 	if updated {
-		err = h.svr.SetScheduleConfig(config.Schedule)
+		switch key {
+		case "max-merge-region-size":
+			err = h.svr.GetStoreConfigManager().GetStoreConfig().CheckMaxMergeSize(config.Schedule.MaxMergeRegionSize)
+		case "max-merge-region-keys":
+			err = h.svr.GetStoreConfigManager().GetStoreConfig().CheckMaxMergeRegionKeys(config.Schedule.MaxMergeRegionKeys)
+		default:
+			err = h.svr.SetScheduleConfig(config.Schedule)
+		}
 	}
 	return err
 }
@@ -360,7 +366,12 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
 		return
 	}
-
+	if err := h.svr.GetStoreConfigManager().GetStoreConfig().CheckMaxMergeSize(config.MaxMergeRegionSize); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err)
+	}
+	if err := h.svr.GetStoreConfigManager().GetStoreConfig().CheckMaxMergeRegionKeys(config.MaxMergeRegionKeys); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err)
+	}
 	if err := h.svr.SetScheduleConfig(*config); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

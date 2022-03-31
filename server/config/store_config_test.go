@@ -81,18 +81,37 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
 }
 
-func (s *testUtilSuite) TestGetMaxMergeSize(c *C) {
+func (s *testUtilSuite) TestCheckMaxMergeSize(c *C) {
 	config := &StoreConfig{
 		Coprocessor: Coprocessor{
 			RegionMaxSize:   "144Mb",
 			RegionSplitSize: "96Mb",
 		},
 	}
-	c.Assert(int(config.GetMaxMergeSize()), Equals, 48)
+	c.Assert(config.CheckMaxMergeSize(48-1), IsNil)
+	c.Assert(config.CheckMaxMergeSize(48), NotNil)
 
 	config.Coprocessor.RegionMaxSize = "181Mb"
 	config.Coprocessor.RegionSplitSize = "100Mb"
-	c.Assert(int(config.GetMaxMergeSize()), Equals, 19)
+	c.Assert(config.CheckMaxMergeSize(19-1), IsNil)
+	c.Assert(config.CheckMaxMergeSize(19), NotNil)
 	config.Coprocessor.RegionMaxSize = "199Mb"
-	c.Assert(config.GetMaxMergeSize(), Equals, uint64(1))
+	c.Assert(config.CheckMaxMergeSize(1-1), IsNil)
+	c.Assert(config.CheckMaxMergeSize(1), NotNil)
+}
+
+func (s *testUtilSuite) TestCheckMaxMergeSplitKeys(c *C) {
+	config := &StoreConfig{
+		Coprocessor: Coprocessor{},
+	}
+	c.Assert(config.CheckMaxMergeRegionKeys(480000-1), IsNil)
+	c.Assert(config.CheckMaxMergeRegionKeys(480000), NotNil)
+
+	config.Coprocessor.RegionMaxKeys = 1810000
+	config.Coprocessor.RegionSplitKeys = 1000000
+	c.Assert(config.CheckMaxMergeRegionKeys(190000-1), IsNil)
+	c.Assert(config.CheckMaxMergeRegionKeys(190000), NotNil)
+	config.Coprocessor.RegionMaxKeys = 1990000
+	c.Assert(config.CheckMaxMergeRegionKeys(10000-1), IsNil)
+	c.Assert(config.CheckMaxMergeRegionKeys(10000), NotNil)
 }

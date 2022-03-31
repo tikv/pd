@@ -162,6 +162,20 @@ func (s *testConfigSuite) TestConfigSchedule(c *C) {
 	sc1 := &config.ScheduleConfig{}
 	c.Assert(readJSON(testDialClient, addr, sc1), IsNil)
 	c.Assert(*sc, DeepEquals, *sc1)
+
+	sc.MaxMergeRegionSize = 48
+	sc.MaxMergeRegionKeys = 480000
+	postData, err = json.Marshal(sc)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, NotNil)
+
+	sc.MaxMergeRegionSize = 20
+	sc.MaxMergeRegionKeys = 480000
+	postData, err = json.Marshal(sc)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, NotNil)
 }
 
 func (s *testConfigSuite) TestConfigReplication(c *C) {
