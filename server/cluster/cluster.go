@@ -606,8 +606,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
-// processBucketHeartbeat update the bucket information.
-func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
+// processReportBuckets update the bucket information.
+func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	region := c.core.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
@@ -624,11 +624,14 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 			bucketEventCounter.WithLabelValues("version_not_match").Inc()
 			return nil
 		}
+		failpoint.Inject("concurrentBucketHeartbeat", func() {
+			time.Sleep(500 * time.Millisecond)
+		})
 		if ok := region.UpdateBuckets(buckets, old); ok {
 			return nil
 		}
 	}
-	bucketEventCounter.WithLabelValues("bucket_update_failed").Inc()
+	bucketEventCounter.WithLabelValues("update_failed").Inc()
 	return nil
 }
 

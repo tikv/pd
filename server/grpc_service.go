@@ -801,7 +801,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 
 		start := time.Now()
-		err = rc.HandleBucketHeartbeat(buckets)
+		err = rc.HandleReportBuckets(buckets)
 		if err != nil {
 			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue

@@ -600,6 +600,18 @@ func checkRegions(c *C, regions *RegionsInfo) {
 	}
 }
 
+func BenchmarkUpdateBuckets(b *testing.B) {
+	region := NewTestRegionInfo([]byte{}, []byte{})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
+		region.UpdateBuckets(buckets, region.GetBuckets())
+	}
+	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
+		b.Fatal("update buckets failed")
+	}
+}
+
 func BenchmarkRandomRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	for i := 0; i < 5000000; i++ {
