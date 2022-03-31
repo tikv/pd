@@ -613,13 +613,22 @@ func (c *RaftCluster) processBucketHeartbeat(buckets *metapb.Buckets) error {
 		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
-
-	// region should not update if the version of the buckets is less than the old one.
-	if old := region.GetBuckets(); old != nil && old.Version >= buckets.Version {
-		bucketEventCounter.WithLabelValues("version_not_match").Inc()
-		return nil
+	// use CAS to update the bucket information.
+	// the two request(A:3,B:2) get the same region and need to update the buckets.
+	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
+	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
+	for retry := 0; retry < 3; retry++ {
+		old := region.GetBuckets()
+		// region should not update if the version of the buckets is less than the old one.
+		if old != nil && buckets.GetVersion() <= old.GetVersion() {
+			bucketEventCounter.WithLabelValues("version_not_match").Inc()
+			return nil
+		}
+		if ok := region.UpdateBuckets(buckets, old); ok {
+			return nil
+		}
 	}
-	region.UpdateBuckets(buckets)
+	bucketEventCounter.WithLabelValues("bucket_update_failed").Inc()
 	return nil
 }
 

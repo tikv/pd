@@ -186,24 +186,23 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 
 	// bucket
 	data := []struct {
-		originExist   bool
 		originBuckets *metapb.Buckets
 		buckets       *metapb.Buckets
 		same          bool
 	}{
-		{false, nil, nil, true},
-		{false, nil, &metapb.Buckets{RegionId: 1, Version: 2}, false},
-		{true, &metapb.Buckets{RegionId: 1, Version: 2}, &metapb.Buckets{RegionId: 1, Version: 3}, false},
-		{true, &metapb.Buckets{RegionId: 1, Version: 2}, nil, true},
+		{nil, nil, true},
+		{nil, &metapb.Buckets{RegionId: 1, Version: 2}, false},
+		{&metapb.Buckets{RegionId: 1, Version: 2}, &metapb.Buckets{RegionId: 1, Version: 3}, false},
+		{&metapb.Buckets{RegionId: 1, Version: 2}, nil, true},
 	}
 	for _, d := range data {
 		var origin *RegionInfo
-		if d.originExist {
+		if d.originBuckets != nil {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.UpdateBuckets(d.originBuckets)
+			origin.UpdateBuckets(d.originBuckets, origin.GetBuckets())
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.UpdateBuckets(d.buckets)
+		r.UpdateBuckets(d.buckets, r.GetBuckets())
 		r.Inherit(origin)
 		if d.same {
 			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
