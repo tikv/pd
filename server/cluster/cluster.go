@@ -1257,10 +1257,10 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		offlineStore := store.GetMeta()
-		// If the store is empty, it can be buried.
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
 		c.updateProgress(id, store.GetAddress(), removingAction, regionSize)
+		// If the store is empty, it can be buried.
 		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
@@ -1287,10 +1287,11 @@ func (c *RaftCluster) checkStores() {
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current int64) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
-	if !c.progressManager.IsProgressExist(progress) {
-		c.progressManager.AddProgressIndicator(progress, float64(current))
+
+	if exist := c.progressManager.AddProgressIndicator(progress, float64(current)); !exist {
 		return
 	}
+
 	c.progressManager.UpdateProgressIndicator(progress, float64(current))
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.Process(progress))
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.LeftSeconds(progress))
@@ -1299,8 +1300,8 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
-	if c.progressManager.IsProgressExist(progress) {
-		c.progressManager.RemoveProgressIndicator(progress)
+
+	if exist := c.progressManager.RemoveProgressIndicator(progress); exist {
 		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 	}

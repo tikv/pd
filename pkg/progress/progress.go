@@ -45,27 +45,34 @@ func (m *Manager) Reset() {
 	m.Lock()
 	defer m.Unlock()
 
-	for progress := range m.progesses {
-		delete(m.progesses, progress)
-	}
+	m.progesses = make(map[string]*progressIndicator)
 }
 
-// AddProgressIndicator adds a progress into manager.
-func (m *Manager) AddProgressIndicator(progress string, total float64) {
+// AddProgressIndicator adds a progress into manager if it doesn't exist.
+func (m *Manager) AddProgressIndicator(progress string, total float64) bool {
 	m.Lock()
 	defer m.Unlock()
+
+	if _, exist := m.progesses[progress]; exist {
+		return true
+	}
 	m.progesses[progress] = &progressIndicator{
 		total:     total,
 		startTime: time.Now(),
 	}
+	return false
 }
 
 // RemoveProgressIndicator removes a progress from manager.
-func (m *Manager) RemoveProgressIndicator(progress string) {
+func (m *Manager) RemoveProgressIndicator(progress string) bool {
 	m.Lock()
 	defer m.Unlock()
 
-	delete(m.progesses, progress)
+	if _, exist := m.progesses[progress]; exist {
+		delete(m.progesses, progress)
+		return true
+	}
+	return false
 }
 
 // UpdateProgressIndicator updates the progress of a given name.
@@ -73,11 +80,13 @@ func (m *Manager) UpdateProgressIndicator(progress string, current float64) {
 	m.Lock()
 	defer m.Unlock()
 
-	m.progesses[progress].current = current
-	if m.progesses[progress].total < current {
-		m.progesses[progress].total = current
+	if _, exist := m.progesses[progress]; exist {
+		m.progesses[progress].current = current
+		if m.progesses[progress].total < current {
+			m.progesses[progress].total = current
+		}
+		m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
 	}
-	m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
 }
 
 // Process returns the current progress of a give name.
@@ -85,7 +94,10 @@ func (m *Manager) Process(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	return 1 - m.progesses[progress].current/m.progesses[progress].total
+	if _, exist := m.progesses[progress]; exist {
+		return 1 - m.progesses[progress].current/m.progesses[progress].total
+	}
+	return 0
 }
 
 // LeftSeconds returns the left seconds until finishing.
@@ -93,7 +105,10 @@ func (m *Manager) LeftSeconds(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	return m.progesses[progress].current / ((m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds())
+	if _, exist := m.progesses[progress]; exist {
+		return m.progesses[progress].current / ((m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds())
+	}
+	return 0
 }
 
 // CurrentSpeed returns the current speed of a given name.
@@ -101,13 +116,8 @@ func (m *Manager) CurrentSpeed(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	return m.progesses[progress].speedPerSec
-}
-
-// IsProgressExist returns if a progress has already record in manager.
-func (m *Manager) IsProgressExist(progress string) bool {
-	m.RLock()
-	defer m.RUnlock()
-	_, ok := m.progesses[progress]
-	return ok
+	if _, exist := m.progesses[progress]; exist {
+		return m.progesses[progress].speedPerSec
+	}
+	return 0
 }
