@@ -926,7 +926,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 			panic(err)
 		}
 	}
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
 
 	// Put 3 stores.
 	for _, store := range newTestStores(4, "5.0.0") {
