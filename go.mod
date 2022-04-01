@@ -14,10 +14,11 @@ require (
 	github.com/docker/go-units v0.4.0
 	github.com/gin-gonic/gin v1.7.4
 	github.com/go-echarts/go-echarts v1.0.0
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
+	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
@@ -28,10 +29,10 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20220309094445-a78dc9fdb89a
+	github.com/pingcap/kvproto v0.0.0-20220330070404-8c4cd3f93748
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
-	github.com/pingcap/tidb-dashboard v0.0.0-20220316134154-e88e27120168
+	github.com/pingcap/tidb-dashboard v0.0.0-20220331105802-5ac69661755c
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -40,6 +41,7 @@ require (
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
+	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
