@@ -90,7 +90,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),
-		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(1),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
 			{Id: 5, StoreId: 2},
@@ -98,7 +98,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 			{Id: 7, StoreId: 4},
 		}))
 	r2 := pdctl.MustPutRegion(c, cluster, 2, 1, []byte("b"), []byte("c"),
-		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3), core.SetApproximateSize(20))
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3), core.SetApproximateSize(144))
 	r3 := pdctl.MustPutRegion(c, cluster, 3, 1, []byte("c"), []byte("d"),
 		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2), core.SetApproximateSize(30),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
@@ -144,6 +144,12 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		{[]string{"region", "check", "down-peer"}, []*core.RegionInfo{r3}},
 		// region check learner-peer command
 		{[]string{"region", "check", "learner-peer"}, []*core.RegionInfo{r3}},
+		// region check empty-region command
+		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
+		// region check merge-region command
+		{[]string{"region", "check", "merge-region"}, []*core.RegionInfo{r1, r4}},
+		// region check split-region command
+		{[]string{"region", "check", "split-region"}, []*core.RegionInfo{r2}},
 		// region keys --format=raw <start_key> <end_key> <limit> command
 		{[]string{"region", "keys", "--format=raw", "b"}, []*core.RegionInfo{r2, r3, r4}},
 		// region keys --format=raw <start_key> <end_key> <limit> command

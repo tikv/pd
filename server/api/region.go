@@ -490,6 +490,40 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 }
 
 // @Tags region
+// @Summary List all regions that needs merges.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /regions/check/merge-region [get]
+func (h *regionsHandler) GetMergeRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	regions, err := handler.GetRegionsByType(statistics.MergerRegion)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
+// @Summary List all regions that needs split.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /regions/check/split-region [get]
+func (h *regionsHandler) GetSplitRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	regions, err := handler.GetRegionsByType(statistics.SplitRegion)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
 // @Summary List all empty regions.
 // @Produce json
 // @Success 200 {object} RegionsInfo
