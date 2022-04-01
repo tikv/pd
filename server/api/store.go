@@ -678,7 +678,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 func (h *storesHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
-	StoresInfo := &StoresInfo{
+	storesInfo := &StoresInfo{
 		Stores: make([]*StoreInfo, 0, len(stores)),
 	}
 
@@ -698,11 +698,11 @@ func (h *storesHandler) GetStores(w http.ResponseWriter, r *http.Request) {
 		}
 
 		storeInfo := newStoreInfo(h.GetScheduleConfig(), store)
-		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
-	StoresInfo.Count = len(StoresInfo.Stores)
+	storesInfo.Count = len(storesInfo.Stores)
 
-	h.rd.JSON(w, http.StatusOK, StoresInfo)
+	h.rd.JSON(w, http.StatusOK, storesInfo)
 }
 
 type storeStateFilter struct {

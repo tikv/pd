@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 )
@@ -25,13 +26,13 @@ import (
 // BootstrapChecker is a middleware to check if raft cluster is started.
 func BootstrapChecker() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
+		svr := c.MustGet(apiutil.ServerKey).(*server.Server)
 		rc := svr.GetRaftCluster()
 		if rc == nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
-		c.Set("cluster", rc)
+		c.Set(apiutil.ClusterKey, rc)
 		c.Next()
 	}
 }

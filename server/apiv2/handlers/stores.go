@@ -21,6 +21,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/cluster"
 )
@@ -28,9 +29,9 @@ import (
 // GetStores returns the stores.
 func GetStores() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rc := c.MustGet("cluster").(*cluster.RaftCluster)
+		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
 		stores := rc.GetMetaStores()
-		StoresInfo := &StoresInfo{
+		storesInfo := &StoresInfo{
 			Stores: make([]*StoreInfo, 0, len(stores)),
 		}
 
@@ -45,11 +46,11 @@ func GetStores() gin.HandlerFunc {
 
 			if !exist || (exist && store.IsInStates(nodeStates)) {
 				storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
-				StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+				storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 			}
 		}
-		StoresInfo.Count = len(StoresInfo.Stores)
-		c.IndentedJSON(http.StatusOK, StoresInfo)
+		storesInfo.Count = len(storesInfo.Stores)
+		c.IndentedJSON(http.StatusOK, storesInfo)
 	}
 }
 
@@ -66,7 +67,7 @@ func GetStores() gin.HandlerFunc {
 // @Router /stores/{id} [get]
 func GetStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rc := c.MustGet("cluster").(*cluster.RaftCluster)
+		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
 		idParam := c.Param("id")
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
@@ -87,7 +88,7 @@ func GetStoreByID() gin.HandlerFunc {
 // DeleteStoreByID will delete the store according to the given ID.
 func DeleteStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rc := c.MustGet("cluster").(*cluster.RaftCluster)
+		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
 		idParam := c.Param("id")
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
@@ -121,10 +122,10 @@ type updateStoresParams struct {
 	RegionWeight float64 `json:"region_weight"`
 }
 
-// UpdateStoreByID will delete the store according to the given ID.
+// UpdateStoreByID will update the field in the store for a given store ID.
 func UpdateStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		rc := c.MustGet("cluster").(*cluster.RaftCluster)
+		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
 		idParam := c.Param("id")
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {

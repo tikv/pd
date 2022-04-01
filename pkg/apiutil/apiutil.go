@@ -34,12 +34,17 @@ import (
 	"github.com/unrolled/render"
 )
 
-var (
+const (
 	// componentSignatureKey is used for http request header key
 	// to identify component signature
 	componentSignatureKey = "component"
 	// componentAnonymousValue identifies anonymous request source
 	componentAnonymousValue = "anonymous"
+
+	// ServerKey is used to save server info into context
+	ServerKey = "server"
+	// ClusterKey is used to save cluster info into context
+	ClusterKey = "cluster"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).

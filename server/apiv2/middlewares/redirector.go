@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -29,7 +30,7 @@ import (
 // Redirector is a middleware to redirect the request to the right place.
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
+		svr := c.MustGet(apiutil.ServerKey).(*server.Server)
 		allowFollowerHandle := len(c.Request.Header.Get(serverapi.AllowFollowerHandle)) > 0
 		isLeader := svr.GetMember().IsLeader()
 		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
