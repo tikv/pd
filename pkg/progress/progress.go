@@ -53,12 +53,13 @@ func (m *Manager) AddOrUpdateProgress(progress string, current float64) (exist b
 	m.Lock()
 	defer m.Unlock()
 
-	if _, exist = m.progesses[progress]; exist {
-		m.progesses[progress].current = current
-		if m.progesses[progress].total < current {
-			m.progesses[progress].total = current
+	var p *progressIndicator
+	if p, exist = m.progesses[progress]; exist {
+		p.current = current
+		if p.total < current {
+			p.total = current
 		}
-		m.progesses[progress].speedPerSec = (m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds()
+		p.speedPerSec = (p.total - p.current) / time.Since(p.startTime).Seconds()
 		return
 	}
 	m.progesses[progress] = &progressIndicator{
@@ -85,8 +86,8 @@ func (m *Manager) Process(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	if _, exist := m.progesses[progress]; exist {
-		return 1 - m.progesses[progress].current/m.progesses[progress].total
+	if p, exist := m.progesses[progress]; exist {
+		return 1 - p.current/p.total
 	}
 	return 0
 }
@@ -96,8 +97,8 @@ func (m *Manager) LeftSeconds(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	if _, exist := m.progesses[progress]; exist {
-		return m.progesses[progress].current / ((m.progesses[progress].total - m.progesses[progress].current) / time.Since(m.progesses[progress].startTime).Seconds())
+	if p, exist := m.progesses[progress]; exist {
+		return p.current / ((p.total - p.current) / time.Since(p.startTime).Seconds())
 	}
 	return 0
 }
@@ -107,8 +108,8 @@ func (m *Manager) CurrentSpeed(progress string) float64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	if _, exist := m.progesses[progress]; exist {
-		return m.progesses[progress].speedPerSec
+	if p, exist := m.progesses[progress]; exist {
+		return p.speedPerSec
 	}
 	return 0
 }
