@@ -496,7 +496,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
 	n, np := uint64(1), uint64(1)
-	regions := newTestRegions(n, np)
+	regions := newTestRegions(n, n, np)
 	for _, store := range stores {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 	}
