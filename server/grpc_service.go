@@ -631,9 +631,48 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
-const regionHeartbeatSendTimeout = 5 * time.Second
+const heartbeatSendTimeout = 5 * time.Second
 
-var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
+var errSendHeartbeatTimeout = errors.New("send heartbeat timeout")
+
+// bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
+// occurs on SendAndClose() or Recv(), both endpoints will be closed.
+type bucketHeartbeatServer struct {
+	stream pdpb.PD_ReportBucketsServer
+	closed int32
+}
+
+func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
+	if atomic.LoadInt32(&b.closed) == 1 {
+		return status.Errorf(codes.Canceled, "stream is closed")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- b.stream.SendAndClose(bucket)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&b.closed, 1)
+		}
+		return err
+	case <-time.After(heartbeatSendTimeout):
+		atomic.StoreInt32(&b.closed, 1)
+		return errors.WithStack(errSendHeartbeatTimeout)
+	}
+}
+
+func (b *bucketHeartbeatServer) Recv() (*pdpb.ReportBucketsRequest, error) {
+	if atomic.LoadInt32(&b.closed) == 1 {
+		return nil, io.EOF
+	}
+	req, err := b.stream.Recv()
+	if err != nil {
+		atomic.StoreInt32(&b.closed, 1)
+		return nil, errors.WithStack(err)
+	}
+	return req, nil
+}
 
 // heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
 // occurs on Send() or Recv(), both endpoints will be closed.
@@ -654,9 +693,9 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.WithStack(err)
-	case <-time.After(regionHeartbeatSendTimeout):
+	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendRegionHeartbeatTimeout)
+		return errors.WithStack(errSendHeartbeatTimeout)
 	}
 }
 
@@ -670,6 +709,89 @@ func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
+}
+
+// ReportBuckets implements gRPC PDServer
+func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
+	var (
+		server            = &bucketHeartbeatServer{stream: stream}
+		forwardStream     pdpb.PD_ReportBucketsClient
+		cancel            context.CancelFunc
+		lastForwardedHost string
+		errCh             chan error
+	)
+	defer func() {
+		if cancel != nil {
+			cancel()
+		}
+	}()
+	for {
+		request, err := server.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		forwardedHost := getForwardedHost(stream.Context())
+		if !s.isLocalRequest(forwardedHost) {
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
+				if cancel != nil {
+					cancel()
+				}
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return err
+				}
+				log.Info("create bucket report forward stream", zap.String("forwarded-host", forwardedHost))
+				forwardStream, cancel, err = s.createReportBucketsForwardStream(client)
+				if err != nil {
+					return err
+				}
+				lastForwardedHost = forwardedHost
+				errCh = make(chan error, 1)
+				go forwardReportBucketClientToServer(forwardStream, server, errCh)
+			}
+			if err := forwardStream.Send(request); err != nil {
+				return errors.WithStack(err)
+			}
+
+			select {
+			case err := <-errCh:
+				return err
+			default:
+			}
+			continue
+		}
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.ReportBucketsResponse{
+				Header: s.notBootstrappedHeader(),
+			}
+			err := server.Send(resp)
+			return errors.WithStack(err)
+		}
+		if err := s.validateRequest(request.GetHeader()); err != nil {
+			return err
+		}
+		buckets := request.GetBuckets()
+		if buckets == nil || len(buckets.Keys) == 0 {
+			continue
+		}
+		store := rc.GetLeaderStoreByRegionID(buckets.GetRegionId())
+		if store == nil {
+			return errors.Errorf("the store of the bucket in region %v is not found ", buckets.GetRegionId())
+		}
+		storeLabel := strconv.FormatUint(store.GetID(), 10)
+		storeAddress := store.GetAddress()
+		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
+
+		start := time.Now()
+		err = rc.HandleReportBuckets(buckets)
+		if err != nil {
+			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
+			continue
+		}
+		bucketReportLatency.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
+	}
 }
 
 // RegionHeartbeat implements gRPC PDServer.
@@ -1614,6 +1736,30 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
+func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (pdpb.PD_ReportBucketsClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := pdpb.NewPDClient(client).ReportBuckets(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
+func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.CloseAndRecv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	select {
@@ -1709,11 +1855,6 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	}
 	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 	return err
-}
-
-// ReportBuckets receives region buckets from tikv.
-func (s *GrpcServer) ReportBuckets(pdpb.PD_ReportBucketsServer) error {
-	return status.Errorf(codes.Unimplemented, "not implemented")
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
