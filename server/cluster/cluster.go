@@ -56,6 +56,9 @@ import (
 // backgroundJobInterval is the interval to run background jobs.
 var backgroundJobInterval = 10 * time.Second
 
+// regionLabelGCInterval is the interval to run region-label's GC work.
+const regionLabelGCInterval = time.Hour
+
 // DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 var DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 
@@ -250,7 +253,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
 	}

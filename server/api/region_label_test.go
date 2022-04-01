@@ -73,7 +73,8 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 
 	err = readJSONWithBody(testDialClient, s.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
 	c.Assert(err, IsNil)
-	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
+	expects := []*labeler.LabelRule{rules[0], rules[2]}
+	c.Assert(resp, DeepEquals, expects)
 
 	_, err = doDelete(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
 	c.Assert(err, IsNil)
