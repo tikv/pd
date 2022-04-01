@@ -1489,6 +1489,16 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 	return nil
 }
 
+// IsTTLConfigExist returns true if the ttl config is existed for a given config.
+func (s *Server) IsTTLConfigExist(key string) bool {
+	if config.IsSupportedTTLConfig(key) {
+		if _, ok := s.persistOptions.GetTTLData(key); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // SplitAndScatterRegions TODO
 func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	return nil, errors.New("no implemented")

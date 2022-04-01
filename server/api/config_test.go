@@ -349,3 +349,22 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	c.Assert(err, Not(IsNil))
 	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }
+
+func (s *testConfigSuite) TestTTLConflict(c *C) {
+	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	postData, err := json.Marshal(ttlConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+
+	cfg := map[string]interface{}{"max-snapshot-count": 30}
+	postData, err = json.Marshal(cfg)
+	c.Assert(err, IsNil)
+	addr = fmt.Sprintf("%s/config", s.urlPrefix)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+	addr = fmt.Sprintf("%s/config/schedule", s.urlPrefix)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+}
