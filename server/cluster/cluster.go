@@ -20,6 +20,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -1086,7 +1087,8 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddOrUpdateProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
+		size := float64(c.core.GetStoreRegionSize(storeID))
+		c.progressManager.AddOrUpdateProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), size, size)
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
@@ -1259,7 +1261,7 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, regionSize)
+		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize))
 		// If the store is empty, it can be buried.
 		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
@@ -1284,15 +1286,16 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current int64) {
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current float64) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
 
-	if exist := c.progressManager.AddOrUpdateProgress(progress, float64(current)); !exist {
+	if exist := c.progressManager.AddOrUpdateProgress(progress, current, current); !exist {
 		return
 	}
-	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.Process(progress))
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(c.progressManager.LeftSeconds(progress))
+	process, ls, _ := c.progressManager.Status(progress)
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
@@ -1902,10 +1905,41 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
 }
 
-// GetStoreProgressByID returns the progress details for a given action and store ID.
-func (c *RaftCluster) GetStoreProgressByID(action string, storeID uint64) (p float64, cs float64, ls float64) {
-	progress := fmt.Sprintf("%s-%d", action, storeID)
-	return c.progressManager.Process(progress), c.progressManager.CurrentSpeed(progress), c.progressManager.LeftSeconds(progress)
+// GetProgressByID returns the progress details for a given store ID.
+func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, ls, cs float64) {
+	filter := func(progress string) bool {
+		s := strings.Split(progress, "-")
+		return len(s) == 2 && s[1] == storeID
+	}
+	progress := c.progressManager.GetProgresses(filter)
+	if len(progress) != 0 {
+		process, ls, cs = c.progressManager.Status(progress[0])
+		if strings.HasPrefix(progress[0], removingAction) {
+			action = removingAction
+		}
+		return
+	}
+	return "", 0, 0, 0
+}
+
+// GetProgressByAction returns the progress details for a given action.
+func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float64) {
+	filter := func(progress string) bool {
+		return strings.HasPrefix(progress, action)
+	}
+
+	progresses := c.progressManager.GetProgresses(filter)
+	for _, progress := range progresses {
+		p, l, c := c.progressManager.Status(progress)
+		process += p
+		ls += l
+		cs += c
+	}
+	num := float64(len(progresses))
+	process /= num
+	cs /= num
+	ls /= num
+	return
 }
 
 var healthURL = "/pd/api/v1/ping"

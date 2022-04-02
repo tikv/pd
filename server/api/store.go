@@ -610,10 +610,10 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, scene)
 }
 
-// StoreProgress contains status about a progress.
-type StoreProgress struct {
-	StoreID      uint64  `json:"store_id"`
+// Progress contains status about a progress.
+type Progress struct {
 	Action       string  `json:"action"`
+	StoreID      uint64  `json:"store_id,omitempty"`
 	Progress     float64 `json:"progress"`
 	CurrentSpeed float64 `json:"current_speed"`
 	LeftSeconds  float64 `json:"left_seconds"`
@@ -622,33 +622,43 @@ type StoreProgress struct {
 // @Tags stores
 // @Summary Get store progress in the cluster.
 // @Produce json
-// @Success 200 {object} StoreProgress
+// @Success 200 {object} Progress
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /stores/{id}/progress [get]
-func (h *storesHandler) GetStoreProgressByID(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
-	if errParse != nil {
-		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+// @Router /stores/progress [get]
+func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request) {
+	if v := r.URL.Query().Get("id"); v != "" {
+		storeID, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			return
+		}
+
+		action, progress, currentSpeed, leftSeconds := h.Handler.GetProgressByID(v)
+		sp := &Progress{
+			StoreID:      storeID,
+			Action:       action,
+			Progress:     progress,
+			CurrentSpeed: currentSpeed,
+			LeftSeconds:  leftSeconds,
+		}
+
+		h.rd.JSON(w, http.StatusOK, sp)
 		return
 	}
+	if v := r.URL.Query().Get("action"); v != "" {
+		progress, currentSpeed, leftSeconds := h.Handler.GetProgressByAction(v)
+		sp := &Progress{
+			Action:       v,
+			Progress:     progress,
+			CurrentSpeed: currentSpeed,
+			LeftSeconds:  leftSeconds,
+		}
 
-	action := r.URL.Query().Get("action")
-	if err := checkProgressAction(action); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		h.rd.JSON(w, http.StatusOK, sp)
 		return
 	}
-	progress, currentSpeed, leftSeconds := h.Handler.GetStoreProgressByID(action, storeID)
-	sp := &StoreProgress{
-		StoreID:      storeID,
-		Action:       action,
-		Progress:     progress,
-		CurrentSpeed: currentSpeed,
-		LeftSeconds:  leftSeconds,
-	}
-
-	h.rd.JSON(w, http.StatusOK, sp)
+	h.rd.JSON(w, http.StatusBadRequest, "need query parameters")
 }
 
 // @Tags store
@@ -760,13 +770,4 @@ func parseStoreLimitType(typeName string) (storelimit.Type, error) {
 		}
 	}
 	return typeValue, err
-}
-
-func checkProgressAction(action string) error {
-	switch action {
-	case metapb.NodeState_Preparing.String(), metapb.NodeState_Removing.String():
-		return nil
-	default:
-		return errors.New("unknown action type")
-	}
 }

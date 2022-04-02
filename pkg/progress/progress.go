@@ -49,21 +49,21 @@ func (m *Manager) Reset() {
 }
 
 // AddOrUpdateProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddOrUpdateProgress(progress string, current float64) (exist bool) {
+func (m *Manager) AddOrUpdateProgress(progress string, total, current float64) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
 	var p *progressIndicator
 	if p, exist = m.progesses[progress]; exist {
 		p.current = current
-		if p.total < current {
-			p.total = current
+		if p.total < total {
+			p.total = total
 		}
 		p.speedPerSec = (p.total - p.current) / time.Since(p.startTime).Seconds()
 		return
 	}
 	m.progesses[progress] = &progressIndicator{
-		total:     current,
+		total:     total,
 		startTime: time.Now(),
 	}
 	return
@@ -81,35 +81,30 @@ func (m *Manager) RemoveProgress(progress string) (exist bool) {
 	return
 }
 
-// Process returns the current progress of a give name.
-func (m *Manager) Process(progress string) float64 {
-	m.RLock()
-	defer m.RUnlock()
+// GetProgresses gets progresses according to the filter.
+func (m *Manager) GetProgresses(filter func(p string) bool) []string {
+	m.Lock()
+	defer m.Unlock()
 
-	if p, exist := m.progesses[progress]; exist {
-		return 1 - p.current/p.total
+	processes := []string{}
+	for p := range m.progesses {
+		if filter(p) {
+			processes = append(processes, p)
+		}
 	}
-	return 0
+	return processes
 }
 
-// LeftSeconds returns the left seconds until finishing.
-func (m *Manager) LeftSeconds(progress string) float64 {
+// Status returns the current progress status of a give name.
+func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64) {
 	m.RLock()
 	defer m.RUnlock()
 
 	if p, exist := m.progesses[progress]; exist {
-		return p.current / ((p.total - p.current) / time.Since(p.startTime).Seconds())
+		process = 1 - p.current/p.total
+		leftSeconds = p.current / ((p.total - p.current) / time.Since(p.startTime).Seconds())
+		currentSpeed = p.speedPerSec
+		return
 	}
-	return 0
-}
-
-// CurrentSpeed returns the current speed of a given name.
-func (m *Manager) CurrentSpeed(progress string) float64 {
-	m.RLock()
-	defer m.RUnlock()
-
-	if p, exist := m.progesses[progress]; exist {
-		return p.speedPerSec
-	}
-	return 0
+	return 0, 0, 0
 }
