@@ -26,7 +26,15 @@ import (
 	"github.com/tikv/pd/server/cluster"
 )
 
-// GetStores returns the stores.
+// GetStores returns all stores.
+// @Tags stores
+// @version 2.0
+// @Summary Get all stores' information.
+// @Param id path integer true "Store Id"
+// @Produce json
+// @Success 200 {object} StoresInfo
+// @Failure 404 {string} string "The store does not exist."
+// @Router /stores [get]
 func GetStores() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
@@ -55,7 +63,7 @@ func GetStores() gin.HandlerFunc {
 }
 
 // GetStoreByID returns the store according to the given ID.
-// @Tags store
+// @Tags stores
 // @version 2.0
 // @Summary Get a store's information.
 // @Param id path integer true "Store Id"
@@ -63,7 +71,6 @@ func GetStores() gin.HandlerFunc {
 // @Success 200 {object} StoreInfo
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 404 {string} string "The store does not exist."
-// @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /stores/{id} [get]
 func GetStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -86,6 +93,14 @@ func GetStoreByID() gin.HandlerFunc {
 }
 
 // DeleteStoreByID will delete the store according to the given ID.
+// @Tags stores
+// @version 2.0
+// @Summary Delete a store's information.
+// @Param id path integer true "Store Id"
+// @Produce json
+// @Success 200
+// @Failure 400 {string} string "The input is invalid."
+// @Router /stores [delete]
 func DeleteStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
@@ -122,7 +137,18 @@ type updateStoresParams struct {
 	RegionWeight float64 `json:"region_weight"`
 }
 
-// UpdateStoreByID will update the field in the store for a given store ID.
+// UpdateStoreByID will update the store according to the given ID.
+// @Tags stores
+// @version 2.0
+// @Summary Update a store's information.
+// @Param id path integer true "Store Id"
+// @Accept json
+// @Produce json
+// @Success 200
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 404 {string} string "The store does not exist."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /stores [patch]
 func UpdateStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
