@@ -1061,8 +1061,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 	upStores := c.getUpStores()
 	expectUpStoresNum := len(upStores) - 1
-	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
-	if !c.opt.IsPlacementRulesEnabled() && expectUpStoresNum < c.opt.GetMaxReplicas() {
+	if expectUpStoresNum < c.opt.GetMaxReplicas() {
 		return fmt.Errorf("can not remove store %d since there are no extra up store has enough space to accommodate the extra replica（%d）", storeID, c.opt.GetMaxReplicas())
 	}
 

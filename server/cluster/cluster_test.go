@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -272,7 +273,6 @@ func (s *testClusterInfoSuite) TestSetOfflineWithReplica(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 
-	opt.SetPlacementRuleEnabled(false)
 	c.Assert(cluster.RemoveStore(2, false), IsNil)
 	// should be failed since no enough store to accommodate the extra replica.
 	c.Assert(cluster.RemoveStore(3, false), NotNil)
@@ -297,22 +297,25 @@ func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictSchedul
 func (s *testClusterInfoSuite) TestSetOfflineStoreWithEvictLeader(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
+	opt.SetMaxReplicas(1)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
-	// Put 4 stores.
-	for _, store := range newTestStores(4, "2.0.0") {
+	// Put 3 stores.
+	for _, store := range newTestStores(3, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	_, err = addEvictLeaderScheduler(cluster, 1)
 
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RemoveStore(2, false), IsNil)
-	c.Assert(cluster.RemoveStore(3, false), IsNil)
+
 	// should be failed since there is only 1 store left and it is the evict-leader store.
-	c.Assert(cluster.RemoveStore(4, false), NotNil)
+	err = cluster.RemoveStore(3, false)
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "leader"), IsTrue)
 	c.Assert(cluster.RemoveScheduler(schedulers.EvictLeaderName), IsNil)
-	c.Assert(cluster.RemoveStore(4, false), IsNil)
+	c.Assert(cluster.RemoveStore(3, false), IsNil)
 }
 
 func (s *testClusterInfoSuite) TestForceBuryStore(c *C) {
