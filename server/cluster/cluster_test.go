@@ -382,7 +382,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// Put 3 stores.
-	for _, store := range newTestStores(3, "2.0.0") {
+	for _, store := range newTestStores(5, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 
@@ -405,7 +405,7 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	c.Assert(cluster.UpStore(3), IsNil)
 
 	// store 4 not exist
-	err = cluster.UpStore(4)
+	err = cluster.UpStore(10)
 	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
 }
 
