@@ -1716,13 +1716,7 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().SplitAndScatterRegions(ctx, req)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+	return c.getClient().SplitAndScatterRegions(ctx, req)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {

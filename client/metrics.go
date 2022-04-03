@@ -96,9 +96,9 @@ var (
 	cmdDurationUpdateServiceGCSafePoint = cmdDuration.WithLabelValues("update_service_gc_safe_point")
 	cmdDurationScatterRegion            = cmdDuration.WithLabelValues("scatter_region")
 	cmdDurationScatterRegions           = cmdDuration.WithLabelValues("scatter_regions")
-	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	cmdDurationGetOperator              = cmdDuration.WithLabelValues("get_operator")
 	cmdDurationSplitRegions             = cmdDuration.WithLabelValues("split_regions")
+	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
