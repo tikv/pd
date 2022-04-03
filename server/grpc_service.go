@@ -1106,25 +1106,9 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}
 
 	if len(request.GetRegionsId()) > 0 {
-		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
 		if err != nil {
 			return nil, err
-		}
-		for _, op := range ops {
-			if ok := rc.GetOperatorController().AddOperator(op); !ok {
-				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-			}
-		}
-		percentage := 100
-		if len(failures) > 0 {
-			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
-			log.Debug("scatter regions", zap.Errors("failures", func() []error {
-				r := make([]error, 0, len(failures))
-				for _, err := range failures {
-					r = append(r, err)
-				}
-				return r
-			}()))
 		}
 		return &pdpb.ScatterRegionResponse{
 			Header:             s.header(),
@@ -1488,21 +1472,17 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SplitAndScatterRegions(ctx, request)
 	}
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
 	}
 	rc := s.GetRaftCluster()
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
-	scatterFinishedPercentage, err := s.addScatterRegionsOperators(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
+	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
 	if err != nil {
 		return nil, err
 	}
@@ -1514,8 +1494,8 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}, nil
 }
 
-// addScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (s *GrpcServer) addScatterRegionsOperators(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
+// scatterRegions add operators to scatter regions and return the processed percentage and error
+func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
 	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
 	if err != nil {
 		return 0, err
