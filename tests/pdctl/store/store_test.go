@@ -264,6 +264,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
 	c.Assert(ok, IsFalse)
 
+	// put enough stores for replica.
+	for id := 1000; id <= 1005; id++ {
+		store2 := &metapb.Store{
+			Id:            uint64(id),
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store2)
+	}
+
 	// store delete <store_id> command
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
@@ -298,8 +308,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	// store delete addr <address>
 	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
-	// should be failed since no store left.
-	c.Assert(strings.EqualFold(string(output), "Success!\n"), IsFalse)
+	c.Assert(string(output), Equals, "Success!\n")
 	c.Assert(err, IsNil)
 
 	args = []string{"-u", pdAddr, "store", "3"}
@@ -307,7 +316,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}

@@ -286,6 +286,8 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 }
 
 func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
+	rc.GetOpts().SetMaxReplicas(2)
+	defer rc.GetOpts().SetMaxReplicas(3)
 	{
 		beforeState := metapb.StoreState_Up // When store is up
 		// Case 1: RemoveStore should be OK;
