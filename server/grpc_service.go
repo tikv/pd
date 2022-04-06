@@ -530,7 +530,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 			case <-ctx.Done():
 				return
 			}
-		}(s.Server.Context(), store.GetStatusAddress())
+		}(s.Server.LoopContext(), store.GetStatusAddress())
 	}
 
 	return &pdpb.PutStoreResponse{
