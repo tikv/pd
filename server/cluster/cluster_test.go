@@ -374,7 +374,7 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	// no region moving
 	p, l, cs := cluster.progressManager.Status(process)
 	c.Assert(p, Equals, 0.0)
-	c.Assert(l, Equals, math.Inf(0))
+	c.Assert(l, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 	i := 0
 	// simulate region moving by deleting region from store 1

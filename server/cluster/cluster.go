@@ -279,7 +279,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		backgroundJobInterval = 100 * time.Microsecond
+		backgroundJobInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
@@ -1087,8 +1087,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		size := float64(c.core.GetStoreRegionSize(storeID))
-		c.progressManager.AddOrUpdateProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), size, size)
+		c.progressManager.AddProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
@@ -1286,13 +1285,14 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, current float64) {
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, left float64) {
 	storeLabel := fmt.Sprintf("%d", storeID)
 	progress := fmt.Sprintf("%s-%s", action, storeLabel)
 
-	if exist := c.progressManager.AddOrUpdateProgress(progress, current, current); !exist {
+	if exist := c.progressManager.AddProgress(progress, left); !exist {
 		return
 	}
+	c.progressManager.UpdateProgress(progress, left)
 	process, ls, _ := c.progressManager.Status(progress)
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
@@ -1929,6 +1929,9 @@ func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float6
 	}
 
 	progresses := c.progressManager.GetProgresses(filter)
+	if len(progresses) == 0 {
+		return 0, 0, 0
+	}
 	for _, progress := range progresses {
 		p, l, c := c.progressManager.Status(progress)
 		process += p
@@ -1939,6 +1942,10 @@ func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float6
 	process /= num
 	cs /= num
 	ls /= num
+	// handle the special cases
+	if math.IsNaN(ls) || math.IsInf(ls, 0) {
+		ls = math.MaxFloat64
+	}
 	return
 }
 

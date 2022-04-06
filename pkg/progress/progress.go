@@ -15,6 +15,7 @@
 package progress
 
 import (
+	"math"
 	"sync"
 	"time"
 )
@@ -35,7 +36,7 @@ func NewManager() *Manager {
 // progressIndicator reflects a specified progress.
 type progressIndicator struct {
 	total       float64
-	current     float64
+	left        float64
 	startTime   time.Time
 	speedPerSec float64
 }
@@ -48,25 +49,33 @@ func (m *Manager) Reset() {
 	m.progesses = make(map[string]*progressIndicator)
 }
 
-// AddOrUpdateProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddOrUpdateProgress(progress string, total, current float64) (exist bool) {
+// AddProgress adds a progress into manager if it doesn't exist.
+func (m *Manager) AddProgress(progress string, total float64) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
-	var p *progressIndicator
-	if p, exist = m.progesses[progress]; exist {
-		p.current = current
-		if p.total < total {
-			p.total = total
+	if _, exist = m.progesses[progress]; !exist {
+		m.progesses[progress] = &progressIndicator{
+			total:     total,
+			left:      total,
+			startTime: time.Now(),
 		}
-		p.speedPerSec = (p.total - p.current) / time.Since(p.startTime).Seconds()
-		return
-	}
-	m.progesses[progress] = &progressIndicator{
-		total:     total,
-		startTime: time.Now(),
 	}
 	return
+}
+
+// UpdateProgress updates a progress into manager if it doesn't exist.
+func (m *Manager) UpdateProgress(progress string, left float64) {
+	m.Lock()
+	defer m.Unlock()
+
+	if p, exist := m.progesses[progress]; exist {
+		p.left = left
+		if p.total < left {
+			p.total = left
+		}
+		p.speedPerSec = (p.total - p.left) / time.Since(p.startTime).Seconds()
+	}
 }
 
 // RemoveProgress removes a progress from manager.
@@ -99,11 +108,14 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64) {
 	m.RLock()
 	defer m.RUnlock()
-
 	if p, exist := m.progesses[progress]; exist {
-		process = 1 - p.current/p.total
-		leftSeconds = p.current / ((p.total - p.current) / time.Since(p.startTime).Seconds())
-		currentSpeed = p.speedPerSec
+		process = 1 - p.left/p.total
+		speedPerSec := (p.total - p.left) / time.Since(p.startTime).Seconds()
+		leftSeconds = p.left / speedPerSec
+		if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
+			leftSeconds = math.MaxFloat64
+		}
+		currentSpeed = speedPerSec
 		return
 	}
 	return 0, 0, 0
