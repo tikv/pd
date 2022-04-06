@@ -637,7 +637,7 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	// store 2: (10+40)/20 ~= 2.5s+
 	// average time ~= (1.75+2.5)/2 = 2.125s+
 	c.Assert(p.LeftSeconds, Greater, 2.125)
-	c.Assert(p.LeftSeconds, Less, 2.2)
+	c.Assert(p.LeftSeconds, Less, 2.5)
 
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
@@ -646,10 +646,10 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.29")
 	// store 2: 20/1s+ < 20
 	c.Assert(p.CurrentSpeed, Less, 20.0)
-	c.Assert(p.CurrentSpeed, Greater, 19.0)
+	c.Assert(p.CurrentSpeed, Greater, 15.0)
 	// store 2: (10+40)/20 ~= 2.5s+
 	c.Assert(p.LeftSeconds, Greater, 2.5)
-	c.Assert(p.LeftSeconds, Less, 2.6)
+	c.Assert(p.LeftSeconds, Less, 3.0)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
