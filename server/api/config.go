@@ -154,7 +154,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
-		return updatePDServerConfig(h.svr, cfg, kp[len(kp)-1], value)
+		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
 	case "log":
 		return h.updateLogLevel(kp, value)
 	case "cluster-version":
@@ -252,7 +252,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	return err
 }
 
-func updatePDServerConfig(svr *server.Server, config *config.Config, key string, value interface{}) error {
+func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value interface{}) error {
 	data, err := json.Marshal(map[string]interface{}{key: value})
 	if err != nil {
 		return err
@@ -268,7 +268,7 @@ func updatePDServerConfig(svr *server.Server, config *config.Config, key string,
 	}
 
 	if updated {
-		err = svr.SetPDServerConfig(config.PDServerCfg)
+		err = h.svr.SetPDServerConfig(config.PDServerCfg)
 	}
 	return err
 }
