@@ -14,9 +14,7 @@
 
 package ratelimit
 
-import (
-	"sync"
-)
+import "sync"
 
 type concurrencyLimiter struct {
 	mu      sync.RWMutex
