@@ -522,7 +522,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
 		go func(ctx context.Context, url string) {
 			select {
-			// tikv may not ready to server.
+			// tikv may not ready to serve.
 			case <-time.After(storeReadyWaitTime):
 				if err := s.storeConfigManager.Load(url); err != nil {
 					log.Error("load store config failed", zap.String("url", url), zap.Error(err))
