@@ -56,6 +56,9 @@ import (
 // backgroundJobInterval is the interval to run background jobs.
 var backgroundJobInterval = 10 * time.Second
 
+// regionLabelGCInterval is the interval to run region-label's GC work.
+const regionLabelGCInterval = time.Hour
+
 // DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 var DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 
@@ -101,13 +104,14 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core          *core.BasicCluster
-	meta          *metapb.Cluster
-	opt           *config.PersistOptions
-	storage       storage.Storage
-	id            id.Allocator
-	limiter       *StoreLimiter
-	minResolvedTS uint64
+	core               *core.BasicCluster
+	meta               *metapb.Cluster
+	opt                *config.PersistOptions
+	storeConfigManager *config.StoreConfigManager
+	storage            storage.Storage
+	id                 id.Allocator
+	limiter            *StoreLimiter
+	minResolvedTS      uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -138,15 +142,22 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client, httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:    ctx,
-		running:      false,
-		clusterID:    clusterID,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
+		serverCtx:          ctx,
+		running:            false,
+		clusterID:          clusterID,
+		regionSyncer:       regionSyncer,
+		httpClient:         httpClient,
+		etcdClient:         etcdClient,
+		storeConfigManager: manager,
 	}
+}
+
+// GetStoreConfig returns the store config.
+func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
+	return c.storeConfigManager.GetStoreConfig()
 }
 
 // LoadClusterStatus loads the cluster status.
@@ -242,7 +253,7 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 	}
 
-	c.regionLabeler, err = labeler.NewRegionLabeler(c.storage)
+	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
 	}
@@ -598,6 +609,35 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+// processReportBuckets update the bucket information.
+func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
+	region := c.core.GetRegion(buckets.GetRegionId())
+	if region == nil {
+		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
+		return errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	// use CAS to update the bucket information.
+	// the two request(A:3,B:2) get the same region and need to update the buckets.
+	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
+	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
+	for retry := 0; retry < 3; retry++ {
+		old := region.GetBuckets()
+		// region should not update if the version of the buckets is less than the old one.
+		if old != nil && buckets.GetVersion() <= old.GetVersion() {
+			bucketEventCounter.WithLabelValues("version_not_match").Inc()
+			return nil
+		}
+		failpoint.Inject("concurrentBucketHeartbeat", func() {
+			time.Sleep(500 * time.Millisecond)
+		})
+		if ok := region.UpdateBuckets(buckets, old); ok {
+			return nil
+		}
+	}
+	bucketEventCounter.WithLabelValues("update_failed").Inc()
+	return nil
+}
+
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -612,7 +652,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.CorrectApproximateSize(origin)
+	region.Inherit(origin)
 
 	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
@@ -867,6 +907,11 @@ func (c *RaftCluster) GetMetaStores() []*metapb.Store {
 // GetStores returns all stores in the cluster.
 func (c *RaftCluster) GetStores() []*core.StoreInfo {
 	return c.core.GetStores()
+}
+
+// GetLeaderStoreByRegionID returns the leader store of the given region.
+func (c *RaftCluster) GetLeaderStoreByRegionID(regionID uint64) *core.StoreInfo {
+	return c.core.GetLeaderStoreByRegionID(regionID)
 }
 
 // GetStore gets store from cluster.
@@ -1729,7 +1774,8 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 }
 
 func (c *RaftCluster) loadMinResolvedTS() {
-	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	minResolvedTS, err := c.GetStorage().LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return

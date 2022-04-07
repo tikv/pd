@@ -15,9 +15,11 @@
 package labeler
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,19 +35,70 @@ type RegionLabeler struct {
 	sync.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
+	ctx        context.Context
+	minExpire  *time.Time
 }
 
 // NewRegionLabeler creates a Labeler instance.
-func NewRegionLabeler(storage endpoint.RuleStorage) (*RegionLabeler, error) {
+func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInterval time.Duration) (*RegionLabeler, error) {
 	l := &RegionLabeler{
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),
+		ctx:        ctx,
+		minExpire:  nil,
 	}
 
 	if err := l.loadRules(); err != nil {
 		return nil, err
 	}
+	go l.doGC(gcInterval)
 	return l, nil
+}
+
+func (l *RegionLabeler) doGC(gcInterval time.Duration) {
+	ticker := time.NewTicker(gcInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			l.checkAndClearExpiredLabels()
+			log.Debug("RegionLabeler GC")
+		case <-l.ctx.Done():
+			log.Info("RegionLabeler GC stopped")
+			return
+		}
+	}
+}
+
+func (l *RegionLabeler) checkAndClearExpiredLabels() {
+	now := time.Now()
+	l.Lock()
+	defer l.Unlock()
+
+	if l.minExpire == nil || l.minExpire.After(now) {
+		return
+	}
+	var err error
+	deleted := false
+
+	for key, rule := range l.labelRules {
+		if !rule.checkAndRemoveExpireLabels(now) {
+			continue
+		}
+		if len(rule.Labels) == 0 {
+			err = l.storage.DeleteRegionRule(key)
+			delete(l.labelRules, key)
+			deleted = true
+		} else {
+			err = l.storage.SaveRegionRule(key, rule)
+		}
+		if err != nil {
+			log.Error("failed to save rule expired label rule", zap.String("rule-key", key), zap.Error(err))
+		}
+	}
+	if deleted {
+		l.buildRangeList()
+	}
 }
 
 func (l *RegionLabeler) loadRules() error {
@@ -78,7 +131,11 @@ func (l *RegionLabeler) loadRules() error {
 
 func (l *RegionLabeler) buildRangeList() {
 	builder := rangelist.NewBuilder()
+	l.minExpire = nil
 	for _, rule := range l.labelRules {
+		if l.minExpire == nil || rule.expireBefore(*l.minExpire) {
+			l.minExpire = rule.minExpire
+		}
 		if rule.RuleType == KeyRange {
 			rs := rule.Data.([]*KeyRangeRule)
 			for _, r := range rs {
@@ -98,6 +155,7 @@ func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 
 // GetAllLabelRules returns all the rules.
 func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
+	l.checkAndClearExpiredLabels()
 	l.RLock()
 	defer l.RUnlock()
 	rules := make([]*LabelRule, 0, len(l.labelRules))
@@ -109,11 +167,10 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 
 // GetLabelRules returns the rules that match the given ids.
 func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
-	l.RLock()
-	defer l.RUnlock()
+	now := time.Now()
 	rules := make([]*LabelRule, 0, len(ids))
 	for _, id := range ids {
-		if rule, ok := l.labelRules[id]; ok {
+		if rule := l.getAndCheckRule(id, now); rule != nil {
 			rules = append(rules, rule)
 		}
 	}
@@ -122,9 +179,26 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 
 // GetLabelRule returns the Rule with the same ID.
 func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
-	l.RLock()
-	defer l.RUnlock()
-	return l.labelRules[id]
+	return l.getAndCheckRule(id, time.Now())
+}
+
+func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
+	l.Lock()
+	defer l.Unlock()
+	rule, ok := l.labelRules[id]
+	if !ok {
+		return nil
+	}
+	if !rule.checkAndRemoveExpireLabels(now) {
+		return rule
+	}
+	if len(rule.Labels) == 0 {
+		l.storage.DeleteRule(id)
+		delete(l.labelRules, id)
+		return nil
+	}
+	l.storage.SaveRegionRule(id, rule)
+	return rule
 }
 
 // SetLabelRule inserts or updates a LabelRule.
@@ -196,6 +270,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) string {
 	l.RLock()
 	defer l.RUnlock()
+	now := time.Now()
 	value, index := "", -1
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
@@ -205,6 +280,9 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 				continue
 			}
 			for _, l := range r.Labels {
+				if l.expireBefore(now) {
+					continue
+				}
 				if l.Key == key {
 					value, index = l.Value, r.Index
 				}
@@ -230,12 +308,15 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 		index int
 	}
 	labels := make(map[string]valueIndex)
-
+	now := time.Now()
 	// search ranges
 	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
 		for _, rule := range data {
 			r := rule.(*LabelRule)
 			for _, l := range r.Labels {
+				if l.expireBefore(now) {
+					continue
+				}
 				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
 					labels[l.Key] = valueIndex{l.Value, r.Index}
 				}
