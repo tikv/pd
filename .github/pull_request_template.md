@@ -67,10 +67,10 @@ Related changes
 
 <!-- A bugfix or a new feature needs a release note. If there is no need release note, just uncomment the below line. -->
 
-Please refer to [Release Notes Language Style Guide](https://pingcap.github.io/tidb-dev-guide/contribute-to-tidb/release-notes-style-guide.html) to write a quality release note.
-
 ```release-note
 Please add a release note.
+
+Please refer to [Release Notes Language Style Guide](https://pingcap.github.io/tidb-dev-guide/contribute-to-tidb/release-notes-style-guide.html) to write a quality release note.
 
 If you don't think this PR needs a release note then fill it with None.
 ```
