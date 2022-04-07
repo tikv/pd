@@ -1774,7 +1774,8 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 }
 
 func (c *RaftCluster) loadMinResolvedTS() {
-	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	minResolvedTS, err := c.GetStorage().LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return

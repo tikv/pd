@@ -525,7 +525,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 			// tikv may not ready to serve.
 			case <-time.After(storeReadyWaitTime):
 				if err := s.storeConfigManager.Load(url); err != nil {
-					log.Error("load store config failed", zap.String("url", url), zap.Error(err))
+					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
 				}
 			case <-ctx.Done():
 				return
