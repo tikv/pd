@@ -758,16 +758,6 @@ func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
-// SetAuditMiddleware changes EnableAuditMiddleware
-func (s *Server) SetAuditMiddleware(status bool) {
-	s.cfg.EnableAuditMiddleware = status
-}
-
-// IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
-func (s *Server) IsAuditMiddlewareEnabled() bool {
-	return s.cfg.EnableAuditMiddleware
-}
-
 // GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster

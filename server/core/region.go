@@ -430,7 +430,7 @@ func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
 
 // GetBuckets returns the buckets of the region.
 func (r *RegionInfo) GetBuckets() *metapb.Buckets {
-	if r == nil || r.buckets == nil {
+	if r == nil {
 		return nil
 	}
 	buckets := atomic.LoadPointer(&r.buckets)

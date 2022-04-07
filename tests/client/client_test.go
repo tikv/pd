@@ -576,6 +576,7 @@ type testClientSuite struct {
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
+	reportBucket    pdpb.PD_ReportBucketsClient
 }
 
 func checkerWithNilAssert(c *C) *assertutil.Checker {
@@ -601,6 +602,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 
 	c.Assert(err, IsNil)
 	s.regionHeartbeat, err = s.grpcPDClient.RegionHeartbeat(s.ctx)
+	c.Assert(err, IsNil)
+	s.reportBucket, err = s.grpcPDClient.ReportBuckets(s.ctx)
 	c.Assert(err, IsNil)
 	cluster := s.srv.GetRaftCluster()
 	c.Assert(cluster, NotNil)
@@ -720,7 +723,6 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	}
 	err := s.regionHeartbeat.Send(req)
 	c.Assert(err, IsNil)
-
 	testutil.WaitUntil(c, func() bool {
 		r, err := s.client.GetRegion(context.Background(), []byte("a"))
 		c.Assert(err, IsNil)
@@ -728,7 +730,25 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 			return false
 		}
 		return c.Check(r.Meta, DeepEquals, region) &&
-			c.Check(r.Leader, DeepEquals, peers[0])
+			c.Check(r.Leader, DeepEquals, peers[0]) &&
+			c.Check(r.Buckets, IsNil)
+	})
+	breq := &pdpb.ReportBucketsRequest{
+		Header: newHeader(s.srv),
+		Buckets: &metapb.Buckets{
+			RegionId: regionID,
+			Version:  1,
+			Keys:     [][]byte{[]byte("a"), []byte("z")},
+		},
+	}
+	c.Assert(s.reportBucket.Send(breq), IsNil)
+	testutil.WaitUntil(c, func() bool {
+		r, err := s.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		c.Assert(err, IsNil)
+		if r == nil {
+			return false
+		}
+		return c.Check(r.Buckets, NotNil)
 	})
 	c.Succeed()
 }
