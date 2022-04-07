@@ -588,8 +588,7 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 
 // SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
-	storeID := store.GetID()
-	s.stores[storeID] = store
+	s.stores[store.GetID()] = store
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.

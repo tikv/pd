@@ -319,6 +319,11 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
+// GetMaxStorePreparingTime returns the max preparing time of a store.
+func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
+	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
+}
+
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 	return o.getTTLUintOr(leaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
