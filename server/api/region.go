@@ -115,6 +115,7 @@ type RegionInfo struct {
 	ReadKeys        uint64        `json:"read_keys"`
 	ApproximateSize int64         `json:"approximate_size"`
 	ApproximateKeys int64         `json:"approximate_keys"`
+	Buckets         []string      `json:"buckets,omitempty"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -163,6 +164,14 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
+	keys := r.GetBuckets().GetKeys()
+
+	if len(keys) > 0 {
+		s.Buckets = make([]string, len(keys))
+		for i, key := range keys {
+			s.Buckets[i] = core.HexRegionKeyStr(key)
+		}
+	}
 	return s
 }
 

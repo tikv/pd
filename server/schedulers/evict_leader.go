@@ -107,8 +107,12 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	for id, ranges := range conf.StoreIDWithRanges {
+		storeIDWithRanges[id] = append(storeIDWithRanges[id], ranges...)
+	}
 	return &evictLeaderSchedulerConfig{
-		StoreIDWithRanges: conf.StoreIDWithRanges,
+		StoreIDWithRanges: storeIDWithRanges,
 	}
 }
 

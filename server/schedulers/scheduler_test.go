@@ -20,7 +20,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -239,68 +238,6 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
-}
-
-var _ = Suite(&testEvictLeaderSuite{})
-
-type testEvictLeaderSuite struct{}
-
-func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	// Add stores 1, 2, 3
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0)
-	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	tc.AddLeaderRegion(2, 2, 1)
-	tc.AddLeaderRegion(3, 3, 1)
-
-	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
-}
-
-func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-
-	// Add stores 1, 2, 3
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0)
-	// Add region 1, which has 3 peers. 1 is leader. 2 is healthy or pending, 3 is healthy or down.
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	region := tc.MockRegionInfo(1, 1, []uint64{2, 3}, nil, nil)
-	withDownPeer := core.WithDownPeers([]*pdpb.PeerStats{{
-		Peer:        region.GetPeers()[2],
-		DownSeconds: 1000,
-	}})
-	withPendingPeer := core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[1]})
-
-	// only pending
-	tc.PutRegion(region.Clone(withPendingPeer))
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{3})
-	// only down
-	tc.PutRegion(region.Clone(withDownPeer))
-	op = sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
-	// pending + down
-	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
-	c.Assert(sl.Schedule(tc), HasLen, 0)
 }
 
 var _ = Suite(&testShuffleRegionSuite{})

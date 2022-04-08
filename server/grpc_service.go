@@ -56,8 +56,9 @@ type GrpcServer struct {
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+	ErrNotLeader       = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted      = status.Errorf(codes.Unavailable, "server not started")
+	storeReadyWaitTime = 5 * time.Second
 )
 
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
@@ -519,13 +520,17 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
 	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(url string) {
-			// tikv may not ready to server.
-			time.Sleep(5 * time.Second)
-			if err := s.storeConfigManager.Load(url); err != nil {
-				log.Error("load store config failed", zap.String("url", url), zap.Error(err))
+		go func(ctx context.Context, url string) {
+			select {
+			// tikv may not ready to serve.
+			case <-time.After(storeReadyWaitTime):
+				if err := s.storeConfigManager.Load(url); err != nil {
+					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
+				}
+			case <-ctx.Done():
+				return
 			}
-		}(store.GetStatusAddress())
+		}(s.Server.LoopContext(), store.GetStatusAddress())
 	}
 
 	return &pdpb.PutStoreResponse{
@@ -941,12 +946,17 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
@@ -970,12 +980,17 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
@@ -998,12 +1013,17 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
