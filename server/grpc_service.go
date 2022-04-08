@@ -47,19 +47,32 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// GrpcServer wraps Server to provide grpc service.
-type GrpcServer struct {
-	*Server
-}
+const (
+	heartbeatSendTimeout = 5 * time.Second
+	// store config
+	storeReadyWaitTime = 5 * time.Second
+
+	// tso
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+
+	// global config
+	globalConfigPath = "/global/config/"
+)
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader       = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted      = status.Errorf(codes.Unavailable, "server not started")
-	storeReadyWaitTime = 5 * time.Second
+	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 )
+
+// GrpcServer wraps Server to provide grpc service.
+type GrpcServer struct {
+	*Server
+}
 
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
@@ -122,11 +135,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
-
-const (
-	maxMergeTSORequests    = 10000
-	defaultTSOProxyTimeout = 3 * time.Second
-)
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
@@ -636,10 +644,6 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
-const heartbeatSendTimeout = 5 * time.Second
-
-var errSendHeartbeatTimeout = errors.New("send heartbeat timeout")
-
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
 type bucketHeartbeatServer struct {
@@ -663,7 +667,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 		return err
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&b.closed, 1)
-		return errors.WithStack(errSendHeartbeatTimeout)
+		return ErrSendHeartbeatTimeout
 	}
 }
 
@@ -700,7 +704,7 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendHeartbeatTimeout)
+		return ErrSendHeartbeatTimeout
 	}
 }
 
@@ -1489,7 +1493,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(ErrNotLeader)
+		return ErrNotLeader
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -1670,7 +1674,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 // the gRPC communication between PD servers internally.
 func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
-		return errors.WithStack(ErrNotStarted)
+		return ErrNotStarted
 	}
 	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
@@ -1791,8 +1795,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	}
 	<-done
 }
-
-const globalConfigPath = "/global/config/"
 
 // StoreGlobalConfig store global config into etcd by transaction
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
