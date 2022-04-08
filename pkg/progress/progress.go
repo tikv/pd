@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-// Manager is used to maintain the progresses we are care about.
+// Manager is used to maintain the progresses we care about.
 type Manager struct {
 	sync.RWMutex
 	progesses map[string]*progressIndicator
