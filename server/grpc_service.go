@@ -45,19 +45,61 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// GrpcServer wraps Server to provide grpc service.
-type GrpcServer struct {
-	*Server
-}
+const (
+	heartbeatSendTimeout = 5 * time.Second
+	// store config
+	storeReadyWaitTime = 5 * time.Second
+
+	// tso
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+
+	// global config
+	globalConfigPath = "/global/config/"
+)
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
+<<<<<<< HEAD
 	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
+=======
+	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+)
+
+// GrpcServer wraps Server to provide grpc service.
+type GrpcServer struct {
+	*Server
+}
+
+type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
+
+func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHeader, fn forwardFn) (rsp interface{}, err error) {
+	failpoint.Inject("customTimeout", func() {
+		time.Sleep(5 * time.Second)
+	})
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return fn(ctx, client)
+	}
+	if err := s.validateRequest(header); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+>>>>>>> e3fd147fd (server: partially fix grpc status (#4798))
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -98,11 +140,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
-
-const (
-	maxMergeTSORequests    = 10000
-	defaultTSOProxyTimeout = 3 * time.Second
-)
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
@@ -629,7 +666,36 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
+<<<<<<< HEAD
 const regionHeartbeatSendTimeout = 5 * time.Second
+=======
+// bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
+// occurs on SendAndClose() or Recv(), both endpoints will be closed.
+type bucketHeartbeatServer struct {
+	stream pdpb.PD_ReportBucketsServer
+	closed int32
+}
+
+func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
+	if atomic.LoadInt32(&b.closed) == 1 {
+		return status.Errorf(codes.Canceled, "stream is closed")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- b.stream.SendAndClose(bucket)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&b.closed, 1)
+		}
+		return err
+	case <-time.After(heartbeatSendTimeout):
+		atomic.StoreInt32(&b.closed, 1)
+		return ErrSendHeartbeatTimeout
+	}
+}
+>>>>>>> e3fd147fd (server: partially fix grpc status (#4798))
 
 var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
 
@@ -654,7 +720,11 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-time.After(regionHeartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
+<<<<<<< HEAD
 		return errors.WithStack(errSendRegionHeartbeatTimeout)
+=======
+		return ErrSendHeartbeatTimeout
+>>>>>>> e3fd147fd (server: partially fix grpc status (#4798))
 	}
 }
 
@@ -1418,7 +1488,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(ErrNotLeader)
+		return ErrNotLeader
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -1603,7 +1673,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 // the gRPC communication between PD servers internally.
 func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
-		return errors.WithStack(ErrNotStarted)
+		return ErrNotStarted
 	}
 	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
@@ -1700,8 +1770,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	}
 	<-done
 }
-
-const globalConfigPath = "/global/config/"
 
 // StoreGlobalConfig store global config into etcd by transaction
 func (s *GrpcServer) StoreGlobalConfig(ctx context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
