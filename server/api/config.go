@@ -145,6 +145,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	kp := strings.Split(key, ".")
 	switch kp[0] {
 	case "schedule":
+		if h.svr.IsTTLConfigExist(key) {
+			return errors.Errorf("need to clean up TTL first for %s", key)
+		}
 		return h.updateSchedule(cfg, kp[len(kp)-1], value)
 	case "replication":
 		return h.updateReplication(cfg, kp[len(kp)-1], value)
@@ -356,8 +359,37 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/schedule [post]
 func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	conf := make(map[string]interface{})
+	if err := json.Unmarshal(data, &conf); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	for k := range conf {
+		key := fmt.Sprintf("schedule.%s", k)
+		if h.svr.IsTTLConfigExist(key) {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("need to clean up TTL first for %s", key))
+			return
+		}
+	}
+
 	config := h.svr.GetScheduleConfig()
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		var errCode errcode.ErrorCode
+		err = apiutil.TagJSONError(err)
+		if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
+		} else {
+			errCode = errcode.NewInternalErr(err)
+		}
+		apiutil.ErrorResp(h.rd, w, errCode)
 		return
 	}
 
