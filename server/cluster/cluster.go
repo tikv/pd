@@ -1278,10 +1278,11 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 }
 
 // ReadyToServe change store's node state to Serving.
-func (c *RaftCluster) ReadyToServe(store *core.StoreInfo) error {
+func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
-	storeID := store.GetID()
+
+	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
@@ -1350,7 +1351,7 @@ func (c *RaftCluster) checkStores() {
 		storeID := store.GetID()
 		if store.IsPreparing() {
 			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || float64(store.GetRegionSize()) >= c.getThreshold(stores, store, keys) {
-				if err := c.ReadyToServe(store); err != nil {
+				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
