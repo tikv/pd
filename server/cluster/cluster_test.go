@@ -427,6 +427,46 @@ func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	c.Assert(stats[4], HasLen, 1)
 }
 
+func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+
+	// case1: region is not exist
+	buckets := &metapb.Buckets{
+		RegionId: 0,
+		Version:  1,
+		Keys:     [][]byte{{'1'}, {'2'}},
+	}
+	c.Assert(cluster.processReportBuckets(buckets), NotNil)
+
+	// case2: bucket can be processed after the region update.
+	stores := newTestStores(3, "2.0.0")
+	n, np := uint64(1), uint64(1)
+	regions := newTestRegions(n, np)
+	for _, store := range stores {
+		c.Assert(cluster.putStoreLocked(store), IsNil)
+	}
+
+	c.Assert(cluster.processRegionHeartbeat(regions[0]), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), IsNil)
+	c.Assert(cluster.processReportBuckets(buckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+
+	// case3: the bucket version is same.
+	c.Assert(cluster.processReportBuckets(buckets), IsNil)
+	// case4: the bucket version is changed.
+	buckets.Version = 3
+	c.Assert(cluster.processReportBuckets(buckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+
+	//case5: region update should inherit buckets.
+	newRegion := regions[0].Clone(core.WithIncConfVer())
+	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), NotNil)
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -660,6 +700,32 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	processRegions(regions)
 	newRegion := cluster.GetRegion(region.GetID())
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
+}
+
+func (s *testClusterInfoSuite) TestConcurrentReportBucket(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+
+	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	heartbeatRegions(c, cluster, regions)
+	c.Assert(cluster.GetRegion(0), NotNil)
+
+	bucket1 := &metapb.Buckets{RegionId: 0, Version: 3}
+	bucket2 := &metapb.Buckets{RegionId: 0, Version: 2}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"), IsNil)
+	go func() {
+		defer wg.Done()
+		cluster.processReportBuckets(bucket1)
+	}()
+	time.Sleep(100 * time.Millisecond)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"), IsNil)
+	c.Assert(cluster.processReportBuckets(bucket2), IsNil)
+	wg.Wait()
+	c.Assert(cluster.GetRegion(0).GetBuckets(), DeepEquals, bucket1)
 }
 
 func (s *testClusterInfoSuite) TestConcurrentRegionHeartbeat(c *C) {
