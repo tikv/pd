@@ -47,18 +47,32 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// GrpcServer wraps Server to provide grpc service.
-type GrpcServer struct {
-	*Server
-}
+const (
+	heartbeatSendTimeout = 5 * time.Second
+	// store config
+	storeReadyWaitTime = 5 * time.Second
+
+	// tso
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+
+	// global config
+	globalConfigPath = "/global/config/"
+)
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 )
+
+// GrpcServer wraps Server to provide grpc service.
+type GrpcServer struct {
+	*Server
+}
 
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
@@ -121,11 +135,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
-
-const (
-	maxMergeTSORequests    = 10000
-	defaultTSOProxyTimeout = 3 * time.Second
-)
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
@@ -519,13 +528,17 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
 	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(url string) {
-			// tikv may not ready to server.
-			time.Sleep(5 * time.Second)
-			if err := s.storeConfigManager.Load(url); err != nil {
-				log.Error("load store config failed", zap.String("url", url), zap.Error(err))
+		go func(ctx context.Context, url string) {
+			select {
+			// tikv may not ready to serve.
+			case <-time.After(storeReadyWaitTime):
+				if err := s.storeConfigManager.Load(url); err != nil {
+					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
+				}
+			case <-ctx.Done():
+				return
 			}
-		}(store.GetStatusAddress())
+		}(s.Server.LoopContext(), store.GetStatusAddress())
 	}
 
 	return &pdpb.PutStoreResponse{
@@ -631,10 +644,6 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
-const heartbeatSendTimeout = 5 * time.Second
-
-var errSendHeartbeatTimeout = errors.New("send heartbeat timeout")
-
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
 // occurs on SendAndClose() or Recv(), both endpoints will be closed.
 type bucketHeartbeatServer struct {
@@ -658,7 +667,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 		return err
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&b.closed, 1)
-		return errors.WithStack(errSendHeartbeatTimeout)
+		return ErrSendHeartbeatTimeout
 	}
 }
 
@@ -695,7 +704,7 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendHeartbeatTimeout)
+		return ErrSendHeartbeatTimeout
 	}
 }
 
@@ -941,12 +950,17 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
@@ -970,12 +984,17 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
@@ -998,12 +1017,17 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+	var buckets *metapb.Buckets
+	if request.GetNeedBuckets() {
+		buckets = region.GetBuckets()
+	}
 	return &pdpb.GetRegionResponse{
 		Header:       s.header(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
+		Buckets:      buckets,
 	}, nil
 }
 
@@ -1469,7 +1493,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(ErrNotLeader)
+		return ErrNotLeader
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -1650,7 +1674,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 // the gRPC communication between PD servers internally.
 func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
-		return errors.WithStack(ErrNotStarted)
+		return ErrNotStarted
 	}
 	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
@@ -1771,8 +1795,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	}
 	<-done
 }
-
-const globalConfigPath = "/global/config/"
 
 // StoreGlobalConfig store global config into etcd by transaction
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
