@@ -280,18 +280,18 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 }
 
 func (s *testConfigSuite) TestConfigPDServer(c *C) {
-	addr := fmt.Sprintf("%s/config", s.urlPrefix)
+	addrPost := fmt.Sprintf("%s/config", s.urlPrefix)
 
 	ms := map[string]interface{}{
 		"metric-storage": "",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addr, postData), IsNil)
+	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
 
-	addr = fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
+	addrGet := fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
 	sc := &config.PDServerConfig{}
-	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
 
 	c.Assert(sc.UseRegionStorage, Equals, bool(true))
 	c.Assert(sc.KeyType, Equals, "table")
@@ -301,6 +301,27 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
 	c.Assert(sc.MinResolvedTSPersistenceInterval, Equals, typeutil.NewDuration(0))
 	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
+	c.Assert(sc.EnableAudit, Equals, false)
+
+	// test update enable-audit
+	ms = map[string]interface{}{
+		"enable-audit": true,
+	}
+	postData, err = json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
+	sc = &config.PDServerConfig{}
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, true)
+	ms = map[string]interface{}{
+		"enable-audit": false,
+	}
+	postData, err = json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
+	sc = &config.PDServerConfig{}
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, false)
 }
 
 var ttlConfig = map[string]interface{}{
@@ -348,4 +369,23 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err, Not(IsNil))
 	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
+}
+
+func (s *testConfigSuite) TestTTLConflict(c *C) {
+	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	postData, err := json.Marshal(ttlConfig)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+
+	cfg := map[string]interface{}{"max-snapshot-count": 30}
+	postData, err = json.Marshal(cfg)
+	c.Assert(err, IsNil)
+	addr = fmt.Sprintf("%s/config", s.urlPrefix)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+	addr = fmt.Sprintf("%s/config/schedule", s.urlPrefix)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
 }
