@@ -1198,7 +1198,7 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize(c *C) {
 	}
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
 
-	// Put 5 stores.
+	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
 		var labels []*metapb.StoreLabel
 		if i%3 == 0 {
@@ -1254,10 +1254,14 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize(c *C) {
 		c.Assert(cluster.putRegion(region), IsNil)
 	}
 
-	keys := cluster.ruleManager.GetSplitKeys([]byte(""), []byte(""))
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-	c.Assert(cluster.getThreshold(stores, store, keys), Equals, 7200.0)
+	c.Assert(cluster.getThreshold(stores, store), Equals, 7200.0)
+
+	cluster.opt.SetPlacementRuleEnabled(false)
+	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	// 30000 / 3 / 4 * 0.9 = 2250
+	c.Assert(cluster.getThreshold(stores, store), Equals, 2250.0)
 }
 
 var _ = Suite(&testStoresInfoSuite{})

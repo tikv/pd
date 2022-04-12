@@ -253,17 +253,6 @@ func (bc *BasicCluster) GetStoreCount() int {
 	return bc.Stores.GetStoreCount()
 }
 
-// GetRegionSize gets the total size of RegionInfo of regionMap.
-func (bc *BasicCluster) GetRegionSize() int64 {
-	bc.RLock()
-	defer bc.RUnlock()
-	var regionSize int64
-	for _, store := range bc.Stores.stores {
-		regionSize += store.GetRegionSize()
-	}
-	return regionSize
-}
-
 // GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID.
 func (bc *BasicCluster) GetStoreRegionCount(storeID uint64) int {
 	bc.RLock()

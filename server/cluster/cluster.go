@@ -848,11 +848,6 @@ func (c *RaftCluster) GetRegionCount() int {
 	return c.core.GetRegionCount()
 }
 
-// GetRegionSize returns total size of regions
-func (c *RaftCluster) GetRegionSize() int64 {
-	return c.core.GetRegionSize()
-}
-
 // GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
@@ -1341,7 +1336,6 @@ func (c *RaftCluster) checkStores() {
 	var upStoreCount int
 	stores := c.GetStores()
 
-	keys := c.ruleManager.GetSplitKeys([]byte(""), []byte(""))
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
@@ -1350,7 +1344,7 @@ func (c *RaftCluster) checkStores() {
 
 		storeID := store.GetID()
 		if store.IsPreparing() {
-			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || float64(store.GetRegionSize()) >= c.getThreshold(stores, store, keys) {
+			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || float64(store.GetRegionSize()) >= c.getThreshold(stores, store) {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
