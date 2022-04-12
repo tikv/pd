@@ -164,6 +164,8 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
 		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
 		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
+		c.Assert(r.GetBuckets().GetKeys(), HasLen, 2)
+		c.Assert(r.GetBuckets(), DeepEquals, region.GetBuckets())
 	}
 }
 
@@ -226,7 +228,14 @@ func initRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(0)},
 			},
 		}
-		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
+		buckets := &metapb.Buckets{
+			RegionId: r.Id,
+			Keys:     [][]byte{r.StartKey, r.EndKey},
+			Version:  1,
+		}
+		region := core.NewRegionInfo(r, r.Peers[0])
+		region.UpdateBuckets(buckets)
+		regions = append(regions, region)
 	}
 	return regions
 }
