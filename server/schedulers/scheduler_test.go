@@ -16,6 +16,8 @@ package schedulers
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -591,4 +593,24 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Check(es.Schedule(tc), IsNil)
 	op = bs.Schedule(tc)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
+
+	es2, ok := es.(*evictSlowStoreScheduler)
+	c.Assert(ok, IsTrue)
+	c.Assert(es2.conf.evictStore(), Equals, uint64(0))
+
+	// check the value from storage.
+	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
+	c.Assert(err, IsNil)
+	valueStr := ""
+	for id, sche := range sches {
+		if strings.EqualFold(sche, EvictSlowStoreName) {
+			valueStr = vs[id]
+		}
+	}
+
+	var persistValue evictSlowStoreSchedulerConfig
+	err = json.Unmarshal([]byte(valueStr), &persistValue)
+	c.Assert(err, IsNil)
+	c.Assert(persistValue.EvictedStores, DeepEquals, es2.conf.EvictedStores)
+	c.Assert(persistValue.evictStore(), Equals, uint64(0))
 }
