@@ -1350,7 +1350,7 @@ func (c *DashboardConfig) adjust(meta *configMetaData) {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationModeConfig struct {
 	ReplicationMode string                      `toml:"replication-mode" json:"replication-mode"` // can be 'dr-auto-sync' or 'majority', default value is 'majority'
-	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'
+	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync,string"`  // used when ReplicationMode is 'dr-auto-sync'
 }
 
 // Clone returns a copy of replication mode config.
@@ -1386,6 +1386,7 @@ type DRAutoSyncReplicationConfig struct {
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
 	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
+	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {

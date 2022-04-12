@@ -154,6 +154,7 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 			StateId:             m.drAutoSync.StateID,
 			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
 			AvailableStores:     m.drAutoSync.AvailableStores,
+			PauseRegionSplit:    m.config.DRAutoSync.PauseRegionSplit && m.drAutoSync.State != "sync",
 		}
 	}
 	return p
