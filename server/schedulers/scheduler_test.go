@@ -603,7 +603,6 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	c.Assert(err, IsNil)
 	valueStr := ""
 	for id, sche := range sches {
-		println(sche, vs[id])
 		if strings.EqualFold(sche, EvictSlowStoreName) {
 			valueStr = vs[id]
 		}

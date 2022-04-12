@@ -128,7 +128,7 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster schedule.Cluster) e
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 	evictSlowStore, err := s.conf.clearAndPersist()
 	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed")
+		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", evictSlowStore))
 	}
 	if evictSlowStore == 0 {
 		return
