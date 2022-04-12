@@ -35,8 +35,8 @@ const (
 	OfflinePeer
 	LearnerPeer
 	EmptyRegion
-	MergerRegion
-	SplitRegion
+	OversizeRegion
+	UndersizeRegion
 )
 
 const nonIsolation = "none"
@@ -76,8 +76,8 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.stats[PendingPeer] = make(map[uint64]*RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
-	r.stats[MergerRegion] = make(map[uint64]*RegionInfo)
-	r.stats[SplitRegion] = make(map[uint64]*RegionInfo)
+	r.stats[OversizeRegion] = make(map[uint64]*RegionInfo)
+	r.stats[UndersizeRegion] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
@@ -86,8 +86,8 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[MergerRegion] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[SplitRegion] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[OversizeRegion] = make(map[uint64]*core.RegionInfo)
+	r.offlineStats[UndersizeRegion] = make(map[uint64]*core.RegionInfo)
 
 	return r
 }
@@ -99,6 +99,17 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 		res = append(res, r.RegionInfo)
 	}
 	return res
+}
+
+//
+func (r *RegionStatistics) UpdateUndersizeRegion() {
+	for id, region := range r.stats[UndersizeRegion] {
+		condition := region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
+			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys())
+		if !condition {
+			delete(r.stats[UndersizeRegion], id)
+		}
+	}
 }
 
 // GetOfflineRegionStatsByType gets the status of the offline region by types.
@@ -172,9 +183,9 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
-		SplitRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
+		OversizeRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
 			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys()),
-		MergerRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
+		UndersizeRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
 			region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys),
 	}
 
@@ -245,8 +256,8 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
-	regionStatusGauge.WithLabelValues("need-merge-region-count").Set(float64(len(r.stats[MergerRegion])))
-	regionStatusGauge.WithLabelValues("need-split-region-count").Set(float64(len(r.stats[SplitRegion])))
+	regionStatusGauge.WithLabelValues("over-size-region-count").Set(float64(len(r.stats[OversizeRegion])))
+	regionStatusGauge.WithLabelValues("under-size-region-count").Set(float64(len(r.stats[UndersizeRegion])))
 
 	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
 	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))
@@ -255,8 +266,8 @@ func (r *RegionStatistics) Collect() {
 	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
 	offlineRegionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.offlineStats[EmptyRegion])))
 	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
-	offlineRegionStatusGauge.WithLabelValues("need-merge-region-count").Set(float64(len(r.offlineStats[MergerRegion])))
-	offlineRegionStatusGauge.WithLabelValues("need-split-region-count").Set(float64(len(r.offlineStats[SplitRegion])))
+	offlineRegionStatusGauge.WithLabelValues("over-size-region-count").Set(float64(len(r.offlineStats[OversizeRegion])))
+	offlineRegionStatusGauge.WithLabelValues("under-size-region-count").Set(float64(len(r.offlineStats[UndersizeRegion])))
 }
 
 // Reset resets the metrics of the regions' status.
