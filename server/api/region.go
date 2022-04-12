@@ -497,7 +497,7 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 // @Router /regions/check/merge-region [get]
 func (h *regionsHandler) GetMergeRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.MergerRegion)
+	regions, err := handler.GetRegionsByType(statistics.OversizeRegion)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -514,7 +514,7 @@ func (h *regionsHandler) GetMergeRegions(w http.ResponseWriter, r *http.Request)
 // @Router /regions/check/split-region [get]
 func (h *regionsHandler) GetSplitRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.SplitRegion)
+	regions, err := handler.GetRegionsByType(statistics.UndersizeRegion)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
