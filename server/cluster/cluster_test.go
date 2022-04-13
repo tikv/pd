@@ -1181,7 +1181,7 @@ func (s *testClusterInfoSuite) TestTopologyWeight(c *C) {
 	c.Assert(getStoreTopoWeight(testStore, stores, labels), Equals, 1.0/3/3/4)
 }
 
-func (s *testClusterInfoSuite) TestCalculateStoreSize(c *C) {
+func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cfg := opt.GetReplicationConfig()
@@ -1248,20 +1248,102 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize(c *C) {
 			},
 			LocationLabels: []string{"rack", "host"}},
 	)
-	regions := newTestRegions(100, 10, 5)
+	cluster.ruleManager.DeleteRule("pd", "default")
 
+	regions := newTestRegions(100, 10, 5)
 	for _, region := range regions {
 		c.Assert(cluster.putRegion(region), IsNil)
 	}
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-	c.Assert(cluster.getThreshold(stores, store), Equals, 7200.0)
+	// 100 * 100 * 5 (total region size) / 5 * 2 (zone) / 4 (host) * 0.9 = 4500
+	c.Assert(cluster.getThreshold(stores, store), Equals, 4500.0)
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
-	// 30000 / 3 / 4 * 0.9 = 2250
+	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
 	c.Assert(cluster.getThreshold(stores, store), Equals, 2250.0)
+}
+
+func (s *testClusterInfoSuite) TestCalculateStoreSize2(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cfg := opt.GetReplicationConfig()
+	cfg.EnablePlacementRules = true
+	opt.SetReplicationConfig(cfg)
+	opt.SetMaxReplicas(3)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+
+	// Put 10 stores.
+	for i, store := range newTestStores(10, "6.0.0") {
+		var labels []*metapb.StoreLabel
+		if i%2 == 0 {
+			// dc 1 has 1, 3, 5, 7, 9
+			labels = append(labels, &metapb.StoreLabel{Key: "dc", Value: "dc1"})
+			if i%4 == 0 {
+				labels = append(labels, &metapb.StoreLabel{Key: "logic", Value: "logic1"})
+			} else {
+				labels = append(labels, &metapb.StoreLabel{Key: "logic", Value: "logic2"})
+			}
+		} else {
+			// dc 2 has 2, 4, 6, 8, 10
+			labels = append(labels, &metapb.StoreLabel{Key: "dc", Value: "dc2"})
+			if i%3 == 0 {
+				labels = append(labels, &metapb.StoreLabel{Key: "logic", Value: "logic3"})
+			} else {
+				labels = append(labels, &metapb.StoreLabel{Key: "logic", Value: "logic4"})
+			}
+		}
+		labels = append(labels, []*metapb.StoreLabel{{Key: "rack", Value: "r1"}, {Key: "host", Value: "h1"}}...)
+		s := store.Clone(core.SetStoreLabels(labels))
+		c.Assert(cluster.PutStore(s.GetMeta()), IsNil)
+	}
+
+	cluster.ruleManager.SetRule(
+		&placement.Rule{GroupID: "pd", ID: "dc1", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc1"}},
+			},
+			LocationLabels: []string{"dc", "logic", "rack", "host"}},
+	)
+
+	cluster.ruleManager.SetRule(
+		&placement.Rule{GroupID: "pd", ID: "logic3", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "logic", Op: "in", Values: []string{"logic3"}},
+			},
+			LocationLabels: []string{"dc", "logic", "rack", "host"}},
+	)
+
+	cluster.ruleManager.SetRule(
+		&placement.Rule{GroupID: "pd", ID: "logic4", StartKey: []byte(""), EndKey: []byte(""), Role: "learner", Count: 1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "logic", Op: "in", Values: []string{"logic4"}},
+			},
+			LocationLabels: []string{"dc", "logic", "rack", "host"}},
+	)
+	cluster.ruleManager.DeleteRule("pd", "default")
+
+	regions := newTestRegions(100, 10, 5)
+	for _, region := range regions {
+		c.Assert(cluster.putRegion(region), IsNil)
+	}
+
+	stores := cluster.GetStores()
+	store := cluster.GetStore(1)
+
+	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
+	c.Assert(cluster.getThreshold(stores, store), Equals, 3000.0)
 }
 
 var _ = Suite(&testStoresInfoSuite{})
