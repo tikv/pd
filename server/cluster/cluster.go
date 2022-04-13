@@ -1087,7 +1087,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddProgress(fmt.Sprintf("%s-%d", removingAction, store.GetID()), float64(c.core.GetStoreRegionSize(storeID)))
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
 		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
@@ -1135,7 +1135,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetProgress(storeID, store.GetAddress(), removingAction)
+		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1202,7 +1202,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.resetProgress(storeID, store.GetAddress(), removingAction)
+		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
 	}
 	return err
 }
@@ -1260,7 +1260,7 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize))
+		c.updateRemovingProgress(id, store.GetAddress(), removingAction, float64(regionSize))
 		// If the store is empty, it can be buried.
 		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
@@ -1285,9 +1285,9 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, left float64) {
+func (c *RaftCluster) updateRemovingProgress(storeID uint64, storeAddress string, action string, left float64) {
 	storeLabel := fmt.Sprintf("%d", storeID)
-	progress := fmt.Sprintf("%s-%s", action, storeLabel)
+	progress := encodeRemovingProgressKey(storeID)
 
 	if exist := c.progressManager.AddProgress(progress, left); !exist {
 		return
@@ -1298,14 +1298,16 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
 
-func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
+func (c *RaftCluster) resetRemovingProgress(storeID uint64, storeAddress string, action string) {
 	storeLabel := fmt.Sprintf("%d", storeID)
-	progress := fmt.Sprintf("%s-%s", action, storeLabel)
-
-	if exist := c.progressManager.RemoveProgress(progress); exist {
+	if exist := c.progressManager.RemoveProgress(encodeRemovingProgressKey(storeID)); exist {
 		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 	}
+}
+
+func encodeRemovingProgressKey(storeID uint64) string {
+	return fmt.Sprintf("%s-%d", removingAction, storeID)
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.
