@@ -51,6 +51,10 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, err
 	}
 
+	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
+		return nil, errors.New("region split is paused by replication mode")
+	}
+
 	newRegionID, err := c.id.Alloc()
 	if err != nil {
 		return nil, err
@@ -102,6 +106,9 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
+	}
+	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
+		return nil, errors.New("region split is paused by replication mode")
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
