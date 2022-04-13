@@ -234,7 +234,7 @@ func initRegions(regionLen int) []*core.RegionInfo {
 			Version:  1,
 		}
 		region := core.NewRegionInfo(r, r.Peers[0])
-		region.UpdateBuckets(buckets)
+		region.UpdateBuckets(buckets, region.GetBuckets())
 		regions = append(regions, region)
 	}
 	return regions
