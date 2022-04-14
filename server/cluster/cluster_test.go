@@ -472,10 +472,10 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	// process = 5 / 20 = 0.25
 	c.Assert(p, Equals, 0.25)
 	// Each region is 100MB, we use more than 1s to move 5 region.
-	// speed = 5 * 100MB / 1s+ ~= 490MB/s+
-	c.Assert(cs, Greater, 490.0)
+	// speed = 5 * 100MB / 1s+ ~= 400MB/s+
+	c.Assert(cs, Greater, 400.0)
 	c.Assert(cs, Less, 500.0)
-	// left second = 15 * 100MB / 490MB/s+ ~= 3s+
+	// left second = 15 * 100MB / 400MB/s+ ~= 3s+
 	c.Assert(l, Greater, 3.0)
 	c.Assert(l, Less, 4.0)
 }
