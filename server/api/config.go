@@ -145,6 +145,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	kp := strings.Split(key, ".")
 	switch kp[0] {
 	case "schedule":
+		if h.svr.IsTTLConfigExist(key) {
+			return errors.Errorf("need to clean up TTL first for %s", key)
+		}
 		return h.updateSchedule(cfg, kp[len(kp)-1], value)
 	case "replication":
 		return h.updateReplication(cfg, kp[len(kp)-1], value)
@@ -193,7 +196,7 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value in
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.Schedule, data)
+	updated, found, err := mergeConfig(&config.Schedule, data)
 	if err != nil {
 		return err
 	}
@@ -214,7 +217,7 @@ func (h *confHandler) updateReplication(config *config.Config, key string, value
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.Replication, data)
+	updated, found, err := mergeConfig(&config.Replication, data)
 	if err != nil {
 		return err
 	}
@@ -237,7 +240,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.ReplicationMode, data)
+	updated, found, err := mergeConfig(&config.ReplicationMode, data)
 	if err != nil {
 		return err
 	}
@@ -258,7 +261,7 @@ func (h *confHandler) updatePDServerConfig(config *config.Config, key string, va
 		return err
 	}
 
-	updated, found, err := h.mergeConfig(&config.PDServerCfg, data)
+	updated, found, err := mergeConfig(&config.PDServerCfg, data)
 	if err != nil {
 		return err
 	}
@@ -310,7 +313,7 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 	return cfg
 }
 
-func (h *confHandler) mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
+func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
 		return false, false, err
@@ -356,8 +359,37 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Failure 503 {string} string "PD server has no leader."
 // @Router /config/schedule [post]
 func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	conf := make(map[string]interface{})
+	if err := json.Unmarshal(data, &conf); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	for k := range conf {
+		key := fmt.Sprintf("schedule.%s", k)
+		if h.svr.IsTTLConfigExist(key) {
+			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("need to clean up TTL first for %s", key))
+			return
+		}
+	}
+
 	config := h.svr.GetScheduleConfig()
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
+	err = json.Unmarshal(data, &config)
+	if err != nil {
+		var errCode errcode.ErrorCode
+		err = apiutil.TagJSONError(err)
+		if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
+		} else {
+			errCode = errcode.NewInternalErr(err)
+		}
+		apiutil.ErrorResp(h.rd, w, errCode)
 		return
 	}
 

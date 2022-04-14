@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
@@ -69,7 +71,7 @@ func (s *testClusterInfoSuite) TestStoreHeartbeat(c *C) {
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n, "2.0.0")
 	storeMetasAfterHeartbeat := make([]*metapb.Store, 0, n)
-	regions := newTestRegions(n, np)
+	regions := newTestRegions(n, n, np)
 
 	for _, region := range regions {
 		c.Assert(cluster.putRegion(region), IsNil)
@@ -247,7 +249,7 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	c.Assert(cluster.RemoveStore(3, false), IsNil)
 
 	cluster.checkStores()
-	// store 1,2,3 shuold be to tombstone
+	// store 1,2,3 should be to tombstone
 	for storeID := uint64(1); storeID <= 3; storeID++ {
 		c.Assert(cluster.GetStore(storeID).IsRemoved(), IsTrue)
 	}
@@ -381,8 +383,8 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
-	// Put 3 stores.
-	for _, store := range newTestStores(5, "2.0.0") {
+	// Put 5 stores.
+	for _, store := range newTestStores(5, "5.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 
@@ -407,6 +409,58 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	// store 4 not exist
 	err = cluster.UpStore(10)
 	c.Assert(errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(4)), IsTrue)
+}
+
+func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	// Put 5 stores.
+	stores := newTestStores(5, "5.0.0")
+	for _, store := range stores {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	regions := newTestRegions(100, 5, 1)
+	var regionInStore1 []*core.RegionInfo
+	for _, region := range regions {
+		if region.GetPeers()[0].GetStoreId() == 1 {
+			region = region.Clone(core.SetApproximateSize(100))
+			regionInStore1 = append(regionInStore1, region)
+		}
+		c.Assert(cluster.putRegion(region), IsNil)
+	}
+	c.Assert(len(regionInStore1), Equals, 20)
+	cluster.progressManager = progress.NewManager()
+	cluster.RemoveStore(1, false)
+	cluster.checkStores()
+	process := "removing-1"
+	// no region moving
+	p, l, cs := cluster.progressManager.Status(process)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(l, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+	i := 0
+	// simulate region moving by deleting region from store 1
+	for _, region := range regionInStore1 {
+		if i >= 5 {
+			break
+		}
+		cluster.DropCacheRegion(region.GetID())
+		i++
+	}
+	time.Sleep(time.Second)
+	cluster.checkStores()
+	p, l, cs = cluster.progressManager.Status(process)
+	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
+	// process = 5 / 20 = 0.25
+	c.Assert(p, Equals, 0.25)
+	// Each region is 100MB, we use more than 1s to move 5 region.
+	// speed = 5 * 100MB / 1s+ ~= 490MB/s+
+	c.Assert(cs, Greater, 490.0)
+	c.Assert(cs, Less, 500.0)
+	// left second = 15 * 100MB / 490MB/s+ ~= 3s+
+	c.Assert(l, Greater, 3.0)
+	c.Assert(l, Less, 4.0)
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
@@ -508,7 +562,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
 	n, np := uint64(1), uint64(1)
-	regions := newTestRegions(n, np)
+	regions := newTestRegions(n, n, np)
 	for _, store := range stores {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 	}
@@ -540,7 +594,7 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	n, np := uint64(3), uint64(3)
 
 	stores := newTestStores(3, "2.0.0")
-	regions := newTestRegions(n, np)
+	regions := newTestRegions(n, n, np)
 
 	for _, store := range stores {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
@@ -1126,7 +1180,7 @@ func (s *testRegionsInfoSuite) SetUpTest(c *C) {
 
 func (s *testRegionsInfoSuite) Test(c *C) {
 	n, np := uint64(10), uint64(3)
-	regions := newTestRegions(n, np)
+	regions := newTestRegions(n, n, np)
 	_, opts, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	tc := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
@@ -1321,9 +1375,9 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	return stores
 }
 
-// Create n regions (0..n) of n stores (0..n).
+// Create n regions (0..n) of m stores (0..m).
 // Each region contains np peers, the first peer is the leader.
-func newTestRegions(n, np uint64) []*core.RegionInfo {
+func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 	regions := make([]*core.RegionInfo, 0, n)
 	for i := uint64(0); i < n; i++ {
 		peers := make([]*metapb.Peer, 0, np)
@@ -1331,7 +1385,7 @@ func newTestRegions(n, np uint64) []*core.RegionInfo {
 			peer := &metapb.Peer{
 				Id: i*np + j,
 			}
-			peer.StoreId = (i + j) % n
+			peer.StoreId = (i + j) % m
 			peers = append(peers, peer)
 		}
 		region := &metapb.Region{

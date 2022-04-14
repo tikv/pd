@@ -130,6 +130,12 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core
 
 func (s *testRegionSuite) TestRegion(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	buckets := &metapb.Buckets{
+		RegionId: 2,
+		Keys:     [][]byte{[]byte("a"), []byte("b")},
+		Version:  1,
+	}
+	r.UpdateBuckets(buckets, r.GetBuckets())
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
@@ -142,6 +148,10 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	c.Assert(r1m["written_keys"].(float64), Equals, float64(r.GetKeysWritten()))
 	c.Assert(r1m["read_bytes"].(float64), Equals, float64(r.GetBytesRead()))
 	c.Assert(r1m["read_keys"].(float64), Equals, float64(r.GetKeysRead()))
+	keys := r1m["buckets"].([]interface{})
+	c.Assert(keys, HasLen, 2)
+	c.Assert(keys[0].(string), Equals, core.HexRegionKeyStr([]byte("a")))
+	c.Assert(keys[1].(string), Equals, core.HexRegionKeyStr([]byte("b")))
 
 	url = fmt.Sprintf("%s/region/key/%s", s.urlPrefix, "a")
 	r2 := &RegionInfo{}
