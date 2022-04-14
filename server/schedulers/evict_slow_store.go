@@ -125,7 +125,7 @@ func (s *evictSlowStoreScheduler) Cleanup(cluster schedule.Cluster) {
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster schedule.Cluster, storeID uint64) error {
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
-		log.Info("evict-slow-store-scheduler persist config failed")
+		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
 		return err
 	}
 
@@ -190,7 +190,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 		}
 
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
-			// If there is more than onw slow store do nothing.
+			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
 				return ops
 			}
