@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -28,13 +29,18 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 	"go.uber.org/goleak"
 )
 
@@ -529,6 +535,135 @@ func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header
+}
+
+var _ = Suite(&testProgressSuite{})
+
+type testProgressSuite struct{}
+
+func (s *testProgressSuite) TestProgress(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leader.GetAddr())
+	clusterID := leader.GetClusterID()
+	req := &pdpb.BootstrapRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+	}
+	_, err = grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leader.GetServer(), store)
+	}
+	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
+	pdctl.MustPutRegion(c, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
+	pdctl.MustPutRegion(c, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
+
+	// no store removing
+	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	var p api.Progress
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, 0.0)
+
+	// remove store 1 and store 2
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete)
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete)
+
+	// size is not changed.
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
+
+	// update size
+	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
+	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
+
+	time.Sleep(time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	// store 1: (60-20)/(60+50) ~= 0.36
+	// store 2: (30-10)/(30+40) ~= 0.28
+	// average progress ~= (0.36+0.28)/2 = 0.32
+	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.32")
+	// store 1: 40/1s+ < 40
+	// store 2: 20/1s+ < 20
+	// average speed ~= (20+40)/2/1s+ < 30
+	c.Assert(p.CurrentSpeed, Less, 30.0)
+	c.Assert(p.CurrentSpeed, Greater, 25.0)
+	// store 1: (20+50)/40 ~= 1.75s+
+	// store 2: (10+40)/20 ~= 2.5s+
+	// average time ~= (1.75+2.5)/2 = 2.125s+
+	c.Assert(p.LeftSeconds, Greater, 2.125)
+	c.Assert(p.LeftSeconds, Less, 2.5)
+
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	// store 2: (30-10)/(30+40) ~= 0.285
+	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.29")
+	// store 2: 20/1s+ < 20
+	c.Assert(p.CurrentSpeed, Less, 20.0)
+	c.Assert(p.CurrentSpeed, Greater, 15.0)
+	// store 2: (10+40)/20 ~= 2.5s+
+	c.Assert(p.LeftSeconds, Greater, 2.5)
+	c.Assert(p.LeftSeconds, Less, 3.0)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
+}
+
+func sendRequest(c *C, url string, method string) []byte {
+	req, _ := http.NewRequest(method, url, nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	output, err := io.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	return output
 }
 
 func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {
