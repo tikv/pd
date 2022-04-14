@@ -1429,6 +1429,10 @@ func (s *Server) reloadConfigFromKV() error {
 		switchableStorage.SwitchToDefaultStorage()
 		log.Info("server disable region storage")
 	}
+
+	if err = s.storeConfigManager.Reload(s.storage); err != nil {
+		return err
+	}
 	return nil
 }
 

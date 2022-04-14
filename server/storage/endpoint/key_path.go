@@ -22,6 +22,7 @@ import (
 const (
 	clusterPath                = "raft"
 	configPath                 = "config"
+	storeConfigPath            = "store-config"
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"

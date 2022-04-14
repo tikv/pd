@@ -713,6 +713,20 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	waitNoResponse(c, stream)
 }
 
+func (s *testCoordinatorSuite) TestStoreConfigPersist(c *C) {
+	tc, _, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	defer cleanup()
+	storage := tc.RaftCluster.storage
+	tc.storeConfigManager = config.NewStoreConfigManager(nil)
+	manager := tc.storeConfigManager
+	c.Assert(manager, NotNil)
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	cfg := &config.StoreConfig{Coprocessor: config.Coprocessor{RegionMaxSize: "10Gib"}}
+	storage.SaveStoreConfig(cfg)
+	manager.Reload(storage)
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10*1024))
+}
+
 func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	hbStreams := co.hbStreams

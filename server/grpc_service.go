@@ -49,8 +49,6 @@ import (
 
 const (
 	heartbeatSendTimeout = 5 * time.Second
-	// store config
-	storeReadyWaitTime = 5 * time.Second
 
 	// tso
 	maxMergeTSORequests    = 10000
@@ -528,17 +526,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
 	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(ctx context.Context, url string) {
-			select {
-			// tikv may not ready to serve.
-			case <-time.After(storeReadyWaitTime):
-				if err := s.storeConfigManager.Load(url); err != nil {
-					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
-				}
-			case <-ctx.Done():
-				return
-			}
-		}(s.Server.LoopContext(), store.GetStatusAddress())
+		go s.storeConfigManager.Observer(s.Server.LoopContext(), store.GetStatusAddress(), s.Server.storage)
 	}
 
 	return &pdpb.PutStoreResponse{

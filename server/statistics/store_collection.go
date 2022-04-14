@@ -29,26 +29,28 @@ const (
 )
 
 type storeStatistics struct {
-	opt             *config.PersistOptions
-	Up              int
-	Disconnect      int
-	Unhealthy       int
-	Down            int
-	Offline         int
-	Tombstone       int
-	LowSpace        int
-	Slow            int
-	StorageSize     uint64
-	StorageCapacity uint64
-	RegionCount     int
-	LeaderCount     int
-	LabelCounter    map[string]int
+	opt                *config.PersistOptions
+	storeConfigManager *config.StoreConfigManager
+	Up                 int
+	Disconnect         int
+	Unhealthy          int
+	Down               int
+	Offline            int
+	Tombstone          int
+	LowSpace           int
+	Slow               int
+	StorageSize        uint64
+	StorageCapacity    uint64
+	RegionCount        int
+	LeaderCount        int
+	LabelCounter       map[string]int
 }
 
-func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
+func newStoreStatistics(opt *config.PersistOptions, storeConfigManager *config.StoreConfigManager) *storeStatistics {
 	return &storeStatistics{
-		opt:          opt,
-		LabelCounter: make(map[string]int),
+		opt:                opt,
+		LabelCounter:       make(map[string]int),
+		storeConfigManager: storeConfigManager,
 	}
 }
 
@@ -172,6 +174,10 @@ func (s *storeStatistics) Collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
+	configs["max-region-size"] = float64(s.storeConfigManager.GetStoreConfig().GetRegionMaxSize())
+	configs["split-region-size"] = float64(s.storeConfigManager.GetStoreConfig().GetRegionSplitSize())
+	configs["max-region-keys"] = float64(s.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())
+	configs["split-region-keys"] = float64(s.storeConfigManager.GetStoreConfig().GetRegionSplitKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
@@ -238,10 +244,10 @@ type storeStatisticsMap struct {
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt *config.PersistOptions, manager *config.StoreConfigManager) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
-		stats: newStoreStatistics(opt),
+		stats: newStoreStatistics(opt, manager),
 	}
 }
 

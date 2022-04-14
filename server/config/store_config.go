@@ -15,17 +15,24 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
+
+// store config
+const storeReadyWaitTime = 5 * time.Second
 
 var (
 	// default region max size is 144MB
@@ -135,8 +142,34 @@ func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
 	return (*StoreConfig)(config)
 }
 
+// Reload reloads the configuration from the storage.
+func (m *StoreConfigManager) Reload(storage endpoint.ConfigStorage) error {
+	cfg := &StoreConfig{}
+
+	isExist, err := storage.LoadStoreConfig(cfg)
+	if err != nil {
+		return err
+	}
+	if isExist {
+		m.UpdateConfig(cfg)
+	}
+	return nil
+}
+
+// Observer is used to observe the store config.
+func (m *StoreConfigManager) Observer(ctx context.Context, url string, storage endpoint.ConfigStorage) {
+	select {
+	case <-time.After(storeReadyWaitTime):
+		if err := m.Load(url, storage); err != nil {
+			log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
+		}
+	case <-ctx.Done():
+		return
+	}
+}
+
 // Load Loads the store configuration.
-func (m *StoreConfigManager) Load(statusAddress string) error {
+func (m *StoreConfigManager) Load(statusAddress string, storage endpoint.ConfigStorage) error {
 	url := fmt.Sprintf("%s://%s/config", m.schema, statusAddress)
 	resp, err := m.client.Get(url)
 	if err != nil {
@@ -151,7 +184,12 @@ func (m *StoreConfigManager) Load(statusAddress string) error {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return err
 	}
+	if reflect.DeepEqual(cfg, m.GetStoreConfig()) {
+		log.Debug("store config is not changed")
+		return nil
+	}
 	log.Info("update store config successful", zap.String("status-url", url), zap.Stringer("config", &cfg))
 	m.UpdateConfig(&cfg)
+	storage.SaveStoreConfig(&cfg)
 	return nil
 }
