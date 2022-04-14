@@ -44,7 +44,6 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.S
 		_ = godotenv.Load()
 		gin.SetMode(gin.ReleaseMode)
 	})
-
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set("server", svr)

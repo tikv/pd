@@ -431,6 +431,7 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+
 	// Put 5 stores.
 	stores := newTestStores(5, "5.0.0")
 	for _, store := range stores {
@@ -1189,13 +1190,6 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
 	opt.SetReplicationConfig(cfg)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
-	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
-		if err != nil {
-			panic(err)
-		}
-	}
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
 
 	// Put 10 stores.
@@ -1275,13 +1269,6 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize2(c *C) {
 	opt.SetMaxReplicas(3)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
-	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
-		if err != nil {
-			panic(err)
-		}
-	}
 	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
 
 	// Put 10 stores.
@@ -1552,13 +1539,6 @@ func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, er
 func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	storage := storage.NewStorageWithMemoryBackend()
-	rc.ruleManager = placement.NewRuleManager(storage, rc, rc.GetOpts())
-	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
-		if err != nil {
-			panic(err)
-		}
-	}
 	rc.regionLabeler, _ = labeler.NewRegionLabeler(ctx, storage, time.Second*5)
 
 	return &testCluster{RaftCluster: rc}
@@ -1568,11 +1548,18 @@ func newTestRaftCluster(
 	ctx context.Context,
 	id id.Allocator,
 	opt *config.PersistOptions,
-	storage storage.Storage,
+	s storage.Storage,
 	basicCluster *core.BasicCluster,
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, storage, basicCluster)
+	rc.InitCluster(id, opt, s, basicCluster)
+	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
+	if opt.IsPlacementRulesEnabled() {
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		if err != nil {
+			panic(err)
+		}
+	}
 	return rc
 }
 

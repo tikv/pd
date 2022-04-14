@@ -1388,14 +1388,129 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, remaining float64) {
-	storeLabel := strconv.FormatUint(storeID, 10)
-	var progress string
-	//nolint
-	switch action {
-	case removingAction:
-		progress = encodeRemovingProgressKey(storeID)
+func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
+	if !c.opt.IsPlacementRulesEnabled() {
+		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
+		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels())
+		return float64(regionSize) * weight * 0.9
 	}
+
+	keys := c.ruleManager.GetSplitKeys([]byte(""), []byte(""))
+	if len(keys) == 0 {
+		return c.calculateRange(stores, store, []byte(""), []byte("")) * 0.9
+	}
+
+	storeSize := 0.0
+	startKey := []byte("")
+	for _, key := range keys {
+		endKey := key
+		storeSize += c.calculateRange(stores, store, startKey, endKey)
+		startKey = endKey
+	}
+	// the range from the last split key to the last key
+	storeSize += c.calculateRange(stores, store, startKey, []byte(""))
+
+	return storeSize * 0.9
+}
+
+func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte) float64 {
+	var storeSize float64
+	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
+	for _, rule := range rules {
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			continue
+		}
+
+		var matchStores []*core.StoreInfo
+		for _, store := range stores {
+			if store.IsRemoving() || store.IsRemoved() {
+				continue
+			}
+			if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+				matchStores = append(matchStores, store)
+			}
+		}
+		regionSize := c.core.GetRegionSizeByRange(rule.StartKey, rule.EndKey) * int64(rule.Count)
+		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels)
+		storeSize += float64(regionSize) * weight
+		log.Debug("calculate range result",
+			zap.Uint64("store-id", store.GetID()),
+			zap.String("rule", rule.String()),
+			zap.Int64("region-size", regionSize),
+			zap.Float64("weight", weight),
+			zap.Float64("store-size", storeSize),
+		)
+	}
+	return storeSize
+}
+
+func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) float64 {
+	topology, count := buildTopology(store, stores, locationLabels)
+	weight := 1.0
+	topo := topology
+	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
+	for _, label := range storeLabels {
+		if _, ok := topo[label.Value]; ok {
+			weight /= float64(len(topo))
+			topo, ok = topo[label.Value].(map[string]interface{})
+			if !ok {
+				return weight / count
+			}
+		}
+	}
+
+	return weight / count
+}
+
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) (map[string]interface{}, float64) {
+	topology := make(map[string]interface{})
+	storeCount := 1.0
+	for _, store := range stores {
+		if store.IsServing() || store.IsPreparing() {
+			updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+		}
+
+		if store.GetID() == s.GetID() {
+			continue
+		}
+
+		if s.CompareLocation(store, locationLabels) == -1 {
+			storeCount++
+		}
+	}
+
+	return topology, storeCount
+}
+
+func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
+	var sortedLabels []*metapb.StoreLabel
+	for _, ll := range locationLabels {
+		for _, sl := range storeLabels {
+			if ll == sl.Key {
+				sortedLabels = append(sortedLabels, sl)
+			}
+		}
+	}
+	return sortedLabels
+}
+
+// updateTopology records stores' topology in the `topology` variable.
+func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) {
+	if len(sortedLabels) == 0 {
+		return
+	}
+	topo := topology
+	for _, l := range sortedLabels {
+		if _, exist := topo[l.Value]; !exist {
+			topo[l.Value] = make(map[string]interface{})
+		}
+		topo = topo[l.Value].(map[string]interface{})
+	}
+}
+
+func (c *RaftCluster) updateRemovingProgress(storeID uint64, storeAddress string, action string, left float64) {
+	storeLabel := fmt.Sprintf("%d", storeID)
+	progress := encodeRemovingProgressKey(storeID)
 
 	if exist := c.progressManager.AddProgress(progress, remaining); !exist {
 		return
