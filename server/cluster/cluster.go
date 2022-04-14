@@ -1142,6 +1142,9 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 }
 
 func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
+	if c.coordinator == nil {
+		return nil
+	}
 	handler, ok := c.coordinator.getSchedulerHandlers()[schedulers.EvictLeaderName]
 	if !ok {
 		return
