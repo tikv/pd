@@ -147,9 +147,9 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		// region check empty-region command
 		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
 		// region check merge-region command
-		{[]string{"region", "check", "merge-region"}, []*core.RegionInfo{r1, r4}},
+		{[]string{"region", "check", "undersize-region"}, []*core.RegionInfo{r1, r4}},
 		// region check split-region command
-		{[]string{"region", "check", "split-region"}, []*core.RegionInfo{r2}},
+		{[]string{"region", "check", "oversize-region"}, []*core.RegionInfo{r2}},
 		// region keys --format=raw <start_key> <end_key> <limit> command
 		{[]string{"region", "keys", "--format=raw", "b"}, []*core.RegionInfo{r2, r3, r4}},
 		// region keys --format=raw <start_key> <end_key> <limit> command

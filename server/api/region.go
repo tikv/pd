@@ -494,8 +494,8 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /regions/check/merge-region [get]
-func (h *regionsHandler) GetMergeRegions(w http.ResponseWriter, r *http.Request) {
+// @Router /regions/check/oversize-region [get]
+func (h *regionsHandler) GetOverSizeRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetRegionsByType(statistics.OversizeRegion)
 	if err != nil {
@@ -511,8 +511,8 @@ func (h *regionsHandler) GetMergeRegions(w http.ResponseWriter, r *http.Request)
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /regions/check/split-region [get]
-func (h *regionsHandler) GetSplitRegions(w http.ResponseWriter, r *http.Request) {
+// @Router /regions/check/undersize-region [get]
+func (h *regionsHandler) GetUndersizeRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetRegionsByType(statistics.UndersizeRegion)
 	if err != nil {
