@@ -80,9 +80,6 @@ func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 }
 
 func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
-	if id == conf.evictStore() {
-		return nil
-	}
 	conf.EvictedStores = []uint64{id}
 	return conf.Persist()
 }
