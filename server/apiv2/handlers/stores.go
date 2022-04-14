@@ -38,20 +38,13 @@ import (
 func GetStores() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
-		stores := rc.GetMetaStores()
+		stores := rc.GetStores()
 		storesInfo := &StoresInfo{
 			Stores: make([]*StoreInfo, 0, len(stores)),
 		}
 
 		nodeStates, exist := c.GetQueryArray("node_state")
-		for _, s := range stores {
-			storeID := s.GetId()
-			store := rc.GetStore(storeID)
-			if store == nil {
-				c.AbortWithStatus(http.StatusNotFound)
-				return
-			}
-
+		for _, store := range stores {
 			if !exist || (exist && store.IsInStates(nodeStates)) {
 				storeInfo := newStoreInfo(rc.GetOpts().GetScheduleConfig(), store)
 				storesInfo.Stores = append(storesInfo.Stores, storeInfo)
@@ -75,7 +68,7 @@ func GetStores() gin.HandlerFunc {
 func GetStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
-		idParam := c.Param("id")
+		idParam := c.Param(StoreIDParamKey)
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())
@@ -104,7 +97,7 @@ func GetStoreByID() gin.HandlerFunc {
 func DeleteStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
-		idParam := c.Param("id")
+		idParam := c.Param(StoreIDParamKey)
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())
@@ -152,7 +145,7 @@ type updateStoresParams struct {
 func UpdateStoreByID() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := c.MustGet(apiutil.ClusterKey).(*cluster.RaftCluster)
-		idParam := c.Param("id")
+		idParam := c.Param(StoreIDParamKey)
 		id, err := strconv.ParseUint(idParam, 10, 64)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause().Error())

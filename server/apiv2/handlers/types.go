@@ -24,6 +24,11 @@ import (
 )
 
 const (
+	// StoreIDParamKey is the key for getting store ID query parameter.
+	StoreIDParamKey = "id"
+)
+
+const (
 	// AliveStatusName is normal status of the store heartbeat.
 	AliveStatusName = "Alive"
 	// DisconnectedStatusName is abnormal status that indicates the store has lost heartbeat for 20s.
