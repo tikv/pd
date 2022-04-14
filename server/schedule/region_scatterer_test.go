@@ -9,6 +9,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -355,8 +356,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		}
 		// For leader, we expect each store have about 20 leader for each group
 		checker(scatterer.ordinaryEngine.selectedLeader, 20, 5)
-		// For peer, we expect each store have about 50 peers for each group
-		checker(scatterer.ordinaryEngine.selectedPeer, 50, 15)
+		// For peer, we expect each store have about 60 peers for each group
+		checker(scatterer.ordinaryEngine.selectedPeer, 60, 15)
 	}
 }
 
@@ -475,4 +476,55 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 		c.Assert(max-min, LessEqual, uint64(2))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
+}
+
+// TestSelectedStores tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/4565
+func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	// Add 4 stores.
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc)
+
+	// Put a lot of regions in Store 1/2/3.
+	for i := uint64(1); i < 100; i++ {
+		region := tc.AddLeaderRegion(i+10, i%3+1, (i+1)%3+1, (i+2)%3+1)
+		peers := make(map[uint64]*metapb.Peer, 3)
+		for _, peer := range region.GetPeers() {
+			peers[peer.GetStoreId()] = peer
+		}
+		scatterer.Put(peers, i%3+1, group)
+	}
+
+	// Try to scatter a region with peer store id 2/3/4
+	for i := uint64(1); i < 20; i++ {
+		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
+		op := scatterer.scatterRegion(region, group)
+		c.Assert(isPeerCountChanged(op), IsFalse)
+	}
+}
+
+func isPeerCountChanged(op *operator.Operator) bool {
+	if op == nil {
+		return false
+	}
+	add, remove := 0, 0
+	for i := 0; i < op.Len(); i++ {
+		step := op.Step(i)
+		switch step.(type) {
+		case operator.AddPeer, operator.AddLearner, operator.AddLightPeer, operator.AddLightLearner:
+			add++
+		case operator.RemovePeer:
+			remove++
+		}
+	}
+	return add != remove
 }
