@@ -101,17 +101,6 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	return res
 }
 
-//
-func (r *RegionStatistics) UpdateUndersizeRegion() {
-	for id, region := range r.stats[UndersizeRegion] {
-		condition := region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
-			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys())
-		if !condition {
-			delete(r.stats[UndersizeRegion], id)
-		}
-	}
-}
-
 // GetOfflineRegionStatsByType gets the status of the offline region by types.
 func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))

@@ -85,12 +85,12 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(regionStats.stats[ExtraPeer], HasLen, 1)
 	c.Assert(regionStats.stats[LearnerPeer], HasLen, 1)
 	c.Assert(regionStats.stats[EmptyRegion], HasLen, 1)
-	c.Assert(regionStats.stats[OversizeRegion], HasLen, 1)
+	c.Assert(regionStats.stats[UndersizeRegion], HasLen, 1)
 	c.Assert(regionStats.offlineStats[ExtraPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[LearnerPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[EmptyRegion], HasLen, 1)
 	c.Assert(regionStats.offlineStats[OfflinePeer], HasLen, 1)
-	c.Assert(regionStats.offlineStats[OversizeRegion], HasLen, 1)
+	c.Assert(regionStats.offlineStats[UndersizeRegion], HasLen, 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -104,8 +104,8 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(regionStats.stats[PendingPeer], HasLen, 1)
 	c.Assert(regionStats.stats[LearnerPeer], HasLen, 1)
 	c.Assert(regionStats.stats[EmptyRegion], HasLen, 0)
-	c.Assert(regionStats.stats[OversizeRegion], HasLen, 0)
-	c.Assert(regionStats.stats[UndersizeRegion], HasLen, 1)
+	c.Assert(regionStats.stats[OversizeRegion], HasLen, 1)
+	c.Assert(regionStats.stats[UndersizeRegion], HasLen, 0)
 	c.Assert(regionStats.offlineStats[ExtraPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[MissPeer], HasLen, 0)
 	c.Assert(regionStats.offlineStats[DownPeer], HasLen, 1)
@@ -113,8 +113,8 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(regionStats.offlineStats[LearnerPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[EmptyRegion], HasLen, 0)
 	c.Assert(regionStats.offlineStats[OfflinePeer], HasLen, 1)
-	c.Assert(regionStats.offlineStats[OversizeRegion], HasLen, 0)
-	c.Assert(regionStats.offlineStats[UndersizeRegion], HasLen, 1)
+	c.Assert(regionStats.offlineStats[OversizeRegion], HasLen, 1)
+	c.Assert(regionStats.offlineStats[UndersizeRegion], HasLen, 0)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
