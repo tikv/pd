@@ -41,6 +41,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerMergeAgain"]
+error = '''
+region will be merged again, %s
+'''
+
 ["PD:checker:ErrCheckerNotFound"]
 error = '''
 checker not found

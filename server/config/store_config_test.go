@@ -81,60 +81,18 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
 }
 
-func (s *testUtilSuite) TestCheckMaxMergeSize(c *C) {
-	config := &StoreConfig{
-		Coprocessor: Coprocessor{},
-	}
+func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 	testdata := []struct {
-		maxSize   string
-		splitSize string
+		size      uint64
 		mergeSize uint64
+		pass      bool
 	}{{
-		maxSize:   "144MB",
-		splitSize: "96MB",
-		mergeSize: 48,
-	}, {
-		maxSize:   "181Mb",
-		splitSize: "100Mb",
-		mergeSize: 19,
-	}, {
-		maxSize:   "199Mb",
-		splitSize: "100Mb",
-		mergeSize: 1,
+		size:      144 + 20,
+		mergeSize: 20,
 	}}
+	config := &StoreConfig{}
 	for _, v := range testdata {
-		config.Coprocessor.RegionMaxSize = v.maxSize
-		config.Coprocessor.RegionSplitSize = v.splitSize
-		c.Assert(config.CheckMaxMergeSize(v.mergeSize-1), IsNil)
-		c.Assert(config.CheckMaxMergeSize(v.mergeSize), NotNil)
-	}
-}
-
-func (s *testUtilSuite) TestCheckMaxMergeSplitKeys(c *C) {
-	config := &StoreConfig{
-		Coprocessor: Coprocessor{},
-	}
-	testdata := []struct {
-		maxKeys   int
-		splitKeys int
-		mergeKeys uint64
-	}{{
-		maxKeys:   144000000,
-		splitKeys: 96000000,
-		mergeKeys: 48000000,
-	}, {
-		maxKeys:   1810000,
-		splitKeys: 1000000,
-		mergeKeys: 190000,
-	}, {
-		maxKeys:   1990000,
-		splitKeys: 1000000,
-		mergeKeys: 10000,
-	}}
-	for _, v := range testdata {
-		config.Coprocessor.RegionMaxKeys = v.maxKeys
-		config.Coprocessor.RegionSplitKeys = v.splitKeys
-		c.Assert(config.CheckMaxMergeRegionKeys(v.mergeKeys-1), IsNil)
-		c.Assert(config.CheckMaxMergeRegionKeys(v.mergeKeys), NotNil)
+		c.Assert(config.CheckRegionSize(v.size-1, v.mergeSize), IsNil)
+		c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
 	}
 }

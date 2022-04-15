@@ -17,7 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/errs"
 	"io/ioutil"
 	"net/http"
 	"sync/atomic"
@@ -119,44 +119,27 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
-// CheckMaxMergeRegionKeys returns the max merge keys
-func (c *StoreConfig) CheckMaxMergeRegionKeys(maxMergeKeys uint64) error {
-	maxRegionKeys := c.GetRegionMaxKeys()
-	splitRegionKeys := c.GetRegionSplitKeys()
-	threshold := splitRegionKeys
-	splitCount := maxRegionKeys / splitRegionKeys
+// CheckRegionSize return error if the smallest region's size is less than mergeSize
+func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
+	if size < c.GetRegionMaxSize() {
+		return nil
+	}
 
-	// the merge size should be less the min region size
-	if size := maxRegionKeys - splitRegionKeys*splitCount; size < threshold {
-		threshold = size
-	}
-	// the sum of merge-region-size+max-region-size should be less than splitCount * max-split-size
-	if size := splitRegionKeys*(splitCount+1) - maxRegionKeys; size < splitRegionKeys {
-		threshold = size
-	}
-	if maxMergeKeys >= threshold {
-		return errors.Errorf("max merge region keys should be less than store max merge key %d", threshold)
+	if smallSize := size % c.GetRegionSplitSize(); smallSize < mergeSize {
+		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-size, " +
+			"it will be merged again")
 	}
 	return nil
 }
 
-// CheckMaxMergeSize returns the max merge size in MB
-func (c *StoreConfig) CheckMaxMergeSize(maxMergeSize uint64) error {
-	maxRegionSize := c.GetRegionMaxSize()
-	splitRegionSize := c.GetRegionSplitSize()
-	threshold := splitRegionSize
-	splitCount := maxRegionSize / splitRegionSize
+// CheckRegionSize return error if the smallest region's size is less than mergeSize
+func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
+	if keys < c.GetRegionMaxKeys() {
+		return nil
+	}
 
-	// the merge size should be less the min region size
-	if size := maxRegionSize - splitRegionSize*splitCount; size < threshold {
-		threshold = size
-	}
-	// the sum of merge-region-size+max-region-size should be less than splitCount * max-split-size
-	if size := splitRegionSize*(splitCount+1) - maxRegionSize; size < threshold {
-		threshold = size
-	}
-	if maxMergeSize >= threshold {
-		return errors.Errorf("max merge region size should be less than store max merge size %d MB", threshold)
+	if smallKeys := keys % c.GetRegionSplitKeys(); smallKeys < mergeKeys {
+		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-keys")
 	}
 	return nil
 }
