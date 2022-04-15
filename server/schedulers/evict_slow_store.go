@@ -145,13 +145,13 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster schedule.Cluster) []*operator.Operator {
 	storeMap := map[uint64][]core.KeyRange{
-		s.conf.EvictedStores[0]: {core.NewKeyRange("", "")},
+		s.conf.evictStore(): {core.NewKeyRange("", "")},
 	}
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, storeMap, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	if len(s.conf.EvictedStores) != 0 {
+	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
