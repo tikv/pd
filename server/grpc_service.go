@@ -519,16 +519,13 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
 	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(url string, ctx context.Context) {
+		go func(url string) {
 			// tikv may not ready to server.
-			select {
-			case <-time.After(5 * time.Second):
-				if err := s.storeConfigManager.Load(url); err != nil {
-					log.Error("load store config failed", zap.String("url", url), zap.Error(err))
-				}
-			case <-ctx.Done():
+			time.Sleep(5 * time.Second)
+			if err := s.storeConfigManager.Load(url); err != nil {
+				log.Error("load store config failed", zap.String("url", url), zap.Error(err))
 			}
-		}(store.GetStatusAddress(), s.Context())
+		}(store.GetStatusAddress())
 	}
 
 	return &pdpb.PutStoreResponse{
