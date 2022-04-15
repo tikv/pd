@@ -84,11 +84,7 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.offlineStats[DownPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[OversizeRegion] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[UndersizeRegion] = make(map[uint64]*core.RegionInfo)
-
 	return r
 }
 
@@ -253,10 +249,7 @@ func (r *RegionStatistics) Collect() {
 	offlineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.offlineStats[DownPeer])))
 	offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.offlineStats[PendingPeer])))
 	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
-	offlineRegionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.offlineStats[EmptyRegion])))
 	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
-	offlineRegionStatusGauge.WithLabelValues("over-size-region-count").Set(float64(len(r.offlineStats[OversizeRegion])))
-	offlineRegionStatusGauge.WithLabelValues("under-size-region-count").Set(float64(len(r.offlineStats[UndersizeRegion])))
 }
 
 // Reset resets the metrics of the regions' status.
