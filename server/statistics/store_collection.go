@@ -72,7 +72,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
 	switch store.GetNodeState() {
-	case metapb.NodeState_Preparing:
+	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
 			s.Down++
 		} else if store.IsUnhealthy() {
@@ -84,20 +84,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		} else {
 			s.Up++
 		}
-		s.Preparing++
-	case metapb.NodeState_Serving:
-		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
-			s.Down++
-		} else if store.IsUnhealthy() {
-			s.Unhealthy++
-		} else if store.IsDisconnected() {
-			s.Disconnect++
-		} else if store.IsSlow() {
-			s.Slow++
+		if store.IsPreparing() {
+			s.Preparing++
 		} else {
-			s.Up++
+			s.Serving++
 		}
-		s.Serving++
 	case metapb.NodeState_Removing:
 		s.Offline++
 		s.Removing++
