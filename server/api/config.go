@@ -392,6 +392,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		apiutil.ErrorResp(h.rd, w, errCode)
 		return
 	}
+
 	if err := h.svr.SetScheduleConfig(*config); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

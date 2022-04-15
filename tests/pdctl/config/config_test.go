@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -121,14 +120,6 @@ func (s *configTestSuite) TestConfig(c *C) {
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "-10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, NotNil)
-	args = []string{"-u", pdAddr, "config", "set", "schedule.max-merge-region-size", "48"}
-	output, _ = pdctl.ExecuteCommand(cmd, args...)
-	fmt.Println(string(output))
-	c.Assert(strings.Contains(string(output), "max merge region size should be less than store max merge size 48 MB"), IsTrue)
-
-	args = []string{"-u", pdAddr, "config", "set", "schedule.max-merge-region-keys", "480000"}
-	output, _ = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(strings.Contains(string(output), "max merge region keys should be less than store max merge key 480000"), IsTrue)
 
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
