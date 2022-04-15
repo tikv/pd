@@ -44,6 +44,8 @@ import (
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func Test(t *testing.T) {
@@ -389,7 +391,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 	c.Assert(tc, NotNil)
 
 	// let the job run at small interval
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
 	for i := 0; i < 100; i++ {
 		err = rc.Start(leaderServer.GetServer())
 		c.Assert(err, IsNil)
@@ -398,6 +400,7 @@ func (s *clusterTestSuite) TestRaftClusterMultipleRestart(c *C) {
 		c.Assert(rc, NotNil)
 		rc.Stop()
 	}
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 
 func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState, deployPath string) *metapb.Store {
@@ -421,6 +424,25 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 	c.Assert(err, IsNil)
 	// A more strict test can be found at api/member_test.go
 	c.Assert(resp.GetMembers(), Not(HasLen), 0)
+}
+
+func (s *clusterTestSuite) TestNotLeader(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 2)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	c.Assert(tc.RunInitialServers(), IsNil)
+
+	tc.WaitLeader()
+	followerServer := tc.GetServer(tc.GetFollower())
+	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
+	clusterID := followerServer.GetClusterID()
+	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(clusterID)}
+	resp, err := grpcPDClient.AllocID(context.Background(), req)
+	c.Assert(resp, IsNil)
+	grpcStatus, ok := status.FromError(err)
+	c.Assert(ok, IsTrue)
+	c.Assert(grpcStatus.Code(), Equals, codes.Unavailable)
+	c.Assert(grpcStatus.Message(), Equals, "not leader")
 }
 
 func (s *clusterTestSuite) TestStoreVersionChange(c *C) {

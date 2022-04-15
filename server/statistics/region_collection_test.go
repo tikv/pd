@@ -260,7 +260,7 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 			stores = append(stores, s)
 		}
 		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
-		label := getRegionLabelIsolation(stores, locationLabels)
+		label := GetRegionLabelIsolation(stores, locationLabels)
 		labelLevelStats.Observe(region, stores, locationLabels)
 		c.Assert(label, Equals, res)
 		regionID++
@@ -273,12 +273,12 @@ func (t *testRegionStatisticsSuite) TestRegionLabelIsolationLevel(c *C) {
 		c.Assert(labelLevelStats.labelCounter[i], Equals, res)
 	}
 
-	label := getRegionLabelIsolation(nil, locationLabels)
+	label := GetRegionLabelIsolation(nil, locationLabels)
 	c.Assert(label, Equals, nonIsolation)
-	label = getRegionLabelIsolation(nil, nil)
+	label = GetRegionLabelIsolation(nil, nil)
 	c.Assert(label, Equals, nonIsolation)
 	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
-	label = getRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
+	label = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
 	c.Assert(label, Equals, "zone")
 
 	regionID = 1

@@ -602,6 +602,9 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
+	failpoint.Inject("hasPrepared", func() {
+		failpoint.Return(true)
+	})
 	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
