@@ -1343,13 +1343,12 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		storeID := store.GetID()
-		if store.IsPreparing() {
-			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || float64(store.GetRegionSize()) >= c.getThreshold(stores, store) {
-				if err := c.ReadyToServe(storeID); err != nil {
-					log.Error("change store to serving failed",
-						zap.Stringer("store", store.GetMeta()),
-						errs.ZapError(err))
-				}
+		if store.IsPreparing() &&
+			(store.GetUptime() > c.opt.GetMaxStorePreparingTime() || float64(store.GetRegionSize()) >= c.getThreshold(stores, store)) {
+			if err := c.ReadyToServe(storeID); err != nil {
+				log.Error("change store to serving failed",
+					zap.Stringer("store", store.GetMeta()),
+					errs.ZapError(err))
 			}
 		}
 
