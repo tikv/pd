@@ -597,7 +597,7 @@ func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 // @Tags store
 // @Summary Get limit scene in the cluster.
 // @Produce json
-// @Success 200 {string} string "Set store limit scene successfully."
+// @Success 200 {string} string "Get store limit scene successfully."
 // @Router /stores/limit/scene [get]
 func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
 	typeName := r.URL.Query().Get("type")
@@ -608,6 +608,57 @@ func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Reques
 	}
 	scene := h.Handler.GetStoreLimitScene(typeValue)
 	h.rd.JSON(w, http.StatusOK, scene)
+}
+
+// Progress contains status about a progress.
+type Progress struct {
+	Action       string  `json:"action"`
+	StoreID      uint64  `json:"store_id,omitempty"`
+	Progress     float64 `json:"progress"`
+	CurrentSpeed float64 `json:"current_speed"`
+	LeftSeconds  float64 `json:"left_seconds"`
+}
+
+// @Tags stores
+// @Summary Get store progress in the cluster.
+// @Produce json
+// @Success 200 {object} Progress
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /stores/progress [get]
+func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request) {
+	if v := r.URL.Query().Get("id"); v != "" {
+		storeID, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+			return
+		}
+
+		action, progress, leftSeconds, currentSpeed := h.Handler.GetProgressByID(v)
+		sp := &Progress{
+			StoreID:      storeID,
+			Action:       action,
+			Progress:     progress,
+			CurrentSpeed: currentSpeed,
+			LeftSeconds:  leftSeconds,
+		}
+
+		h.rd.JSON(w, http.StatusOK, sp)
+		return
+	}
+	if v := r.URL.Query().Get("action"); v != "" {
+		progress, leftSeconds, currentSpeed := h.Handler.GetProgressByAction(v)
+		sp := &Progress{
+			Action:       v,
+			Progress:     progress,
+			CurrentSpeed: currentSpeed,
+			LeftSeconds:  leftSeconds,
+		}
+
+		h.rd.JSON(w, http.StatusOK, sp)
+		return
+	}
+	h.rd.JSON(w, http.StatusBadRequest, "need query parameters")
 }
 
 // @Tags store

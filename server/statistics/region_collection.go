@@ -265,7 +265,7 @@ func NewLabelStatistics() *LabelStatistics {
 // Observe records the current label status.
 func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	regionID := region.GetID()
-	regionIsolation := getRegionLabelIsolation(stores, labels)
+	regionIsolation := GetRegionLabelIsolation(stores, labels)
 	if label, ok := l.regionLabelStats[regionID]; ok {
 		if label == regionIsolation {
 			return
@@ -301,7 +301,8 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 	return l.labelCounter
 }
 
-func getRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
+// GetRegionLabelIsolation returns the isolation level of the region.
+func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 	if len(stores) == 0 || len(labels) == 0 {
 		return nonIsolation
 	}

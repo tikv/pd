@@ -224,7 +224,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
 
-// HandleReportBuckets processes RegionInfo reports from client
+// HandleReportBuckets processes buckets reports from client
 func (c *RaftCluster) HandleReportBuckets(buckets *metapb.Buckets) error {
 	return c.processReportBuckets(buckets)
 }

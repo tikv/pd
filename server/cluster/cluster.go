@@ -20,6 +20,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -69,6 +71,7 @@ const (
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
 	persistLimitWaitTime   = 100 * time.Millisecond
+	removingAction         = "removing"
 )
 
 // Server is the interface for cluster.
@@ -131,6 +134,10 @@ type RaftCluster struct {
 	replicationMode *replication.ModeManager
 
 	unsafeRecoveryController *unsafeRecoveryController
+	progressManager          *progress.Manager
+
+	// Keep the previous store limit settings when removing a store.
+	prevStoreLimit map[uint64]map[storelimit.Type]*storelimit.StoreLimit
 }
 
 // Status saves some state information.
@@ -187,15 +194,8 @@ func (c *RaftCluster) isInitialized() bool {
 	}
 	region := c.core.GetRegionByKey(nil)
 	return region != nil &&
-		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetVoters()) >= int(c.opt.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
-}
-
-// GetReplicationConfig get the replication config.
-func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
-	cfg := &config.ReplicationConfig{}
-	*cfg = *c.opt.GetReplicationConfig()
-	return cfg
 }
 
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
@@ -222,7 +222,9 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
 }
 
 // Start starts a cluster.
@@ -236,7 +238,6 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
-
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -271,7 +272,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.wg.Add(6)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		backgroundJobInterval = 100 * time.Microsecond
+		backgroundJobInterval = 1 * time.Microsecond
 	})
 	go c.runBackgroundJobs(backgroundJobInterval)
 	go c.runStatsBackgroundJobs()
@@ -314,7 +315,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Duration("cost", time.Since(start)),
 	)
 	for _, store := range c.GetStores() {
-		c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
+		storeID := store.GetID()
+		c.hotStat.GetOrCreateRollingStoreStats(storeID)
 	}
 	return c, nil
 }
@@ -549,22 +551,22 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
-			zap.Uint64("store-id", newStore.GetID()),
+			zap.Uint64("store-id", storeID),
 			zap.Uint64("capacity", newStore.GetCapacity()),
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", newStore.GetID()), errs.ZapError(err))
+			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
 		}
 	}
-	if store := c.core.GetStore(newStore.GetID()); store != nil {
+	if store := c.core.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
 	c.core.PutStore(newStore)
-	c.hotStat.Observe(newStore.GetID(), newStore.GetStoreStats())
+	c.hotStat.Observe(storeID, newStore.GetStoreStats())
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -1073,13 +1075,18 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
-		zap.Uint64("store-id", newStore.GetID()),
+		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
+		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
+			storelimit.AddPeer:    store.GetStoreLimit(storelimit.AddPeer),
+			storelimit.RemovePeer: store.GetStoreLimit(storelimit.RemovePeer),
+		}
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
@@ -1111,7 +1118,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 
 	newStore := store.Clone(core.TombstoneStore())
 	log.Warn("store has been Tombstone",
-		zap.Uint64("store-id", newStore.GetID()),
+		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
@@ -1119,7 +1126,9 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
+		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
+		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1169,11 +1178,26 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return nil
 	}
 
-	newStore := store.Clone(core.UpStore())
+	limiter := c.prevStoreLimit[storeID]
+	options := []core.StoreCreateOption{core.UpStore()}
+	// To prevent panic we check if the store limit is nil. There are two cases may cause this problem:
+	// 1. when we start a new cluster, the store limit is only initialized for the first time scheduling
+	// 2. once the PD leader transfer, the previous store limit may be lost, we suggest changing it manually
+	if limiter[storelimit.AddPeer] != nil {
+		options = append(options, core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer].Rate()))
+	}
+	if limiter[storelimit.RemovePeer] != nil {
+		options = append(options, core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer].Rate()))
+	}
+	newStore := store.Clone(options...)
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-	return c.putStoreLocked(newStore)
+	err := c.putStoreLocked(newStore)
+	if err == nil {
+		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
+	}
+	return err
 }
 
 // SetStoreWeight sets up a store's leader/region balance weight.
@@ -1227,10 +1251,12 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		offlineStore := store.GetMeta()
+		id := offlineStore.GetId()
+		regionSize := c.core.GetStoreRegionSize(id)
+		c.updateRemovingProgress(id, store.GetAddress(), removingAction, float64(regionSize))
 		// If the store is empty, it can be buried.
-		regionCount := c.core.GetStoreRegionCount(offlineStore.GetId())
-		if regionCount == 0 {
-			if err := c.BuryStore(offlineStore.GetId(), false); err != nil {
+		if regionSize == 0 {
+			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))
@@ -1250,6 +1276,31 @@ func (c *RaftCluster) checkStores() {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
+}
+
+func (c *RaftCluster) updateRemovingProgress(storeID uint64, storeAddress string, action string, left float64) {
+	storeLabel := fmt.Sprintf("%d", storeID)
+	progress := encodeRemovingProgressKey(storeID)
+
+	if exist := c.progressManager.AddProgress(progress, left); !exist {
+		return
+	}
+	c.progressManager.UpdateProgress(progress, left)
+	process, ls, _ := c.progressManager.Status(progress)
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
+}
+
+func (c *RaftCluster) resetRemovingProgress(storeID uint64, storeAddress string, action string) {
+	storeLabel := fmt.Sprintf("%d", storeID)
+	if exist := c.progressManager.RemoveProgress(encodeRemovingProgressKey(storeID)); exist {
+		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+	}
+}
+
+func encodeRemovingProgressKey(storeID uint64) string {
+	return fmt.Sprintf("%s-%d", removingAction, storeID)
 }
 
 // RemoveTombStoneRecords removes the tombStone Records.
@@ -1311,6 +1362,7 @@ func (c *RaftCluster) resetMetrics() {
 	c.coordinator.resetHotSpotMetrics()
 	c.resetClusterMetrics()
 	c.resetHealthStatus()
+	c.resetProgressIndicator()
 }
 
 func (c *RaftCluster) collectClusterMetrics() {
@@ -1358,6 +1410,12 @@ func (c *RaftCluster) collectHealthStatus() {
 
 func (c *RaftCluster) resetHealthStatus() {
 	healthStatusGauge.Reset()
+}
+
+func (c *RaftCluster) resetProgressIndicator() {
+	c.progressManager.Reset()
+	storesProgressGauge.Reset()
+	storesETAGauge.Reset()
 }
 
 // GetRegionStatsByType gets the status of the region by types.
@@ -1774,7 +1832,8 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 }
 
 func (c *RaftCluster) loadMinResolvedTS() {
-	minResolvedTS, err := c.storage.LoadMinResolvedTS()
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	minResolvedTS, err := c.GetStorage().LoadMinResolvedTS()
 	if err != nil {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
@@ -1839,6 +1898,50 @@ func (c *RaftCluster) GetClusterVersion() string {
 // GetEtcdClient returns the current etcd client
 func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 	return c.etcdClient
+}
+
+// GetProgressByID returns the progress details for a given store ID.
+func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, ls, cs float64) {
+	filter := func(progress string) bool {
+		s := strings.Split(progress, "-")
+		return len(s) == 2 && s[1] == storeID
+	}
+	progress := c.progressManager.GetProgresses(filter)
+	if len(progress) != 0 {
+		process, ls, cs = c.progressManager.Status(progress[0])
+		if strings.HasPrefix(progress[0], removingAction) {
+			action = removingAction
+		}
+		return
+	}
+	return "", 0, 0, 0
+}
+
+// GetProgressByAction returns the progress details for a given action.
+func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float64) {
+	filter := func(progress string) bool {
+		return strings.HasPrefix(progress, action)
+	}
+
+	progresses := c.progressManager.GetProgresses(filter)
+	if len(progresses) == 0 {
+		return 0, 0, 0
+	}
+	for _, progress := range progresses {
+		p, l, c := c.progressManager.Status(progress)
+		process += p
+		ls += l
+		cs += c
+	}
+	num := float64(len(progresses))
+	process /= num
+	cs /= num
+	ls /= num
+	// handle the special cases
+	if math.IsNaN(ls) || math.IsInf(ls, 0) {
+		ls = math.MaxFloat64
+	}
+	return
 }
 
 var healthURL = "/pd/api/v1/ping"
