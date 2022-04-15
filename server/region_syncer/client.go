@@ -186,8 +186,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				stats := resp.GetRegionStats()
 				regions := resp.GetRegions()
+				buckets := resp.GetBuckets()
 				regionLeaders := resp.GetRegionLeaders()
 				hasStats := len(stats) == len(regions)
+				hasBuckets := len(buckets) == len(regions)
 				for i, r := range regions {
 					var (
 						region       *core.RegionInfo
@@ -205,6 +207,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						)
 					} else {
 						region = core.NewRegionInfo(r, regionLeader)
+					}
+
+					if hasBuckets {
+						region.UpdateBuckets(buckets[i], region.GetBuckets())
 					}
 
 					origin, err := bc.PreCheckPutRegion(region)
