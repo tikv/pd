@@ -17,6 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/tikv/pd/server/storage"
 
 	. "github.com/pingcap/check"
 )
@@ -72,11 +73,27 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 			RegionMaxSize: "15GiB",
 		},
 	}
-	manager.UpdateConfig(nil)
-	c.Assert(manager.GetStoreConfig(), IsNil)
-	manager.UpdateConfig(config)
+	manager.UpdateConfig(config, nil)
+	c.Assert(manager.GetStoreConfig(), NotNil)
+	manager.UpdateConfig(config, nil)
 	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
 	var m StoreConfigManager
-	m.UpdateConfig(nil)
+	m.UpdateConfig(nil, nil)
 	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+}
+
+func (t *testTiKVConfigSuite) TestReload(c *C) {
+	manager := NewStoreConfigManager(nil)
+	storage := storage.NewStorageWithMemoryBackend()
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	c.Assert(manager.Reload(storage), IsNil)
+	config := &StoreConfig{
+		Coprocessor{
+			RegionMaxSize: "15GiB",
+		},
+	}
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	storage.SaveStoreConfig(config)
+	c.Assert(manager.Reload(storage), IsNil)
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
 }

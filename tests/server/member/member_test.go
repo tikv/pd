@@ -229,6 +229,36 @@ func (s *memberTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, o
 	return leader
 }
 
+func (s *memberTestSuite) TestReload(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	leader1 := cluster.WaitLeader()
+	server := cluster.GetServer(leader1)
+	storage := server.GetServer().GetStorage()
+	storeConfigManager := server.GetServer().GetStoreConfigManager()
+	c.Assert(storeConfigManager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	storeConfigManager.UpdateConfig(&config.StoreConfig{
+		Coprocessor: config.Coprocessor{
+			RegionMaxSize: "10Gib",
+		},
+	}, storage)
+	storeConfigManager.Reload(storage)
+	c.Assert(storeConfigManager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10*1024))
+
+	//
+	s.post(c, server.GetConfig().ClientUrls+"/pd/api/v1/leader/resign", "")
+	leader2 := cluster.WaitLeader()
+	server = cluster.GetServer(leader2)
+	storeConfigManager = server.GetServer().GetStoreConfigManager()
+	c.Assert(storeConfigManager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10*1024))
+	c.Assert(storeConfigManager.GetStoreConfig().GetRegionSplitSize(), Equals, uint64(96))
+}
+
 func (s *memberTestSuite) TestLeaderResign(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
