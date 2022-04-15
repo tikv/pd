@@ -195,15 +195,8 @@ func (c *RaftCluster) isInitialized() bool {
 	}
 	region := c.core.GetRegionByKey(nil)
 	return region != nil &&
-		len(region.GetVoters()) >= int(c.GetReplicationConfig().MaxReplicas) &&
+		len(region.GetVoters()) >= int(c.opt.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
-}
-
-// GetReplicationConfig get the replication config.
-func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
-	cfg := &config.ReplicationConfig{}
-	*cfg = *c.opt.GetReplicationConfig()
-	return cfg
 }
 
 // loadBootstrapTime loads the saved bootstrap time from etcd. It returns zero
