@@ -1110,7 +1110,7 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 	upStores := c.getUpStores()
 	expectUpStoresNum := len(upStores) - 1
 	if expectUpStoresNum < c.opt.GetMaxReplicas() {
-		return errors.Errorf("can not remove store %d since the number of up stores would be %d while need %d", storeID, expectUpStoresNum, c.opt.GetMaxReplicas())
+		return errs.ErrStoresNotEnough.FastGenByArgs(storeID, expectUpStoresNum, c.opt.GetMaxReplicas())
 	}
 
 	// Check if thre are extra up store to store the leaders of the regions.
@@ -1135,7 +1135,7 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 
 	// returns error if there is no store for leader.
 	if evictLeaderStoresNum == len(expectUpstores) {
-		return errors.Errorf("can not remove store %d since there are no extra up store to store the leader", storeID)
+		return errs.ErrNoStoreForRegionLeader.FastGenByArgs(storeID)
 	}
 
 	return nil
