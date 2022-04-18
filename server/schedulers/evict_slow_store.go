@@ -111,8 +111,9 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *evictSlowStoreScheduler) Prepare(cluster schedule.Cluster) error {
-	if len(s.conf.EvictedStores) != 0 {
-		return s.prepareEvictLeader(cluster)
+	evictStore := s.conf.evictStore()
+	if evictStore != 0 {
+		return cluster.SlowStoreEvicted(evictStore)
 	}
 	return nil
 }
@@ -121,8 +122,14 @@ func (s *evictSlowStoreScheduler) Cleanup(cluster schedule.Cluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster schedule.Cluster) error {
-	return cluster.SlowStoreEvicted(s.conf.EvictedStores[0])
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster schedule.Cluster, storeID uint64) error {
+	err := s.conf.setStoreAndPersist(storeID)
+	if err != nil {
+		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
+		return err
+	}
+
+	return cluster.SlowStoreEvicted(storeID)
 }
 
 func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
@@ -138,13 +145,13 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster schedule.Cluster) []*operator.Operator {
 	storeMap := map[uint64][]core.KeyRange{
-		s.conf.EvictedStores[0]: {core.NewKeyRange("", "")},
+		s.conf.evictStore(): {core.NewKeyRange("", "")},
 	}
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, storeMap, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	if len(s.conf.EvictedStores) != 0 {
+	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -175,36 +182,35 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 		return ops
 	}
 
-	slowStores := make([]*core.StoreInfo, 0)
+	var slowStore *core.StoreInfo
+
 	for _, store := range cluster.GetStores() {
 		if store.IsRemoved() {
 			continue
 		}
 
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
-			slowStores = append(slowStores, store)
+			// Do nothing if there is more than one slow store.
+			if slowStore != nil {
+				return ops
+			}
+			slowStore = store
 		}
+	}
+
+	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
+		return ops
 	}
 
 	// If there is only one slow store, evict leaders from that store.
-	if len(slowStores) == 1 && slowStores[0].GetSlowScore() >= slowStoreEvictThreshold {
-		store := slowStores[0]
-		log.Info("detected slow store, start to evict leaders",
-			zap.Uint64("store-id", store.GetID()))
-		err := s.conf.setStoreAndPersist(store.GetID())
-		if err != nil {
-			log.Info("evict-slow-store-scheduler persist config failed")
-			return ops
-		}
-		err = s.prepareEvictLeader(cluster)
-		if err != nil {
-			log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", store.GetID()))
-			return ops
-		}
-		ops = s.schedulerEvictLeader(cluster)
+	log.Info("detected slow store, start to evict leaders",
+		zap.Uint64("store-id", slowStore.GetID()))
+	err := s.prepareEvictLeader(cluster, slowStore.GetID())
+	if err != nil {
+		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
+		return ops
 	}
-
-	return ops
+	return s.schedulerEvictLeader(cluster)
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
