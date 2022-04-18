@@ -1488,8 +1488,3 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 	}
 	return false
 }
-
-// SplitAndScatterRegions TODO
-func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	return nil, errors.New("no implemented")
-}

@@ -208,7 +208,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
 
-	co.run()
+	go co.runUntilStop()
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)

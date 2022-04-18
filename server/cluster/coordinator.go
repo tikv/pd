@@ -296,6 +296,14 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
+func (c *coordinator) runUntilStop() {
+	c.run()
+	<-c.ctx.Done()
+	log.Info("coordinator is stopping")
+	c.wg.Wait()
+	log.Info("coordinator has been stopped")
+}
+
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
