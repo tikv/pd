@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -195,84 +196,124 @@ type tsoBatchController struct {
 	tsoRequestCh          chan *tsoRequest
 	collectedRequests     []*tsoRequest
 	collectedRequestCount int
+	batchStartTime        time.Time
 
-	batchStartTime time.Time
+	// Statistics at a fixed interval
+	statTicker             *time.Ticker // time.NewTicker(tsoStatisticsInterval)
+	statStartTime          time.Time
+	countTSOQuery          int64         // The number of TSO obtained during the statistical time
+	countTSORequest        int64         // The number of TSO Requests sent to the PD during the statistical time
+	countBatchWaitDuration time.Duration // The total time spent in Batch Wait during the statistical time
+	countNotExtraTSOQuery  int64         // The number of TSOs obtained without using the wait strategy during the statistical time
 }
+
+const (
+	tsoStatisticsInterval      = time.Second * 5
+	tsoStatisticsAmplification = 0.1
+	minCountTSORequest         = 20 * 5 // 20 (times per second) * 5 (Second)
+)
+
+var (
+	// ZeroTime is a zero time.
+	ZeroTime = time.Time{}
+)
 
 func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tsoBatchController {
 	return &tsoBatchController{
 		maxBatchSize:          maxBatchSize,
-		bestBatchSize:         8, /* Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4) */
+		bestBatchSize:         0,
 		tsoRequestCh:          tsoRequestCh,
 		collectedRequests:     make([]*tsoRequest, maxBatchSize+1),
 		collectedRequestCount: 0,
+		statStartTime:         ZeroTime,
 	}
+}
+
+func (tbc *tsoBatchController) fetchRecentPendingRequests(ctx context.Context, endChan <-chan time.Time) error {
+	var tsoReq *tsoRequest
+
+	// get the first request
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-endChan:
+		// timeout
+		return nil
+	case tsoReq = <-tbc.tsoRequestCh:
+		tbc.pushRequest(tsoReq)
+	}
+
+	// take the remaining requests without blocking
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case tsoReq = <-tbc.tsoRequestCh:
+			tbc.pushRequest(tsoReq)
+		default:
+			return nil
+		}
+	}
+	return nil
 }
 
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
 func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, maxBatchWaitInterval time.Duration) error {
-	var firstTSORequest *tsoRequest
+	// Periodically calculate bestBatchSize based on statistics and reset it.
 	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case firstTSORequest = <-tbc.tsoRequestCh:
+	case <-tbc.statTicker.C:
+		tbc.adjustBestBatchSize(maxBatchWaitInterval)
+	default:
 	}
-	// Start to batch when the first TSO request arrives.
-	tbc.batchStartTime = time.Now()
+
+	// Generate the required variables according to maxBatchWaitInterval.
+	var (
+		fetchStartTime time.Time
+		endTimer       *time.Timer
+	)
+	if maxBatchWaitInterval != 0 {
+		fetchStartTime = time.Now()
+		endTimer = time.NewTimer(maxBatchWaitInterval)
+		defer endTimer.Stop()
+	}
+
+	// For the first batch, there is no endTimer limit.
 	tbc.collectedRequestCount = 0
-	tbc.pushRequest(firstTSORequest)
-
-	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
-fetchPendingRequestsLoop:
-	for tbc.collectedRequestCount < tbc.maxBatchSize {
-		select {
-		case tsoReq := <-tbc.tsoRequestCh:
-			tbc.pushRequest(tsoReq)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			break fetchPendingRequestsLoop
-		}
+	if err := tbc.fetchRecentPendingRequests(ctx, nil); err != nil {
+		return err
 	}
-
-	// Check whether we should fetch more pending TSO requests from the channel.
-	// TODO: maybe consider the actual load that returns through a TSO response from PD server.
-	if tbc.collectedRequestCount >= tbc.maxBatchSize || maxBatchWaitInterval <= 0 {
+	tbc.batchStartTime = time.Now()
+	if maxBatchWaitInterval == 0 {
+		// maxBatchWaitInterval is 0, indicating that the strategy is closed.
+		// No follow-up statistics and additional batches are performed.
 		return nil
 	}
 
-	// Fetches more pending TSO requests from the channel.
-	// Try to collect `tbc.bestBatchSize` requests, or wait `maxBatchWaitInterval`
-	// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
-	if tbc.collectedRequestCount < tbc.bestBatchSize {
-		after := time.NewTimer(maxBatchWaitInterval)
-		defer after.Stop()
-		for tbc.collectedRequestCount < tbc.bestBatchSize {
-			select {
-			case tsoReq := <-tbc.tsoRequestCh:
-				tbc.pushRequest(tsoReq)
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-after.C:
-				return nil
+	tbc.countNotExtraTSOQuery += int64(tbc.collectedRequestCount)
+	if tbc.bestBatchSize > 0 {
+		// Fetches more pending TSO requests from the channel.
+		// Try to collect `tbc.bestBatchSize` requests, or wait `maxBatchWaitInterval`
+		// when `tbc.collectedRequestCount` is less than the `tbc.bestBatchSize`.
+		// TODO: maybe consider the actual load that returns through a TSO response from PD server.
+		lastRequestCount := tbc.collectedRequestCount
+		for {
+			if tbc.collectedRequestCount >= tbc.bestBatchSize {
+				tsoExceedsBestBatchSize.Inc()
+				break
 			}
+			if err := tbc.fetchRecentPendingRequests(ctx, endTimer.C); err != nil {
+				return err
+			}
+			if tbc.collectedRequestCount == lastRequestCount {
+				tsoExceedsMaxWaitInterval.Inc()
+				break
+			}
+			lastRequestCount = tbc.collectedRequestCount
 		}
 	}
+	tbc.countTSOQuery += int64(tbc.collectedRequestCount)
+	tbc.countTSORequest++
+	tbc.countBatchWaitDuration += time.Since(fetchStartTime)
 
-	// Do an additional non-block try. Here we test the length with `tbc.maxBatchSize` instead
-	// of `tbc.bestBatchSize` because trying best to fetch more requests is necessary so that
-	// we can adjust the `tbc.bestBatchSize` dynamically later.
-	for tbc.collectedRequestCount < tbc.maxBatchSize {
-		select {
-		case tsoReq := <-tbc.tsoRequestCh:
-			tbc.pushRequest(tsoReq)
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return nil
-		}
-	}
 	return nil
 }
 
@@ -285,17 +326,72 @@ func (tbc *tsoBatchController) getCollectedRequests() []*tsoRequest {
 	return tbc.collectedRequests[:tbc.collectedRequestCount]
 }
 
-// adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
-func (tbc *tsoBatchController) adjustBestBatchSize() {
-	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
-	length := tbc.collectedRequestCount
-	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
-		// Waits too long to collect requests, reduce the target batch size.
-		tbc.bestBatchSize--
-	} else if length > tbc.bestBatchSize+4 /* Hard-coded number, in order to make `tbc.bestBatchSize` stable */ &&
-		tbc.bestBatchSize < tbc.maxBatchSize {
-		tbc.bestBatchSize++
+func (tbc *tsoBatchController) adjustBestBatchSize(maxBatchWaitInterval time.Duration) {
+	if maxBatchWaitInterval == 0 {
+		// maxBatchWaitInterval is 0, indicating that the strategy is closed.
+		tbc.statStartTime = ZeroTime
+		return
 	}
+
+	if tbc.statStartTime == ZeroTime {
+		// The strategy has just started, reset all statistics.
+		tbc.bestBatchSize = 0
+		tbc.resetStat()
+		return
+	}
+
+	totalDuration := time.Since(tbc.statStartTime)
+	if totalDuration < tsoStatisticsInterval/2 {
+		// Ensure that the duration is long enough.
+		return
+	}
+
+	if tbc.countTSORequest < minCountTSORequest {
+		// If there are too few requests, turn off the batch strategy.
+		tbc.bestBatchSize = 0
+	} else if float64(tbc.countTSORequest)*float64(maxBatchWaitInterval) <= float64(tbc.countBatchWaitDuration)/(1+tsoStatisticsAmplification) {
+		// If avgBatchWaitInterval far exceeds maxBatchWaitInterval, turn off the batch strategy.
+		// The distribution at this time is very sparse, and waiting is basically useless.
+		//
+		// avgBatchWaitInterval = countBatchWaitDuration / countTSORequest
+		// To prevent jitter, the actual value = avgBatchWaitInterval / 110%.
+		// 110% = 1 + tsoStatisticsAmplification, The latter cases are the same.
+		tbc.bestBatchSize = 0
+	} else if float64(tbc.countBatchWaitDuration) < float64(maxBatchWaitInterval)*float64(tbc.countTSORequest)*tsoStatisticsAmplification {
+		// If the waiting time is not long enough, estimate the bestBatchSize based on the total.
+		// At this point, the prediction is close to a linear distribution.
+		//
+		// totalDuration = statEndTime - statStartTime
+		// avgRequestDuration = (totalDuration - countBatchWaitDuration) / countTSORequest
+		// bestCountTSORequest = totalDuration / (avgRequestDuration + maxBatchWaitInterval)
+		// bestBatchSize = countTSOQuery / bestCountTSORequest / 110%
+		avgRequestDuration := float64(totalDuration-tbc.countBatchWaitDuration) / float64(tbc.countTSORequest)
+		bestBatchSize := float64(tbc.countTSOQuery) * (avgRequestDuration + float64(maxBatchWaitInterval)) / float64(totalDuration) / (1 + tsoStatisticsAmplification)
+		tbc.bestBatchSize = int(math.Round(bestBatchSize))
+	} else {
+		// Estimate a bestBatchSize based on the waiting time.
+		// At this point, the prediction also performs well when the distribution is non-linear.
+		//
+		// avgExtraBatchSize = (countTSOQuery - countNotExtraTSOQuery) / countTSORequest
+		// avgNotExtraBatchSize = countNotExtraTSOQuery / countTSORequest
+		// avgBatchWaitInterval = countBatchWaitDuration / countTSORequest
+		// bestExtraBatchSize = avgExtraBatchSize / avgBatchWaitInterval * maxBatchWaitInterval
+		// bestBatchSize = bestExtraBatchSize + avgNotExtraBatchSize / 110%
+		avgNotExtraBatchSize := float64(tbc.countNotExtraTSOQuery) / float64(tbc.countTSORequest)
+		bestExtraBatchSize := float64(tbc.countTSOQuery-tbc.countNotExtraTSOQuery) * float64(maxBatchWaitInterval) / float64(tbc.countBatchWaitDuration)
+		tbc.bestBatchSize = int(avgNotExtraBatchSize + bestExtraBatchSize/(1+tsoStatisticsAmplification))
+	}
+
+	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
+	tbc.resetStat()
+}
+
+func (tbc *tsoBatchController) resetStat() {
+	tbc.statStartTime = time.Now()
+	tbc.countTSOQuery = 0
+	tbc.countTSORequest = 0
+	tbc.countBatchWaitDuration = 0
+	tbc.countNotExtraTSOQuery = 0
 }
 
 func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
@@ -704,14 +800,19 @@ func (c *client) handleDispatcher(
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
 	)
+
+	tbc.statTicker = time.NewTicker(tsoStatisticsInterval)
+
 	defer func() {
 		log.Info("[pd] exit tso dispatcher", zap.String("dc-location", dc))
+		tbc.statTicker.Stop()
 		// Cancel all connections.
 		connectionCtxs.Range(func(_, cc interface{}) bool {
 			cc.(*connectionContext).cancel()
 			return true
 		})
 	}()
+
 	// Call updateConnectionCtxs once to init the connectionCtxs first.
 	c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 	// Only the Global TSO needs to watch the updateConnectionCtxsCh to sense the
@@ -774,9 +875,6 @@ tsoBatchLoop:
 					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
 			}
 			return
-		}
-		if maxBatchWaitInterval >= 0 {
-			tbc.adjustBestBatchSize()
 		}
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:

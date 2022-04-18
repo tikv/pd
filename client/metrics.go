@@ -62,6 +62,14 @@ var (
 			Buckets:   []float64{1, 2, 4, 8, 10, 14, 18, 22, 26, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 180, 200, 500, 1000},
 		})
 
+	tsoEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd_client",
+			Subsystem: "request",
+			Name:      "tso_event",
+			Help:      "Counter of the tso event",
+		}, []string{"event"})
+
 	tsoBatchSendLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd_client",
@@ -111,6 +119,9 @@ var (
 	cmdFailedDurationUpdateGCSafePoint        = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
+
+	tsoExceedsMaxWaitInterval = tsoEventCounter.WithLabelValues("exceeds_max_wait_interval")
+	tsoExceedsBestBatchSize   = tsoEventCounter.WithLabelValues("exceeds_best_batch_size")
 )
 
 func init() {
@@ -119,6 +130,7 @@ func init() {
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(tsoBestBatchSize)
 	prometheus.MustRegister(tsoBatchSize)
+	prometheus.MustRegister(tsoEventCounter)
 	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
 }
