@@ -16,6 +16,7 @@ package syncer_test
 
 import (
 	"context"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"testing"
 	"time"
 
@@ -211,6 +212,47 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(loadRegions, HasLen, regionLen)
 }
 
+func (s *regionSyncerTestSuite) TestSyncClient(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+	regionLen := 110
+	regions := initRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+
+	client := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	c.Assert(client, NotNil)
+	syncClient, err := client.SyncRegions(context.Background())
+	c.Assert(err, IsNil)
+	err = syncClient.Send(&pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: leaderServer.GetClusterID(),
+		},
+		Member: &pdpb.Member{
+			Name:       "pd-2",
+			ClientUrls: []string{"fate-pd-2"},
+		},
+	})
+	c.Assert(err, IsNil)
+	rsp, err := syncClient.Recv()
+	c.Assert(err, IsNil)
+	c.Assert(rsp, NotNil)
+	c.Assert(rsp.Regions, HasLen, regionLen)
+	c.Assert(rsp.Buckets, HasLen, regionLen)
+	syncClient.CloseSend()
+}
+
 func initRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
@@ -228,13 +270,15 @@ func initRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(0)},
 			},
 		}
-		buckets := &metapb.Buckets{
-			RegionId: r.Id,
-			Keys:     [][]byte{r.StartKey, r.EndKey},
-			Version:  1,
-		}
 		region := core.NewRegionInfo(r, r.Peers[0])
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		if i < regionLen/2 {
+			buckets := &metapb.Buckets{
+				RegionId: r.Id,
+				Keys:     [][]byte{r.StartKey, r.EndKey},
+				Version:  1,
+			}
+			region.UpdateBuckets(buckets, region.GetBuckets())
+		}
 		regions = append(regions, region)
 	}
 	return regions
