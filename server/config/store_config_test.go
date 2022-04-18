@@ -17,9 +17,9 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/server/storage"
 
 	. "github.com/pingcap/check"
+	"github.com/tikv/pd/server/storage"
 )
 
 var _ = Suite(&testTiKVConfigSuite{})

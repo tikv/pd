@@ -250,7 +250,6 @@ func (s *memberTestSuite) TestReload(c *C) {
 	storeConfigManager.Reload(storage)
 	c.Assert(storeConfigManager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10*1024))
 
-	//
 	s.post(c, server.GetConfig().ClientUrls+"/pd/api/v1/leader/resign", "")
 	leader2 := cluster.WaitLeader()
 	server = cluster.GetServer(leader2)
