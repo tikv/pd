@@ -368,13 +368,7 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer func() {
-		c.coordinator.wg.Wait()
-		log.Info("coordinator has been stopped")
-	}()
-	c.coordinator.run()
-	<-c.coordinator.ctx.Done()
-	log.Info("coordinator is stopping")
+	c.coordinator.runUntilStop()
 }
 
 func (c *RaftCluster) syncRegions() {
