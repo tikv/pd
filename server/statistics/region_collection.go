@@ -85,6 +85,9 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.offlineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
+	//r.offlineStats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
+	//r.offlineStats[OversizeRegion] = make(map[uint64]*core.RegionInfo)
+	//r.offlineStats[UndersizeRegion] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -176,7 +179,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 
 	for typ, c := range conditions {
 		if c {
-			if isRemoving {
+			if isRemoving && typ < EmptyRegion {
 				r.offlineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
