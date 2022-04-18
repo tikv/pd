@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -1073,6 +1074,12 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
+	if (store.IsPreparing() || store.IsServing()) && !physicallyDestroyed {
+		if err := c.checkReplicaBeforeOfflineStore(storeID); err != nil {
+			return err
+		}
+	}
+
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
@@ -1090,6 +1097,69 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
+}
+
+func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
+	upStores := c.getUpStores()
+	expectUpStoresNum := len(upStores) - 1
+	if expectUpStoresNum < c.opt.GetMaxReplicas() {
+		return errs.ErrStoresNotEnough.FastGenByArgs(storeID, expectUpStoresNum, c.opt.GetMaxReplicas())
+	}
+
+	// Check if there are extra up store to store the leaders of the regions.
+	evictStores := c.getEvictLeaderStores()
+	if len(evictStores) < expectUpStoresNum {
+		return nil
+	}
+
+	expectUpstores := make(map[uint64]bool)
+	for _, UpStoreID := range upStores {
+		if UpStoreID == storeID {
+			continue
+		}
+		expectUpstores[UpStoreID] = true
+	}
+	evictLeaderStoresNum := 0
+	for _, evitStoreID := range evictStores {
+		if _, ok := expectUpstores[evitStoreID]; ok {
+			evictLeaderStoresNum++
+		}
+	}
+
+	// returns error if there is no store for leader.
+	if evictLeaderStoresNum == len(expectUpstores) {
+		return errs.ErrNoStoreForRegionLeader.FastGenByArgs(storeID)
+	}
+
+	return nil
+}
+
+func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
+	if c.coordinator == nil {
+		return nil
+	}
+	handler, ok := c.coordinator.getSchedulerHandlers()[schedulers.EvictLeaderName]
+	if !ok {
+		return
+	}
+	type evictLeaderHandler interface {
+		EvictStoreIDs() []uint64
+	}
+	h, ok := handler.(evictLeaderHandler)
+	if !ok {
+		return
+	}
+	return h.EvictStoreIDs()
+}
+
+func (c *RaftCluster) getUpStores() []uint64 {
+	upStores := make([]uint64, 0)
+	for _, store := range c.GetStores() {
+		if store.IsPreparing() || store.IsServing() {
+			upStores = append(upStores, store.GetID())
+		}
+	}
+	return upStores
 }
 
 // BuryStore marks a store as tombstone in cluster.
