@@ -277,6 +277,8 @@ func (s *testClusterInfoSuite) TestSetOfflineWithReplica(c *C) {
 
 	c.Assert(cluster.RemoveStore(2, false), IsNil)
 	// should be failed since no enough store to accommodate the extra replica.
+	err = cluster.RemoveStore(3, false)
+	c.Assert(strings.Contains(err.Error(), string(errs.ErrStoresNotEnough.RFCCode())), IsTrue)
 	c.Assert(cluster.RemoveStore(3, false), NotNil)
 	// should be success since physically-destroyed is true.
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
@@ -315,7 +317,7 @@ func (s *testClusterInfoSuite) TestSetOfflineStoreWithEvictLeader(c *C) {
 	// should be failed since there is only 1 store left and it is the evict-leader store.
 	err = cluster.RemoveStore(3, false)
 	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "leader"), IsTrue)
+	c.Assert(strings.Contains(err.Error(), string(errs.ErrNoStoreForRegionLeader.RFCCode())), IsTrue)
 	c.Assert(cluster.RemoveScheduler(schedulers.EvictLeaderName), IsNil)
 	c.Assert(cluster.RemoveStore(3, false), IsNil)
 }

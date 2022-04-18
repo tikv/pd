@@ -1153,13 +1153,13 @@ func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
 }
 
 func (c *RaftCluster) getUpStores() []uint64 {
-	upstores := make([]uint64, 0)
+	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
 		if store.IsPreparing() || store.IsServing() {
-			upstores = append(upstores, store.GetID())
+			upStores = append(upStores, store.GetID())
 		}
 	}
-	return upstores
+	return upStores
 }
 
 // BuryStore marks a store as tombstone in cluster.
