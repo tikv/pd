@@ -98,6 +98,7 @@ var (
 	cmdDurationScatterRegions           = cmdDuration.WithLabelValues("scatter_regions")
 	cmdDurationGetOperator              = cmdDuration.WithLabelValues("get_operator")
 	cmdDurationSplitRegions             = cmdDuration.WithLabelValues("split_regions")
+	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
