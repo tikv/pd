@@ -300,7 +300,10 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 			leader = r.GetLeader()
 		}
 		leaders[i] = leader
-		buckets[i] = r.GetBuckets()
+		buckets[i] = &metapb.Buckets{}
+		if r.GetBuckets() != nil {
+			buckets[i] = r.GetBuckets()
+		}
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
