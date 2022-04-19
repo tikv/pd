@@ -35,8 +35,8 @@ const (
 	OfflinePeer
 	LearnerPeer
 	EmptyRegion
-	OversizeRegion
-	UndersizeRegion
+	OversizedRegion
+	UndersizedRegion
 )
 
 const nonIsolation = "none"
@@ -76,8 +76,8 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.stats[PendingPeer] = make(map[uint64]*RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
-	r.stats[OversizeRegion] = make(map[uint64]*RegionInfo)
-	r.stats[UndersizeRegion] = make(map[uint64]*RegionInfo)
+	r.stats[OversizedRegion] = make(map[uint64]*RegionInfo)
+	r.stats[UndersizedRegion] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
@@ -168,9 +168,9 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
-		OversizeRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
+		OversizedRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
 			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys()),
-		UndersizeRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
+		UndersizedRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
 			region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys),
 	}
 
@@ -241,8 +241,8 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
-	regionStatusGauge.WithLabelValues("over-size-region-count").Set(float64(len(r.stats[OversizeRegion])))
-	regionStatusGauge.WithLabelValues("under-size-region-count").Set(float64(len(r.stats[UndersizeRegion])))
+	regionStatusGauge.WithLabelValues("oversized-region-count").Set(float64(len(r.stats[OversizedRegion])))
+	regionStatusGauge.WithLabelValues("undersized-region-count").Set(float64(len(r.stats[UndersizedRegion])))
 
 	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
 	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))

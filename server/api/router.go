@@ -275,8 +275,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/check/learner-peer", regionsHandler.GetLearnerPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/empty-region", regionsHandler.GetEmptyRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/offline-peer", regionsHandler.GetOfflinePeerRegions, setMethods("GET"))
-	registerFunc(clusterRouter, "/regions/check/oversize-region", regionsHandler.GetOverSizedRegions, setMethods("GET"))
-	registerFunc(clusterRouter, "/regions/check/undersize-region", regionsHandler.GetUndersizedRegions, setMethods("GET"))
+	registerFunc(clusterRouter, "/regions/check/oversized-region", regionsHandler.GetOverSizedRegions, setMethods("GET"))
+	registerFunc(clusterRouter, "/regions/check/undersized-region", regionsHandler.GetUndersizedRegions, setMethods("GET"))
 
 	registerFunc(clusterRouter, "/regions/check/hist-size", regionsHandler.GetSizeHistogram, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/hist-keys", regionsHandler.GetKeysHistogram, setMethods("GET"))
