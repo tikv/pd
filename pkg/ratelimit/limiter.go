@@ -20,8 +20,27 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// LimiterConfig is the config of Limiter
+type LimiterConfig map[string]*DimensionConfig
+
+// NewLimiterConfig returns a new LimiterConfig
+func NewLimiterConfig() LimiterConfig {
+	return make(map[string]*DimensionConfig)
+}
+
+// DimensionConfig is the limit dimension config of one label
+type DimensionConfig struct {
+	// qps conifg
+	QPS      float64
+	QPSBrust int
+	// concurrency config
+	ConcurrencyLimit uint64
+}
+
 // Limiter is a controller for the request rate.
 type Limiter struct {
+	configMux          sync.Mutex
+	labelConfig        LimiterConfig
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 	// the label which is in labelAllowList won't be limited
@@ -30,7 +49,10 @@ type Limiter struct {
 
 // NewLimiter returns a global limiter which can be updated in the later.
 func NewLimiter() *Limiter {
-	return &Limiter{labelAllowList: make(map[string]struct{})}
+	return &Limiter{
+		labelAllowList: make(map[string]struct{}),
+		labelConfig:    NewLimiterConfig(),
+	}
 }
 
 // Allow is used to check whether it has enough token.

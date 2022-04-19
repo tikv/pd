@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
@@ -141,6 +142,13 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
+func updateRateLimitConfig(svr *server.Server, key string, value *ratelimit.DimensionConfig) {
+	cfg := svr.GetConfig()
+	rateLimitCfg := cfg.PDServerCfg.RateLimitConfig
+	rateLimitCfg[key] = value
+	updatePDServerConfig(svr, cfg, key, &rateLimitCfg)
+}
+
 func (h *confHandler) updateConfig(cfg *config.Config, key string, value interface{}) error {
 	kp := strings.Split(key, ".")
 	switch kp[0] {
@@ -157,7 +165,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
-		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
+		return updatePDServerConfig(h.svr, cfg, kp[len(kp)-1], value)
 	case "log":
 		return h.updateLogLevel(kp, value)
 	case "cluster-version":
@@ -255,7 +263,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	return err
 }
 
-func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value interface{}) error {
+func updatePDServerConfig(svr *server.Server, config *config.Config, key string, value interface{}) error {
 	data, err := json.Marshal(map[string]interface{}{key: value})
 	if err != nil {
 		return err
@@ -271,7 +279,7 @@ func (h *confHandler) updatePDServerConfig(config *config.Config, key string, va
 	}
 
 	if updated {
-		err = h.svr.SetPDServerConfig(config.PDServerCfg)
+		err = svr.SetPDServerConfig(config.PDServerCfg)
 	}
 	return err
 }

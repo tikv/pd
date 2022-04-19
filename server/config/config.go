@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
@@ -1115,6 +1116,8 @@ type PDServerConfig struct {
 	EnableAudit bool `toml:"enable-audit" json:"enable-audit"`
 	// EnableRateLimit controls the switch of the rate limit middleware
 	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit"`
+	// RateLimitConfig is the config of rate limit middleware
+	RateLimitConfig ratelimit.LimiterConfig `toml:"rate-limit-config" json:"rate-limit-config"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1145,6 +1148,9 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("enable-rate-limit") {
 		c.EnableRateLimit = defaultEnableRateLimitMiddleware
+	}
+	if !meta.IsDefined("enable-rate-limit") {
+		c.RateLimitConfig = ratelimit.NewLimiterConfig()
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

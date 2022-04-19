@@ -116,7 +116,7 @@ func newRateLimitMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for rateLimitMiddleware
 func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !s.svr.IsRateLimitMiddlewareEnabled() {
+	if !s.svr.GetPersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}

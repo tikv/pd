@@ -1435,6 +1435,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	s.loadRateLimitConfig()
 	switchableStorage, ok := s.storage.(interface {
 		SwitchToRegionStorage()
 		SwitchToDefaultStorage()
@@ -1450,6 +1451,15 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 	return nil
+}
+
+func (s *Server) loadRateLimitConfig() {
+	cfg := s.GetConfig().PDServerCfg.RateLimitConfig
+	for key, value := range cfg {
+		if value.QPSBrust > 0 && value.QPS > 0 {
+			s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
+		}
+	}
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.

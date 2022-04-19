@@ -449,8 +449,8 @@ func (o *PersistOptions) IsAuditEnabled() bool {
 	return o.GetPDServerConfig().EnableAudit
 }
 
-// isRateLimitEnabled returns whether rate limit middleware is enabled
-func (o *PersistOptions) isRateLimitEnabled() bool {
+// IsRateLimitEnabled returns whether rate limit middleware is enabled
+func (o *PersistOptions) IsRateLimitEnabled() bool {
 	return o.GetPDServerConfig().EnableRateLimit
 }
 

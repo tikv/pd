@@ -28,10 +28,46 @@ func AddLabelAllowList() Option {
 	}
 }
 
+func updateConcurrencyConfig(label string, l *Limiter, limit uint64) bool {
+	l.configMux.Lock()
+	defer l.configMux.Unlock()
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{ConcurrencyLimit: limit}
+		l.labelConfig[label] = cfg
+		return true
+	}
+	if cfg.ConcurrencyLimit == limit {
+		return false
+	}
+	cfg.ConcurrencyLimit = limit
+	return true
+}
+
+func updateQPSConfig(label string, l *Limiter, limit float64, burst int) bool {
+	l.configMux.Lock()
+	defer l.configMux.Unlock()
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{QPS: limit, QPSBrust: burst}
+		l.labelConfig[label] = cfg
+		return true
+	}
+	if cfg.QPS == limit && cfg.QPSBrust == burst {
+		return false
+	}
+	cfg.QPS = limit
+	cfg.QPSBrust = burst
+	return true
+}
+
 // UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
 	return func(label string, l *Limiter) {
 		if _, allow := l.labelAllowList[label]; allow {
+			return
+		}
+		if !updateConcurrencyConfig(label, l, limit) {
 			return
 		}
 		if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(limit)); exist {
@@ -46,9 +82,32 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 		if _, allow := l.labelAllowList[label]; allow {
 			return
 		}
+		if !updateQPSConfig(label, l, limit, burst) {
+			return
+		}
 		if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
 			limiter.(*RateLimiter).SetLimit(rate.Limit(limit))
 			limiter.(*RateLimiter).SetBurst(burst)
+		}
+	}
+}
+
+// UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
+func UpdateDimensionConfig(cfg *DimensionConfig) Option {
+	return func(label string, l *Limiter) {
+		if _, allow := l.labelAllowList[label]; allow {
+			return
+		}
+		if updateQPSConfig(label, l, cfg.QPS, cfg.QPSBrust) {
+			if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(cfg.QPS, cfg.QPSBrust)); exist {
+				limiter.(*RateLimiter).SetLimit(rate.Limit(cfg.QPS))
+				limiter.(*RateLimiter).SetBurst(cfg.QPSBrust)
+			}
+		}
+		if updateConcurrencyConfig(label, l, cfg.ConcurrencyLimit) {
+			if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(cfg.ConcurrencyLimit)); exist {
+				limiter.(*concurrencyLimiter).setLimit(cfg.ConcurrencyLimit)
+			}
 		}
 	}
 }

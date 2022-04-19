@@ -190,13 +190,14 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
 		return
 	}
-
+	cfg := &ratelimit.DimensionConfig{}
 	// update concurrency limiter
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
 		concurrency := uint64(concurrencyFloat)
 		if concurrency > 0 {
+			cfg.ConcurrencyLimit = concurrency
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(concurrency))
 			concurrencyUpdatedFlag = "Concurrency limiter is changed."
 		} else {
@@ -213,6 +214,8 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			if int(qps) > 1 {
 				brust = int(qps)
 			}
+			cfg.QPS = qps
+			cfg.QPSBrust = brust
 			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(qps, brust))
 			qpsRateUpdatedFlag = "QPS rate limiter is changed."
 		} else {
@@ -223,6 +226,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
+		updateRateLimitConfig(h.svr, "rate-limit-config", cfg)
 		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
 	}
 }
