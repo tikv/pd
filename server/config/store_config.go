@@ -17,13 +17,13 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/pkg/errs"
 	"io/ioutil"
 	"net/http"
 	"sync/atomic"
 	"unsafe"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
