@@ -142,10 +142,10 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-func updateRateLimitConfig(svr *server.Server, key string, value *ratelimit.DimensionConfig) {
+func updateRateLimitConfig(svr *server.Server, key, label string, value *ratelimit.DimensionConfig) {
 	cfg := svr.GetConfig()
 	rateLimitCfg := cfg.PDServerCfg.RateLimitConfig
-	rateLimitCfg[key] = value
+	rateLimitCfg[label] = value
 	updatePDServerConfig(svr, cfg, key, &rateLimitCfg)
 }
 

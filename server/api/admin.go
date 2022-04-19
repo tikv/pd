@@ -226,7 +226,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
-		updateRateLimitConfig(h.svr, "rate-limit-config", cfg)
+		updateRateLimitConfig(h.svr, "rate-limit-config", serviceLabel, cfg)
 		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
 	}
 }
