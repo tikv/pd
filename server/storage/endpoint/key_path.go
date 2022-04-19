@@ -22,7 +22,6 @@ import (
 const (
 	clusterPath                = "raft"
 	configPath                 = "config"
-	storeConfigPath            = "store_config"
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
@@ -103,4 +102,9 @@ func gcSafePointServicePath(serviceID string) string {
 // MinResolvedTSPath returns the min resolved ts path
 func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
+}
+
+// StoreConfigPath returns the store config key path.
+func StoreConfigPath() string {
+	return path.Join(configPath, "store_config")
 }

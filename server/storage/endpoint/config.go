@@ -79,7 +79,7 @@ func (se *StorageEndpoint) RemoveScheduleConfig(scheduleName string) error {
 
 // LoadStoreConfig loads the config of store.
 func (se *StorageEndpoint) LoadStoreConfig(cfg interface{}) (bool, error) {
-	value, err := se.Load(storeConfigPath)
+	value, err := se.Load(StoreConfigPath())
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -96,5 +96,5 @@ func (se *StorageEndpoint) SaveStoreConfig(cfg interface{}) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	return se.Save(storeConfigPath, string(value))
+	return se.Save(StoreConfigPath(), string(value))
 }
