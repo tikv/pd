@@ -223,3 +223,8 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
+
+// HandleReportBuckets processes buckets reports from client
+func (c *RaftCluster) HandleReportBuckets(buckets *metapb.Buckets) error {
+	return c.processReportBuckets(buckets)
+}

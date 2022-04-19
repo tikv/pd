@@ -40,7 +40,7 @@ import (
 const (
 	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
 	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
-	mb                   = (1 << 20)       // 1MiB
+	mb                   = 1 << 20         // 1MiB
 )
 
 // Cluster is used to mock a cluster for test purpose.
@@ -53,24 +53,31 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
+	*config.StoreConfigManager
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
+		BasicCluster:       core.NewBasicCluster(),
+		IDAllocator:        mockid.NewIDAllocator(),
+		HotStat:            statistics.NewHotStat(ctx),
+		PersistOptions:     opts,
+		suspectRegions:     map[uint64]struct{}{},
+		StoreConfigManager: config.NewStoreConfigManager(nil),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
 	// It should be updated to the latest feature version.
 	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewStorageWithMemoryBackend())
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend(), time.Second*5)
 	return clus
+}
+
+// GetStoreConfig returns the store config.
+func (mc *Cluster) GetStoreConfig() *config.StoreConfig {
+	return mc.StoreConfigManager.GetStoreConfig()
 }
 
 // GetOpts returns the cluster configuration.

@@ -56,7 +56,7 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !rm.svr.IsAuditMiddlewareEnabled() && !rm.svr.IsRateLimitMiddlewareEnabled() {
+	if !rm.svr.GetPersistOptions().IsAuditEnabled() && !rm.svr.GetPersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}
@@ -143,7 +143,7 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 
 // ServeHTTP is used to implememt negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !s.svr.IsAuditMiddlewareEnabled() {
+	if !s.svr.GetPersistOptions().IsAuditEnabled() {
 		next(w, r)
 		return
 	}

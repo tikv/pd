@@ -213,6 +213,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/stores/limit", storesHandler.SetAllStoresLimit, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.GetStoreLimitScene, setMethods("GET"))
+	registerFunc(clusterRouter, "/stores/progress", storesHandler.GetStoresProgress, setMethods("GET"))
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	registerFunc(clusterRouter, "/labels", labelsHandler.GetLabels, setMethods("GET"))
@@ -283,8 +284,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/audit-middleware", adminHandler.SwitchAuditMiddleware, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/ratelimit-middleware", adminHandler.HanldeRatelimitMiddlewareSwitch, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/ratelimit/config", adminHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimit(allowList))
 
 	logHandler := newLogHandler(svr, rd)

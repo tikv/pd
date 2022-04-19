@@ -163,10 +163,6 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
-
-	EnableAuditMiddleware bool
-
-	EnableRateLimitMiddleware bool
 }
 
 // NewConfig creates a new config.
@@ -236,6 +232,8 @@ const (
 	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
 	defaultMaxResetTSGap                    = 24 * time.Hour
 	defaultMinResolvedTSPersistenceInterval = 0
+	defaultEnableAuditMiddleware            = false
+	defaultEnableRateLimitMiddleware        = false
 	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
@@ -1113,6 +1111,10 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// EnableAudit controls the switch of the audit middleware
+	EnableAudit bool `toml:"enable-audit" json:"enable-audit"`
+	// EnableRateLimit controls the switch of the rate limit middleware
+	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1137,6 +1139,12 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
+	}
+	if !meta.IsDefined("enable-audit") {
+		c.EnableAudit = defaultEnableAuditMiddleware
+	}
+	if !meta.IsDefined("enable-rate-limit") {
+		c.EnableRateLimit = defaultEnableRateLimitMiddleware
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

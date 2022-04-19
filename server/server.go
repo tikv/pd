@@ -100,10 +100,11 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg            *config.Config
-	etcdCfg        *embed.Config
-	persistOptions *config.PersistOptions
-	handler        *Handler
+	cfg                *config.Config
+	storeConfigManager *config.StoreConfigManager
+	etcdCfg            *embed.Config
+	persistOptions     *config.PersistOptions
+	handler            *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -240,14 +241,14 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:               cfg,
-		persistOptions:    config.NewPersistOptions(cfg),
-		member:            &member.Member{},
-		ctx:               ctx,
-		startTimestamp:    time.Now().Unix(),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                cfg,
+		persistOptions:     config.NewPersistOptions(cfg),
+		member:             &member.Member{},
+		ctx:                ctx,
+		startTimestamp:     time.Now().Unix(),
+		DiagnosticsServer:  sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		storeConfigManager: config.NewStoreConfigManager(&cfg.Security),
 	}
-
 	s.handler = newHandler(s)
 
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
@@ -411,7 +412,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient, s.storeConfigManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -683,6 +684,11 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
+// GetStoreConfigManager returns the store config manager
+func (s *Server) GetStoreConfigManager() *config.StoreConfigManager {
+	return s.storeConfigManager
+}
+
 // GetAddr returns the server urls for clients.
 func (s *Server) GetAddr() string {
 	return s.cfg.AdvertiseClientUrls
@@ -747,26 +753,6 @@ func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
-// SetAuditMiddleware changes EnableAuditMiddleware
-func (s *Server) SetAuditMiddleware(status bool) {
-	s.cfg.EnableAuditMiddleware = status
-}
-
-// IsAuditMiddlewareEnabled returns EnableAuditMiddleware status
-func (s *Server) IsAuditMiddlewareEnabled() bool {
-	return s.cfg.EnableAuditMiddleware
-}
-
-// SetRateLimitMiddleware changes EnableRateLimitMiddleware
-func (s *Server) SetRateLimitMiddleware(status bool) {
-	s.cfg.EnableRateLimitMiddleware = status
-}
-
-// IsRateLimitMiddlewareEnabled returns EnableRateLimitMiddleware status
-func (s *Server) IsRateLimitMiddlewareEnabled() bool {
-	return s.cfg.EnableRateLimitMiddleware
-}
-
 // GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
@@ -810,7 +796,7 @@ func (s *Server) StartTimestamp() int64 {
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	if s.IsClosed() {
-		return nil, errors.New("server not started")
+		return nil, errs.ErrServerNotStarted.FastGenByArgs()
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	return members, err
@@ -1513,7 +1499,12 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 	return nil
 }
 
-// SplitAndScatterRegions TODO
-func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	return nil, errors.New("no implemented")
+// IsTTLConfigExist returns true if the ttl config is existed for a given config.
+func (s *Server) IsTTLConfigExist(key string) bool {
+	if config.IsSupportedTTLConfig(key) {
+		if _, ok := s.persistOptions.GetTTLData(key); ok {
+			return true
+		}
+	}
+	return false
 }

@@ -59,6 +59,7 @@ func init() {
 			if err != nil {
 				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 			}
+
 			ranges, err := getKeyRanges(args[1:])
 			if err != nil {
 				return err
@@ -85,6 +86,16 @@ type evictLeaderSchedulerConfig struct {
 	cluster           schedule.Cluster
 }
 
+func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
+	stores := make([]uint64, 0, len(conf.StoreIDWithRanges))
+	for storeID := range conf.StoreIDWithRanges {
+		stores = append(stores, storeID)
+	}
+	return stores
+}
+
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
@@ -107,8 +118,12 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	for id, ranges := range conf.StoreIDWithRanges {
+		storeIDWithRanges[id] = append(storeIDWithRanges[id], ranges...)
+	}
 	return &evictLeaderSchedulerConfig{
-		StoreIDWithRanges: conf.StoreIDWithRanges,
+		StoreIDWithRanges: storeIDWithRanges,
 	}
 }
 
@@ -187,6 +202,11 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 		conf:          conf,
 		handler:       handler,
 	}
+}
+
+// EvictStores returns the IDs of the evict-stores.
+func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
+	return s.conf.getStores()
 }
 
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

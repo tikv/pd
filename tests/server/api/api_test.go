@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -28,13 +29,18 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/pdctl"
 	"go.uber.org/goleak"
 )
 
@@ -129,7 +135,7 @@ func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	server.EnableZap = true
 	s.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
 	c.Assert(cluster.RunInitialServers(), IsNil)
 	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
@@ -146,15 +152,20 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"), IsNil)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
-	data, _ := json.Marshal(labels)
+	data, _ = json.Marshal(labels)
 	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
@@ -169,11 +180,16 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("component"), Equals, "anonymous")
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
 
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
@@ -189,7 +205,11 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -208,7 +228,11 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input := map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -229,11 +253,39 @@ func doTestRequest(srv *tests.TestServer) {
 
 func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
+<<<<<<< HEAD
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit-middleware?enable=true", nil)
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
 	c.Assert(leader.GetServer().IsRateLimitMiddlewareEnabled(), Equals, true)
+=======
+
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
+
+	oldLeaderName := leader.GetServer().Name()
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	mustWaitLeader(c, s.cluster.GetServers())
+	leader = s.cluster.GetServer(s.cluster.GetLeader())
+>>>>>>> master
 
 	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
 	resp, err = dialClient.Do(req)
@@ -243,6 +295,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 
+<<<<<<< HEAD
 	input := make(map[string]interface{})
 	input["type"] = "label"
 	input["label"] = "SetLogLevel"
@@ -251,6 +304,20 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	jsonBody, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit/config", bytes.NewBuffer(jsonBody))
+=======
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
+>>>>>>> master
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
@@ -322,11 +389,16 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 	timeUnix := time.Now().Unix() - 20
 	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
@@ -343,11 +415,16 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	output := string(content)
 	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
+	input = map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
@@ -358,11 +435,16 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().IsAuditMiddlewareEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)
@@ -391,11 +473,12 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": true,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=true", nil)
-	resp, _ = dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -413,11 +496,12 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/service-middleware?enable=true", nil)
+	input := map[string]interface{}{
+		"enable-audit": false,
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/audit-middleware?enable=false", nil)
-	resp, _ = dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -532,4 +616,147 @@ func mustRequestSuccess(c *C, s *server.Server) http.Header {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, http.StatusOK)
 	return resp.Header
+}
+
+var _ = Suite(&testProgressSuite{})
+
+type testProgressSuite struct{}
+
+func (s *testProgressSuite) TestProgress(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leader.GetAddr())
+	clusterID := leader.GetClusterID()
+	req := &pdpb.BootstrapRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+	}
+	_, err = grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leader.GetServer(), store)
+	}
+	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
+	pdctl.MustPutRegion(c, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
+	pdctl.MustPutRegion(c, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
+
+	// no store removing
+	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	var p api.Progress
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, 0.0)
+
+	// remove store 1 and store 2
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete)
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete)
+
+	// size is not changed.
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
+
+	// update size
+	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
+	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
+
+	time.Sleep(time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	// store 1: (60-20)/(60+50) ~= 0.36
+	// store 2: (30-10)/(30+40) ~= 0.28
+	// average progress ~= (0.36+0.28)/2 = 0.32
+	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.32")
+	// store 1: 40/1s+ < 40
+	// store 2: 20/1s+ < 20
+	// average speed ~= (20+40)/2/1s+ < 30
+	c.Assert(p.CurrentSpeed, Less, 30.0)
+	c.Assert(p.CurrentSpeed, Greater, 25.0)
+	// store 1: (20+50)/40 ~= 1.75s+
+	// store 2: (10+40)/20 ~= 2.5s+
+	// average time ~= (1.75+2.5)/2 = 2.125s+
+	c.Assert(p.LeftSeconds, Greater, 2.125)
+	c.Assert(p.LeftSeconds, Less, 2.5)
+
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	// store 2: (30-10)/(30+40) ~= 0.285
+	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.29")
+	// store 2: 20/1s+ < 20
+	c.Assert(p.CurrentSpeed, Less, 20.0)
+	c.Assert(p.CurrentSpeed, Greater, 15.0)
+	// store 2: (10+40)/20 ~= 2.5s+
+	c.Assert(p.LeftSeconds, Greater, 2.5)
+	c.Assert(p.LeftSeconds, Less, 3.0)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
+}
+
+func sendRequest(c *C, url string, method string) []byte {
+	req, _ := http.NewRequest(method, url, nil)
+	resp, err := dialClient.Do(req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	output, err := io.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	resp.Body.Close()
+	return output
+}
+
+func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {
+	var leader *server.Server
+	testutil.WaitUntil(c, func() bool {
+		for _, s := range svrs {
+			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
+				leader = s.GetServer()
+				return true
+			}
+		}
+		return false
+	})
+	return leader
 }
