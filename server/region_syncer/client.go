@@ -218,8 +218,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
-						old := region.GetBuckets()
-						if old == nil || buckets[i].GetVersion() > old.GetVersion() {
+						if old := region.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
 						}
 					}

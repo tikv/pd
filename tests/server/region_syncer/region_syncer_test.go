@@ -16,7 +16,6 @@ package syncer_test
 
 import (
 	"context"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"testing"
 	"time"
 
@@ -165,7 +164,6 @@ func (s *regionSyncerTestSuite) TestRegionSyncer(c *C) {
 		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
 		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
 		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
-		c.Assert(r.GetBuckets().GetKeys(), HasLen, 2)
 		c.Assert(r.GetBuckets(), DeepEquals, region.GetBuckets())
 	}
 }
@@ -210,47 +208,6 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(loadRegions, HasLen, regionLen)
-}
-
-func (s *regionSyncerTestSuite) TestSyncClient(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	rc := leaderServer.GetServer().GetRaftCluster()
-	c.Assert(rc, NotNil)
-	regionLen := 110
-	regions := initRegions(regionLen)
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		c.Assert(err, IsNil)
-	}
-
-	client := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
-	c.Assert(client, NotNil)
-	syncClient, err := client.SyncRegions(context.Background())
-	c.Assert(err, IsNil)
-	err = syncClient.Send(&pdpb.SyncRegionRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: leaderServer.GetClusterID(),
-		},
-		Member: &pdpb.Member{
-			Name:       "pd-2",
-			ClientUrls: []string{"fate-pd-2"},
-		},
-	})
-	c.Assert(err, IsNil)
-	rsp, err := syncClient.Recv()
-	c.Assert(err, IsNil)
-	c.Assert(rsp, NotNil)
-	c.Assert(rsp.Regions, HasLen, regionLen)
-	c.Assert(rsp.Buckets, HasLen, regionLen)
-	syncClient.CloseSend()
 }
 
 func initRegions(regionLen int) []*core.RegionInfo {
