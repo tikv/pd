@@ -147,8 +147,10 @@ type Server struct {
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock syncutil.Mutex
+	// Lock for UpdateServiceSafePointByServiceGroup
+	serviceGroupSafePointLock syncutil.Mutex
 
-	// hot region history info storeage
+	// hot region history info storage
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map

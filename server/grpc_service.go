@@ -1445,6 +1445,160 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}, nil
 }
 
+// GetAllServiceGroupGcSafePoint used by RawKV
+// returns GCSafePoint for all service groups as well as min GCSafePoint
+func (s *GrpcServer) GetAllServiceGroupGcSafePoint(ctx context.Context, request *pdpb.GetAllServiceGroupGcSafePointRequest) (*pdpb.GetAllServiceGroupGcSafePointResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).GetAllServiceGroupGcSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetAllServiceGroupGcSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetAllServiceGroupGcSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	var storage endpoint.GCSafePointStorage = s.storage
+	safePoints, err := storage.LoadAllServiceGroupGCSafePoints()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.GetAllServiceGroupGcSafePointResponse{
+		Header:                s.header(),
+		ServiceGroupSafePoint: safePoints,
+	}, nil
+}
+
+// UpdateGCSafePointByServiceGroup used by gc_worker to update their gc safe points
+func (s *GrpcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request *pdpb.UpdateGCSafePointByServiceGroupRequest) (*pdpb.UpdateGCSafePointByServiceGroupResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).UpdateGCSafePointByServiceGroup(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateGCSafePointByServiceGroupResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateGCSafePointByServiceGroupResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	var storage endpoint.GCSafePointStorage = s.storage
+	serviceGroupID := string(request.ServiceGroupId)
+	oldSafePoint, err := storage.LoadGCWorkerSafePoint(serviceGroupID)
+	if err != nil {
+		return nil, err
+	}
+	newSafePoint := &endpoint.GCSafePoint{
+		ServiceGroupID: serviceGroupID,
+		SafePoint:      request.SafePoint,
+	}
+
+	// Only save the safe point if it's greater than the previous one
+	if newSafePoint.SafePoint > oldSafePoint.SafePoint {
+		if err := storage.SaveGCWorkerSafePoint(serviceGroupID, newSafePoint); err != nil {
+			return nil, err
+		}
+		log.Info("updated gc_worker safe point",
+			zap.String("service-group-id", serviceGroupID),
+			zap.Uint64("safe-point", newSafePoint.SafePoint))
+	} else if newSafePoint.SafePoint < oldSafePoint.SafePoint {
+		log.Warn("trying to update gc_worker safe point",
+			zap.String("service-group-id", serviceGroupID),
+			zap.Uint64("old-safe-point", oldSafePoint.SafePoint),
+			zap.Uint64("new-safe-point", newSafePoint.SafePoint))
+		newSafePoint = oldSafePoint
+	}
+	return &pdpb.UpdateGCSafePointByServiceGroupResponse{
+		Header:         s.header(),
+		ServiceGroupId: request.ServiceGroupId,
+		NewSafePoint:   newSafePoint.SafePoint,
+	}, nil
+}
+
+// UpdateServiceSafePointByServiceGroup for services like CDC/BR/Lightning to update gc safe points in PD
+func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, request *pdpb.UpdateServiceSafePointByServiceGroupRequest) (*pdpb.UpdateServiceSafePointByServiceGroupResponse, error) {
+	s.serviceGroupSafePointLock.Lock()
+	defer s.serviceGroupSafePointLock.Unlock()
+
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).UpdateServiceSafePointByServiceGroup(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateServiceSafePointByServiceGroupResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateServiceSafePointByServiceGroupResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	var storage endpoint.GCSafePointStorage = s.storage
+	serviceGroupID := string(request.ServiceGroupId)
+	serviceID := string(request.ServiceId)
+	// a less than 0 ttl means to remove the safe point
+	if request.TTL <= 0 {
+		if err := storage.RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID); err != nil {
+			return nil, err
+		}
+	}
+
+	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	if err != nil {
+		return nil, err
+	}
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
+	min, err := storage.LoadMinServiceSafePointByServiceGroup(serviceGroupID, now)
+	if err != nil {
+		return nil, err
+	}
+
+	// min safe point of all services need
+	if request.TTL > 0 && (min == nil || request.SafePoint >= min.SafePoint) {
+		ssp := &endpoint.ServiceSafePoint{
+			ServiceID: serviceID,
+			ExpiredAt: now.Unix() + request.TTL,
+			SafePoint: request.SafePoint,
+		}
+		// handles overflow
+		if math.MaxInt64-now.Unix() <= request.TTL {
+			ssp.ExpiredAt = math.MaxInt64
+		}
+		if err := storage.SaveServiceSafePointByServiceGroup(serviceGroupID, ssp); err != nil {
+			return nil, err
+		}
+		log.Info("update service safe point by service group",
+			zap.String("service-group-id", serviceGroupID),
+			zap.String("service-id", ssp.ServiceID),
+			zap.Int64("expire-at", ssp.ExpiredAt),
+			zap.Uint64("safepoint", ssp.SafePoint))
+		// If the updated service is the original min, or if originally it's empty, look for min again
+		// note that this guarantees that min is not nil
+		if min == nil || serviceID == min.ServiceID {
+			min, err = storage.LoadMinServiceSafePointByServiceGroup(serviceGroupID, now)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return &pdpb.UpdateServiceSafePointByServiceGroupResponse{
+		Header:       s.header(),
+		ServiceId:    []byte(min.ServiceID),
+		TTL:          min.ExpiredAt - now.Unix(),
+		MinSafePoint: min.SafePoint,
+	}, nil
+}
+
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
