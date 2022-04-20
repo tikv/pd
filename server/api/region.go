@@ -115,6 +115,7 @@ type RegionInfo struct {
 	ReadKeys        uint64        `json:"read_keys"`
 	ApproximateSize int64         `json:"approximate_size"`
 	ApproximateKeys int64         `json:"approximate_keys"`
+	Buckets         []string      `json:"buckets,omitempty"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -163,6 +164,14 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 
+	keys := r.GetBuckets().GetKeys()
+
+	if len(keys) > 0 {
+		s.Buckets = make([]string, len(keys))
+		for i, key := range keys {
+			s.Buckets[i] = core.HexRegionKeyStr(key)
+		}
+	}
 	return s
 }
 
@@ -481,6 +490,40 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	regions, err := handler.GetOfflinePeer(statistics.OfflinePeer)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
+// @Summary List all regions that are oversized.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /regions/check/oversized-region [get]
+func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	regions, err := handler.GetRegionsByType(statistics.OversizedRegion)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags region
+// @Summary List all regions that are undersized.
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /regions/check/undersized-region [get]
+func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Request) {
+	handler := h.svr.GetHandler()
+	regions, err := handler.GetRegionsByType(statistics.UndersizedRegion)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

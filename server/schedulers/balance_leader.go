@@ -76,6 +76,9 @@ func init() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		if conf.Batch == 0 {
+			conf.Batch = BalanceLeaderBatchSize
+		}
 		return newBalanceLeaderScheduler(opController, conf), nil
 	})
 }
@@ -230,6 +233,8 @@ func (l *balanceLeaderScheduler) GetType() string {
 }
 
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
+	l.conf.mu.RLock()
+	defer l.conf.mu.RUnlock()
 	return schedule.EncodeConfig(l.conf)
 }
 
@@ -290,8 +295,8 @@ func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
 
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	l.conf.mu.RLock()
+	defer l.conf.mu.RUnlock()
 	batch := l.conf.Batch
-	l.conf.mu.RUnlock()
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()

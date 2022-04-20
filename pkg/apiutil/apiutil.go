@@ -59,7 +59,8 @@ func (e JSONError) Error() string {
 	return e.Err.Error()
 }
 
-func tagJSONError(err error) error {
+// TagJSONError wraps the JSON error to one type.
+func TagJSONError(err error) error {
 	switch err.(type) {
 	case *json.SyntaxError, *json.UnmarshalTypeError:
 		return JSONError{err}
@@ -299,7 +300,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 
 	err = json.Unmarshal(b, data)
 	if err != nil {
-		return tagJSONError(err)
+		return TagJSONError(err)
 	}
 
 	return err

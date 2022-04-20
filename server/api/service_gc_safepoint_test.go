@@ -49,7 +49,7 @@ func (s *testServiceGCSafepointSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testServiceGCSafepointSuite) TestRegionStats(c *C) {
+func (s *testServiceGCSafepointSuite) TestServiceGCSafepoint(c *C) {
 	sspURL := s.urlPrefix + "/gc/safepoint"
 
 	storage := s.svr.GetStorage()

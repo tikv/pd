@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
 	"sync"
 	"testing"
@@ -207,7 +208,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
 
-	co.run()
+	go co.runUntilStop()
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
@@ -250,7 +251,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -675,6 +676,18 @@ func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
 	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
 
 	oc := co.opController
+
+	// test ConfigJSONDecoder create
+	bl, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
+	c.Assert(err, IsNil)
+	conf, err := bl.EncodeConfig()
+	c.Assert(err, IsNil)
+	data := make(map[string]interface{})
+	err = json.Unmarshal(conf, &data)
+	c.Assert(err, IsNil)
+	batch := data["batch"].(float64)
+	c.Assert(int(batch), Equals, 4)
+
 	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	c.Assert(err, IsNil)
 	c.Assert(co.addScheduler(gls), NotNil)

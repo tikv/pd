@@ -96,6 +96,11 @@ error = '''
 incorrect system time
 '''
 
+["PD:core:ErrNoStoreForRegionLeader"]
+error = '''
+can not remove store %d since there are no extra up store to store the leader
+'''
+
 ["PD:core:ErrPauseLeaderTransfer"]
 error = '''
 store %v is paused for leader transfer
@@ -124,6 +129,11 @@ store %v has been removed
 ["PD:core:ErrStoreUnhealthy"]
 error = '''
 store %v is unhealthy
+'''
+
+["PD:core:ErrStoresNotEnough"]
+error = '''
+can not remove store %v since the number of up stores would be %v while need %v
 '''
 
 ["PD:core:ErrWrongRangeKeys"]
@@ -281,6 +291,11 @@ error = '''
 etcd member list failed
 '''
 
+["PD:etcd:ErrEtcdMemberRemove"]
+error = '''
+etcd remove member failed
+'''
+
 ["PD:etcd:ErrEtcdMoveLeader"]
 error = '''
 etcd move leader error
@@ -324,6 +339,11 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:gin:ErrBindJSON"]
+error = '''
+bind JSON error
 '''
 
 ["PD:grpc:ErrCloseGRPCConn"]
@@ -601,9 +621,19 @@ error = '''
 leader is nil
 '''
 
+["PD:server:ErrServerNotStarted"]
+error = '''
+server not started
+'''
+
 ["PD:server:ErrServiceRegistered"]
 error = '''
 service with path [%s] already registered
+'''
+
+["PD:strconv:ErrStrconvParseBool"]
+error = '''
+parse bool error
 '''
 
 ["PD:strconv:ErrStrconvParseFloat"]

@@ -296,6 +296,14 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
+func (c *coordinator) runUntilStop() {
+	c.run()
+	<-c.ctx.Done()
+	log.Info("coordinator is stopping")
+	c.wg.Wait()
+	log.Info("coordinator has been stopped")
+}
+
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
@@ -602,6 +610,9 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
+	failpoint.Inject("hasPrepared", func() {
+		failpoint.Return(true)
+	})
 	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 

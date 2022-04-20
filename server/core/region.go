@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/gogo/protobuf/proto"
@@ -39,7 +40,8 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 }
 
 // RegionInfo records detail region info.
-// Read-Only once created.
+// the properties are Read-Only once created except buckets.
+// the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
 	term              uint64
 	meta              *metapb.Region
@@ -58,6 +60,8 @@ type RegionInfo struct {
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
+	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	buckets unsafe.Pointer
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -165,18 +169,20 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// CorrectApproximateSize correct approximate size by the previous size if here exists an reported RegionInfo.
-//
+// Inherit inherits the buckets and region size from the parent region.
+// correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
-func (r *RegionInfo) CorrectApproximateSize(origin *RegionInfo) {
-	if r.approximateSize != 0 {
-		return
+func (r *RegionInfo) Inherit(origin *RegionInfo) {
+	// regionSize should not be zero if region is not empty.
+	if r.GetApproximateSize() == 0 {
+		if origin != nil {
+			r.approximateSize = origin.approximateSize
+		} else {
+			r.approximateSize = EmptyRegionApproximateSize
+		}
 	}
-
-	if origin != nil {
-		r.approximateSize = origin.approximateSize
-	} else {
-		r.approximateSize = EmptyRegionApproximateSize
+	if origin != nil && r.buckets == nil {
+		r.buckets = origin.buckets
 	}
 }
 
@@ -205,6 +211,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		approximateKeys:   r.approximateKeys,
 		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
 		replicationStatus: r.replicationStatus,
+		buckets:           r.buckets,
 	}
 
 	for _, opt := range opts {
@@ -404,6 +411,30 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 		KeysWritten:  r.writtenKeys,
 		KeysRead:     r.readKeys,
 	}
+}
+
+// UpdateBuckets sets the buckets of the region.
+func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
+	// the bucket can't be nil except in the test cases.
+	if buckets == nil {
+		return true
+	}
+	// only need to update bucket keys, versions.
+	newBuckets := &metapb.Buckets{
+		RegionId: buckets.GetRegionId(),
+		Version:  buckets.GetVersion(),
+		Keys:     buckets.GetKeys(),
+	}
+	return atomic.CompareAndSwapPointer(&r.buckets, unsafe.Pointer(old), unsafe.Pointer(newBuckets))
+}
+
+// GetBuckets returns the buckets of the region.
+func (r *RegionInfo) GetBuckets() *metapb.Buckets {
+	if r == nil {
+		return nil
+	}
+	buckets := atomic.LoadPointer(&r.buckets)
+	return (*metapb.Buckets)(buckets)
 }
 
 // GetApproximateSize returns the approximate size of the region.
