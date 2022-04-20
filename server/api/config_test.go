@@ -295,7 +295,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 
 	addrGet := fmt.Sprintf("%s/config/pd-server", s.urlPrefix)
 	sc := &config.PDServerConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrPost, sc), IsNil)
+	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
 
 	c.Assert(sc.UseRegionStorage, Equals, bool(true))
 	c.Assert(sc.KeyType, Equals, "table")
@@ -387,9 +387,9 @@ func (s *testConfigSuite) TestTTLConflict(c *C) {
 	postData, err = json.Marshal(cfg)
 	c.Assert(err, IsNil)
 	addr = fmt.Sprintf("%s/config", s.urlPrefix)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c))
-	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(c), tu.StringEqual(c, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
+	c.Assert(err, IsNil)
 	addr = fmt.Sprintf("%s/config/schedule", s.urlPrefix)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c))
-	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(c), tu.StringEqual(c, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
+	c.Assert(err, IsNil)
 }
