@@ -89,46 +89,52 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
 		}},
 	}
-	c.Assert(recoveryController.stage, Equals, collectingClusterInfo)
+	c.Assert(recoveryController.GetStage(), Equals, collectingClusterInfo)
+	// require peer report
 	for storeID, _ := range reports {
 		req := newStoreHeartbeat(storeID)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RequireDetailedReport, IsTrue)
+		c.Assert(resp.Plan, NotNil)
+		c.Assert(len(resp.Plan.Creates), Equals, 0)
+		c.Assert(len(resp.Plan.Removes), Equals, 0)
+		c.Assert(len(resp.Plan.Deletes), Equals, 0)
+		c.Assert(len(resp.Plan.EnterForceLeaders), Equals, 0)
+		c.Assert(len(resp.Plan.FailedStores), Equals, 0)
 	}
-	c.Assert(recoveryController.stage, Equals, forceLeader)
+
+	// receive all reports and dispatch plan
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID)
-		resp := &pdpb.StoreHeartbeatResponse{}
-		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RequireDetailedReport, IsFalse)
-		// force leader
-		c.Assert(resp.Plan, NotNil)
-
 		req.StoreReport = report
-		resp = &pdpb.StoreHeartbeatResponse{}
+		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RequireDetailedReport, IsFalse)
-		c.Assert(resp.Plan, IsNil)
+		c.Assert(resp.Plan, NotNil)
+		c.Assert(len(resp.Plan.EnterForceLeaders), Equals, 1)
+		c.Assert(resp.Plan.FailedStores, NotNil)
 	}
-	c.Assert(recoveryController.stage, Equals, recovering)
+	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		c.Assert(resp.Plan, NotNil)
+		c.Assert(len(resp.Plan.Removes), Equals, 1)
+	}
+	c.Assert(recoveryController.GetStage(), Equals, recovering)
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID)
 		resp := &pdpb.StoreHeartbeatResponse{}
-		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RequireDetailedReport, IsFalse)
-		// force leader
-		c.Assert(resp.Plan, NotNil)
-
 		req.StoreReport = report
 		// remove the two failed peers
 		req.StoreReport.PeerReports[0].RegionState.Region.Peers = req.StoreReport.PeerReports[0].RegionState.Region.Peers[:1]
 		resp = &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RequireDetailedReport, IsFalse)
 		c.Assert(resp.Plan, IsNil)
 	}
-	c.Assert(recoveryController.stage, Equals, ready)
+	c.Assert(recoveryController.GetStage(), Equals, ready)
 }
 
 // func (s *testUnsafeRecoverSuite) TestPlanGenerationOneUnhealthyRegion(c *C) {
