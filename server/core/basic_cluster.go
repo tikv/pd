@@ -399,8 +399,8 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	bc.Lock()
-	defer bc.Unlock()
+	bc.RLock()
+	defer bc.RUnlock()
 	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
 }
 
