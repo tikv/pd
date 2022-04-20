@@ -1190,7 +1190,7 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
 	opt.SetReplicationConfig(cfg)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -1269,7 +1269,7 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize2(c *C) {
 	opt.SetMaxReplicas(3)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager)
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {

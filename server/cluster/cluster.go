@@ -344,6 +344,9 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		nodeStateCheckJobInterval = 1 * time.Microsecond
+	})
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	defer ticker.Stop()
 
