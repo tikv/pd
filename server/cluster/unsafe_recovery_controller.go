@@ -298,6 +298,18 @@ type regionItem struct {
 	storeID uint64
 }
 
+// Less returns true if the region start key is less than the other.
+func (r *regionItem) Less(other btree.Item) bool {
+	left := r.Region().GetStartKey()
+	right := other.(*regionItem).Region().GetStartKey()
+	return bytes.Compare(left, right) < 0
+}
+
+func (r *regionItem) Contains(key []byte) bool {
+	start, end := r.Region().GetStartKey(), r.Region().GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+}
+
 func (r *regionItem) Region() *metapb.Region {
 	return r.report.GetRegionState().GetRegion()
 }
@@ -313,40 +325,31 @@ func (r *regionItem) IsStale(origin *regionItem) bool {
 		panic("should compare peers of same region")
 	}
 
-	// compare region epoch, commit index, term and last index in order
+	// compare region epoch, last log term, last log index and commit index in order
 	if r.IsEpochStale(origin) {
 		return true
 	}
 	re := r.Region().GetRegionEpoch()
 	oe := origin.Region().GetRegionEpoch()
 	if re.GetVersion() == oe.GetVersion() && re.GetConfVer() == oe.GetConfVer() {
-		rs := r.report.GetRaftState()
-		os := origin.report.GetRaftState()
-		if rs.GetHardState().GetCommit() < os.GetHardState().GetCommit() {
-			return true
-		} else if rs.GetHardState().GetCommit() == os.GetHardState().GetCommit() {
-			if rs.GetHardState().GetTerm() < os.GetHardState().GetTerm() {
-				return true
-			} else if rs.GetHardState().GetTerm() == os.GetHardState().GetTerm() {
-				if rs.GetLastIndex() < os.GetLastIndex() {
-					return true
-				}
-			}
-		}
+		return r.IsRaftStale(origin)
 	}
 	return false
 }
 
-// Less returns true if the region start key is less than the other.
-func (r *regionItem) Less(other btree.Item) bool {
-	left := r.Region().GetStartKey()
-	right := other.(*regionItem).Region().GetStartKey()
-	return bytes.Compare(left, right) < 0
-}
-
-func (r *regionItem) Contains(key []byte) bool {
-	start, end := r.Region().GetStartKey(), r.Region().GetEndKey()
-	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+func (r *regionItem) IsRaftStale(origin *regionItem) bool {
+	rs := r.report.GetRaftState()
+	os := origin.report.GetRaftState()
+	if rs.GetHardState().GetTerm() < os.GetHardState().GetTerm() {
+		return true
+	} else if rs.GetHardState().GetTerm() == os.GetHardState().GetTerm() {
+		if rs.GetLastIndex() < os.GetLastIndex() {
+			return true
+		} else if rs.GetLastIndex() == os.GetLastIndex() {
+			return rs.GetHardState().GetCommit() < os.GetHardState().GetCommit()
+		}
+	}
+	return false
 }
 
 const (
@@ -413,7 +416,7 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
-// insert the region.
+// insert the new region.
 func (t *regionTree) update(item *regionItem) bool {
 	overlaps := t.getOverlaps(item)
 
@@ -459,27 +462,46 @@ func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.Recover
 	return storeRecoveryPlan
 }
 
-func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
+func (u *unsafeRecoveryController) findLeader(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
+	var leader *regionItem
+	for _, peer := range peersMap[region.GetId()] {
+		if leader == nil || leader.IsRaftStale(peer) {
+			leader = peer
+		}
+	}
+	return leader
+}
+
+func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
 	// clean up previous plan
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 
 	newestRegionTree := newRegionTree()
+	peersMap := make(map[uint64][]*regionItem)
 	// Go through all the peer reports to build up the newest region tree
 	for storeID, storeReport := range u.storeReports {
 		for _, peerReport := range storeReport.PeerReports {
-			newestRegionTree.update(&regionItem{report: peerReport, storeID: storeID})
+			item := &regionItem{report: peerReport, storeID: storeID}
+			peersMap[item.Region().GetId()] = append(peersMap[item.Region().GetId()], item)
+			newestRegionTree.update(item)
 		}
 	}
+	return newestRegionTree, peersMap
+}
 
+func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
+	newestRegionTree, peersMap := u.buildUpFromReports()
 	hasPlan := false
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
-		storeID := item.(*regionItem).storeID
 		if !u.canElectLeader(region) {
-			storeRecoveryPlan := u.getRecoveryPlan(storeID)
+			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
+			// so find which peer should to be the leader instead of using peer info in the region tree.
+			leader := u.findLeader(peersMap, region)
+			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
 			storeRecoveryPlan.EnterForceLeaders = append(storeRecoveryPlan.EnterForceLeaders, region.GetId())
 			if storeRecoveryPlan.FailedStores == nil {
 				for store := range u.failedStores {
@@ -499,26 +521,15 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 }
 
 func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
-	// clean up previous plan
-	u.storePlanExpires = make(map[uint64]time.Time)
-	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-
-	newestRegionTree := newRegionTree()
-	// Go through all the peer reports to build up the newest region tree
-	for storeID, storeReport := range u.storeReports {
-		for _, peerReport := range storeReport.PeerReports {
-			newestRegionTree.update(&regionItem{report: peerReport, storeID: storeID})
-		}
-	}
-
+	newestRegionTree, peersMap := u.buildUpFromReports()
 	hasPlan := false
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
-		storeID := item.(*regionItem).storeID
 		if !u.canElectLeader(region) {
-			storeRecoveryPlan := u.getRecoveryPlan(storeID)
+			leader := u.findLeader(peersMap, region)
+			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
 			storeRecoveryPlan.Removes = append(storeRecoveryPlan.Removes,
 				&pdpb.RemovePeers{
 					RegionId: region.GetId(),
@@ -553,10 +564,14 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
 		if !bytes.Equal(region.StartKey, lastEnd) {
+			var err error
 			newRegion := &metapb.Region{}
 			newRegion.StartKey = lastEnd
 			newRegion.EndKey = region.StartKey
-			newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
+			newRegion.Id, err = u.cluster.GetAllocator().Alloc()
+			if err != nil {
+				panic("can't alloc region id")
+			}
 			newRegion.RegionEpoch = &metapb.RegionEpoch{ConfVer: 1, Version: 1}
 			creates = append(creates, newRegion)
 		}
@@ -575,7 +590,10 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 	}
 	for idx, create := range creates {
 		storeID := allStores[idx%len(allStores)]
-		peerID, _ := u.cluster.GetAllocator().Alloc()
+		peerID, err := u.cluster.GetAllocator().Alloc()
+		if err != nil {
+			panic("can't alloc peer id")
+		}
 		create.Peers = []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}}
 		storeRecoveryPlan := u.getRecoveryPlan(storeID)
 		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, create)
