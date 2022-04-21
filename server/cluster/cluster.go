@@ -1389,6 +1389,8 @@ func (c *RaftCluster) checkStores() {
 				if left < 0 {
 					left = 0
 				}
+				// If we add multiple stores, the total will need to be changed.
+				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
 				c.updateProgress(storeID, store.GetAddress(), preparingAction, left)
 			}
 		}
