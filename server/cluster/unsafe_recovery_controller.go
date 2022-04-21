@@ -40,9 +40,10 @@ const (
 
 const (
 	ready unsafeRecoveryStage = iota
-	collectingClusterInfo
+	collectReport
 	forceLeader
-	recovering
+	removePeer
+	createEmptyRegion
 )
 
 type unsafeRecoveryController struct {
@@ -130,7 +131,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	}
 
 	u.failedStores = failedStores
-	u.stage = collectingClusterInfo
+	u.stage = collectReport
 	return nil
 }
 
@@ -144,7 +145,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	case ready:
 		// no recovery in progress, do nothing
 		return
-	case collectingClusterInfo:
+	case collectReport:
 		if u.collectReport(heartbeat, resp) {
 			if !u.generateForceLeaderPlan() {
 				u.finishRecovery()
@@ -156,22 +157,33 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 		u.dispatchPlan(heartbeat, resp)
 	case forceLeader:
 		if u.collectReport(heartbeat, resp) {
-			if !u.generateRecoveryPlan() {
+			if !u.generateRemovePeerPlan() {
 				u.finishRecovery()
 				return
 			} else {
-				u.changeStage(recovering)
+				u.changeStage(removePeer)
 			}
 		}
 		u.dispatchPlan(heartbeat, resp)
-	case recovering:
+	case removePeer:
 		if u.collectReport(heartbeat, resp) {
+			// may still have plan to do, recheck again
 			if u.generateForceLeaderPlan() {
-				// still have plan to do
 				u.changeStage(forceLeader)
-			} else if u.generateRecoveryPlan() {
-				// still have plan to do
-				u.changeStage(recovering)
+			} else if u.generateRemovePeerPlan() {
+				u.changeStage(removePeer)
+			} else if u.generateCreateEmptyRegionPlan() {
+				u.changeStage(createEmptyRegion)
+			} else {
+				u.finishRecovery()
+				return
+			}
+		}
+		u.dispatchPlan(heartbeat, resp)
+	case createEmptyRegion:
+		if u.collectReport(heartbeat, resp) {
+			if u.generateCreateEmptyRegionPlan() {
+				u.changeStage(createEmptyRegion)
 			} else {
 				u.finishRecovery()
 				return
@@ -297,6 +309,14 @@ type regionItem struct {
 	report  *pdpb.PeerReport
 	storeID uint64
 }
+
+// TODO!!!!!!!!!!!!
+// 1. [DONE] make sure propose on the origin forced leader
+// 2. test add apply recovery plan
+// 3. construct accumulative log
+// 4. [DONE] separate create empty region
+// 5. make region tree generic
+// 6. consider Tiflash
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
@@ -522,7 +542,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
+func (u *unsafeRecoveryController) generateRemovePeerPlan() bool {
 	newestRegionTree, peersMap := u.buildUpFromReports()
 	hasPlan := false
 
@@ -575,46 +595,57 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 		}
 	}
 
-	// There may be ranges that are covered by no one. Find these empty ranges, create new
-	// regions that cover them and evenly distribute newly created regions among all stores.
-	lastEnd := []byte("")
-	var creates []*metapb.Region
-	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
-		region := item.(*regionItem).Region()
-		if !bytes.Equal(region.StartKey, lastEnd) {
-			var err error
-			newRegion := &metapb.Region{}
-			newRegion.StartKey = lastEnd
-			newRegion.EndKey = region.StartKey
-			newRegion.Id, err = u.cluster.GetAllocator().Alloc()
-			if err != nil {
-				panic("can't alloc region id")
-			}
-			newRegion.RegionEpoch = &metapb.RegionEpoch{ConfVer: 1, Version: 1}
-			creates = append(creates, newRegion)
+	log.Info("Plan generated")
+	for store, plan := range u.storeRecoveryPlans {
+		log.Info("Store plan", zap.String("store", strconv.FormatUint(store, 10)), zap.String("plan", proto.MarshalTextString(plan)))
+	}
+	return hasPlan
+}
+
+func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
+	newestRegionTree, _ := u.buildUpFromReports()
+	hasPlan := false
+
+	createRegion := func(startKey, endKey []byte, storeID uint64) *metapb.Region {
+		regionID, err := u.cluster.GetAllocator().Alloc()
+		if err != nil {
+			panic("can't alloc region id")
 		}
-		lastEnd = region.EndKey
-		return true
-	})
-	if !bytes.Equal(lastEnd, []byte("")) {
-		newRegion := &metapb.Region{}
-		newRegion.StartKey = lastEnd
-		newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
-		creates = append(creates, newRegion)
-	}
-	var allStores []uint64
-	for storeID := range u.storeReports {
-		allStores = append(allStores, storeID)
-	}
-	for idx, create := range creates {
-		storeID := allStores[idx%len(allStores)]
 		peerID, err := u.cluster.GetAllocator().Alloc()
 		if err != nil {
 			panic("can't alloc peer id")
 		}
-		create.Peers = []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}}
-		storeRecoveryPlan := u.getRecoveryPlan(storeID)
-		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, create)
+		return &metapb.Region{
+			Id:          regionID,
+			StartKey:    startKey,
+			EndKey:      endKey,
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			Peers:       []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}},
+		}
+	}
+
+	// There may be ranges that are covered by no one. Find these empty ranges, create new
+	// regions that cover them and evenly distribute newly created regions among all stores.
+	lastEnd := []byte("")
+	var lastStoreID uint64
+	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
+		region := item.(*regionItem).Region()
+		storeID := item.(*regionItem).storeID
+		if !bytes.Equal(region.StartKey, lastEnd) {
+			newRegion := createRegion(lastEnd, region.StartKey, storeID)
+			storeRecoveryPlan := u.getRecoveryPlan(storeID)
+			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+			hasPlan = true
+		}
+		lastEnd = region.EndKey
+		lastStoreID = storeID
+		return true
+	})
+	if !bytes.Equal(lastEnd, []byte("")) {
+		newRegion := createRegion(lastEnd, []byte(""), lastStoreID)
+		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
+		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+		hasPlan = true
 	}
 
 	log.Info("Plan generated")
@@ -657,56 +688,56 @@ func getStoreDigest(storeReport *pdpb.StoreReport) string {
 func (u *unsafeRecoveryController) Show() []string {
 	u.RLock()
 	defer u.RUnlock()
-	switch u.stage {
-	case ready:
-		return []string{"No on-going operation."}
-	case collectingClusterInfo:
-		var status []string
-		status = append(status, fmt.Sprintf("Collecting cluster info from all alive stores, %d/%d.", u.numStoresReported, len(u.storeReports)))
-		var reported, unreported string
-		for storeID, report := range u.storeReports {
-			if report == nil {
-				unreported += strconv.FormatUint(storeID, 10) + ","
-			} else {
-				reported += strconv.FormatUint(storeID, 10) + ","
-			}
-		}
-		status = append(status, "Stores that have reported to PD: "+reported)
-		status = append(status, "Stores that have not reported to PD: "+unreported)
-		return status
-	case forceLeader:
-		// TODO:
-	case recovering:
-		var status []string
-		status = append(status, fmt.Sprintf("Waiting for recover commands being applied, %d/%d", u.numStoresReported, len(u.storeRecoveryPlans)))
-		status = append(status, "Recovery plan:")
-		for storeID, plan := range u.storeRecoveryPlans {
-			planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
-			for _, create := range plan.Creates {
-				planDigest += getRegionDigest(create) + ", "
-			}
-			planDigest += "; removes: "
-			for _, remove := range plan.Removes {
-				var peers string
-				for _, peer := range remove.Peers {
-					peers += "(" + getPeerDigest(peer) + "), "
-				}
-				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
-			}
-			planDigest += "; deletes: "
-			for _, deletion := range plan.Tombstones {
-				planDigest += strconv.FormatUint(deletion, 10) + ", "
-			}
-			status = append(status, planDigest)
-		}
-		status = append(status, "Execution progess:")
-		for storeID, applied := range u.executionResults {
-			if !applied {
-				status = append(status, strconv.FormatUint(storeID, 10)+"not yet applied, last report: "+getStoreDigest(u.executionReports[storeID]))
-			}
-		}
-		return status
-	}
+	// switch u.stage {
+	// case ready:
+	// 	return []string{"No on-going operation."}
+	// case collectingClusterInfo:
+	// 	var status []string
+	// 	status = append(status, fmt.Sprintf("Collecting cluster info from all alive stores, %d/%d.", u.numStoresReported, len(u.storeReports)))
+	// 	var reported, unreported string
+	// 	for storeID, report := range u.storeReports {
+	// 		if report == nil {
+	// 			unreported += strconv.FormatUint(storeID, 10) + ","
+	// 		} else {
+	// 			reported += strconv.FormatUint(storeID, 10) + ","
+	// 		}
+	// 	}
+	// 	status = append(status, "Stores that have reported to PD: "+reported)
+	// 	status = append(status, "Stores that have not reported to PD: "+unreported)
+	// 	return status
+	// case forceLeader:
+	// 	// TODO:
+	// case recovering:
+	// 	var status []string
+	// 	status = append(status, fmt.Sprintf("Waiting for recover commands being applied, %d/%d", u.numStoresReported, len(u.storeRecoveryPlans)))
+	// 	status = append(status, "Recovery plan:")
+	// 	for storeID, plan := range u.storeRecoveryPlans {
+	// 		planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
+	// 		for _, create := range plan.Creates {
+	// 			planDigest += getRegionDigest(create) + ", "
+	// 		}
+	// 		planDigest += "; removes: "
+	// 		for _, remove := range plan.Removes {
+	// 			var peers string
+	// 			for _, peer := range remove.Peers {
+	// 				peers += "(" + getPeerDigest(peer) + "), "
+	// 			}
+	// 			planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
+	// 		}
+	// 		planDigest += "; deletes: "
+	// 		for _, deletion := range plan.Tombstones {
+	// 			planDigest += strconv.FormatUint(deletion, 10) + ", "
+	// 		}
+	// 		status = append(status, planDigest)
+	// 	}
+	// 	status = append(status, "Execution progess:")
+	// 	for storeID, applied := range u.executionResults {
+	// 		if !applied {
+	// 			status = append(status, strconv.FormatUint(storeID, 10)+"not yet applied, last report: "+getStoreDigest(u.executionReports[storeID]))
+	// 		}
+	// 	}
+	// 	return status
+	// }
 	return []string{"Undefined status"}
 }
 
@@ -717,52 +748,53 @@ func (u *unsafeRecoveryController) History() []string {
 	return u.historyLocked()
 }
 func (u *unsafeRecoveryController) historyLocked() []string {
-	if u.stage <= ready {
-		return []string{"No unsafe recover has been triggered since PD restarted."}
-	}
-	var history []string
-	if u.stage >= collectingClusterInfo {
-		history = append(history, "Store reports collection:")
-		for storeID, report := range u.storeReports {
-			if report == nil {
-				history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": waiting for report.")
-			} else {
-				history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": "+getStoreDigest(report))
-			}
-		}
-	}
-	if u.stage >= recovering {
-		history = append(history, "Recovery plan:")
-		for storeID, plan := range u.storeRecoveryPlans {
-			planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
-			for _, create := range plan.Creates {
-				planDigest += getRegionDigest(create) + ", "
-			}
-			planDigest += "; removes: "
-			for _, remove := range plan.Removes {
-				var peers string
-				for _, peer := range remove.Peers {
-					peers += "(" + getPeerDigest(peer) + "), "
-				}
-				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
-			}
-			planDigest += "; deletes: "
-			for _, deletion := range plan.Tombstones {
-				planDigest += strconv.FormatUint(deletion, 10) + ", "
-			}
-			history = append(history, planDigest)
-		}
-		history = append(history, "Execution progress:")
-		for storeID, applied := range u.executionResults {
-			executionDigest := "Store " + strconv.FormatUint(storeID, 10)
-			if !applied {
-				executionDigest += "not yet finished, "
-			} else {
-				executionDigest += "finished, "
-			}
-			executionDigest += getStoreDigest(u.executionReports[storeID])
-			history = append(history, executionDigest)
-		}
-	}
-	return history
+	// if u.stage <= ready {
+	// 	return []string{"No unsafe recover has been triggered since PD restarted."}
+	// }
+	// var history []string
+	// if u.stage >= collectingClusterInfo {
+	// 	history = append(history, "Store reports collection:")
+	// 	for storeID, report := range u.storeReports {
+	// 		if report == nil {
+	// 			history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": waiting for report.")
+	// 		} else {
+	// 			history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": "+getStoreDigest(report))
+	// 		}
+	// 	}
+	// }
+	// if u.stage >= recovering {
+	// 	history = append(history, "Recovery plan:")
+	// 	for storeID, plan := range u.storeRecoveryPlans {
+	// 		planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
+	// 		for _, create := range plan.Creates {
+	// 			planDigest += getRegionDigest(create) + ", "
+	// 		}
+	// 		planDigest += "; removes: "
+	// 		for _, remove := range plan.Removes {
+	// 			var peers string
+	// 			for _, peer := range remove.Peers {
+	// 				peers += "(" + getPeerDigest(peer) + "), "
+	// 			}
+	// 			planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
+	// 		}
+	// 		planDigest += "; deletes: "
+	// 		for _, deletion := range plan.Tombstones {
+	// 			planDigest += strconv.FormatUint(deletion, 10) + ", "
+	// 		}
+	// 		history = append(history, planDigest)
+	// 	}
+	// 	history = append(history, "Execution progress:")
+	// 	for storeID, applied := range u.executionResults {
+	// 		executionDigest := "Store " + strconv.FormatUint(storeID, 10)
+	// 		if !applied {
+	// 			executionDigest += "not yet finished, "
+	// 		} else {
+	// 			executionDigest += "finished, "
+	// 		}
+	// 		executionDigest += getStoreDigest(u.executionReports[storeID])
+	// 		history = append(history, executionDigest)
+	// 	}
+	// }
+	// return history
+	return []string{"Undefined status"}
 }
