@@ -103,7 +103,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
