@@ -547,8 +547,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 		if i == 0 {
 			wg.Add(1)
 		}
-		go func(isReciver bool) {
-			if isReciver {
+		go func(isReceiver bool) {
+			if isReceiver {
 				_, err := stream.Recv()
 				c.Assert(err, IsNil)
 				wg.Done()

@@ -1114,8 +1114,8 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 		expectUpstores[UpStoreID] = true
 	}
 	evictLeaderStoresNum := 0
-	for _, evitStoreID := range evictStores {
-		if _, ok := expectUpstores[evitStoreID]; ok {
+	for _, evictStoreID := range evictStores {
+		if _, ok := expectUpstores[evictStoreID]; ok {
 			evictLeaderStoresNum++
 		}
 	}
