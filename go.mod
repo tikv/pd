@@ -13,7 +13,7 @@ require (
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
 	github.com/go-echarts/go-echarts v1.0.0
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.3.4
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
@@ -52,4 +52,4 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-replace github.com/pingcap/kvproto v0.0.0-20220309094445-a78dc9fdb89a => github.com/Connor1996/kvproto v0.0.0-20220322093254-c1a1ef043e77
+replace github.com/pingcap/kvproto v0.0.0-20220309094445-a78dc9fdb89a => github.com/Connor1996/kvproto v0.0.0-20220421081713-e2ab002a8f03

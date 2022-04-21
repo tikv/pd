@@ -189,7 +189,7 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 	if expire, requested := u.storePlanExpires[storeID]; !requested || expire.Before(now) {
 		// Dispatch the recovery plan to the store, and the plan may be empty.
-		resp.Plan = u.getRecoveryPlan(storeID)
+		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
 		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
 	}
 }
@@ -462,16 +462,6 @@ func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.Recover
 	return storeRecoveryPlan
 }
 
-func (u *unsafeRecoveryController) findLeader(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
-	var leader *regionItem
-	for _, peer := range peersMap[region.GetId()] {
-		if leader == nil || leader.IsRaftStale(peer) {
-			leader = peer
-		}
-	}
-	return leader
-}
-
 func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
 	// clean up previous plan
 	u.storePlanExpires = make(map[uint64]time.Time)
@@ -493,6 +483,17 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	newestRegionTree, peersMap := u.buildUpFromReports()
 	hasPlan := false
+
+	selectLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
+		var leader *regionItem
+		for _, peer := range peersMap[region.GetId()] {
+			if leader == nil || leader.IsRaftStale(peer) {
+				leader = peer
+			}
+		}
+		return leader
+	}
+
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
@@ -500,14 +501,15 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 		if !u.canElectLeader(region) {
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
-			leader := u.findLeader(peersMap, region)
+			leader := selectLeader(peersMap, region)
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
-			storeRecoveryPlan.EnterForceLeaders = append(storeRecoveryPlan.EnterForceLeaders, region.GetId())
-			if storeRecoveryPlan.FailedStores == nil {
+			if storeRecoveryPlan.ForceLeader == nil {
+				storeRecoveryPlan.ForceLeader = &pdpb.ForceLeader{}
 				for store := range u.failedStores {
-					storeRecoveryPlan.FailedStores = append(storeRecoveryPlan.FailedStores, store)
+					storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, store)
 				}
 			}
+			storeRecoveryPlan.ForceLeader.EnterForceLeaders = append(storeRecoveryPlan.ForceLeader.EnterForceLeaders, region.GetId())
 			hasPlan = true
 		}
 		return true
@@ -523,17 +525,33 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 	newestRegionTree, peersMap := u.buildUpFromReports()
 	hasPlan := false
+
+	findForceLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
+		var leader *regionItem
+		for _, peer := range peersMap[region.GetId()] {
+			if peer.report.IsForceLeader {
+				leader = peer
+				break
+			}
+		}
+		return leader
+	}
+
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
 		if !u.canElectLeader(region) {
-			leader := u.findLeader(peersMap, region)
+			leader := findForceLeader(peersMap, region)
+			if leader == nil {
+				// can't find the force leader, skip
+				return true
+			}
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
 			storeRecoveryPlan.Removes = append(storeRecoveryPlan.Removes,
 				&pdpb.RemovePeers{
 					RegionId: region.GetId(),
-					Peers:    u.getFailedPeers(region),
+					Peers:    u.getFailedPeers(leader.Region()),
 				},
 			)
 			hasPlan = true
@@ -551,7 +569,7 @@ func (u *unsafeRecoveryController) generateRecoveryPlan() bool {
 				} else {
 					// the peer is not in the valid regions, should be deleted directly
 					storeRecoveryPlan := u.getRecoveryPlan(storeID)
-					storeRecoveryPlan.Deletes = append(storeRecoveryPlan.Deletes, regionID)
+					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, regionID)
 				}
 			}
 		}
@@ -676,7 +694,7 @@ func (u *unsafeRecoveryController) Show() []string {
 				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
 			}
 			planDigest += "; deletes: "
-			for _, deletion := range plan.Deletes {
+			for _, deletion := range plan.Tombstones {
 				planDigest += strconv.FormatUint(deletion, 10) + ", "
 			}
 			status = append(status, planDigest)
@@ -729,7 +747,7 @@ func (u *unsafeRecoveryController) historyLocked() []string {
 				planDigest += fmt.Sprintf("region %d {%s}", remove.RegionId, peers) + ", "
 			}
 			planDigest += "; deletes: "
-			for _, deletion := range plan.Deletes {
+			for _, deletion := range plan.Tombstones {
 				planDigest += strconv.FormatUint(deletion, 10) + ", "
 			}
 			history = append(history, planDigest)
