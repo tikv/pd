@@ -305,8 +305,8 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 
 	// test update enable-audit and enable-rate-limit
 	ms = map[string]interface{}{
-		"enable-audit":      true,
-		"enable-rate-limit": true,
+		"enable-audit":      "true",
+		"enable-rate-limit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -316,8 +316,8 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.EnableAudit, Equals, true)
 	c.Assert(sc.EnableRateLimit, Equals, true)
 	ms = map[string]interface{}{
-		"enable-audit":      false,
-		"enable-rate-limit": false,
+		"enable-audit":      "false",
+		"enable-rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)

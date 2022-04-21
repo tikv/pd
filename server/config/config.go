@@ -1113,9 +1113,9 @@ type PDServerConfig struct {
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 	// EnableAudit controls the switch of the audit middleware
-	EnableAudit bool `toml:"enable-audit" json:"enable-audit"`
+	EnableAudit bool `toml:"enable-audit" json:"enable-audit,string"`
 	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit"`
+	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit,string"`
 	// RateLimitConfig is the config of rate limit middleware
 	RateLimitConfig ratelimit.LimiterConfig `toml:"rate-limit-config" json:"rate-limit-config"`
 }
