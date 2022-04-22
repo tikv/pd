@@ -279,6 +279,7 @@ func (se *StorageEndpoint) SaveServiceSafePointByServiceGroup(serviceGroupID str
 
 // LoadMinServiceSafePointByServiceGroup returns the minimum safepoint for the given service group
 // note that gc worker safe point are store separately
+// If no service safe point exist for the given service group or the only service safe point just expired, return nil
 func (se *StorageEndpoint) LoadMinServiceSafePointByServiceGroup(serviceGroupID string, now time.Time) (*ServiceSafePoint, error) {
 	prefix := serviceSafePointPrefixPath(serviceGroupID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
@@ -311,8 +312,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByServiceGroup(serviceGroupID 
 	}
 
 	if min.SafePoint == math.MaxUint64 {
-		// fail to find a valid service safe point under current service group
-		// this can be normal behavior if the only safe point just expired
+		// the only service safe point just expired
 		return nil, nil
 	}
 

@@ -1378,7 +1378,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	}, nil
 }
 
-// UpdateServiceGCSafePoint update the safepoint for specific service
+// UpdateServiceGCSafePoint update the safe point for specific service
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
 	s.serviceSafePointLock.Lock()
 	defer s.serviceSafePointLock.Unlock()
@@ -1563,7 +1563,8 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 		return nil, err
 	}
 
-	// min safe point of all services need
+	// ToDO: Should this requirement be stronger? Like say request.SafePoint > old.SafePoint
+	// ToDO: Add proper requirements for new service
 	if request.TTL > 0 && (min == nil || request.SafePoint >= min.SafePoint) {
 		ssp := &endpoint.ServiceSafePoint{
 			ServiceID: serviceID,
