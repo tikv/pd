@@ -1109,21 +1109,27 @@ func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
 	testdata := []struct {
 		whiteList     []string
 		maxRegionSize uint64
+		updated       bool
 	}{{
 		whiteList:     []string{},
 		maxRegionSize: uint64(144),
+		updated:       false,
 	}, {
 		whiteList:     []string{"127.0.0.1:5"},
 		maxRegionSize: uint64(10),
+		updated:       true,
 	}}
 
 	for _, v := range testdata {
 		manager := config.NewTestStoreConfigManager(v.whiteList)
 		tc.storeConfig = manager.GetStoreConfig()
 		c.Assert(tc.storeConfig.GetRegionMaxSize(), Equals, uint64(144))
-		tc.wg.Add(1)
-		go tc.runSyncConfig(manager)
-		time.Sleep(3 * time.Second)
+		index := syncConfig(manager, tc.GetStores(), 0)
+		if !v.updated {
+			c.Assert(index, Equals, 5)
+		} else {
+			c.Assert(index, Less, 5)
+		}
 		c.Assert(tc.storeConfig.GetRegionMaxSize(), Equals, v.maxRegionSize)
 	}
 }
@@ -1404,6 +1410,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Serving,
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}

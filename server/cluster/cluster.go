@@ -294,39 +294,36 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 	defer ticker.Stop()
 	stores := c.GetStores()
 
-	index := 0
-	fn := func() {
-		for index < len(stores) {
-			// filter out the stores that are tiflash or not serving.
-			if store := stores[index]; !store.IsServing() && store.IsTiFlash() {
-				index++
-				continue
-			}
-			// it will try next store if the current store is failed.
-			if err := manager.Observer(stores[index].GetStatusAddress()); err != nil {
-				log.Warn("sync config failed", zap.Error(err))
-				index++
-				continue
-			}
-			// it will only try one store.
-			break
-		}
-		// it will be updated if all store failed.
-		if index >= len(stores) {
-			index = 0
-			stores = c.GetStores()
-		}
-	}
-	// it will not wait one minutes to update.
-	fn()
+	index := syncConfig(manager, stores, 0)
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			fn()
+			index = syncConfig(manager, stores, index)
+			if index >= len(stores) {
+				index = 0
+				stores = c.GetStores()
+			}
 		}
 	}
+}
+
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
+	for i := index; i < len(stores); i++ {
+		// filter out the stores that are tiflash or not serving.
+		if store := stores[i]; !store.IsServing() || store.IsTiFlash() {
+			continue
+		}
+		// it will try next store if the current store is failed.
+		if err := manager.Observer(stores[i].GetStatusAddress()); err != nil {
+			log.Warn("sync config failed", zap.Error(err))
+			continue
+		}
+		// it will only try one store.
+		return i
+	}
+	return len(stores)
 }
 
 // LoadClusterInfo loads cluster related info.
@@ -1449,7 +1446,7 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfig)
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.hotStat.StoresStats)
@@ -1463,7 +1460,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfig)
 	statsMap.Reset()
 
 	c.coordinator.resetSchedulerMetrics()

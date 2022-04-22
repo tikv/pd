@@ -64,7 +64,7 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	manager := NewTestStoreConfigManager([]string{"tidb.com"})
 	old := manager.GetStoreConfig()
 	manager.Observer("tikv.com")
-	c.Assert(old.RegionMaxSize, Equals, "144MB")
+	c.Assert(old.GetRegionMaxSize(), Equals, uint64(144))
 	manager.Observer("tidb.com")
-	c.Assert(old.RegionMaxSize, Equals, "10MB")
+	c.Assert(old.GetRegionMaxSize(), Equals, uint64(10))
 }

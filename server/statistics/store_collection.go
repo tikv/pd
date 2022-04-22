@@ -30,6 +30,7 @@ const (
 
 type storeStatistics struct {
 	opt             *config.PersistOptions
+	storeConfig     *config.StoreConfig
 	Up              int
 	Disconnect      int
 	Unhealthy       int
@@ -45,9 +46,10 @@ type storeStatistics struct {
 	LabelCounter    map[string]int
 }
 
-func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
+func newStoreStatistics(opt *config.PersistOptions, storeConfig *config.StoreConfig) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
+		storeConfig:  storeConfig,
 		LabelCounter: make(map[string]int),
 	}
 }
@@ -174,6 +176,8 @@ func (s *storeStatistics) Collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
+	configs["region-max-size"] = float64(s.storeConfig.GetRegionMaxSize())
+	configs["region-split-size"] = float64(s.storeConfig.GetRegionSplitKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
@@ -240,10 +244,10 @@ type storeStatisticsMap struct {
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt *config.PersistOptions, storeConfig *config.StoreConfig) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
-		stats: newStoreStatistics(opt),
+		stats: newStoreStatistics(opt, storeConfig),
 	}
 }
 
