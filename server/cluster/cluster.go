@@ -298,6 +298,7 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 	for {
 		select {
 		case <-c.ctx.Done():
+			log.Info("sync config job is stopped")
 			return
 		case <-ticker.C:
 			index = syncConfig(manager, stores, index)
@@ -312,7 +313,7 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
 	for i := index; i < len(stores); i++ {
 		// filter out the stores that are tiflash or not serving.
-		if store := stores[i]; !store.IsServing() || store.IsTiFlash() {
+		if store := stores[i]; !store.IsTiFlash() {
 			continue
 		}
 		// it will try next store if the current store is failed.
