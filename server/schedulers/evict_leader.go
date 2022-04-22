@@ -186,16 +186,6 @@ func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 	return nil
 }
 
-func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
-	stores := make([]uint64, 0, len(conf.StoreIDWithRanges))
-	for id := range conf.StoreIDWithRanges {
-		stores = append(stores, id)
-	}
-	return stores
-}
-
 type evictLeaderScheduler struct {
 	*BaseScheduler
 	conf    *evictLeaderSchedulerConfig
