@@ -141,8 +141,8 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb, 1.4),
 	}, {
 		// store1 and store2 has same available ratio less than 0.2
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 1*gb, 100*gb, 1.4),
+		bigger: NewStoreInfoWithAvailable(1, 20*gb, 1000*gb, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 10*gb, 500*gb, 1.4),
 	}, {
 		// store1 and store2 has same available ratio
 		// but the store1 ratio less than store2 ((50-10)/50=0.8<(200-100)/200=0.5)
@@ -163,6 +163,10 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		// but store1 has higher amp, so store1(60g) has more regionSize (40g)
 		bigger: NewStoreInfoWithAvailable(1, 80*gb, 100*gb, 3),
 		small:  NewStoreInfoWithAvailable(2, 60*gb, 100*gb, 1),
+	}, {
+		// store1's capacity is less than store2's capacity, but store2 has more available space,
+		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
+		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
 	}}
 	for _, v := range testdata {
 		score1 := v.bigger.regionScoreV2(0, 0.8)
