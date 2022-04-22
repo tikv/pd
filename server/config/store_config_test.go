@@ -17,7 +17,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-
 	. "github.com/pingcap/check"
 )
 
@@ -62,21 +61,10 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 }
 
 func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
-	manager := NewStoreConfigManager(nil)
-	c.Assert(manager.schema, Equals, "http")
-	var tlsConfig *SecurityConfig
-	manager = NewStoreConfigManager(tlsConfig)
-	c.Assert(manager.schema, Equals, "http")
-	config := &StoreConfig{
-		Coprocessor{
-			RegionMaxSize: "15GiB",
-		},
-	}
-	manager.UpdateConfig(nil)
-	c.Assert(manager.GetStoreConfig(), IsNil)
-	manager.UpdateConfig(config)
-	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
-	var m StoreConfigManager
-	m.UpdateConfig(nil)
-	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	manager := NewTestStoreConfigManager([]string{"tidb.com"})
+	old := manager.GetStoreConfig()
+	manager.Observer("tikv.com")
+	c.Assert(old.RegionMaxSize, Equals, "144MB")
+	manager.Observer("tidb.com")
+	c.Assert(old.RegionMaxSize, Equals, "10MB")
 }

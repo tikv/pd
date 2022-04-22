@@ -251,7 +251,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.GetStoreConfig())
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 

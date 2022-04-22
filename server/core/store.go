@@ -210,6 +210,16 @@ func (s *StoreInfo) GetNodeState() metapb.NodeState {
 	return s.meta.GetNodeState()
 }
 
+// IsTiFlash returns true if the store is TiFlash.
+func (s *StoreInfo) IsTiFlash() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// GetStatusAddress returns the http address of the store.
+func (s *StoreInfo) GetStatusAddress() string {
+	return s.meta.GetStatusAddress()
+}
+
 // GetAddress returns the address of the store.
 func (s *StoreInfo) GetAddress() string {
 	return s.meta.GetAddress()
@@ -737,5 +747,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash) && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
 }

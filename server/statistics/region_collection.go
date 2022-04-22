@@ -56,15 +56,15 @@ type RegionStatistics struct {
 	index        map[uint64]RegionStatisticType
 	offlineIndex map[uint64]RegionStatisticType
 	ruleManager  *placement.RuleManager
-	storeManager *config.StoreConfigManager
+	storeConfig  *config.StoreConfig
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager, storeManager *config.StoreConfigManager) *RegionStatistics {
+func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager, storeConfig *config.StoreConfig) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:          opt,
 		ruleManager:  ruleManager,
-		storeManager: storeManager,
+		storeConfig:  storeConfig,
 		stats:        make(map[RegionStatisticType]map[uint64]*RegionInfo),
 		offlineStats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
 		index:        make(map[uint64]RegionStatisticType),
@@ -168,8 +168,8 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
-		OversizedRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
-			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys()),
+		OversizedRegion: region.GetApproximateSize() >= int64(r.storeConfig.GetRegionMaxSize()) ||
+			region.GetApproximateKeys() >= int64(r.storeConfig.GetRegionMaxKeys()),
 		UndersizedRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
 			region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys),
 	}

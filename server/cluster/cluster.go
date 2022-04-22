@@ -108,14 +108,14 @@ type RaftCluster struct {
 	clusterID uint64
 
 	// cached cluster info
-	core               *core.BasicCluster
-	meta               *metapb.Cluster
-	opt                *config.PersistOptions
-	storeConfigManager *config.StoreConfigManager
-	storage            storage.Storage
-	id                 id.Allocator
-	limiter            *StoreLimiter
-	minResolvedTS      uint64
+	core          *core.BasicCluster
+	meta          *metapb.Cluster
+	opt           *config.PersistOptions
+	storeConfig   *config.StoreConfig
+	storage       storage.Storage
+	id            id.Allocator
+	limiter       *StoreLimiter
+	minResolvedTS uint64
 
 	changedRegions chan *core.RegionInfo
 
@@ -151,21 +151,20 @@ type Status struct {
 
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
+	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:          ctx,
-		running:            false,
-		clusterID:          clusterID,
-		regionSyncer:       regionSyncer,
-		httpClient:         httpClient,
-		etcdClient:         etcdClient,
-		storeConfigManager: manager,
+		serverCtx:    ctx,
+		running:      false,
+		clusterID:    clusterID,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
 // GetStoreConfig returns the store config.
 func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
-	return c.storeConfigManager.GetStoreConfig()
+	return c.storeConfig
 }
 
 // LoadClusterStatus loads the cluster status.
@@ -264,13 +263,13 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-
+	manager := config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
+	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, manager.GetStoreConfig())
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
-	c.wg.Add(6)
+	c.wg.Add(7)
 	go c.runCoordinator()
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		backgroundJobInterval = 1 * time.Microsecond
@@ -280,9 +279,54 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
+	go c.runSyncConfig(manager)
 	c.running = true
 
 	return nil
+}
+
+// runSyncConfig runs the sync config job.
+func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	stores := c.GetStores()
+
+	index := 0
+	fn := func() {
+		for index < len(stores) {
+			// filter out the stores that are tiflash or not serving.
+			if store := stores[index]; !store.IsServing() && store.IsTiFlash() {
+				index++
+				continue
+			}
+			// it will try next store if the current store is failed.
+			if err := manager.Observer(stores[index].GetStatusAddress()); err != nil {
+				log.Warn("sync config failed", zap.Error(err))
+				index++
+				continue
+			}
+			// it will only try one store.
+			break
+		}
+		// it will be updated if all store failed.
+		if index >= len(stores) {
+			index = 0
+			stores = c.GetStores()
+		}
+	}
+	// it will not wait one minutes to update.
+	fn()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			fn()
+		}
+	}
 }
 
 // LoadClusterInfo loads cluster related info.
