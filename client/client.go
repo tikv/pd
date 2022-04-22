@@ -106,6 +106,17 @@ type Client interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// UpdateGCSafePointByServiceGroup update GC safe point, the update will only be successful if proposed
+	// safe point is later than the old one
+	// returns the new safePoint after the update attempt (may return the old safe point if update rejected)
+	UpdateGCSafePointByServiceGroup(ctx context.Context, serviceGroupID string, safePoint uint64) (uint64, error)
+	// UpdateServiceSafePointByServiceGroup update service safe point for specific service under given service group
+	// pass in a ttl less than 0 to remove the target service safe point instead
+	// will return the min safePoint of the serviceGroup after the update,
+	// if no service safePoint exists after the given operation, return 0
+	UpdateServiceSafePointByServiceGroup(ctx context.Context, serviceGroupID, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// GetAllServiceGroupGcSafePoint returns a list containing gc safe point for each service group
+	GetAllServiceGroupGcSafePoint(ctx context.Context) ([]*pdpb.ServiceGroupSafepoint, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
@@ -1655,6 +1666,84 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		return 0, errors.WithStack(err)
 	}
 	return resp.GetMinSafePoint(), nil
+}
+
+func (c *client) UpdateGCSafePointByServiceGroup(ctx context.Context, serviceGroupID string, safePoint uint64) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.UpdateGCSafePointByServiceGroup", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationUpdateGCSafePointByServiceGroup.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.UpdateGCSafePointByServiceGroupRequest{
+		Header:         c.requestHeader(),
+		ServiceGroupId: []byte(serviceGroupID),
+		SafePoint:      safePoint,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().UpdateGCSafePointByServiceGroup(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationUpdateGCSafePointByServiceGroup.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.WithStack(err)
+	}
+	return resp.GetNewSafePoint(), nil
+}
+func (c *client) UpdateServiceSafePointByServiceGroup(ctx context.Context, serviceGroupID, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.UpdateServiceSafePointByServiceGroup", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationUpdateServiceSafePointByServiceGroup.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.UpdateServiceSafePointByServiceGroupRequest{
+		Header:         c.requestHeader(),
+		ServiceGroupId: []byte(serviceGroupID),
+		ServiceId:      []byte(serviceID),
+		TTL:            ttl,
+		SafePoint:      safePoint,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().UpdateServiceSafePointByServiceGroup(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationUpdateServiceSafePointByServiceGroup.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return 0, errors.WithStack(err)
+	}
+
+	return resp.GetMinSafePoint(), nil
+}
+
+func (c *client) GetAllServiceGroupGcSafePoint(ctx context.Context) ([]*pdpb.ServiceGroupSafepoint, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetAllServiceGroupGcSafePoint", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+
+	start := time.Now()
+	defer func() { cmdDurationGetAllServiceGroupGcSafePoint.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.GetAllServiceGroupGcSafePointRequest{
+		Header: c.requestHeader(),
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().GetAllServiceGroupGcSafePoint(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationGetAllServiceGroupGcSafePoint.Observe(time.Since(start).Seconds())
+		c.ScheduleCheckLeader()
+		return nil, errors.WithStack(err)
+	}
+
+	return resp.GetServiceGroupSafePoint(), nil
 }
 
 func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {

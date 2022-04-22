@@ -1592,6 +1592,11 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 			}
 		}
 	}
+
+	// the case where we just deleted the last service safe point
+	if min == nil {
+		min = &endpoint.ServiceSafePoint{}
+	}
 	return &pdpb.UpdateServiceSafePointByServiceGroupResponse{
 		Header:       s.header(),
 		ServiceId:    []byte(min.ServiceID),
