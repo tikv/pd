@@ -16,6 +16,7 @@ package labeler
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -56,5 +57,5 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	c.Assert(label2.StartAt, Equals, label.StartAt)
 	c.Assert(label2.TTL, Equals, label.TTL)
 	label2.checkAndAdjustExpire()
-	c.Assert(label.expire.Format(time.UnixDate), Equals, label2.expire.Format(time.UnixDate))
+	c.Assert(math.Abs(label2.expire.Sub(*label.expire).Seconds()) < 1, IsTrue)
 }
