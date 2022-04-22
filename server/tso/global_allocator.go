@@ -347,9 +347,6 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), errs.ZapError(err))
 					return
 				}
-				if syncMaxTSResp == nil {
-					log.Error("sync max ts rpc failed, got a nil response", zap.String("local-allocator-leader-url", leaderConn.Target()))
-				}
 			}(ctx, leaderConn, respCh)
 		}
 		wg.Wait()

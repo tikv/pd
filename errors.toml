@@ -91,6 +91,11 @@ error = '''
 incorrect system time
 '''
 
+["PD:core:ErrNoStoreForRegionLeader"]
+error = '''
+can not remove store %d since there are no extra up store to store the leader
+'''
+
 ["PD:core:ErrPauseLeaderTransfer"]
 error = '''
 store %v is paused for leader transfer
@@ -98,7 +103,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -119,6 +124,11 @@ store %v has been removed
 ["PD:core:ErrStoreUnhealthy"]
 error = '''
 store %v is unhealthy
+'''
+
+["PD:core:ErrStoresNotEnough"]
+error = '''
+can not remove store %v since the number of up stores would be %v while need %v
 '''
 
 ["PD:core:ErrWrongRangeKeys"]

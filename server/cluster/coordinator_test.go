@@ -208,7 +208,7 @@ func (s *testCoordinatorSuite) TestDispatch(c *C) {
 	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
 	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
 
-	co.run()
+	go co.runUntilStop()
 
 	// Wait for schedule and turn off balance.
 	waitOperator(c, co, 1)
@@ -251,7 +251,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil)
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 

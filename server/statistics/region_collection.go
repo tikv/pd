@@ -35,6 +35,8 @@ const (
 	OfflinePeer
 	LearnerPeer
 	EmptyRegion
+	OversizedRegion
+	UndersizedRegion
 )
 
 const nonIsolation = "none"
@@ -54,12 +56,15 @@ type RegionStatistics struct {
 	index        map[uint64]RegionStatisticType
 	offlineIndex map[uint64]RegionStatisticType
 	ruleManager  *placement.RuleManager
+	storeManager *config.StoreConfigManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager) *RegionStatistics {
+func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager, storeManager *config.StoreConfigManager) *RegionStatistics {
 	r := &RegionStatistics{
 		opt:          opt,
+		ruleManager:  ruleManager,
+		storeManager: storeManager,
 		stats:        make(map[RegionStatisticType]map[uint64]*RegionInfo),
 		offlineStats: make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
 		index:        make(map[uint64]RegionStatisticType),
@@ -71,15 +76,15 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.stats[PendingPeer] = make(map[uint64]*RegionInfo)
 	r.stats[LearnerPeer] = make(map[uint64]*RegionInfo)
 	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
+	r.stats[OversizedRegion] = make(map[uint64]*RegionInfo)
+	r.stats[UndersizedRegion] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[DownPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[EmptyRegion] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
-	r.ruleManager = ruleManager
 	return r
 }
 
@@ -163,11 +168,15 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
+		OversizedRegion: region.GetApproximateSize() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxSize()) ||
+			region.GetApproximateKeys() >= int64(r.storeManager.GetStoreConfig().GetRegionMaxKeys()),
+		UndersizedRegion: region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionSize) &&
+			region.GetApproximateSize() < int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys),
 	}
 
 	for typ, c := range conditions {
 		if c {
-			if isRemoving {
+			if isRemoving && typ < EmptyRegion {
 				r.offlineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
@@ -232,13 +241,14 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
 	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
 	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
+	regionStatusGauge.WithLabelValues("oversized-region-count").Set(float64(len(r.stats[OversizedRegion])))
+	regionStatusGauge.WithLabelValues("undersized-region-count").Set(float64(len(r.stats[UndersizedRegion])))
 
 	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
 	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))
 	offlineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.offlineStats[DownPeer])))
 	offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.offlineStats[PendingPeer])))
 	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
-	offlineRegionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.offlineStats[EmptyRegion])))
 	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
 }
 

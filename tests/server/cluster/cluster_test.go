@@ -288,6 +288,8 @@ func testStateAndLimit(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDCl
 }
 
 func testRemoveStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
+	rc.GetOpts().SetMaxReplicas(2)
+	defer rc.GetOpts().SetMaxReplicas(3)
 	{
 		beforeState := metapb.StoreState_Up // When store is up
 		// Case 1: RemoveStore should be OK;
@@ -545,8 +547,8 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 		if i == 0 {
 			wg.Add(1)
 		}
-		go func(isReciver bool) {
-			if isReciver {
+		go func(isReceiver bool) {
+			if isReceiver {
 				_, err := stream.Recv()
 				c.Assert(err, IsNil)
 				wg.Done()
