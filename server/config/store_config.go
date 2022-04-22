@@ -103,7 +103,7 @@ type StoreConfigManager struct {
 // NewStoreConfigManager creates a new StoreConfigManager.
 func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
 	schema := "http"
-	if ts, ok := client.Transport.(*http.Transport); ok && ts.TLSClientConfig != nil {
+	if ts, ok := client.Transport.(*http.Transport); ok && ts.TLSClientConfig != nil && len(ts.TLSClientConfig.Certificates) > 0 {
 		schema = "https"
 	}
 

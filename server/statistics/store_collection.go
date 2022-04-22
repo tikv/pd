@@ -177,7 +177,7 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 	configs["region-max-size"] = float64(s.storeConfig.GetRegionMaxSize())
-	configs["region-split-size"] = float64(s.storeConfig.GetRegionSplitKeys())
+	configs["region-split-size"] = float64(s.storeConfig.GetRegionSplitSize())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
