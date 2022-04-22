@@ -16,13 +16,15 @@ package config
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
+	"go.uber.org/zap"
 )
 
 var (
@@ -111,6 +113,7 @@ func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
 	}
 }
 
+// NewTestStoreConfigManager creates a new StoreConfigManager for test.
 func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
 	return &StoreConfigManager{
 		source: newFakeSource(whiteList),
@@ -124,7 +127,8 @@ func (m *StoreConfigManager) Observer(address string) error {
 	if err != nil {
 		return err
 	}
-	if cfg != nil {
+	if cfg != nil && !reflect.DeepEqual(cfg, m.config) {
+		log.Info("update tikv config", zap.String("config", cfg.String()))
 		*m.config = *cfg
 	}
 	return nil
@@ -156,6 +160,7 @@ func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
 	}
 }
 
+// GetConfig returns the store config from TiKV.
 func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) {
 	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
 	resp, err := s.client.Get(url)
@@ -185,9 +190,10 @@ func newFakeSource(whiteList []string) *FakeSource {
 	}
 }
 
+// GetConfig returns the config.
 func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
 	if !slice.Contains(f.whiteList, url) {
-		return nil, errors.New(fmt.Sprintf("[url:%s] is not in white list", url))
+		return nil, fmt.Errorf("[url:%s] is not in white list", url)
 	}
 	config := &StoreConfig{
 		Coprocessor{

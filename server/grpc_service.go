@@ -49,8 +49,6 @@ import (
 
 const (
 	heartbeatSendTimeout = 5 * time.Second
-	// store config
-	storeReadyWaitTime = 5 * time.Second
 
 	// tso
 	maxMergeTSORequests    = 10000
