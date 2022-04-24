@@ -16,6 +16,7 @@ package ratelimit
 
 import "golang.org/x/time/rate"
 
+// UpdateStatus is flags for updating limiter config.
 type UpdateStatus uint32
 
 // Flags for limiter.
