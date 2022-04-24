@@ -97,48 +97,40 @@ type Server interface {
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	sync.RWMutex
+	wg sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
 	cancel    context.CancelFunc
-	wg        sync.WaitGroup
 
-	running bool
+	etcdClient *clientv3.Client
+	httpClient *http.Client
 
-	clusterID uint64
-
-	// cached cluster info
-	core               *core.BasicCluster
+	running            bool
 	meta               *metapb.Cluster
-	opt                *config.PersistOptions
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
-	id                 id.Allocator
-	limiter            *StoreLimiter
 	minResolvedTS      uint64
-
-	changedRegions chan *core.RegionInfo
-
-	labelLevelStats *statistics.LabelStatistics
-	regionStats     *statistics.RegionStatistics
-	hotStat         *statistics.HotStat
-
-	coordinator *coordinator
-
-	regionSyncer *syncer.RegionSyncer
-
-	ruleManager   *placement.RuleManager
-	regionLabeler *labeler.RegionLabeler
-	etcdClient    *clientv3.Client
-	httpClient    *http.Client
-
-	replicationMode *replication.ModeManager
-
-	unsafeRecoveryController *unsafeRecoveryController
-	progressManager          *progress.Manager
-
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]*storelimit.StoreLimit
+
+	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
+	clusterID                uint64
+	id                       id.Allocator
+	core                     *core.BasicCluster // cached cluster info
+	opt                      *config.PersistOptions
+	limiter                  *StoreLimiter
+	coordinator              *coordinator
+	labelLevelStats          *statistics.LabelStatistics
+	regionStats              *statistics.RegionStatistics
+	hotStat                  *statistics.HotStat
+	ruleManager              *placement.RuleManager
+	regionLabeler            *labeler.RegionLabeler
+	replicationMode          *replication.ModeManager
+	unsafeRecoveryController *unsafeRecoveryController
+	progressManager          *progress.Manager
+	regionSyncer             *syncer.RegionSyncer
+	changedRegions           chan *core.RegionInfo
 }
 
 // Status saves some state information.
@@ -677,23 +669,19 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
-	storage := c.storage
-	coreCluster := c.core
-	hotStat := c.hotStat
-
-	origin, err := coreCluster.PreCheckPutRegion(region)
+	origin, err := c.core.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
 	region.Inherit(origin)
 
-	hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-	hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
+	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
+		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 
 	// Save to storage if meta is updated.
@@ -754,13 +742,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	changedRegions := c.changedRegions
 	c.Unlock()
 
-	if storage != nil {
+	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
 		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
 		// after restart. Here we only log the error then go on updating cache.
 		for _, item := range overlaps {
-			if err := storage.DeleteRegion(item.GetMeta()); err != nil {
+			if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
 				log.Error("failed to delete region from storage",
 					zap.Uint64("region-id", item.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
@@ -768,7 +756,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 		}
 		if saveKV {
-			if err := storage.SaveRegion(region.GetMeta()); err != nil {
+			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
