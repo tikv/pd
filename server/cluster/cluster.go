@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/component"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -487,11 +486,6 @@ func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
 // IsCheckerPaused returns if checker is paused
 func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
 	return c.coordinator.isCheckerPaused(name)
-}
-
-// GetComponentManager returns component manager.
-func (c *RaftCluster) GetComponentManager() *component.Manager {
-	return c.componentManager
 }
 
 // GetAllocator returns cluster's id allocator.
