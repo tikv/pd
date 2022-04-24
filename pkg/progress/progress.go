@@ -91,6 +91,10 @@ func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 			p.lastTime = time.Now()
 			p.lastTimeRemaining = remaining
 		}
+		if time.Since(p.lastTime) >= speedStatisticalInterval {
+			p.lastTime = time.Now()
+			p.last = left
+		}
 	}
 }
 
