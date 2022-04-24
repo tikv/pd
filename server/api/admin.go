@@ -196,36 +196,35 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
 		concurrency := uint64(concurrencyFloat)
-		if concurrency > 0 {
-			cfg.ConcurrencyLimit = concurrency
-			concurrencyUpdatedFlag = "Concurrency limiter is changed."
-		} else {
-			cfg.ConcurrencyLimit = 0
-			h.svr.DeteleServiceConcurrencyLimiter(serviceLabel)
-			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
-		}
-		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(cfg.ConcurrencyLimit))
+		cfg.ConcurrencyLimit = concurrency
 	}
 	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
 	qps, okq := input["qps"].(float64)
 	if okq {
+		brust := 0
 		if qps > 0 {
-			brust := 1
 			if int(qps) > 1 {
 				brust = int(qps)
+			} else {
+				brust = 1
 			}
-			cfg.QPS = qps
-			cfg.QPSBrust = brust
-			qpsRateUpdatedFlag = "QPS rate limiter is changed."
-		} else {
-			cfg.QPS = 0
-			cfg.QPSBrust = 0
-			h.svr.DeleteServiceQPSLimiter(serviceLabel)
-			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
 		}
-		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(cfg.QPS, cfg.QPSBrust))
-
+		cfg.QPS = qps
+		cfg.QPSBrust = brust
+	}
+	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(cfg))
+	switch {
+	case status&ratelimit.QPSChanged != 0:
+		qpsRateUpdatedFlag = "QPS rate limiter is changed."
+	case status&ratelimit.QPSDeleted != 0:
+		qpsRateUpdatedFlag = "QPS rate limiter is deleted."
+	}
+	switch {
+	case status&ratelimit.ConcurrencyChanged != 0:
+		concurrencyUpdatedFlag = "Concurrency limiter is changed."
+	case status&ratelimit.ConcurrencyDeleted != 0:
+		concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 	}
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")

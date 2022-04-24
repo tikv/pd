@@ -71,7 +71,7 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 		limiter.Release(label)
 	}
 
-	limiter.DeleteConcurrencyLimiter(label)
+	limiter.deleteConcurrencyLimiter(label)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -144,7 +144,7 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 		}
 	}
 	time.Sleep(time.Second)
-	limiter.DeleteQPSLimiter(label)
+	limiter.deleteQPSLimiter(label)
 	for i := 0; i < 10; i++ {
 		c.Assert(limiter.Allow(label), Equals, true)
 	}

@@ -1177,18 +1177,8 @@ func (s *Server) IsInRateLimitBlockList(serviceLabel string) bool {
 }
 
 // UpdateServiceRateLimiter is used to update RateLimiter
-func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) {
-	s.serviceRateLimiter.Update(serviceLabel, opts...)
-}
-
-// DeteleServiceConcurrencyLimiter is used to delete concurrency limiter
-func (s *Server) DeteleServiceConcurrencyLimiter(serviceLabel string) {
-	s.serviceRateLimiter.DeleteConcurrencyLimiter(serviceLabel)
-}
-
-// DeleteServiceQPSLimiter is used to delete qps limiter
-func (s *Server) DeleteServiceQPSLimiter(serviceLabel string) {
-	s.serviceRateLimiter.DeleteQPSLimiter(serviceLabel)
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
+	return s.serviceRateLimiter.Update(serviceLabel, opts...)
 }
 
 // GetClusterStatus gets cluster status.
