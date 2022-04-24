@@ -39,7 +39,7 @@ const (
 )
 
 const (
-	ready unsafeRecoveryStage = iota
+	idle unsafeRecoveryStage = iota
 	collectReport
 	forceLeader
 	removePeer
@@ -53,11 +53,14 @@ type unsafeRecoveryController struct {
 	stage        unsafeRecoveryStage
 	failedStores map[uint64]interface{}
 
-	storeReports      map[uint64]*pdpb.StoreReport // collected reports from store, if not reported yet, it would be nil
+	// collected reports from store, if not reported yet, it would be nil
+	storeReports      map[uint64]*pdpb.StoreReport
 	numStoresReported int
 
 	storePlanExpires   map[uint64]time.Time
-	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan // StoreRecoveryPlan proto
+	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
+
+	output []string
 
 	executionResults map[uint64]bool              // Execution results for tracking purpose
 	executionReports map[uint64]*pdpb.StoreReport // Execution reports for tracking purpose
@@ -66,7 +69,7 @@ type unsafeRecoveryController struct {
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
 	return &unsafeRecoveryController{
 		cluster:            cluster,
-		stage:              ready,
+		stage:              idle,
 		failedStores:       make(map[uint64]interface{}),
 		storeReports:       make(map[uint64]*pdpb.StoreReport),
 		numStoresReported:  0,
@@ -78,7 +81,7 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 }
 
 func (u *unsafeRecoveryController) reset() {
-	u.stage = ready
+	u.stage = idle
 	u.failedStores = make(map[uint64]interface{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
@@ -86,6 +89,12 @@ func (u *unsafeRecoveryController) reset() {
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	u.executionResults = make(map[uint64]bool)
 	u.executionReports = make(map[uint64]*pdpb.StoreReport)
+}
+
+func (u *unsafeRecoveryController) log(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	u.output = append(u.output, msg)
+	log.Info(msg)
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
@@ -96,7 +105,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	if len(failedStores) == 0 {
 		return errors.Errorf("No store specified")
 	}
-	if u.stage != ready {
+	if u.stage != idle {
 		return errors.Errorf("Another request is working in progress")
 	}
 
@@ -130,6 +139,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 		u.getRecoveryPlan(s.GetID())
 	}
 
+	u.log("Unsafe recovery, remove failed stores: %v", failedStores)
 	u.failedStores = failedStores
 	u.stage = collectReport
 	return nil
@@ -142,7 +152,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	defer u.Unlock()
 
 	switch u.stage {
-	case ready:
+	case idle:
 		// no recovery in progress, do nothing
 		return
 	case collectReport:
@@ -241,7 +251,7 @@ func (u *unsafeRecoveryController) finishRecovery() {
 	for _, history := range u.historyLocked() {
 		log.Info(history)
 	}
-	u.changeStage(ready)
+	u.changeStage(idle)
 }
 
 func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
@@ -568,10 +578,10 @@ func (u *unsafeRecoveryController) generateRemovePeerPlan() bool {
 				return true
 			}
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
-			storeRecoveryPlan.Removes = append(storeRecoveryPlan.Removes,
-				&pdpb.RemovePeers{
-					RegionId: region.GetId(),
-					Peers:    u.getFailedPeers(leader.Region()),
+			storeRecoveryPlan.Demotes = append(storeRecoveryPlan.Demotes,
+				&pdpb.DemoteFailedVoters{
+					RegionId:     region.GetId(),
+					FailedVoters: u.getFailedPeers(leader.Region()),
 				},
 			)
 			hasPlan = true
@@ -655,31 +665,13 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
 	return hasPlan
 }
 
-func getPeerDigest(peer *metapb.Peer) string {
-	return strconv.FormatUint(peer.Id, 10) + ", " + strconv.FormatUint(peer.StoreId, 10) + ", " + peer.Role.String()
-}
-
-func getRegionDigest(region *metapb.Region) string {
-	if region == nil {
-		return "nil"
-	}
-	regionID := strconv.FormatUint(region.Id, 10)
-	regionStartKey := core.HexRegionKeyStr(region.StartKey)
-	regionEndKey := core.HexRegionKeyStr(region.EndKey)
-	var peers string
-	for _, peer := range region.Peers {
-		peers += "(" + getPeerDigest(peer) + "), "
-	}
-	return fmt.Sprintf("region %s [%s, %s) {%s}", regionID, regionStartKey, regionEndKey, peers)
-}
-
 func getStoreDigest(storeReport *pdpb.StoreReport) string {
 	if storeReport == nil {
 		return "nil"
 	}
 	var result string
 	for _, peerReport := range storeReport.PeerReports {
-		result += getRegionDigest(peerReport.RegionState.Region) + ", "
+		result += core.RegionToHexMeta(peerReport.RegionState.Region).String() + ", "
 	}
 	return result
 }
@@ -689,9 +681,9 @@ func (u *unsafeRecoveryController) Show() []string {
 	u.RLock()
 	defer u.RUnlock()
 	// switch u.stage {
-	// case ready:
+	// case idle:
 	// 	return []string{"No on-going operation."}
-	// case collectingClusterInfo:
+	// case collectReport:
 	// 	var status []string
 	// 	status = append(status, fmt.Sprintf("Collecting cluster info from all alive stores, %d/%d.", u.numStoresReported, len(u.storeReports)))
 	// 	var reported, unreported string
@@ -748,7 +740,7 @@ func (u *unsafeRecoveryController) History() []string {
 	return u.historyLocked()
 }
 func (u *unsafeRecoveryController) historyLocked() []string {
-	// if u.stage <= ready {
+	// if u.stage <= idle {
 	// 	return []string{"No unsafe recover has been triggered since PD restarted."}
 	// }
 	// var history []string
