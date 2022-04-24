@@ -20,8 +20,27 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// LimiterConfig is the config of Limiter
+type LimiterConfig map[string]DimensionConfig
+
+// NewLimiterConfig returns a new LimiterConfig
+func NewLimiterConfig() LimiterConfig {
+	return make(map[string]DimensionConfig)
+}
+
+// DimensionConfig is the limit dimension config of one label
+type DimensionConfig struct {
+	// qps conifg
+	QPS      float64
+	QPSBrust int
+	// concurrency config
+	ConcurrencyLimit uint64
+}
+
 // Limiter is a controller for the request rate.
 type Limiter struct {
+	configMux          sync.Mutex
+	labelConfig        LimiterConfig
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 	// the label which is in labelAllowList won't be limited
@@ -30,7 +49,10 @@ type Limiter struct {
 
 // NewLimiter returns a global limiter which can be updated in the later.
 func NewLimiter() *Limiter {
-	return &Limiter{labelAllowList: make(map[string]struct{})}
+	return &Limiter{
+		labelAllowList: make(map[string]struct{}),
+		labelConfig:    NewLimiterConfig(),
+	}
 }
 
 // Allow is used to check whether it has enough token.
@@ -65,10 +87,12 @@ func (l *Limiter) Release(label string) {
 }
 
 // Update is used to update Ratelimiter with Options
-func (l *Limiter) Update(label string, opts ...Option) {
+func (l *Limiter) Update(label string, opts ...Option) UpdateStatus {
+	var status UpdateStatus
 	for _, opt := range opts {
-		opt(label, l)
+		status |= opt(label, l)
 	}
+	return status
 }
 
 // GetQPSLimiterStatus returns the status of a given label's QPS limiter.
@@ -81,7 +105,7 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 }
 
 // DeleteQPSLimiter deletes QPS limiter of given label
-func (l *Limiter) DeleteQPSLimiter(label string) {
+func (l *Limiter) deleteQPSLimiter(label string) {
 	l.qpsLimiter.Delete(label)
 }
 
@@ -95,7 +119,7 @@ func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, curre
 }
 
 // DeleteConcurrencyLimiter deletes concurrency limiter of given label
-func (l *Limiter) DeleteConcurrencyLimiter(label string) {
+func (l *Limiter) deleteConcurrencyLimiter(label string) {
 	l.concurrencyLimiter.Delete(label)
 }
 
