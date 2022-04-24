@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/pkg/net"
 	"math"
 	"net/http"
 	"strconv"
@@ -286,7 +287,7 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
-// runSyncConfig runs the sync config job.
+// runSyncConfig runs the job to sync config.
 func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -299,7 +300,7 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("sync config job is stopped")
+			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
 			index = syncConfig(manager, stores, index)
@@ -312,18 +313,19 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 }
 
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
-	for i := index; i < len(stores); i++ {
-		// filter out the stores that are tiflash or not serving.
-		if store := stores[i]; store.IsTiFlash() {
+	for ; index < len(stores); index++ {
+		// filter out the stores that are tiflash
+		if store := stores[index]; store.IsTiFlash() {
 			continue
 		}
 		// it will try next store if the current store is failed.
-		if err := manager.Observer(stores[i].GetStatusAddress()); err != nil {
-			log.Warn("sync config failed", zap.Error(err))
+		address := net.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		if err := manager.Observer(address); err != nil {
+			log.Warn("sync store config failed", zap.Error(err))
 			continue
 		}
 		// it will only try one store.
-		return i
+		return index
 	}
 	return len(stores)
 }

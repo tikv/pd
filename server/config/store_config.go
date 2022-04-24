@@ -128,7 +128,7 @@ func (m *StoreConfigManager) Observer(address string) error {
 		return err
 	}
 	if cfg != nil && !reflect.DeepEqual(cfg, m.config) {
-		log.Info("update tikv config", zap.String("config", cfg.String()))
+		log.Info("pd update the store config successful", zap.String("store-config", cfg.String()))
 		*m.config = *cfg
 	}
 	return nil

@@ -15,9 +15,11 @@
 package config
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	. "github.com/pingcap/check"
+	"net/http"
 )
 
 var _ = Suite(&testTiKVConfigSuite{})
@@ -67,4 +69,13 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	c.Assert(old.GetRegionMaxSize(), Equals, uint64(144))
 	manager.Observer("tidb.com")
 	c.Assert(old.GetRegionMaxSize(), Equals, uint64(10))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   &tls.Config{},
+		},
+	}
+	manager = NewStoreConfigManager(client)
+	c.Assert(manager.source.(*TiKVConfigSource).schema, Equals, "http")
 }
