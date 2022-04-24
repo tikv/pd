@@ -31,9 +31,12 @@ func AddLabelAllowList() Option {
 func updateConcurrencyConfig(label string, l *Limiter, limit uint64) bool {
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
+	if limit < 1 {
+		return false
+	}
 	cfg, ok := l.labelConfig[label]
 	if !ok {
-		cfg = &DimensionConfig{ConcurrencyLimit: limit}
+		cfg = DimensionConfig{ConcurrencyLimit: limit}
 		l.labelConfig[label] = cfg
 		return true
 	}
@@ -47,9 +50,12 @@ func updateConcurrencyConfig(label string, l *Limiter, limit uint64) bool {
 func updateQPSConfig(label string, l *Limiter, limit float64, burst int) bool {
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
+	if limit <= 0 && burst < 1 {
+		return false
+	}
 	cfg, ok := l.labelConfig[label]
 	if !ok {
-		cfg = &DimensionConfig{QPS: limit, QPSBrust: burst}
+		cfg = DimensionConfig{QPS: limit, QPSBrust: burst}
 		l.labelConfig[label] = cfg
 		return true
 	}
@@ -93,7 +99,7 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 }
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
-func UpdateDimensionConfig(cfg *DimensionConfig) Option {
+func UpdateDimensionConfig(cfg DimensionConfig) Option {
 	return func(label string, l *Limiter) {
 		if _, allow := l.labelAllowList[label]; allow {
 			return

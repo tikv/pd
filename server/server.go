@@ -1456,9 +1456,7 @@ func (s *Server) reloadConfigFromKV() error {
 func (s *Server) loadRateLimitConfig() {
 	cfg := s.GetConfig().PDServerCfg.RateLimitConfig
 	for key, value := range cfg {
-		if value.QPSBrust > 0 && value.QPS > 0 {
-			s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
-		}
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
 	}
 }
 

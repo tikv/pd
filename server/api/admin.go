@@ -190,7 +190,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
 		return
 	}
-	cfg := &ratelimit.DimensionConfig{}
+	cfg := h.svr.GetConfig().PDServerCfg.RateLimitConfig[serviceLabel]
 	// update concurrency limiter
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
@@ -198,12 +198,13 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		concurrency := uint64(concurrencyFloat)
 		if concurrency > 0 {
 			cfg.ConcurrencyLimit = concurrency
-			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(concurrency))
 			concurrencyUpdatedFlag = "Concurrency limiter is changed."
 		} else {
+			cfg.ConcurrencyLimit = 0
 			h.svr.DeteleServiceConcurrencyLimiter(serviceLabel)
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
+		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateConcurrencyLimiter(cfg.ConcurrencyLimit))
 	}
 	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
@@ -216,17 +217,24 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			}
 			cfg.QPS = qps
 			cfg.QPSBrust = brust
-			h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(qps, brust))
 			qpsRateUpdatedFlag = "QPS rate limiter is changed."
 		} else {
+			cfg.QPS = 0
+			cfg.QPSBrust = 0
 			h.svr.DeleteServiceQPSLimiter(serviceLabel)
 			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
 		}
+		h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateQPSLimiter(cfg.QPS, cfg.QPSBrust))
+
 	}
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
-		updateRateLimitConfig(h.svr, "rate-limit-config", serviceLabel, cfg)
-		h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
+		err := updateRateLimitConfig(h.svr, "rate-limit-config", serviceLabel, cfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
+		}
 	}
 }

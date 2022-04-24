@@ -142,11 +142,14 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-func updateRateLimitConfig(svr *server.Server, key, label string, value *ratelimit.DimensionConfig) {
+func updateRateLimitConfig(svr *server.Server, key, label string, value ratelimit.DimensionConfig) error {
 	cfg := svr.GetConfig()
-	rateLimitCfg := cfg.PDServerCfg.RateLimitConfig
+	rateLimitCfg := ratelimit.NewLimiterConfig()
+	for label, item := range cfg.PDServerCfg.RateLimitConfig {
+		rateLimitCfg[label] = item
+	}
 	rateLimitCfg[label] = value
-	updatePDServerConfig(svr, cfg, key, &rateLimitCfg)
+	return updatePDServerConfig(svr, cfg, key, &rateLimitCfg)
 }
 
 func (h *confHandler) updateConfig(cfg *config.Config, key string, value interface{}) error {
@@ -268,7 +271,6 @@ func updatePDServerConfig(svr *server.Server, config *config.Config, key string,
 	if err != nil {
 		return err
 	}
-
 	updated, found, err := mergeConfig(&config.PDServerCfg, data)
 	if err != nil {
 		return err
