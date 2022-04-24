@@ -153,7 +153,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -181,7 +181,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	c.Assert(resp.Header.Get("ip"), Equals, "127.0.0.1")
 
 	input = map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -206,7 +206,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
@@ -229,7 +229,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
@@ -256,7 +256,7 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -290,7 +290,7 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
 
 	input = map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -315,7 +315,7 @@ func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -341,7 +341,7 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
 
 	input = map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -361,7 +361,7 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	log.ReplaceGlobals(lg, p)
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -393,7 +393,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
@@ -416,7 +416,7 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
