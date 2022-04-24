@@ -566,11 +566,6 @@ error = '''
 wrong scheduler config %s
 '''
 
-["PD:scheduler:ErrSchedulerConfigNoImplement"]
-error = '''
-schedulers config no implement
-'''
-
 ["PD:scheduler:ErrSchedulerCreateFuncNotRegistered"]
 error = '''
 create func of %v is not registered

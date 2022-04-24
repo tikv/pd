@@ -87,7 +87,6 @@ var (
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
 	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
-	ErrSchedulerConfigNoImplement       = errors.Normalize("schedulers config no implement", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfigNoImplement"))
 )
 
 // checker errors
