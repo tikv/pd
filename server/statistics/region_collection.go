@@ -287,10 +287,10 @@ func NewLabelStatistics() *LabelStatistics {
 
 // Observe records the current label status.
 func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
-	l.Lock()
-	defer l.Unlock()
 	regionID := region.GetID()
 	regionIsolation := GetRegionLabelIsolation(stores, labels)
+	l.Lock()
+	defer l.Unlock()
 	if label, ok := l.regionLabelStats[regionID]; ok {
 		if label == regionIsolation {
 			return
@@ -329,7 +329,11 @@ func (l *LabelStatistics) ClearDefunctRegion(regionID uint64) {
 func (l *LabelStatistics) GetLabelCounter() map[string]int {
 	l.RLock()
 	defer l.RUnlock()
-	return l.labelCounter
+	clonedLabelCounter := make(map[string]int, len(l.labelCounter))
+	for k, v := range l.labelCounter {
+		clonedLabelCounter[k] = v
+	}
+	return clonedLabelCounter
 }
 
 // GetRegionLabelIsolation returns the isolation level of the region.
