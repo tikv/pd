@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
 )
 
 // createRouteOption is used to register service for mux.Route
@@ -47,6 +46,14 @@ func setQueries(pairs ...string) createRouteOption {
 	}
 }
 
+// routeCreateFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) {
+	route = route.Handler(handler).Name(name)
+	for _, opt := range opts {
+		opt(route)
+	}
+}
+
 func createStreamingRender() *render.Render {
 	return render.New(render.Options{
 		StreamingJSON: true,
@@ -57,54 +64,6 @@ func createIndentRender() *render.Render {
 	return render.New(render.Options{
 		IndentJSON: true,
 	})
-}
-
-// middlewareBuilder is used to build service middleware for HTTP api
-type serviceMiddlewareBuilder struct {
-	svr     *server.Server
-	handler http.Handler
-}
-
-func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
-	return &serviceMiddlewareBuilder{
-		svr: s,
-		handler: negroni.New(
-			newRequestInfoMiddleware(s),
-			newAuditMiddleware(s),
-			// todo: add rate limit middleware
-		),
-	}
-}
-
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
-func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, path string,
-	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.HandleFunc(path, s.middlewareFunc(handleFunc))
-	handleFuncName := getFunctionName(handleFunc)
-	route = route.Name(handleFuncName)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
-}
-
-// registerPathPrefixRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
-func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandleFunc(router *mux.Router, prefix string,
-	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.PathPrefix(prefix).HandlerFunc(s.middlewareFunc(handleFunc))
-	handleFuncName := getFunctionName(handleFunc)
-	route = route.Name(handleFuncName)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
-}
-
-func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.handler.ServeHTTP(w, r)
-		next(w, r)
-	}
 }
 
 func getFunctionName(f interface{}) string {
@@ -123,10 +82,23 @@ func getFunctionName(f interface{}) string {
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := createIndentRender()
+	serviceMiddle := newServiceMiddlewareBuilder(svr)
+	registerPrefix := func(router *mux.Router, prefixPath string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.PathPrefix(prefixPath), serviceMiddle.createHandler(handleFunc),
+			getFunctionName(handleFunc), opts...)
+	}
+	registerFunc := func(router *mux.Router, path string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.Path(path), serviceMiddle.createHandler(handleFunc),
+			getFunctionName(handleFunc), opts...)
+	}
+
 	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.SetServiceAuditBackendForHTTP(route, labels...)
+			if len(labels) > 0 {
+				svr.SetServiceAuditBackendLabels(route.GetName(), labels)
+			}
 		}
 	}
 
@@ -134,6 +106,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
 
+	rd := createIndentRender()
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
 
@@ -144,10 +117,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
-
-	serviceBuilder := newServiceMiddlewareBuilder(svr)
-	registerPrefix := serviceBuilder.registerPathPrefixRouteHandleFunc
-	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods("GET"))

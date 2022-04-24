@@ -17,11 +17,9 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
@@ -30,6 +28,23 @@ import (
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
 )
+
+// serviceMiddlewareBuilder is used to build service middleware for HTTP api
+type serviceMiddlewareBuilder struct {
+	svr      *server.Server
+	handlers []negroni.Handler
+}
+
+func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
+	return &serviceMiddlewareBuilder{
+		svr:      s,
+		handlers: []negroni.Handler{newRequestInfoMiddleware(s), newAuditMiddleware(s)},
+	}
+}
+
+func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, *http.Request)) http.Handler {
+	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
+}
 
 // requestInfoMiddleware is used to gather info from requsetInfo
 type requestInfoMiddleware struct {
@@ -106,22 +121,14 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		return
 	}
 
-	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
-	if !ok {
-		log.Error("failed to get request info when auditing")
-		next(w, r)
-		return
-	}
+	// There is no need to check whether requestInfo is available like getting RaftCluster
+	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
 
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
 	if labels == nil {
 		next(w, r)
 		return
 	}
-
-	failpoint.Inject("addAuditMiddleware", func() {
-		w.Header().Add("audit-label", strings.Join(labels.Labels, ","))
-	})
 
 	beforeNextBackends := make([]audit.Backend, 0)
 	afterNextBackends := make([]audit.Backend, 0)
