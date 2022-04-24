@@ -55,7 +55,7 @@ func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatu
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
 
-	cfg, _ := l.labelConfig[label]
+	cfg := l.labelConfig[label]
 	if cfg.ConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
