@@ -90,24 +90,24 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	return r
 }
 
-// GetRegionStatsByType gets the status of the region by types.
+// GetRegionStatsByType gets the status of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
 func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for _, r := range r.stats[typ] {
-		res = append(res, r.RegionInfo)
+		res = append(res, r.RegionInfo.Clone())
 	}
 	return res
 }
 
-// GetOfflineRegionStatsByType gets the status of the offline region by types.
+// GetOfflineRegionStatsByType gets the status of the offline region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
 func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for _, r := range r.offlineStats[typ] {
-		res = append(res, r)
+		res = append(res, r.Clone())
 	}
 	return res
 }
