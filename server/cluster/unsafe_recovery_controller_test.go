@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
@@ -42,26 +43,69 @@ func (s *testUnsafeRecoverSuite) SetUpTest(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 }
 
-func (s *testUnsafeRecoverSuite) TestRegionTree(c *C) {
-
-}
-
-// func newRegion(peerID uint64, start, end []byte, epoch *metapb.RegionEpoch, peers []*metapb.Peer) *metapb.Region {
-
-// }
-
-// func newPeer(peerID uint64, storeID uint64) *metapb.Peer {
-// 	return &metapb.Peer{
-// 		Id: peerID,
-// 		StoreId: storeID,
-// 	}
-// }
-
 func newStoreHeartbeat(storeID uint64) *pdpb.StoreHeartbeatRequest {
 	return &pdpb.StoreHeartbeatRequest{
 		Stats: &pdpb.StoreStats{
 			StoreId: storeID,
 		},
+	}
+}
+
+func applyRecoveryPlan(c *C, reports *pdpb.StoreReport, resp *pdpb.StoreHeartbeatResponse) {
+	plan := resp.GetRecoveryPlan()
+	if plan == nil {
+		return
+	}
+
+	for _, create := range plan.GetCreates() {
+		reports.PeerReports = append(reports.PeerReports, &pdpb.PeerReport{
+			RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+			RegionState: &raft_serverpb.RegionLocalState{
+				Region: create,
+			},
+		})
+	}
+
+	for _, tombstone := range plan.GetTombstones() {
+		for i, report := range reports.PeerReports {
+			if report.GetRegionState().GetRegion().GetId() == tombstone {
+				reports.PeerReports = append(reports.PeerReports[:i], reports.PeerReports[i+1:]...)
+				break
+			}
+		}
+	}
+
+	for _, demote := range plan.GetDemotes() {
+		for _, report := range reports.PeerReports {
+			region := report.GetRegionState().GetRegion()
+			if region.GetId() == demote.GetRegionId() {
+				for _, failedVoter := range demote.GetFailedVoters() {
+					for _, peer := range region.GetPeers() {
+						if failedVoter.GetId() == peer.GetId() {
+							peer.Role = metapb.PeerRole_Learner
+							break
+						}
+					}
+				}
+				c.Assert(report.IsForceLeader, IsTrue)
+				report.IsForceLeader = false
+				break
+			}
+		}
+	}
+
+	forceLeaders := plan.GetForceLeader()
+	if forceLeaders == nil {
+		return
+	}
+	for _, forceLeader := range forceLeaders.GetEnterForceLeaders() {
+		for _, report := range reports.PeerReports {
+			region := report.GetRegionState().GetRegion()
+			if region.GetId() == forceLeader {
+				report.IsForceLeader = true
+				break
+			}
+		}
 	}
 }
 
@@ -80,7 +124,7 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
-				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10},
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
 				RegionState: &raft_serverpb.RegionLocalState{
 					Region: &metapb.Region{
 						Id:          1,
@@ -91,7 +135,7 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 	}
 	c.Assert(recoveryController.GetStage(), Equals, collectReport)
 	// require peer report
-	for storeID, _ := range reports {
+	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
@@ -99,6 +143,7 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 		c.Assert(len(resp.RecoveryPlan.Creates), Equals, 0)
 		c.Assert(len(resp.RecoveryPlan.Demotes), Equals, 0)
 		c.Assert(resp.RecoveryPlan.ForceLeader, IsNil)
+		applyRecoveryPlan(c, report, resp)
 	}
 
 	// receive all reports and dispatch plan
@@ -111,6 +156,7 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 		c.Assert(resp.RecoveryPlan.ForceLeader, NotNil)
 		c.Assert(len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders), Equals, 1)
 		c.Assert(resp.RecoveryPlan.ForceLeader.FailedStores, NotNil)
+		applyRecoveryPlan(c, report, resp)
 	}
 	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
 
@@ -121,19 +167,20 @@ func (s *testUnsafeRecoverSuite) TestWholeProcess(c *C) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		c.Assert(resp.RecoveryPlan, NotNil)
 		c.Assert(len(resp.RecoveryPlan.Demotes), Equals, 1)
+		applyRecoveryPlan(c, report, resp)
 	}
-	c.Assert(recoveryController.GetStage(), Equals, removePeer)
+	c.Assert(recoveryController.GetStage(), Equals, demoteFailedVoter)
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		req.StoreReport = report
 		// remove the two failed peers
-		req.StoreReport.PeerReports[0].RegionState.Region.Peers = req.StoreReport.PeerReports[0].RegionState.Region.Peers[:1]
 		resp = &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		c.Assert(resp.RecoveryPlan, IsNil)
+		applyRecoveryPlan(c, report, resp)
 	}
-	c.Assert(recoveryController.GetStage(), Equals, idle)
+	c.Assert(recoveryController.GetStage(), Equals, finished)
 }
 
 // func (s *testUnsafeRecoverSuite) TestPlanGenerationOneUnhealthyRegion(c *C) {
