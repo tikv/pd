@@ -264,8 +264,9 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 	manager := config.NewStoreConfigManager(c.httpClient)
+	c.storeConfig = manager.GetStoreConfig()
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, manager.GetStoreConfig())
+	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfig)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
@@ -313,7 +314,7 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
 	for i := index; i < len(stores); i++ {
 		// filter out the stores that are tiflash or not serving.
-		if store := stores[i]; !store.IsTiFlash() {
+		if store := stores[i]; store.IsTiFlash() {
 			continue
 		}
 		// it will try next store if the current store is failed.
