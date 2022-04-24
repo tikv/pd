@@ -303,9 +303,10 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
 	c.Assert(sc.EnableAudit, Equals, false)
 
-	// test update enable-audit
+	// test update enable-audit and enable-rate-limit
 	ms = map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit":      "true",
+		"enable-rate-limit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -313,8 +314,10 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	sc = &config.PDServerConfig{}
 	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, true)
+	c.Assert(sc.EnableRateLimit, Equals, true)
 	ms = map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit":      "false",
+		"enable-rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -322,6 +325,7 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	sc = &config.PDServerConfig{}
 	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, false)
+	c.Assert(sc.EnableRateLimit, Equals, false)
 }
 
 var ttlConfig = map[string]interface{}{
