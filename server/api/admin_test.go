@@ -351,7 +351,7 @@ func (s *testServiceSuite) TestUpdateRateLimitConfig(c *C) {
 	limiter := s.svr.GetServiceRateLimiter()
 	limiter.Update("SetRatelimitConfig", ratelimit.AddLabelAllowList())
 
-	// block list
+	// Allow list
 	input = make(map[string]interface{})
 	input["type"] = "label"
 	input["label"] = "SetRatelimitConfig"
