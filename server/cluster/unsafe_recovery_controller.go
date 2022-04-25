@@ -44,7 +44,6 @@ const (
 //   +-----------+
 //         |
 //         |
-//         |
 //         v
 //   +-----------+             +-----------+               +-----------+
 //   |           |------------>|           |               |           |
@@ -53,7 +52,6 @@ const (
 //   |           |      |      |           |       |       +-----------+
 //   +-----------+      |      +-----------+       |
 //                      |         |     ^          |
-//                      |         |     |          |
 //                      |         |     |          |
 //                      |         v     |          |
 //                      |      +-----------+       |
@@ -257,13 +255,13 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 // It collects and checks if store reports have been fully collected.
 func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) (bool, error) {
-	if heartbeat.StoreReport == nil {
-		return false, nil
-	}
-
 	storeID := heartbeat.Stats.StoreId
 	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
 		return false, errors.Errorf("Receive heartbeat from failed store %d", storeID)
+	}
+
+	if heartbeat.StoreReport == nil {
+		return false, nil
 	}
 
 	if report, exists := u.storeReports[storeID]; exists {
@@ -276,7 +274,6 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 			}
 		}
 	}
-
 	return false, nil
 }
 
@@ -830,5 +827,9 @@ func (u *unsafeRecoveryController) Show() []string {
 func (u *unsafeRecoveryController) History() []string {
 	u.RLock()
 	defer u.RUnlock()
-	return []string{""}
+
+	if u.stage <= idle {
+		return []string{"No unsafe recover has been triggered since PD restarted."}
+	}
+	return u.output
 }
