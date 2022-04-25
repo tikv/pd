@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -155,6 +156,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
+	serviceRateLimiter *ratelimit.Limiter
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
@@ -255,6 +257,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
@@ -1171,6 +1174,11 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
 }
 
+// GetServiceRateLimiter is used to get rate limiter
+func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+	return s.serviceRateLimiter
+}
+
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 	s.cluster.Lock()
@@ -1415,6 +1423,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	s.loadRateLimitConfig()
 	switchableStorage, ok := s.storage.(interface {
 		SwitchToRegionStorage()
 		SwitchToDefaultStorage()
@@ -1430,6 +1439,13 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 	return nil
+}
+
+func (s *Server) loadRateLimitConfig() {
+	cfg := s.GetConfig().PDServerCfg.RateLimitConfig
+	for key, value := range cfg {
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
+	}
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.
