@@ -186,7 +186,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
 		return
 	}
-	if h.svr.IsInRateLimitBlockList(serviceLabel) {
+	if h.svr.IsInRateLimitAllowList(serviceLabel) {
 		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
 		return
 	}
