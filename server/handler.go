@@ -809,7 +809,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 }
 
 // AddScatterRegionOperator adds an operator to scatter a region.
-func (h *Handler) AddScatterRegionOperator(regionID uint64, group string, kind operator.OpKind) error {
+func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -824,7 +824,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string, kind o
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.GetRegionScatter().Scatter(region, group, kind)
+	op, err := c.GetRegionScatter().Scatter(region, group, operator.OpAdmin)
 	if err != nil {
 		return err
 	}

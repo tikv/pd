@@ -280,7 +280,7 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		group, _ := input["group"].(string)
-		if err := h.AddScatterRegionOperator(uint64(regionID), group, operator.OpAdmin); err != nil {
+		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
