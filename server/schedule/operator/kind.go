@@ -25,6 +25,8 @@ type OpKind uint32
 
 // Flags for operators.
 const (
+	// Default value.
+	OpDefault OpKind = 0
 	// Initiated by admin.
 	OpAdmin OpKind = 1 << iota
 	// Initiated by merge checker or merge scheduler. Note that it may not include region merge.

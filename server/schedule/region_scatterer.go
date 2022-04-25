@@ -339,7 +339,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, k
 		r.Put(targetPeers, targetLeader, group)
 		return nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, operator.OpAdmin)
+	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, kind)
 	if err != nil {
 		scatterCounter.WithLabelValues("fail", "").Inc()
 		for _, peer := range region.GetPeers() {
