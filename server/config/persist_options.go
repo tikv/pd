@@ -449,6 +449,11 @@ func (o *PersistOptions) IsAuditEnabled() bool {
 	return o.GetPDServerConfig().EnableAudit
 }
 
+// IsRateLimitEnabled returns whether rate limit middleware is enabled
+func (o *PersistOptions) IsRateLimitEnabled() bool {
+	return o.GetPDServerConfig().EnableRateLimit
+}
+
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.GetPDServerConfig().KeyType)

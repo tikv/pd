@@ -95,6 +95,10 @@ func postJSON(client *http.Client, url string, data []byte, checkOpts ...func([]
 	return apiutil.PostJSON(client, url, data, checkOpts...)
 }
 
+func postJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
+	return apiutil.PostJSONIgnoreRespStatus(client, url, data, checkOpts...)
+}
+
 func getJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
 	return apiutil.GetJSON(client, url, data, checkOpts...)
 }

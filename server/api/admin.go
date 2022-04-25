@@ -16,12 +16,14 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -137,4 +139,101 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 	cluster := getCluster(r)
 	cluster.GetReplicationMode().UpdateMemberWaitAsyncTime(memberID)
 	h.rd.JSON(w, http.StatusOK, nil)
+}
+
+// @Tags admin
+// @Summary switch ratelimit middleware
+// @Param enable query string true "enable" Enums(true, false)
+// @Produce json
+// @Success 200 {string} string ""
+// @Failure 400 {string} string ""
+// @Router /admin/ratelimit/config [POST]
+func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	typeStr, ok := input["type"].(string)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "The type is empty.")
+		return
+	}
+	var serviceLabel string
+	switch typeStr {
+	case "label":
+		serviceLabel, ok = input["label"].(string)
+		if !ok || len(serviceLabel) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "The label is empty.")
+			return
+		}
+		if len(h.svr.GetServiceLabels(serviceLabel)) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			return
+		}
+	case "path":
+		method, _ := input["method"].(string)
+		path, ok := input["path"].(string)
+		if !ok || len(path) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "The path is empty.")
+			return
+		}
+		serviceLabel = h.svr.GetAPIAccessServiceLabel(apiutil.NewAccessPath(path, method))
+		if len(serviceLabel) == 0 {
+			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			return
+		}
+	default:
+		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
+		return
+	}
+	if h.svr.IsInRateLimitBlockList(serviceLabel) {
+		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
+		return
+	}
+	cfg := h.svr.GetConfig().PDServerCfg.RateLimitConfig[serviceLabel]
+	// update concurrency limiter
+	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
+	concurrencyFloat, okc := input["concurrency"].(float64)
+	if okc {
+		concurrency := uint64(concurrencyFloat)
+		cfg.ConcurrencyLimit = concurrency
+	}
+	// update qps rate limiter
+	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
+	qps, okq := input["qps"].(float64)
+	if okq {
+		brust := 0
+		if qps > 0 {
+			if int(qps) > 1 {
+				brust = int(qps)
+			} else {
+				brust = 1
+			}
+		}
+		cfg.QPS = qps
+		cfg.QPSBrust = brust
+	}
+	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(cfg))
+	switch {
+	case status&ratelimit.QPSChanged != 0:
+		qpsRateUpdatedFlag = "QPS rate limiter is changed."
+	case status&ratelimit.QPSDeleted != 0:
+		qpsRateUpdatedFlag = "QPS rate limiter is deleted."
+	}
+	switch {
+	case status&ratelimit.ConcurrencyChanged != 0:
+		concurrencyUpdatedFlag = "Concurrency limiter is changed."
+	case status&ratelimit.ConcurrencyDeleted != 0:
+		concurrencyUpdatedFlag = "Concurrency limiter is deleted."
+	}
+	if !okc && !okq {
+		h.rd.JSON(w, http.StatusOK, "No changed.")
+	} else {
+		err := updateRateLimitConfig(h.svr, "rate-limit-config", serviceLabel, cfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else {
+			h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
+		}
+	}
 }

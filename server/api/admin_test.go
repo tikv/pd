@@ -23,6 +23,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -191,4 +192,177 @@ func (s *testServiceSuite) SetUpSuite(c *C) {
 
 func (s *testServiceSuite) TearDownSuite(c *C) {
 	s.cleanup()
+}
+
+func (s *testServiceSuite) TestUpdateRateLimitConfig(c *C) {
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/ratelimit/config", s.svr.GetAddr(), apiPrefix)
+
+	// test empty type
+	input := make(map[string]interface{})
+	input["type"] = 123
+	jsonBody, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"The type is empty.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+	// test invalid type
+	input = make(map[string]interface{})
+	input["type"] = "url"
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"The type is invalid.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+
+	// test empty label
+	input = make(map[string]interface{})
+	input["type"] = "label"
+	input["label"] = ""
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"The label is empty.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+	// test no label matched
+	input = make(map[string]interface{})
+	input["type"] = "label"
+	input["label"] = "TestLabel"
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+
+	// test empty path
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = ""
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"The path is empty.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+
+	// test path but no label matched
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/test"
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
+
+	// no change
+	input = make(map[string]interface{})
+	input["type"] = "label"
+	input["label"] = "GetHealthStatus"
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"No changed.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+
+	// change concurrency
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/health"
+	input["method"] = "GET"
+	input["concurrency"] = 100
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(strings.Contains(string(res), "Concurrency limiter is changed."), Equals, true)
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+	input["concurrency"] = 0
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(strings.Contains(string(res), "Concurrency limiter is deleted."), Equals, true)
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+
+	// change qps
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/health"
+	input["method"] = "GET"
+	input["qps"] = 100
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+	input["qps"] = -1
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(strings.Contains(string(res), "QPS rate limiter is deleted."), Equals, true)
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+
+	// change both
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/debug/pprof/profile"
+	input["qps"] = 100
+	input["concurrency"] = 100
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"Concurrency limiter is changed. QPS rate limiter is changed.\"\n")
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+
+	limiter := s.svr.GetServiceRateLimiter()
+	limiter.Update("SetRatelimitConfig", ratelimit.AddLabelAllowList())
+
+	// Allow list
+	input = make(map[string]interface{})
+	input["type"] = "label"
+	input["label"] = "SetRatelimitConfig"
+	input["qps"] = 100
+	input["concurrency"] = 100
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(string(res), Equals, "\"This service is in block list.\"\n")
+			c.Assert(code, Equals, http.StatusBadRequest)
+		})
+	c.Assert(err, IsNil)
 }
