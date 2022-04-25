@@ -38,7 +38,7 @@ type serviceMiddlewareBuilder struct {
 func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
 	return &serviceMiddlewareBuilder{
 		svr:      s,
-		handlers: []negroni.Handler{newRequestInfoMiddleware(s), newAuditMiddleware(s)},
+		handlers: []negroni.Handler{newRequestInfoMiddleware(s), newAuditMiddleware(s), newRateLimitMiddleware(s)},
 	}
 }
 
@@ -56,7 +56,7 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !rm.svr.GetPersistOptions().IsAuditEnabled() {
+	if !rm.svr.GetPersistOptions().IsAuditEnabled() && !rm.svr.GetPersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}
@@ -151,5 +151,32 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 	r = r.WithContext(requestutil.WithEndTime(r.Context(), endTime))
 	for _, backend := range afterNextBackends {
 		backend.ProcessHTTPRequest(r)
+	}
+}
+
+type rateLimitMiddleware struct {
+	svr *server.Server
+}
+
+func newRateLimitMiddleware(s *server.Server) negroni.Handler {
+	return &rateLimitMiddleware{svr: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for rateLimitMiddleware
+func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !s.svr.GetPersistOptions().IsRateLimitEnabled() {
+		next(w, r)
+		return
+	}
+	// There is no need to check whether requestInfo is available like getting RaftCluster
+	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
+
+	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
+	rateLimiter := s.svr.GetServiceRateLimiter()
+	if rateLimiter.Allow(requestInfo.ServiceLabel) {
+		next(w, r)
+		rateLimiter.Release(requestInfo.ServiceLabel)
+	} else {
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 	}
 }

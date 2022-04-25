@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -105,6 +106,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	localLog := audit.LocalLogLabel
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
+
+	setRateLimit := func(opts ...ratelimit.Option) createRouteOption {
+		return func(route *mux.Route) {
+			svr.UpdateServiceRateLimiter(route.GetName(), opts...)
+		}
+	}
+	allowList := ratelimit.AddLabelAllowList()
 
 	rd := createIndentRender()
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -281,7 +289,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/ratelimit/config", adminHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/ratelimit/config", adminHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimit(allowList))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))
