@@ -23,6 +23,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -346,6 +347,9 @@ func (s *testServiceSuite) TestUpdateRateLimitConfig(c *C) {
 			c.Assert(code, Equals, http.StatusOK)
 		})
 	c.Assert(err, IsNil)
+
+	limiter := s.svr.GetServiceRateLimiter()
+	limiter.Update("SetRatelimitConfig", ratelimit.AddLabelAllowList())
 
 	// block list
 	input = make(map[string]interface{})
