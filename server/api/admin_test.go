@@ -323,6 +323,22 @@ func (s *testServiceSuite) TestUpdateRateLimitConfig(c *C) {
 			c.Assert(code, Equals, http.StatusOK)
 		})
 	c.Assert(err, IsNil)
+
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/health"
+	input["method"] = "GET"
+	input["qps"] = 0.3
+	jsonBody, err = json.Marshal(input)
+	c.Assert(err, IsNil)
+	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
+		func(res []byte, code int) {
+			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
+			c.Assert(code, Equals, http.StatusOK)
+		})
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetConfig().PDServerCfg.RateLimitConfig["GetHealthStatus"].QPSBrust, Equals, 1)
+
 	input["qps"] = -1
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
