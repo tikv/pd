@@ -258,6 +258,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
@@ -1179,8 +1180,8 @@ func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
-// IsInRateLimitBlockList returns whethis given service label is in block lost
-func (s *Server) IsInRateLimitBlockList(serviceLabel string) bool {
+// IsInRateLimitAllowList returns whethis given service label is in block lost
+func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
 	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
 }
 
@@ -1433,6 +1434,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	s.loadRateLimitConfig()
 	switchableStorage, ok := s.storage.(interface {
 		SwitchToRegionStorage()
 		SwitchToDefaultStorage()
@@ -1448,6 +1450,13 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 	return nil
+}
+
+func (s *Server) loadRateLimitConfig() {
+	cfg := s.GetConfig().PDServerCfg.RateLimitConfig
+	for key, value := range cfg {
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
+	}
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.
