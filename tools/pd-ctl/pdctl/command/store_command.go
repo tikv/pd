@@ -392,7 +392,7 @@ func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	prefix := fmt.Sprintf(storePrefix, args[0])
-	r, err := doRequest(cmd, prefix, http.MethodGet)
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
 		return
@@ -414,7 +414,7 @@ func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	prefix = fmt.Sprintf(storeUpStatePrefix, args[0])
-	_, err = doRequest(cmd, prefix, http.MethodPost)
+	_, err = doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to cancel delete store %s: %s\n", args[0], err)
 		return
@@ -429,7 +429,7 @@ func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	}
 	// cancel delete store by its ID
 	prefix := fmt.Sprintf(storeUpStatePrefix, id)
-	_, err := doRequest(cmd, prefix, http.MethodPost)
+	_, err := doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to cancel delete store %s: %s\n", args[0], err)
 		return
