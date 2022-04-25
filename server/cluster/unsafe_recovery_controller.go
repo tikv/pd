@@ -96,8 +96,8 @@ type unsafeRecoveryController struct {
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
-	err    error
 	output []string
+	err    error
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
@@ -109,6 +109,8 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 		numStoresReported:  0,
 		storePlanExpires:   make(map[uint64]time.Time),
 		storeRecoveryPlans: make(map[uint64]*pdpb.RecoveryPlan),
+		output:             make([]string, 0),
+		err:                nil,
 	}
 }
 
@@ -119,6 +121,8 @@ func (u *unsafeRecoveryController) reset() {
 	u.numStoresReported = 0
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+	u.output = make([]string, 0)
+	u.err = nil
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
@@ -126,9 +130,6 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	u.Lock()
 	defer u.Unlock()
 
-	if len(failedStores) == 0 {
-		return errors.Errorf("No store specified")
-	}
 	if u.stage != idle {
 		return errors.Errorf("Another request is working in progress")
 	}
@@ -222,6 +223,8 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 			} else {
 				hasPlan = false
 			}
+		default:
+			panic("unreachable")
 		}
 
 		if !hasPlan {
@@ -263,12 +266,8 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 		return false, errors.Errorf("Receive heartbeat from failed store %d", storeID)
 	}
 
-	if _, find := u.storeReports[storeID]; !find {
-		// No need to collect the report of the store
-		return false, nil
-	}
-
-	if report, exists := u.storeReports[storeID]; exists && report == nil { // if receive duplicated report from same TiKV, use the latest one
+	if report, exists := u.storeReports[storeID]; exists {
+		// if receive duplicated report from the same TiKV, use the latest one
 		u.storeReports[storeID] = heartbeat.StoreReport
 		if report == nil {
 			u.numStoresReported++
@@ -282,8 +281,8 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 }
 
 func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
-	u.Lock()
-	defer u.Unlock()
+	u.RLock()
+	defer u.RUnlock()
 	return u.stage
 }
 
@@ -606,12 +605,10 @@ func (t *regionTree) update(item *regionItem) bool {
 }
 
 func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.RecoveryPlan {
-	storeRecoveryPlan, exists := u.storeRecoveryPlans[storeID]
-	if !exists {
+	if _, exists := u.storeRecoveryPlans[storeID]; !exists {
 		u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
-		storeRecoveryPlan = u.storeRecoveryPlans[storeID]
 	}
-	return storeRecoveryPlan
+	return u.storeRecoveryPlans[storeID]
 }
 
 func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
