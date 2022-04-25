@@ -788,16 +788,13 @@ func sendRequest(c *C, url string, method string) []byte {
 	return output
 }
 
-func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {
-	var leader *server.Server
+func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) {
 	testutil.WaitUntil(c, func() bool {
 		for _, s := range svrs {
 			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
-				leader = s.GetServer()
 				return true
 			}
 		}
 		return false
 	})
-	return leader
 }
