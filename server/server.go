@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -155,6 +156,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
+	serviceRateLimiter *ratelimit.Limiter
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
@@ -254,6 +256,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
@@ -1169,6 +1172,21 @@ func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.Backen
 // SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
 func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
 	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
+}
+
+// GetServiceRateLimiter is used to get rate limiter
+func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+	return s.serviceRateLimiter
+}
+
+// IsInRateLimitBlockList returns whethis given service label is in block lost
+func (s *Server) IsInRateLimitBlockList(serviceLabel string) bool {
+	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
+}
+
+// UpdateServiceRateLimiter is used to update RateLimiter
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
+	return s.serviceRateLimiter.Update(serviceLabel, opts...)
 }
 
 // GetClusterStatus gets cluster status.
