@@ -36,6 +36,42 @@ const (
 	storeRequestInterval = time.Second * 60
 )
 
+// Stage transition graph: for more details, please check `unsafeRecoveryController.HandleStoreHeartbeat()`
+//   +-----------+
+//   |           |
+//   |   idle    |
+//   |           |
+//   +-----------+
+//         |
+//         |
+//         |
+//         v
+//   +-----------+             +-----------+               +-----------+
+//   |           |------------>|           |               |           |
+//   |  collect  |             |  force    |               |  failed   |
+//   |  report   |      +------|  leader   |-------+------>|           |
+//   |           |      |      |           |       |       +-----------+
+//   +-----------+      |      +-----------+       |
+//                      |         |     ^          |
+//                      |         |     |          |
+//                      |         |     |          |
+//                      |         v     |          |
+//                      |      +-----------+       |
+//                      |      |           |       |
+//                      |      |  demote   |       |
+//                      +------|  voter    |-------+
+//                      |      |           |       |
+//                      |      +-----------+       |
+//                      |         |     ^          |
+//                      |         |     |          |
+//                      |         v     |          |
+//                      |      +-----------+       |
+//   +-----------+      |      |           |       |
+//   |           |      |      |  create   |       |
+//   | finished  |      |      |  region   |-------+
+//   |           |<-----+------|           |
+//   +-----------+             +-----------+
+//
 const (
 	idle unsafeRecoveryStage = iota
 	collectReport
@@ -43,6 +79,7 @@ const (
 	demoteFailedVoter
 	createEmptyRegion
 	finished
+	failed
 )
 
 type unsafeRecoveryController struct {
@@ -59,6 +96,7 @@ type unsafeRecoveryController struct {
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
+	err    error
 	output []string
 }
 
@@ -81,12 +119,6 @@ func (u *unsafeRecoveryController) reset() {
 	u.numStoresReported = 0
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-}
-
-func (u *unsafeRecoveryController) log(format string, a ...interface{}) {
-	msg := fmt.Sprintf(format, a...)
-	u.output = append(u.output, msg)
-	log.Info(msg)
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
@@ -131,9 +163,8 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 		u.getRecoveryPlan(s.GetID())
 	}
 
-	u.log("Unsafe recovery, remove failed stores: %v", failedStores)
 	u.failedStores = failedStores
-	u.stage = collectReport
+	u.changeStage(collectReport)
 	return nil
 }
 
@@ -143,32 +174,38 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	u.Lock()
 	defer u.Unlock()
 
-	switch u.stage {
-	case idle:
+	if u.stage == idle || u.stage == finished || u.stage == failed {
 		// no recovery in progress, do nothing
 		return
-	case collectReport:
-		if u.collectReport(heartbeat, resp) {
-			if !u.generateForceLeaderPlan() {
-				u.changeStage(finished)
-				return
-			} else {
+	}
+
+	allCollected := false
+	allCollected, u.err = u.collectReport(heartbeat, resp)
+	if u.err != nil {
+		u.changeStage(failed)
+		return
+	}
+
+	if allCollected {
+		hasPlan := true
+		switch u.stage {
+		case collectReport:
+			if u.generateForceLeaderPlan() {
 				u.changeStage(forceLeader)
-			}
-		}
-		u.dispatchPlan(heartbeat, resp)
-	case forceLeader:
-		if u.collectReport(heartbeat, resp) {
-			if !u.generateDemoteFailedVoterPlan() {
-				u.changeStage(finished)
-				return
+			} else if u.generateCreateEmptyRegionPlan() {
+				u.changeStage(createEmptyRegion)
 			} else {
-				u.changeStage(demoteFailedVoter)
+				hasPlan = false
 			}
-		}
-		u.dispatchPlan(heartbeat, resp)
-	case demoteFailedVoter:
-		if u.collectReport(heartbeat, resp) {
+		case forceLeader:
+			if u.generateDemoteFailedVoterPlan() {
+				u.changeStage(demoteFailedVoter)
+			} else if u.generateCreateEmptyRegionPlan() {
+				u.changeStage(createEmptyRegion)
+			} else {
+				hasPlan = false
+			}
+		case demoteFailedVoter:
 			// may still have plan to do, recheck again
 			if u.generateForceLeaderPlan() {
 				u.changeStage(forceLeader)
@@ -177,31 +214,38 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 			} else if u.generateCreateEmptyRegionPlan() {
 				u.changeStage(createEmptyRegion)
 			} else {
-				u.changeStage(finished)
-				return
+				hasPlan = false
 			}
-		}
-		u.dispatchPlan(heartbeat, resp)
-	case createEmptyRegion:
-		if u.collectReport(heartbeat, resp) {
+		case createEmptyRegion:
 			if u.generateCreateEmptyRegionPlan() {
 				u.changeStage(createEmptyRegion)
 			} else {
-				u.changeStage(finished)
-				return
+				hasPlan = false
 			}
 		}
-		u.dispatchPlan(heartbeat, resp)
+
+		if !hasPlan {
+			if u.err == nil {
+				u.changeStage(finished)
+			} else {
+				u.changeStage(failed)
+			}
+			return
+		}
 	}
+
+	u.dispatchPlan(heartbeat, resp)
 }
 
 /// It dispatches recovery plan if any.
 func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
-	// Lock should be held
 	storeID := heartbeat.Stats.StoreId
 	now := time.Now()
 
 	if expire, requested := u.storePlanExpires[storeID]; !requested || expire.Before(now) {
+		if requested {
+			log.Info(fmt.Sprintf("Unsafe Recovery store %d recovery plan execution timeout, retry", storeID))
+		}
 		// Dispatch the recovery plan to the store, and the plan may be empty.
 		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
 		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
@@ -209,33 +253,32 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 }
 
 // It collects and checks if store reports have been fully collected.
-func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) bool {
-	// Lock should be held
+func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) (bool, error) {
 	if heartbeat.StoreReport == nil {
-		return false
+		return false, nil
 	}
 
 	storeID := heartbeat.Stats.StoreId
 	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
-		// This should be unreachable.
-		// TODO: abort the process directly
-		return false
+		return false, errors.Errorf("Receive heartbeat from failed store %d", storeID)
 	}
 
 	if _, find := u.storeReports[storeID]; !find {
 		// No need to collect the report of the store
-		return false
+		return false, nil
 	}
 
-	if report, exists := u.storeReports[storeID]; exists && report == nil { // if receive duplicated report from same TiKV, just ignore
+	if report, exists := u.storeReports[storeID]; exists && report == nil { // if receive duplicated report from same TiKV, use the latest one
 		u.storeReports[storeID] = heartbeat.StoreReport
-		u.numStoresReported++
-		if u.numStoresReported == len(u.storeReports) {
-			return true
+		if report == nil {
+			u.numStoresReported++
+			if u.numStoresReported == len(u.storeReports) {
+				return true, nil
+			}
 		}
 	}
 
-	return false
+	return false, nil
 }
 
 func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
@@ -251,18 +294,29 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	switch u.stage {
 	case idle:
 	case collectReport:
-		output = append(output, "Enter collect report stage")
+		stores := ""
+		count := 0
+		for store := range u.failedStores {
+			count += 1
+			stores += fmt.Sprintf("%d", store)
+			if count != len(u.failedStores) {
+				stores += ", "
+			}
+		}
+		output = append(output, fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores))
 	case forceLeader:
-		output = append(output, "Enter force leader stage")
+		output = append(output, "Unsafe recovery enters force leader stage")
 		output = append(output, u.getForceLeaderPlanDigest()...)
 	case demoteFailedVoter:
-		output = append(output, "Enter demote failed voter stage")
+		output = append(output, "Unsafe recovery enters demote failed voter stage")
 		output = append(output, u.getDemoteFailedVoterPlanDigest()...)
 	case createEmptyRegion:
-		output = append(output, "Enter create empty region stage")
+		output = append(output, "Unsafe recovery enters create empty region stage")
 		output = append(output, u.getCreateEmptyRegionPlanDigest()...)
 	case finished:
 		output = append(output, "Unsafe recovery finished")
+	case failed:
+		output = append(output, fmt.Sprintf("Unsafe recovery failed: %v", u.err))
 	}
 
 	u.output = append(u.output, output...)
@@ -394,6 +448,7 @@ type regionItem struct {
 // 6. consider Tiflash
 // 7. consider commit merge
 // 8. add test cases
+// 9. [DONE] add abort
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
@@ -641,7 +696,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan() bool {
 		if !u.canElectLeader(region) {
 			leader := findForceLeader(peersMap, region)
 			if leader == nil {
-				// can't find the force leader, skip
+				// can't find the force leader, maybe a newly split region, skip
 				return true
 			}
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
@@ -662,7 +717,8 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan() bool {
 			regionID := peerReport.GetRegionState().Region.Id
 			if !newestRegionTree.contains(regionID) {
 				if u.canElectLeader(peerReport.GetRegionState().Region) {
-					log.Warn("find invalid peer but it has quorum")
+					// find invalid peer but it has quorum
+					continue
 				} else {
 					// the peer is not in the valid regions, should be deleted directly
 					storeRecoveryPlan := u.getRecoveryPlan(storeID)
@@ -678,14 +734,14 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
 	newestRegionTree, _ := u.buildUpFromReports()
 	hasPlan := false
 
-	createRegion := func(startKey, endKey []byte, storeID uint64) *metapb.Region {
+	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
 		regionID, err := u.cluster.GetAllocator().Alloc()
 		if err != nil {
-			panic("can't alloc region id")
+			return nil, err
 		}
 		peerID, err := u.cluster.GetAllocator().Alloc()
 		if err != nil {
-			panic("can't alloc peer id")
+			return nil, err
 		}
 		return &metapb.Region{
 			Id:          regionID,
@@ -693,7 +749,7 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
 			EndKey:      endKey,
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 			Peers:       []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}},
-		}
+		}, nil
 	}
 
 	// There may be ranges that are covered by no one. Find these empty ranges, create new
@@ -704,7 +760,11 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
 		region := item.(*regionItem).Region()
 		storeID := item.(*regionItem).storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			newRegion := createRegion(lastEnd, region.StartKey, storeID)
+			newRegion, err := createRegion(lastEnd, region.StartKey, storeID)
+			if err != nil {
+				u.err = err
+				return false
+			}
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 			hasPlan = true
@@ -713,8 +773,15 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
 		lastStoreID = storeID
 		return true
 	})
+	if u.err != nil {
+		return false
+	}
 	if !bytes.Equal(lastEnd, []byte("")) {
-		newRegion := createRegion(lastEnd, []byte(""), lastStoreID)
+		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
+		if err != nil {
+			u.err = err
+			return false
+		}
 		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
 		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 		hasPlan = true
