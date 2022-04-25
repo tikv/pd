@@ -280,7 +280,7 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		group, _ := input["group"].(string)
-		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
+		if err := h.AddScatterRegionOperator(uint64(regionID), group, operator.OpAdmin); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -299,7 +299,7 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 		if rl, ok := input["retry_limit"].(float64); ok {
 			retryLimit = int(rl)
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
+		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit, operator.OpAdmin)
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()

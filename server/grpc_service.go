@@ -1272,7 +1272,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
-	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
+	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup(), 0)
 	if err != nil {
 		return nil, err
 	}
@@ -1644,7 +1644,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit, 0)
 	if err != nil {
 		return 0, err
 	}

@@ -809,7 +809,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 }
 
 // AddScatterRegionOperator adds an operator to scatter a region.
-func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error {
+func (h *Handler) AddScatterRegionOperator(regionID uint64, group string, kind operator.OpKind) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -824,7 +824,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.GetRegionScatter().Scatter(region, group)
+	op, err := c.GetRegionScatter().Scatter(region, group, kind)
 	if err != nil {
 		return err
 	}
@@ -839,7 +839,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 }
 
 // AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, endRawKey, group string, retryLimit int) (int, error) {
+func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, endRawKey, group string, retryLimit int, kind operator.OpKind) (int, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return 0, err
@@ -856,12 +856,12 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 		if err != nil {
 			return 0, err
 		}
-		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit, kind)
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit, kind)
 		if err != nil {
 			return 0, err
 		}

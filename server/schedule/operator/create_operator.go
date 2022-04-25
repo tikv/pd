@@ -193,7 +193,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, kind OpKind) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -214,7 +214,7 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 		EnableLightWeight().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
-		Build(0)
+		Build(kind)
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.

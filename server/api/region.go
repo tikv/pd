@@ -866,7 +866,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit, operator.OpAdmin)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -877,7 +877,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
 			return
 		}
-		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit)
+		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit, operator.OpAdmin)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
