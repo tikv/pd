@@ -34,9 +34,8 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	limiter := NewLimiter()
 
 	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
+	status := limiter.Update(label, opts...)
+	c.Assert(status&ConcurrencyChanged != 0, IsTrue)
 	var lock sync.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
@@ -57,7 +56,11 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 	c.Assert(limit, Equals, uint64(10))
 	c.Assert(current, Equals, uint64(0))
 
-	limiter.Update(label, UpdateConcurrencyLimiter(5))
+	status = limiter.Update(label, UpdateConcurrencyLimiter(10))
+	c.Assert(status&ConcurrencyNoChange != 0, IsTrue)
+
+	status = limiter.Update(label, UpdateConcurrencyLimiter(5))
+	c.Assert(status&ConcurrencyChanged != 0, IsTrue)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -71,7 +74,8 @@ func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
 		limiter.Release(label)
 	}
 
-	limiter.deleteConcurrencyLimiter(label)
+	status = limiter.Update(label, UpdateConcurrencyLimiter(0))
+	c.Assert(status&ConcurrencyDeleted != 0, IsTrue)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -99,7 +103,8 @@ func (s *testRatelimiterSuite) TestBlockList(c *C) {
 	}
 	c.Assert(limiter.IsInAllowList(label), Equals, true)
 
-	UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
+	status := UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
+	c.Assert(status&InAllowList != 0, Equals, true)
 	for i := 0; i < 10; i++ {
 		c.Assert(limiter.Allow(label), Equals, true)
 	}
@@ -111,9 +116,8 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	limiter := NewLimiter()
 
 	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
+	status := limiter.Update(label, opts...)
+	c.Assert(status&QPSChanged != 0, IsTrue)
 
 	var lock sync.Mutex
 	successCount, failedCount := 0, 0
@@ -130,7 +134,11 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 	c.Assert(limit, Equals, rate.Limit(1))
 	c.Assert(burst, Equals, 1)
 
-	limiter.Update(label, UpdateQPSLimiter(5, 5))
+	status = limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(time.Second)), 1))
+	c.Assert(status&QPSNoChange != 0, IsTrue)
+
+	status = limiter.Update(label, UpdateQPSLimiter(5, 5))
+	c.Assert(status&QPSChanged != 0, IsTrue)
 	limit, burst = limiter.GetQPSLimiterStatus(label)
 	c.Assert(limit, Equals, rate.Limit(5))
 	c.Assert(burst, Equals, 5)
@@ -144,7 +152,9 @@ func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
 		}
 	}
 	time.Sleep(time.Second)
-	limiter.deleteQPSLimiter(label)
+
+	status = limiter.Update(label, UpdateQPSLimiter(0, 0))
+	c.Assert(status&QPSDeleted != 0, IsTrue)
 	for i := 0; i < 10; i++ {
 		c.Assert(limiter.Allow(label), Equals, true)
 	}
