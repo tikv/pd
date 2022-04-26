@@ -642,7 +642,7 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 		3: "",
 	}
 
-	c.Assert(recoveryController.RemoveFailedStores(failedStores, 60), IsNil)
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
 	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
 	for _, s := range cluster.GetSchedulers() {
 		paused, err := cluster.IsSchedulerAllowed(s)
@@ -655,7 +655,7 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 		2: "",
 	}
 
-	c.Assert(recoveryController.RemoveFailedStores(failedStores, 60), NotNil)
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), NotNil)
 }
 
 func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
@@ -673,7 +673,7 @@ func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 	failedStores := map[uint64]string{
 		1: "",
 	}
-	c.Assert(recoveryController.RemoveFailedStores(failedStores, 60), IsNil)
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
 	askSplitReq := &pdpb.AskSplitRequest{}
 	_, err := cluster.HandleAskSplit(askSplitReq)
 	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")

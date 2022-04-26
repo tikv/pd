@@ -88,7 +88,7 @@ func (u *unsafeRecoveryController) IsRunning() bool {
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
-func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]string, timeout int64) error {
+func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]string) error {
 	if u.IsRunning() {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}

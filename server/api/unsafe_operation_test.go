@@ -53,7 +53,7 @@ func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
 	data, _ = json.Marshal(input)
 	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
 	c.Assert(err.Error(), Equals, "\"Store ids are invalid\"\n")
-	input = map[string]interface{}{"stores": []uint64{1, 2}, "timeout": 3600}
+	input = map[string]interface{}{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
 	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
 	c.Assert(err, IsNil)
