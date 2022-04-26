@@ -49,6 +49,12 @@ func (s *unsafeOperationTestSuite) TestRemoveFailedStores(c *C) {
 	args := []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "3600"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "abc"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, Not(IsNil))
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "show"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)

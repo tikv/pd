@@ -45,9 +45,16 @@ func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
 }
 
 func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
-	input := map[uint64]string{1: ""}
-	data, err := json.Marshal(input)
-	c.Assert(err, IsNil)
+	input := map[string]interface{}{"stores": []uint64{}}
+	data, _ := json.Marshal(input)
+	err := postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
+	c.Assert(err.Error(), Equals, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n")
+	input = map[string]interface{}{"stores": []string{"abc", "def"}}
+	data, _ = json.Marshal(input)
+	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
+	c.Assert(err.Error(), Equals, "\"Store ids are invalid\"\n")
+	input = map[string]interface{}{"stores": []uint64{1, 2}, "timeout": 3600}
+	data, _ = json.Marshal(input)
 	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
 	c.Assert(err, IsNil)
 	// Test show

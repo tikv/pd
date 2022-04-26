@@ -42,6 +42,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Short: "Remove failed stores unsafely",
 		Run:   removeFailedStoresCommandFunc,
 	}
+	cmd.PersistentFlags().Float64("timeout", 600, "timeout in seconds")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	cmd.AddCommand(NewRemoveFailedStoresHistoryCommand())
 	return cmd
@@ -67,21 +68,31 @@ func NewRemoveFailedStoresHistoryCommand() *cobra.Command {
 
 func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/remove-failed-stores", unsafePrefix)
-	if len(args) != 1 {
+	if len(args) < 1 {
 		cmd.Usage()
 		return
 	}
 	strStores := strings.Split(args[0], ",")
-	stores := make(map[string]interface{})
+	var stores []uint64
 	for _, strStore := range strStores {
-		_, err := strconv.Atoi(strStore)
+		store, err := strconv.ParseUint(strStore, 10, 64)
 		if err != nil {
 			cmd.Usage()
 			return
 		}
-		stores[strStore] = ""
+		stores = append(stores, store)
 	}
-	postJSON(cmd, prefix, stores)
+	postInput := map[string]interface{}{
+		"stores": stores,
+	}
+	timeout, err := cmd.Flags().GetFloat64("timeout")
+	if err != nil {
+		cmd.Usage()
+		return
+	} else if timeout != 600 {
+		postInput["timeout"] = timeout
+	}
+	postJSON(cmd, prefix, postInput)
 }
 
 func removeFailedStoresShowCommandFunc(cmd *cobra.Command, args []string) {
