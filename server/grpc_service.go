@@ -1928,7 +1928,20 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
 		zap.Uint64s("region-ids", damagedRegions))
 
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
-	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
+	err := s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
+	if err != nil {
+		return err
+	}
+
+	for _, regionID := range stats.GetDamagedRegionsId() {
+		err = s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
+		if err != nil {
+			log.Error("store damaged but can't add remove peer operator",
+				zap.Uint64("region-id", regionID), zap.String("error", err.Error()))
+		}
+	}
+
+	return nil
 }
 
 // ReportMinResolvedTS implements gRPC PDServer.
