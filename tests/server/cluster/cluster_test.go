@@ -247,7 +247,7 @@ func resetStoreState(c *C, rc *cluster.RaftCluster, storeID uint64, state metapb
 		newStore = newStore.Clone(core.TombstoneStore())
 	}
 
-	rc.GetCacheCluster().PutStore(newStore)
+	rc.GetBasicCluster().PutStore(newStore)
 	if state == metapb.StoreState_Offline {
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	} else if state == metapb.StoreState_Tombstone {
@@ -693,7 +693,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	c.Assert(raftCluster, IsNil)
 
 	storage := rc.GetStorage()
-	basicCluster := rc.GetCacheCluster()
+	basicCluster := rc.GetBasicCluster()
 	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
@@ -757,7 +757,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	for _, region := range regions {
 		c.Assert(storage.SaveRegion(region), IsNil)
 	}
-	raftCluster.GetStorage().LoadRegionsOnce(s.ctx, raftCluster.GetCacheCluster().PutRegion)
+	raftCluster.GetStorage().LoadRegionsOnce(s.ctx, raftCluster.GetBasicCluster().PutRegion)
 	c.Assert(raftCluster.GetRegionCount(), Equals, n)
 }
 

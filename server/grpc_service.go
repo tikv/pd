@@ -1593,7 +1593,11 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
-	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),
 		RegionsId:          newRegionIDs,
