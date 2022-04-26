@@ -800,8 +800,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
-	// max duration
-	defaultMaxStorePreparingTime = 1<<63 - 1
+	// using a large duration means disable it
+	defaultMaxStorePreparingTime = 1000000 * time.Hour
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
