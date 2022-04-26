@@ -1533,6 +1533,7 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 		for _, sl := range storeLabels {
 			if ll == sl.Key {
 				sortedLabels = append(sortedLabels, sl)
+				break
 			}
 		}
 	}
@@ -1554,7 +1555,7 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 }
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, left float64) {
-	storeLabel := fmt.Sprintf("%d", storeID)
+	storeLabel := strconv.FormatUint(storeID, 10)
 	var progress string
 	switch action {
 	case removingAction:
@@ -1573,7 +1574,7 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
-	storeLabel := fmt.Sprintf("%d", storeID)
+	storeLabel := strconv.FormatUint(storeID, 10)
 	var progress string
 	switch action {
 	case removingAction:
