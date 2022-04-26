@@ -196,7 +196,7 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	c.Parallel()
 	cfg := DimensionConfig{
 		QPS:              100,
-		QPSBrust:         100,
+		QPSBurst:         100,
 		ConcurrencyLimit: 100,
 	}
 	opts := []Option{UpdateDimensionConfig(cfg)}
