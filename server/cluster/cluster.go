@@ -1385,13 +1385,13 @@ func (c *RaftCluster) checkStores() {
 						errs.ZapError(err))
 				}
 			} else {
-				left := threshold - regionSize
-				if left < 0 {
-					left = 0
+				remaining := threshold - regionSize
+				if remaining < 0 {
+					remaining = 0
 				}
 				// If we add multiple stores, the total will need to be changed.
 				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-				c.updateProgress(storeID, store.GetAddress(), preparingAction, left)
+				c.updateProgress(storeID, store.GetAddress(), preparingAction, remaining)
 			}
 		}
 
@@ -1554,7 +1554,7 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, left float64) {
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, remaining float64) {
 	storeLabel := strconv.FormatUint(storeID, 10)
 	var progress string
 	switch action {
