@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - master
+      - release-5.*
   pull_request:
     branches:
       - master
+      - release-5.*
 jobs:
   tso-function-test:
     runs-on: ubuntu-latest
