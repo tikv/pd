@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -1926,20 +1925,15 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 		zap.Uint64("store-id", stats.GetStoreId()),
 		zap.Uint64s("region-ids", damagedRegions))
 
-	// Defensive behavior: the persistence of this damaged store is unstable.
-	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
-	err := s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
-	if err != nil {
-		log.Error("store damaged but can't add remove peer operator",
-			zap.String("error", err.Error()))
-	}
-
 	for _, regionID := range stats.GetDamagedRegionsId() {
 		// Remove peers to make sst recovery physically delete files in TiKV.
-		err = s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
+		err := s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
 		if err != nil {
 			log.Error("store damaged but can't add remove peer operator",
-				zap.Uint64("region-id", regionID), zap.String("error", err.Error()))
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
+		} else {
+			log.Warn("added remove peer operator due to damaged region",
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
 		}
 	}
 }
