@@ -395,7 +395,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
 		}
 
-		scatterer.ScatterRegions(regions, failures, group, 3)
+		scatterer.scatterRegions(regions, failures, group, 3)
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
