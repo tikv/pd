@@ -906,9 +906,6 @@ func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
 	c.Assert(paused, Equals, true)
 	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
 	c.Assert(allowed, Equals, false)
-	co.cluster = nil
-	_, err = co.isSchedulerPaused(schedulers.BalanceLeaderName)
-	c.Assert(err, NotNil)
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {
