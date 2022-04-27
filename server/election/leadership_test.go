@@ -109,9 +109,6 @@ func (s *testLeadershipSuite) TestLeadership(c *C) {
 	leadership1.Reset()
 	leadership2.Reset()
 	c.Assert(leadership1.Check(), IsFalse)
-	// Since `go leadership2.Keep(ctx)` could renew this lease concurrently,
-	// we may need to wait for a while.
-	time.Sleep(defaultLeaseTimeout * time.Second)
 	c.Assert(leadership2.Check(), IsFalse)
 
 	// Try to keep the reset leadership.
