@@ -358,25 +358,43 @@ func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
 	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
 }
 
+func createTTLUrl(url string, ttl int) string {
+	return fmt.Sprintf("%s/config?ttlSecond=%d", url, ttl)
+}
+
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c))
+
+	// test no config and cleaning up
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
+	// test time goes by
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
 	time.Sleep(2 * time.Second)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
 
+	// test cleaning up
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
 	postData, err = json.Marshal(invalidTTLConfig)
 	c.Assert(err, IsNil)
-	err = tu.CheckPostJSON(testDialClient, addr, postData,
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData,
 		tu.StatusNotOK(c), tu.StringEqual(c, "\"unsupported ttl config schedule.invalid-ttl-config\"\n"))
 	c.Assert(err, IsNil)
 }
 
 func (s *testConfigSuite) TestTTLConflict(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	addr := createTTLUrl(s.urlPrefix, 1)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c))
@@ -391,5 +409,12 @@ func (s *testConfigSuite) TestTTLConflict(c *C) {
 	c.Assert(err, IsNil)
 	addr = fmt.Sprintf("%s/config/schedule", s.urlPrefix)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(c), tu.StringEqual(c, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
+	c.Assert(err, IsNil)
+	cfg = map[string]interface{}{"schedule.max-snapshot-count": 30}
+	postData, err = json.Marshal(cfg)
+	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 }

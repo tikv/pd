@@ -108,7 +108,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -689,6 +689,16 @@ sync max ts failed, %s
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
 '''
 
 ["PD:url:ErrQueryUnescape"]

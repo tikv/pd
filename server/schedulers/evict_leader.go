@@ -257,10 +257,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf.StoreIDWithRanges, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -278,10 +275,15 @@ func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) [
 	return dst
 }
 
-func scheduleEvictLeaderBatch(name, typ string, cluster schedule.Cluster, storeRanges map[uint64][]core.KeyRange, batchSize int) []*operator.Operator {
+type evictLeaderStoresConf interface {
+	getStores() []uint64
+	getKeyRangesByID(id uint64) []core.KeyRange
+}
+
+func scheduleEvictLeaderBatch(name, typ string, cluster schedule.Cluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
-		once := scheduleEvictLeaderOnce(name, typ, cluster, storeRanges)
+		once := scheduleEvictLeaderOnce(name, typ, cluster, conf)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -295,14 +297,19 @@ func scheduleEvictLeaderBatch(name, typ string, cluster schedule.Cluster, storeR
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, storeRanges map[uint64][]core.KeyRange) []*operator.Operator {
-	ops := make([]*operator.Operator, 0, len(storeRanges))
-	for id, ranges := range storeRanges {
+func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf evictLeaderStoresConf) []*operator.Operator {
+	stores := conf.getStores()
+	ops := make([]*operator.Operator, 0, len(stores))
+	for _, storeID := range stores {
+		ranges := conf.getKeyRangesByID(storeID)
+		if len(ranges) == 0 {
+			continue
+		}
 		var filters []filter.Filter
-		region := cluster.RandLeaderRegion(id, ranges, schedule.IsRegionHealthy)
+		region := cluster.RandLeaderRegion(storeID, ranges, schedule.IsRegionHealthy)
 		if region == nil {
 			// try to pick unhealthy region
-			region = cluster.RandLeaderRegion(id, ranges)
+			region = cluster.RandLeaderRegion(storeID, ranges)
 			if region == nil {
 				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
 				continue

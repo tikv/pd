@@ -138,6 +138,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 }
 
 func (s *storeStatistics) Collect() {
+	placementStatusGauge.Reset()
+
 	metrics := make(map[string]float64)
 	metrics["store_up_count"] = float64(s.Up)
 	metrics["store_disconnected_count"] = float64(s.Disconnect)
