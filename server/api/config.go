@@ -99,7 +99,6 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
 		ttls, err := strconv.Atoi(ttlSec)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
