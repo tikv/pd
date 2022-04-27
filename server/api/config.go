@@ -99,6 +99,7 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ttls int
+	var ttlFlag bool
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
 		var err error
 		ttls, err = strconv.Atoi(ttlSec)
@@ -106,10 +107,11 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		ttlFlag = true
 	}
 
 	// if ttlSecond defined, we will apply if to temp configuration.
-	if ttls > 0 {
+	if ttlFlag {
 		err := h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
