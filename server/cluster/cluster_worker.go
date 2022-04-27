@@ -42,6 +42,9 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	reqRegion := request.GetRegion()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
@@ -94,6 +97,9 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
 	err := c.ValidRequestRegion(reqRegion)

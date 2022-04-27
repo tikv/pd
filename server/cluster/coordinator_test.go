@@ -896,6 +896,18 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	waitPromoteLearner(c, stream, region, 3)
 }
 
+func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
+	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	defer cleanup()
+	_, err := co.isSchedulerAllowed("test")
+	c.Assert(err, NotNil)
+	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
+	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
+	c.Assert(paused, Equals, true)
+	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
+	c.Assert(allowed, Equals, false)
+}
+
 func BenchmarkPatrolRegion(b *testing.B) {
 	mergeLimit := uint64(4100)
 	regionNum := 10000
