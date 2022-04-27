@@ -105,26 +105,22 @@ func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
 }
 
-// gcWorkerSafePointPath returns the path of the gc_worker's safe point
-// /gc_servicegroup/$service_group_id/safe_point
-func gcWorkerSafePointPath(serviceGroupID string) string {
-	return path.Join(gcServiceGroupPath, serviceGroupID, "safe_point")
+// gcSafePointPathByServiceGroup returns the path of the gc_worker's safe point
+// /gc_servicegroup/gc_safepoint/$service_group_id
+func gcSafePointPathByServiceGroup(serviceGroupID string) string {
+	return path.Join(gcServiceGroupPath, "gc_safepoint", serviceGroupID)
 }
 
 // serviceSafePointPath returns the path of services' safe point
-// /gc_servicegroup/$service_group_id/service/$service_id
+// /gc_servicegroup/service_safepoint/$service_group_id/$service_id
 func serviceSafePointPath(serviceGroupID, serviceID string) string {
-	return path.Join(gcServiceGroupPath, serviceGroupID, "service", serviceID)
-}
-
-func safePointPrefixPath() string {
-	return path.Join(gcServiceGroupPath) + "/"
+	return path.Join(gcServiceGroupPath, "service_safepoint", serviceGroupID, serviceID)
 }
 
 func serviceSafePointPrefixPath(serviceGroupID string) string {
-	return path.Join(gcServiceGroupPath, serviceGroupID, "service") + "/"
+	return path.Join(gcServiceGroupPath, "service_safepoint", serviceGroupID) + "/"
 }
 
-func gcWorkerSafePointSuffix() string {
-	return "/safe_point"
+func gcSafePointPrefixPath() string {
+	return path.Join(gcServiceGroupPath, "gc_safepoint") + "/"
 }

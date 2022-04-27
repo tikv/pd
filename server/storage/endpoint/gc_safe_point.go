@@ -17,8 +17,8 @@ package endpoint
 import (
 	"encoding/json"
 	"math"
+	"path"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -51,12 +51,14 @@ type GCSafePointStorage interface {
 	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
 
-	LoadGCWorkerSafePoint(serviceGroupID string) (*GCSafePoint, error)
-	SaveGCWorkerSafePoint(serviceGroupID string, gcSafePoint *GCSafePoint) error
-	LoadAllServiceGroupGCSafePoints() ([]*pdpb.ServiceGroupSafepoint, error)
-	RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error
+	LoadAllServiceGroup() ([][]byte, error)
 	LoadMinServiceSafePointByServiceGroup(serviceGroupID string, now time.Time) (*ServiceSafePoint, error)
+	LoadGCWorkerSafePoint(serviceGroupID string) (*GCSafePoint, error)
+	SaveGCWorkerSafePoint(gcSafePoint *GCSafePoint) error
+	RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error
+	LoadServiceSafePoint(serviceGroupID, serviceID string) (*ServiceSafePoint, error)
 	SaveServiceSafePointByServiceGroup(serviceGroupID string, ssp *ServiceSafePoint) error
+	LoadAllServiceGroupGCSafePoints() ([]*pdpb.ServiceGroupSafePoint, error)
 }
 
 var _ GCSafePointStorage = (*StorageEndpoint)(nil)
@@ -193,88 +195,13 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 	return se.Save(key, string(value))
 }
 
-// RemoveServiceGCSafePoint removes a GC safepoint for the service
+// RemoveServiceGCSafePoint removes a GC safeoint for the service
 func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
 	if serviceID == gcWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
 	key := gcSafePointServicePath(serviceID)
 	return se.Remove(key)
-}
-
-// LoadGCWorkerSafePoint reads GCSafePoint for the given service group
-func (se *StorageEndpoint) LoadGCWorkerSafePoint(serviceGroupID string) (*GCSafePoint, error) {
-	value, err := se.Load(gcWorkerSafePointPath(serviceGroupID))
-	if err != nil || value == "" {
-		return nil, err
-	}
-	gcSafePoint := &GCSafePoint{}
-	if err := json.Unmarshal([]byte(value), gcSafePoint); err != nil {
-		return nil, err
-	}
-
-	return gcSafePoint, nil
-}
-
-// SaveGCWorkerSafePoint saves GCSafePoint under given service group
-func (se *StorageEndpoint) SaveGCWorkerSafePoint(serviceGroupID string, gcSafePoint *GCSafePoint) error {
-	safePoint, err := json.Marshal(gcSafePoint)
-	if err != nil {
-		return err
-	}
-	return se.Save(gcWorkerSafePointPath(serviceGroupID), string(safePoint))
-}
-
-// LoadAllServiceGroupGCSafePoints returns a slice contains GCSafePoint for every service group
-func (se *StorageEndpoint) LoadAllServiceGroupGCSafePoints() ([]*pdpb.ServiceGroupSafepoint, error) {
-	prefix := safePointPrefixPath()
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
-	if err != nil {
-		return nil, err
-	}
-	if len(keys) == 0 {
-		return []*pdpb.ServiceGroupSafepoint{}, nil
-	}
-	gcSafePoints := make([]*pdpb.ServiceGroupSafepoint, 0, 2) // there are probably only two service groups
-	for i := range keys {
-		// skip service safe point
-		if !strings.HasSuffix(keys[i], gcWorkerSafePointSuffix()) {
-			continue
-		}
-
-		gcSafePoint := &GCSafePoint{}
-		if err := json.Unmarshal([]byte(values[i]), gcSafePoint); err != nil {
-			return nil, err
-		}
-		serviceGroupSafePoint := &pdpb.ServiceGroupSafepoint{
-			ServiceGroupId: []byte(gcSafePoint.ServiceGroupID),
-			SafePoint:      gcSafePoint.SafePoint,
-		}
-		gcSafePoints = append(gcSafePoints, serviceGroupSafePoint)
-	}
-
-	return gcSafePoints, nil
-}
-
-// RemoveServiceSafePointByServiceGroup removes a service safe point
-func (se *StorageEndpoint) RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error {
-	key := serviceSafePointPath(serviceGroupID, serviceID)
-	return se.Remove(key)
-}
-
-// SaveServiceSafePointByServiceGroup saves service safe point under given service group
-func (se *StorageEndpoint) SaveServiceSafePointByServiceGroup(serviceGroupID string, ssp *ServiceSafePoint) error {
-	if ssp.ServiceID == "" {
-		return errors.New("service id of service safepoint cannot be empty")
-	}
-	key := serviceSafePointPath(serviceGroupID, ssp.ServiceID)
-	value, err := json.Marshal(ssp)
-	if err != nil {
-		return err
-	}
-
-	return se.Save(key, string(value))
 }
 
 // LoadMinServiceSafePointByServiceGroup returns the minimum safepoint for the given service group
@@ -318,4 +245,105 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByServiceGroup(serviceGroupID 
 
 	// successfully found a valid min safe point
 	return min, nil
+}
+
+// LoadAllServiceGroup returns a list of all service group IDs
+func (se *StorageEndpoint) LoadAllServiceGroup() ([][]byte, error) {
+	prefix := gcSafePointPrefixPath()
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, _, err := se.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	serviceGroupIDs := make([][]byte, 0, 2)
+	for _, key := range keys {
+		_, serviceGroupID := path.Split(key)
+		serviceGroupIDs = append(serviceGroupIDs, []byte(serviceGroupID))
+	}
+	return serviceGroupIDs, nil
+}
+
+// LoadGCWorkerSafePoint reads GCSafePoint for the given service group
+// return nil if no safepoint not exist
+func (se *StorageEndpoint) LoadGCWorkerSafePoint(serviceGroupID string) (*GCSafePoint, error) {
+	value, err := se.Load(gcSafePointPathByServiceGroup(serviceGroupID))
+	if err != nil || value == "" {
+		return nil, err
+	}
+	gcSafePoint := &GCSafePoint{}
+	if err := json.Unmarshal([]byte(value), gcSafePoint); err != nil {
+		return nil, err
+	}
+	return gcSafePoint, nil
+}
+
+// SaveGCWorkerSafePoint saves GCSafePoint under given service group
+func (se *StorageEndpoint) SaveGCWorkerSafePoint(gcSafePoint *GCSafePoint) error {
+	safePoint, err := json.Marshal(gcSafePoint)
+	if err != nil {
+		return err
+	}
+	return se.Save(gcSafePointPathByServiceGroup(gcSafePoint.ServiceGroupID), string(safePoint))
+}
+
+// RemoveServiceSafePointByServiceGroup removes a service safe point
+func (se *StorageEndpoint) RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error {
+	key := serviceSafePointPath(serviceGroupID, serviceID)
+	return se.Remove(key)
+}
+
+// LoadServiceSafePoint reads ServiceSafePoint for the given service group and service name
+// return nil if no safepoint not exist
+func (se *StorageEndpoint) LoadServiceSafePoint(serviceGroupID, serviceID string) (*ServiceSafePoint, error) {
+	value, err := se.Load(serviceSafePointPath(serviceGroupID, serviceID))
+	if err != nil || value == "" {
+		return nil, err
+	}
+	serviceSafePoint := &ServiceSafePoint{}
+	if err := json.Unmarshal([]byte(value), serviceSafePoint); err != nil {
+		return nil, err
+	}
+	return serviceSafePoint, nil
+}
+
+// SaveServiceSafePointByServiceGroup saves service safe point under given service group
+func (se *StorageEndpoint) SaveServiceSafePointByServiceGroup(serviceGroupID string, ssp *ServiceSafePoint) error {
+	if ssp.ServiceID == "" {
+		return errors.New("service id of service safepoint cannot be empty")
+	}
+	key := serviceSafePointPath(serviceGroupID, ssp.ServiceID)
+	value, err := json.Marshal(ssp)
+	if err != nil {
+		return err
+	}
+
+	return se.Save(key, string(value))
+}
+
+// LoadAllServiceGroupGCSafePoints returns a slice contains GCSafePoint for every service group
+func (se *StorageEndpoint) LoadAllServiceGroupGCSafePoints() ([]*pdpb.ServiceGroupSafePoint, error) {
+	prefix := gcSafePointPrefixPath()
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return []*pdpb.ServiceGroupSafePoint{}, nil
+	}
+	gcSafePoints := make([]*pdpb.ServiceGroupSafePoint, 0, 2) // there are probably only two service groups
+	for i := range keys {
+		gcSafePoint := &GCSafePoint{}
+		if err := json.Unmarshal([]byte(values[i]), gcSafePoint); err != nil {
+			return nil, err
+		}
+		serviceGroupSafePoint := &pdpb.ServiceGroupSafePoint{
+			ServiceGroupId: []byte(gcSafePoint.ServiceGroupID),
+			SafePoint:      gcSafePoint.SafePoint,
+		}
+		gcSafePoints = append(gcSafePoints, serviceGroupSafePoint)
+	}
+
+	return gcSafePoints, nil
 }
