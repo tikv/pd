@@ -57,5 +57,6 @@ func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
 	c.Assert(label2.StartAt, Equals, label.StartAt)
 	c.Assert(label2.TTL, Equals, label.TTL)
 	label2.checkAndAdjustExpire()
+	// The `expire` should be the same with minor inaccuracies.
 	c.Assert(math.Abs(label2.expire.Sub(*label.expire).Seconds()) < 1, IsTrue)
 }
