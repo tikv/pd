@@ -622,10 +622,9 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		err = s.handleDamagedStore(request.GetStats())
-		if err != nil {
-			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
-		}
+
+		s.handleDamagedStore(request.GetStats())
+
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
@@ -1915,33 +1914,34 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
 // and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
-func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
+func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 	// TODO: regions have no special process for the time being
 	// and need to be removed in the future
 	damagedRegions := stats.GetDamagedRegionsId()
 	if len(damagedRegions) == 0 {
-		return nil
+		return
 	}
 
 	log.Error("store damaged and leaders will be evicted, you might fix the store and remove evict-leader-scheduler manually",
 		zap.Uint64("store-id", stats.GetStoreId()),
 		zap.Uint64s("region-ids", damagedRegions))
 
+	// Defensive behavior: the persistence of this damaged store is unstable.
 	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
 	err := s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
 	if err != nil {
-		return err
+		log.Error("store damaged but can't add remove peer operator",
+			zap.String("error", err.Error()))
 	}
 
 	for _, regionID := range stats.GetDamagedRegionsId() {
+		// Remove peers to make sst recovery physically delete files in TiKV.
 		err = s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
 		if err != nil {
 			log.Error("store damaged but can't add remove peer operator",
 				zap.Uint64("region-id", regionID), zap.String("error", err.Error()))
 		}
 	}
-
-	return nil
 }
 
 // ReportMinResolvedTS implements gRPC PDServer.
