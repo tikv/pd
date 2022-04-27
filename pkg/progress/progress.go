@@ -16,13 +16,14 @@ package progress
 
 import (
 	"math"
-	"sync"
 	"time"
+
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	progesses map[string]*progressIndicator
 }
 
