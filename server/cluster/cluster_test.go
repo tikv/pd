@@ -1202,7 +1202,7 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
 			// zone 2 has 2, 5, 8
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone2"})
 		} else {
-			// zone 2 has 3, 6, 9
+			// zone 3 has 3, 6, 9
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone3"})
 		}
 		labels = append(labels, []*metapb.StoreLabel{
@@ -1251,7 +1251,7 @@ func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-	// 100 * 100 * 5 (total region size) / 5 * 2 (zone) / 4 (host) * 0.9 = 4500
+	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
 	c.Assert(cluster.getThreshold(stores, store), Equals, 4500.0)
 
 	cluster.opt.SetPlacementRuleEnabled(false)

@@ -1465,12 +1465,12 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 		}
 
 		var matchStores []*core.StoreInfo
-		for _, store := range stores {
-			if store.IsRemoving() || store.IsRemoved() {
+		for _, s := range stores {
+			if s.IsRemoving() || s.IsRemoved() {
 				continue
 			}
-			if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
-				matchStores = append(matchStores, store)
+			if placement.MatchLabelConstraints(s, rule.LabelConstraints) {
+				matchStores = append(matchStores, s)
 			}
 		}
 		regionSize := c.core.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
@@ -1490,7 +1490,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 }
 
 func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) float64 {
-	topology, count := buildTopology(store, stores, locationLabels)
+	topology, sameLocationStoreNum := buildTopology(store, stores, locationLabels)
 	weight := 1.0
 	topo := topology
 	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
@@ -1499,17 +1499,17 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 			weight /= float64(len(topo))
 			topo, ok = topo[label.Value].(map[string]interface{})
 			if !ok {
-				return weight / count
+				return weight / sameLocationStoreNum
 			}
 		}
 	}
 
-	return weight / count
+	return weight / sameLocationStoreNum
 }
 
 func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) (map[string]interface{}, float64) {
 	topology := make(map[string]interface{})
-	storeCount := 1.0
+	sameLocationStoreNum := 1.0
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
 			updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
@@ -1520,11 +1520,11 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 		}
 
 		if s.CompareLocation(store, locationLabels) == -1 {
-			storeCount++
+			sameLocationStoreNum++
 		}
 	}
 
-	return topology, storeCount
+	return topology, sameLocationStoreNum
 }
 
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
