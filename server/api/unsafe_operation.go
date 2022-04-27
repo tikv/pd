@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -36,6 +37,8 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 
 // @Tags unsafe
 // @Summary Remove failed stores unsafely.
+// @Accept json
+// @Param body body object true "json params"
 // @Produce json
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
@@ -43,13 +46,18 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 // @Router /admin/unsafe/remove-failed-stores [POST]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	var stores map[uint64]string
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &stores); err != nil {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	if len(stores) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "No store specified")
+	storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
 		return
+	}
+	stores := make(map[uint64]string)
+	for _, store := range storeSlice {
+		stores[store] = ""
 	}
 	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

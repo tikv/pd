@@ -116,6 +116,10 @@ func (c *coordinator) patrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
+		if c.cluster.GetUnsafeRecoveryController() != nil && c.cluster.GetUnsafeRecoveryController().IsRunning() {
+			// Skip patrolling regions during unsafe recovery.
+			continue
+		}
 
 		// Check priority regions first.
 		c.checkPriorityRegions()
@@ -722,6 +726,20 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	return err
 }
 
+// isSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
+func (c *coordinator) isSchedulerAllowed(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.AllowSchedule(), nil
+}
+
 func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
@@ -882,7 +900,7 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused()
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused() && !(s.cluster.GetUnsafeRecoveryController() != nil && s.cluster.GetUnsafeRecoveryController().IsRunning())
 }
 
 // isPaused returns if a scheduler is paused.
