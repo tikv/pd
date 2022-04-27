@@ -175,7 +175,7 @@ func (m *Manager) setNewAddress() {
 	}
 	// select the sever with minimum member ID(avoid the PD leader if possible) to run dashboard.
 	minMemberIdx := 0
-	if len(m.members) > 0 {
+	if len(m.members) > 1 {
 		leaderID := m.srv.GetMemberInfo().GetMemberId()
 		for idx, member := range m.members {
 			curMemberID := member.GetMemberId()
