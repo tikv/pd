@@ -1931,10 +1931,6 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 		return
 	}
 
-	log.Error("store damaged and leaders will be evicted, you might fix the store and remove evict-leader-scheduler manually",
-		zap.Uint64("store-id", stats.GetStoreId()),
-		zap.Uint64s("region-ids", damagedRegions))
-
 	for _, regionID := range stats.GetDamagedRegionsId() {
 		// Remove peers to make sst recovery physically delete files in TiKV.
 		err := s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
