@@ -323,3 +323,9 @@ var (
 var (
 	ErrBindJSON = errors.Normalize("bind JSON error", errors.RFCCodeText("PD:gin:ErrBindJSON"))
 )
+
+// unsafe recovery errors
+var (
+	ErrUnsafeRecoveryIsRunning    = errors.Normalize("unsafe recovery is running", errors.RFCCodeText("PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"))
+	ErrUnsafeRecoveryInvalidInput = errors.Normalize("invalid input %s", errors.RFCCodeText("PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"))
+)
