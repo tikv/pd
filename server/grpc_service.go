@@ -1089,7 +1089,12 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 	}
 	split, err := rc.HandleAskSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskSplitResponse{
@@ -1127,7 +1132,12 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	}
 	split, err := rc.HandleAskBatchSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskBatchSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskBatchSplitResponse{
@@ -1608,7 +1618,11 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
-	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),
 		RegionsId:          newRegionIDs,
