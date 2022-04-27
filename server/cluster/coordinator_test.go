@@ -899,13 +899,16 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
 	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
+	_, err := co.isSchedulerAllowed("test")
+	c.Assert(err, NotNil)
 	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
-	paused, err := co.isSchedulerPaused(schedulers.BalanceLeaderName)
-	c.Assert(err, IsNil)
+	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
 	c.Assert(paused, Equals, true)
-	allowed, err := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
-	c.Assert(err, IsNil)
+	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
 	c.Assert(allowed, Equals, false)
+	co.cluster = nil
+	_, err = co.isSchedulerPaused(schedulers.BalanceLeaderName)
+	c.Assert(err, NotNil)
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {
