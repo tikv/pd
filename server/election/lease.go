@@ -107,7 +107,7 @@ func (l *lease) KeepAlive(ctx context.Context) {
 		case t := <-timeCh:
 			if t.After(maxExpire) {
 				maxExpire = t
-				// Check again to make sure the lease is still need to be renew.
+				// Check again to make sure the `expireTime` still needs to be updated.
 				select {
 				case <-ctx.Done():
 					return
