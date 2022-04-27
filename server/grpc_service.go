@@ -1942,7 +1942,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 			log.Error("store damaged but can't add remove peer operator",
 				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
 		} else {
-			log.Warn("added remove peer operator due to damaged region",
+			log.Info("added remove peer operator due to damaged region",
 				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
 		}
 	}
