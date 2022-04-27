@@ -98,19 +98,14 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ttls int
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
-		ttls, err = strconv.Atoi(ttlSec)
+		ttls, err := strconv.Atoi(ttlSec)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-
-	// if ttlSecond defined, we will apply if to temp configuration.
-	if ttls > 0 {
-		err := h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		// if ttlSecond defined, we will apply if to temp configuration.
+		err = h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
