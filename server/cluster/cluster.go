@@ -1501,6 +1501,8 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 			if !ok {
 				return weight / sameLocationStoreNum
 			}
+		} else {
+			break
 		}
 	}
 
