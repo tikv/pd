@@ -1497,10 +1497,7 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 	for _, label := range storeLabels {
 		if _, ok := topo[label.Value]; ok {
 			weight /= float64(len(topo))
-			topo, ok = topo[label.Value].(map[string]interface{})
-			if !ok {
-				return weight / sameLocationStoreNum
-			}
+			topo = topo[label.Value].(map[string]interface{})
 		} else {
 			break
 		}
@@ -1538,6 +1535,8 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 				break
 			}
 		}
+		// TODO: we need to improve this logic to make the label calculation more accurate if the user has the wrong label settings.
+		sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
 	}
 	return sortedLabels
 }
