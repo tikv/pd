@@ -1529,14 +1529,18 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
 	var sortedLabels []*metapb.StoreLabel
 	for _, ll := range locationLabels {
+		find := false
 		for _, sl := range storeLabels {
 			if ll == sl.Key {
 				sortedLabels = append(sortedLabels, sl)
+				find = true
 				break
 			}
 		}
 		// TODO: we need to improve this logic to make the label calculation more accurate if the user has the wrong label settings.
-		sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
+		if !find {
+			sortedLabels = append(sortedLabels, &metapb.StoreLabel{Key: ll, Value: ""})
+		}
 	}
 	return sortedLabels
 }
