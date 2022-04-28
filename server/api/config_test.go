@@ -279,6 +279,39 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
 
+func (s *testConfigSuite) TestConfigService(c *C) {
+	addrGet := fmt.Sprintf("%s/config/service", s.urlPrefix)
+	sc := &config.ServiceConfig{}
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, false)
+
+	addrPost := fmt.Sprintf("%s/config", s.urlPrefix)
+
+	// test update enable-audit and enable-rate-limit
+	ms := map[string]interface{}{
+		"enable-audit":      "true",
+		"enable-rate-limit": "true",
+	}
+	postData, err := json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
+	sc = &config.ServiceConfig{}
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, true)
+	c.Assert(sc.EnableRateLimit, Equals, true)
+	ms = map[string]interface{}{
+		"enable-audit":      "false",
+		"enable-rate-limit": "false",
+	}
+	postData, err = json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
+	sc = &config.ServiceConfig{}
+	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, false)
+	c.Assert(sc.EnableRateLimit, Equals, false)
+}
+
 func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	addrPost := fmt.Sprintf("%s/config", s.urlPrefix)
 
@@ -301,31 +334,6 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
 	c.Assert(sc.MinResolvedTSPersistenceInterval, Equals, typeutil.NewDuration(0))
 	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
-	c.Assert(sc.EnableAudit, Equals, false)
-
-	// test update enable-audit and enable-rate-limit
-	ms = map[string]interface{}{
-		"enable-audit":      "true",
-		"enable-rate-limit": "true",
-	}
-	postData, err = json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
-	sc = &config.PDServerConfig{}
-	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, true)
-	c.Assert(sc.EnableRateLimit, Equals, true)
-	ms = map[string]interface{}{
-		"enable-audit":      "false",
-		"enable-rate-limit": "false",
-	}
-	postData, err = json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(postJSON(testDialClient, addrPost, postData), IsNil)
-	sc = &config.PDServerConfig{}
-	c.Assert(readJSON(testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, false)
-	c.Assert(sc.EnableRateLimit, Equals, false)
 }
 
 var ttlConfig = map[string]interface{}{
@@ -358,25 +366,43 @@ func assertTTLConfig(c *C, options *config.PersistOptions, checker Checker) {
 	c.Assert(options.GetMergeScheduleLimit(), checker, uint64(999))
 }
 
+func createTTLUrl(url string, ttl int) string {
+	return fmt.Sprintf("%s/config?ttlSecond=%d", url, ttl)
+}
+
 func (s *testConfigSuite) TestConfigTTL(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+
+	// test no config and cleaning up
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
+	// test time goes by
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData)
 	c.Assert(err, IsNil)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
 	time.Sleep(2 * time.Second)
 	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
 
+	// test cleaning up
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Equals)
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData)
+	c.Assert(err, IsNil)
+	assertTTLConfig(c, s.svr.GetPersistOptions(), Not(Equals))
+
 	postData, err = json.Marshal(invalidTTLConfig)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, addr, postData)
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData)
 	c.Assert(err, Not(IsNil))
 	c.Assert(err.Error(), Equals, "\"unsupported ttl config schedule.invalid-ttl-config\"\n")
 }
 
 func (s *testConfigSuite) TestTTLConflict(c *C) {
-	addr := fmt.Sprintf("%s/config?ttlSecond=1", s.urlPrefix)
+	addr := createTTLUrl(s.urlPrefix, 1)
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
 	err = postJSON(testDialClient, addr, postData)
@@ -392,4 +418,12 @@ func (s *testConfigSuite) TestTTLConflict(c *C) {
 	addr = fmt.Sprintf("%s/config/schedule", s.urlPrefix)
 	err = postJSON(testDialClient, addr, postData)
 	c.Assert(err.Error(), Equals, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n")
+
+	cfg = map[string]interface{}{"schedule.max-snapshot-count": 30}
+	postData, err = json.Marshal(cfg)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, createTTLUrl(s.urlPrefix, 0), postData)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 }

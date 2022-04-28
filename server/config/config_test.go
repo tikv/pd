@@ -502,6 +502,10 @@ func (s *testConfigSuite) TestConfigClone(c *C) {
 	replication.adjust(emptyConfigMetaData)
 	c.Assert(replication.Clone(), DeepEquals, replication)
 
+	service := &ServiceConfig{}
+	service.adjust(emptyConfigMetaData)
+	c.Assert(service.Clone(), DeepEquals, service)
+
 	pdServer := &PDServerConfig{}
 	pdServer.adjust(emptyConfigMetaData)
 	c.Assert(pdServer.Clone(), DeepEquals, pdServer)

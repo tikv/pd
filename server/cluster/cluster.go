@@ -465,6 +465,11 @@ func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
 	return c.coordinator.isSchedulerDisabled(name)
 }
 
+// IsSchedulerAllowed checks if a scheduler is allowed.
+func (c *RaftCluster) IsSchedulerAllowed(name string) (bool, error) {
+	return c.coordinator.isSchedulerAllowed(name)
+}
+
 // IsSchedulerExisted checks if a scheduler is existed.
 func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
 	return c.coordinator.isSchedulerExisted(name)

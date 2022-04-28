@@ -686,6 +686,16 @@ error = '''
 invalid data, must 8 bytes, but %d
 '''
 
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
+'''
+
 ["PD:url:ErrQueryUnescape"]
 error = '''
 inverse transformation of QueryEscape error
