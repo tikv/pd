@@ -17,7 +17,6 @@ package config
 import (
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	. "github.com/pingcap/check"
 	"net/http"
 )
@@ -41,7 +40,6 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
     	}}`
 		var config StoreConfig
 		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
 
 		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(144000000))
 		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(96000000))
@@ -53,7 +51,6 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 		body := `{}`
 		var config StoreConfig
 		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
 
 		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(1440000))
 		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(960000))
@@ -64,11 +61,10 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 
 func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	manager := NewTestStoreConfigManager([]string{"tidb.com"})
-	old := manager.GetStoreConfig()
 	manager.Observer("tikv.com")
-	c.Assert(old.GetRegionMaxSize(), Equals, uint64(144))
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
 	manager.Observer("tidb.com")
-	c.Assert(old.GetRegionMaxSize(), Equals, uint64(10))
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10))
 
 	client := &http.Client{
 		Transport: &http.Transport{

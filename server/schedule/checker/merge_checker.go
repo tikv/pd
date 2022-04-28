@@ -149,7 +149,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	regionMaxSize := m.cluster.GetStoreConfig().GetRegionMaxSize()
+	regionMaxSize := m.cluster.GetStoreConfigManager().GetStoreConfig().GetRegionMaxSize()
 	maxTargetRegionSizeThreshold := int64(float64(regionMaxSize) * float64(maxTargetRegionFactor))
 	if maxTargetRegionSizeThreshold < maxTargetRegionSize {
 		maxTargetRegionSizeThreshold = maxTargetRegionSize

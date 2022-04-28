@@ -20,6 +20,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -96,7 +97,7 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 
 // StoreConfigManager is used to manage the store config.
 type StoreConfigManager struct {
-	config *StoreConfig
+	config atomic.Value
 	source Source
 }
 
@@ -107,18 +108,20 @@ func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
 		schema = "https"
 	}
 
-	return &StoreConfigManager{
+	manager := &StoreConfigManager{
 		source: newTiKVConfigSource(schema, client),
-		config: &StoreConfig{},
 	}
+	manager.config.Store(&StoreConfig{})
+	return manager
 }
 
 // NewTestStoreConfigManager creates a new StoreConfigManager for test.
 func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
-	return &StoreConfigManager{
+	manager := &StoreConfigManager{
 		source: newFakeSource(whiteList),
-		config: &StoreConfig{},
 	}
+	manager.config.Store(&StoreConfig{})
+	return manager
 }
 
 // Observer is used to observe the config change.
@@ -127,9 +130,10 @@ func (m *StoreConfigManager) Observer(address string) error {
 	if err != nil {
 		return err
 	}
-	if cfg != nil && !reflect.DeepEqual(cfg, m.config) {
-		log.Info("pd update the store config successful", zap.String("store-config", cfg.String()))
-		*m.config = *cfg
+	old := m.GetStoreConfig()
+	if cfg != nil && !reflect.DeepEqual(cfg, old) {
+		log.Info("sync the store config successful", zap.String("store-config", cfg.String()))
+		m.config.Store(cfg)
 	}
 	return nil
 }
@@ -139,7 +143,8 @@ func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
 	if m == nil {
 		return nil
 	}
-	return m.config
+	config := m.config.Load()
+	return config.(*StoreConfig)
 }
 
 // Source is used to get the store config.

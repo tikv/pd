@@ -33,7 +33,7 @@ import (
 type ClusterInformer interface {
 	GetBasicCluster() *core.BasicCluster
 	GetOpts() *config.PersistOptions
-	GetStoreConfig() *config.StoreConfig
+	GetStoreConfigManager() *config.StoreConfigManager
 	GetRuleManager() *placement.RuleManager
 	GetAllocator() id.Allocator
 }

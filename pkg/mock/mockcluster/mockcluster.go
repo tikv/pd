@@ -53,18 +53,18 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
-	*config.StoreConfig
+	*config.StoreConfigManager
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
-		StoreConfig:    &config.StoreConfig{},
+		BasicCluster:       core.NewBasicCluster(),
+		IDAllocator:        mockid.NewIDAllocator(),
+		HotStat:            statistics.NewHotStat(ctx),
+		PersistOptions:     opts,
+		suspectRegions:     map[uint64]struct{}{},
+		StoreConfigManager: config.NewTestStoreConfigManager(nil),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -76,8 +76,8 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 }
 
 // GetStoreConfig returns the store config.
-func (mc *Cluster) GetStoreConfig() *config.StoreConfig {
-	return mc.StoreConfig
+func (mc *Cluster) GetStoreConfigManager() *config.StoreConfigManager {
+	return mc.StoreConfigManager
 }
 
 // GetOpts returns the cluster configuration.
