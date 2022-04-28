@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -28,18 +29,22 @@ import (
 // RegionLabel is the label of a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type RegionLabel struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key     string `json:"key"`
+	Value   string `json:"value"`
+	TTL     string `json:"ttl,omitempty"`
+	StartAt string `json:"start_at,omitempty"`
+	expire  *time.Time
 }
 
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
-	ID       string        `json:"id"`
-	Index    int           `json:"index"`
-	Labels   []RegionLabel `json:"labels"`
-	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"data"`
+	ID        string        `json:"id"`
+	Index     int           `json:"index"`
+	Labels    []RegionLabel `json:"labels"`
+	RuleType  string        `json:"rule_type"`
+	Data      interface{}   `json:"data"`
+	minExpire *time.Time
 }
 
 const (
@@ -68,6 +73,57 @@ type LabelRulePatch struct {
 	DeleteRules []string     `json:"deletes"`
 }
 
+func (l *RegionLabel) expireBefore(t time.Time) bool {
+	if l.expire == nil {
+		return false
+	}
+	return l.expire.Before(t)
+}
+
+func (l *RegionLabel) checkAndAdjustExpire() (err error) {
+	if len(l.TTL) == 0 {
+		l.expire = nil
+		return
+	}
+	ttl, err := time.ParseDuration(l.TTL)
+	if err != nil {
+		return err
+	}
+	var startAt time.Time
+	if len(l.StartAt) == 0 {
+		startAt = time.Now()
+		l.StartAt = startAt.Format(time.UnixDate)
+	} else {
+		startAt, err = time.Parse(time.UnixDate, l.StartAt)
+		if err != nil {
+			return err
+		}
+	}
+	expire := startAt.Add(ttl)
+	l.expire = &expire
+	return nil
+}
+
+func (rule *LabelRule) checkAndRemoveExpireLabels(now time.Time) bool {
+	labels := make([]RegionLabel, 0)
+	rule.minExpire = nil
+	for _, l := range rule.Labels {
+		if l.expireBefore(now) {
+			continue
+		}
+		labels = append(labels, l)
+		if rule.minExpire == nil || l.expireBefore(*rule.minExpire) {
+			rule.minExpire = l.expire
+		}
+	}
+
+	if len(labels) == len(rule.Labels) {
+		return false
+	}
+	rule.Labels = labels
+	return true
+}
+
 func (rule *LabelRule) checkAndAdjust() error {
 	if rule.ID == "" {
 		return errs.ErrRegionRuleContent.FastGenByArgs("empty rule id")
@@ -75,13 +131,21 @@ func (rule *LabelRule) checkAndAdjust() error {
 	if len(rule.Labels) == 0 {
 		return errs.ErrRegionRuleContent.FastGenByArgs("no region labels")
 	}
-	for _, l := range rule.Labels {
+	for id, l := range rule.Labels {
 		if l.Key == "" {
 			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label key")
 		}
 		if l.Value == "" {
 			return errs.ErrRegionRuleContent.FastGenByArgs("empty region label value")
 		}
+		if err := rule.Labels[id].checkAndAdjustExpire(); err != nil {
+			err := fmt.Sprintf("region label with invalid ttl info %v", err)
+			return errs.ErrRegionRuleContent.FastGenByArgs(err)
+		}
+	}
+	rule.checkAndRemoveExpireLabels(time.Now())
+	if len(rule.Labels) == 0 {
+		return errs.ErrRegionRuleContent.FastGenByArgs("region label with expired ttl")
 	}
 
 	// TODO: change it to switch statement once we support more types.
@@ -92,6 +156,13 @@ func (rule *LabelRule) checkAndAdjust() error {
 	}
 	log.Error("invalid rule type", zap.String("rule-type", rule.RuleType))
 	return errs.ErrRegionRuleContent.FastGenByArgs(fmt.Sprintf("invalid rule type: %s", rule.RuleType))
+}
+
+func (rule *LabelRule) expireBefore(t time.Time) bool {
+	if rule.minExpire == nil {
+		return false
+	}
+	return rule.minExpire.Before(t)
 }
 
 // initKeyRangeRulesFromLabelRuleData init and adjust []KeyRangeRule from `LabelRule.Data``

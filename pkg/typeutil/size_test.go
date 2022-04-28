@@ -39,3 +39,25 @@ func (s *testSizeSuite) TestJSON(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(string(o), Equals, `"1.598TiB"`)
 }
+
+func (s *testSizeSuite) TestParseMbFromText(c *C) {
+	testdata := []struct {
+		body []string
+		size uint64
+	}{{
+		body: []string{"10Mib", "10MiB", "10M", "10MB"},
+		size: uint64(10),
+	}, {
+		body: []string{"10GiB", "10Gib", "10G", "10GB"},
+		size: uint64(10 * 1024),
+	}, {
+		body: []string{"10yiB", "10aib"},
+		size: uint64(1),
+	}}
+
+	for _, t := range testdata {
+		for _, b := range t.body {
+			c.Assert(int(ParseMBFromText(b, 1)), Equals, int(t.size))
+		}
+	}
+}

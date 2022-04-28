@@ -157,8 +157,9 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
-func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
+func (s *testRegionInfoSuite) TestInherit(c *C) {
 	// size in MB
+	// case for approximateSize
 	testcases := []struct {
 		originExists bool
 		originSize   uint64
@@ -179,8 +180,35 @@ func (s *testRegionInfoSuite) TestCorrectRegionApproximateSize(c *C) {
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(t.size)
-		r.CorrectApproximateSize(origin)
+		r.Inherit(origin)
 		c.Assert(r.approximateSize, Equals, int64(t.expect))
+	}
+
+	// bucket
+	data := []struct {
+		originBuckets *metapb.Buckets
+		buckets       *metapb.Buckets
+		same          bool
+	}{
+		{nil, nil, true},
+		{nil, &metapb.Buckets{RegionId: 1, Version: 2}, false},
+		{&metapb.Buckets{RegionId: 1, Version: 2}, &metapb.Buckets{RegionId: 1, Version: 3}, false},
+		{&metapb.Buckets{RegionId: 1, Version: 2}, nil, true},
+	}
+	for _, d := range data {
+		var origin *RegionInfo
+		if d.originBuckets != nil {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.UpdateBuckets(d.originBuckets, origin.GetBuckets())
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.UpdateBuckets(d.buckets, r.GetBuckets())
+		r.Inherit(origin)
+		if d.same {
+			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
+		} else {
+			c.Assert(r.GetBuckets(), Not(DeepEquals), d.originBuckets)
+		}
 	}
 }
 
@@ -569,6 +597,18 @@ func checkRegions(c *C, regions *RegionsInfo) {
 	}
 	for key, value := range regions.pendingPeers {
 		c.Assert(value.length(), Equals, int(pendingPeerMap[key]))
+	}
+}
+
+func BenchmarkUpdateBuckets(b *testing.B) {
+	region := NewTestRegionInfo([]byte{}, []byte{})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
+		region.UpdateBuckets(buckets, region.GetBuckets())
+	}
+	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
+		b.Fatal("update buckets failed")
 	}
 }
 

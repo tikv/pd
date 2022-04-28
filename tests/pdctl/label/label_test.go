@@ -144,4 +144,11 @@ func (s *labelTestSuite) TestLabel(c *C) {
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
 	sss := []*api.StoreInfo{stores[0], stores[2]}
 	pdctl.CheckStoresInfo(c, storesInfo.Stores, sss)
+
+	// label isolation [label]
+	args = []string{"-u", pdAddr, "label", "isolation"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "none"), IsTrue)
+	c.Assert(strings.Contains(string(output), "2"), IsTrue)
 }

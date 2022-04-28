@@ -444,6 +444,11 @@ func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
 }
 
+// IsAuditEnabled returns whether audit middleware is enabled
+func (o *PersistOptions) IsAuditEnabled() bool {
+	return o.GetPDServerConfig().EnableAudit
+}
+
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
@@ -486,7 +491,7 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
-	if v, ok := o.getTTLData(enableLocationReplacement); ok {
+	if v, ok := o.GetTTLData(enableLocationReplacement); ok {
 		result, err := strconv.ParseBool(v)
 		if err == nil {
 			return result
@@ -674,7 +679,7 @@ func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Cli
 }
 
 func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
-	stringForm, ok := o.getTTLData(key)
+	stringForm, ok := o.GetTTLData(key)
 	if !ok {
 		return 0, false, nil
 	}
@@ -693,7 +698,7 @@ func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 }
 
 func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.getTTLData(key)
+	stringForm, ok := o.GetTTLData(key)
 	if !ok {
 		return 0, false, nil
 	}
@@ -711,7 +716,8 @@ func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64
 	return defaultValue
 }
 
-func (o *PersistOptions) getTTLData(key string) (string, bool) {
+// GetTTLData returns if there is a TTL data for a given key.
+func (o *PersistOptions) GetTTLData(key string) (string, bool) {
 	if o.ttl == nil {
 		return "", false
 	}

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -82,7 +82,7 @@ const (
 )
 
 type unsafeRecoveryController struct {
-	sync.RWMutex
+	syncutil.RWMutex
 
 	cluster      *RaftCluster
 	stage        unsafeRecoveryStage
@@ -124,13 +124,24 @@ func (u *unsafeRecoveryController) reset() {
 	u.err = nil
 }
 
+// IsRunning returns whether there is ongoing unsafe recovery process. If yes, further unsafe
+// recovery requests, schedulers, checkers, AskSplit and AskBatchSplit requests are blocked.
+func (u *unsafeRecoveryController) IsRunning() bool {
+	u.RLock()
+	defer u.RUnlock()
+	return u.stage != idle && u.stage != finished && u.stage != failed
+}
+
 // RemoveFailedStores removes failed stores from the cluster.
 func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]interface{}) error {
+	if u.IsRunning() {
+		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	u.Lock()
 	defer u.Unlock()
 
-	if u.stage != idle {
-		return errors.Errorf("Another request is working in progress")
+	if len(failedStores) == 0 {
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
 	}
 
 	// validate the stores and mark the store as tombstone forcibly
@@ -139,12 +150,12 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 		if store == nil {
 			return errors.Errorf("Store %v doesn't exist", failedStore)
 		} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
-			return errors.Errorf("Store %v is up and connected", failedStore)
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
 		}
 	}
 	for failedStore := range failedStores {
 		err := u.cluster.BuryStore(failedStore, true)
-		if err != nil && errors.ErrorNotEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
 			return err
 		}
 	}
@@ -322,8 +333,10 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output = append(output, "Unsafe recovery enters create empty region stage")
 		output = append(output, u.getCreateEmptyRegionPlanDigest()...)
 	case finished:
+		u.cluster.PauseOrResumeScheduler("all", 0)
 		output = append(output, "Unsafe recovery finished")
 	case failed:
+		u.cluster.PauseOrResumeScheduler("all", 0)
 		output = append(output, fmt.Sprintf("Unsafe recovery failed: %v", u.err))
 	}
 

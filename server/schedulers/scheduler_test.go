@@ -20,7 +20,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -239,68 +238,6 @@ func (s *testHotRegionSchedulerSuite) TestAbnormalReplica(c *C) {
 	tc.SetHotRegionCacheHitsThreshold(0)
 	c.Assert(tc.IsRegionHot(tc.GetRegion(1)), IsTrue)
 	c.Assert(hb.IsScheduleAllowed(tc), IsFalse)
-}
-
-var _ = Suite(&testEvictLeaderSuite{})
-
-type testEvictLeaderSuite struct{}
-
-func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	// Add stores 1, 2, 3
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0)
-	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	tc.AddLeaderRegion(2, 2, 1)
-	tc.AddLeaderRegion(3, 3, 1)
-
-	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
-}
-
-func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-
-	// Add stores 1, 2, 3
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0)
-	// Add region 1, which has 3 peers. 1 is leader. 2 is healthy or pending, 3 is healthy or down.
-	tc.AddLeaderRegion(1, 1, 2, 3)
-	region := tc.MockRegionInfo(1, 1, []uint64{2, 3}, nil, nil)
-	withDownPeer := core.WithDownPeers([]*pdpb.PeerStats{{
-		Peer:        region.GetPeers()[2],
-		DownSeconds: 1000,
-	}})
-	withPendingPeer := core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[1]})
-
-	// only pending
-	tc.PutRegion(region.Clone(withPendingPeer))
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{3})
-	// only down
-	tc.PutRegion(region.Clone(withDownPeer))
-	op = sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
-	// pending + down
-	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
-	c.Assert(sl.Schedule(tc), HasLen, 0)
 }
 
 var _ = Suite(&testShuffleRegionSuite{})
@@ -606,52 +543,4 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 			c.Assert(s.schedule(), HasLen, 0)
 		}
 	}
-}
-
-var _ = Suite(&testEvictSlowStoreSuite{})
-
-type testEvictSlowStoreSuite struct{}
-
-func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	// Add stores 1, 2
-	tc.AddLeaderStore(1, 0)
-	tc.AddLeaderStore(2, 0)
-	tc.AddLeaderStore(3, 0)
-	// Add regions 1, 2 with leaders in stores 1, 2
-	tc.AddLeaderRegion(1, 1, 2)
-	tc.AddLeaderRegion(2, 2, 1)
-	tc.UpdateLeaderCount(2, 16)
-
-	oc := schedule.NewOperatorController(ctx, nil, nil)
-	storage := storage.NewStorageWithMemoryBackend()
-	es, err := schedule.CreateScheduler(EvictSlowStoreType, oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
-	c.Assert(err, IsNil)
-	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
-	c.Assert(err, IsNil)
-	storeInfo := tc.GetStore(1)
-	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowScore = 100
-	})
-	tc.PutStore(newStoreInfo)
-	c.Assert(es.IsScheduleAllowed(tc), IsTrue)
-	// Add evict leader scheduler to store 1
-	op := es.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
-	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
-	// Cannot balance leaders to store 1
-	op = bs.Schedule(tc)
-	c.Assert(op, HasLen, 0)
-	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowScore = 0
-	})
-	tc.PutStore(newStoreInfo)
-	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
-	c.Check(es.Schedule(tc), IsNil)
-	op = bs.Schedule(tc)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 }

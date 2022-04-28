@@ -19,7 +19,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -37,7 +36,6 @@ type testMinResolvedTSSuite struct {
 
 func (s *testMinResolvedTSSuite) SetUpSuite(c *C) {
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Microsecond
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/highFrequencyClusterJobs", `return(true)`), IsNil)
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 

@@ -14,7 +14,10 @@
 
 package slice
 
-import "reflect"
+import (
+	"reflect"
+	"strings"
+)
 
 // AnyOf returns true if any element in the slice matches the predict func.
 func AnyOf(s interface{}, p func(int) bool) bool {
@@ -38,4 +41,20 @@ func AllOf(s interface{}, p func(int) bool) bool {
 		return !p(i)
 	}
 	return NoneOf(s, np)
+}
+
+// Contains returns true if the given slice contains the value.
+func Contains(slice interface{}, value interface{}) bool {
+	if reflect.TypeOf(slice).Kind() == reflect.Slice || reflect.TypeOf(slice).Kind() == reflect.Array {
+		sliceValue := reflect.ValueOf(slice)
+		for i := 0; i < sliceValue.Len(); i++ {
+			if value == sliceValue.Index(i).Interface() {
+				return true
+			}
+		}
+	}
+	if reflect.TypeOf(slice).Kind() == reflect.String && reflect.TypeOf(value).Kind() == reflect.String {
+		return strings.Contains(slice.(string), value.(string))
+	}
+	return false
 }

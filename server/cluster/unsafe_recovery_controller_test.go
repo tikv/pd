@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/storage"
 )
 
@@ -135,6 +136,8 @@ func advanceUntilFinished(c *C, recoveryController *unsafeRecoveryController, re
 func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
@@ -208,6 +211,8 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
@@ -282,6 +287,8 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
@@ -364,6 +371,8 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
@@ -453,6 +462,8 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
@@ -953,6 +964,8 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {
@@ -970,10 +983,39 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 		1: "",
 	}), IsNil)
 	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
+	for _, s := range cluster.GetSchedulers() {
+		paused, err := cluster.IsSchedulerAllowed(s)
+		c.Assert(err, IsNil)
+		c.Assert(paused, IsTrue)
+	}
 
 	// Store 2's last heartbeat is recent, and is not allowed to be removed.
 	c.Assert(recoveryController.RemoveFailedStores(
 		map[uint64]interface{}{
 			2: "",
 		}), NotNil)
+}
+
+func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
+	stores := newTestStores(2, "5.3.0")
+	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
+	for _, store := range stores {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	cluster.unsafeRecoveryController = recoveryController
+	failedStores := map[uint64]interface{}{
+		1: "",
+	}
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
+	askSplitReq := &pdpb.AskSplitRequest{}
+	_, err := cluster.HandleAskSplit(askSplitReq)
+	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
+	askBatchSplitReq := &pdpb.AskBatchSplitRequest{}
+	_, err = cluster.HandleAskBatchSplit(askBatchSplitReq)
+	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
 }

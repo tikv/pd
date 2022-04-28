@@ -16,13 +16,13 @@ package cluster
 
 import (
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -161,7 +161,7 @@ func (s *CPUEntries) CPU() float64 {
 
 // StatEntries saves the StatEntries for each store in the cluster
 type StatEntries struct {
-	m     sync.RWMutex
+	m     syncutil.RWMutex
 	stats map[uint64]*CPUEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
@@ -195,15 +195,6 @@ func (cst *StatEntries) Append(stat *StatEntry) bool {
 	return entries.Append(stat, ThreadsCollected...)
 }
 
-func contains(slice []uint64, value uint64) bool {
-	for i := range slice {
-		if slice[i] == value {
-			return true
-		}
-	}
-	return false
-}
-
 // CPU returns the cpu usage of the cluster
 func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 	cst.m.Lock()
@@ -216,7 +207,7 @@ func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 
 	sum := 0.0
 	for sid, stat := range cst.stats {
-		if contains(excludes, sid) {
+		if slice.Contains(excludes, sid) {
 			continue
 		}
 		if time.Since(stat.updated) > cst.ttl {

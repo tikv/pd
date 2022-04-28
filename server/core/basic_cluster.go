@@ -16,19 +16,19 @@ package core
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	Stores  *StoresInfo
 	Regions *RegionsInfo
 }
@@ -114,6 +114,17 @@ func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
 		}
 	}
 	return Stores
+}
+
+// GetLeaderStoreByRegionID returns the leader store of the given region.
+func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
+	bc.RLock()
+	defer bc.RUnlock()
+	region := bc.Regions.GetRegion(regionID)
+	if region == nil || region.GetLeader() == nil {
+		return nil
+	}
+	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
@@ -401,8 +412,8 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
 	bc.Lock()
 	defer bc.Unlock()
-	if region := bc.Regions.GetRegion(id); region != nil {
-		bc.Regions.RemoveRegion(region)
+	if r := bc.Regions.GetRegion(id); r != nil {
+		bc.Regions.RemoveRegion(r)
 	}
 }
 

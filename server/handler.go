@@ -23,7 +23,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -33,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -84,11 +84,11 @@ type Handler struct {
 	s               *Server
 	opt             *config.PersistOptions
 	pluginChMap     map[string]chan string
-	pluginChMapLock sync.RWMutex
+	pluginChMapLock syncutil.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
+	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: syncutil.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -934,6 +934,16 @@ func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelim
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	cluster := h.s.GetRaftCluster()
 	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
+}
+
+// GetProgressByID returns the progress details for a given store ID.
+func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64) {
+	return h.s.GetRaftCluster().GetProgressByID(storeID)
+}
+
+// GetProgressByAction returns the progress details for a given action.
+func (h *Handler) GetProgressByAction(action string) (p, ls, cs float64) {
+	return h.s.GetRaftCluster().GetProgressByAction(action)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath

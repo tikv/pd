@@ -50,3 +50,17 @@ func (s *testSliceSuite) Test(c *C) {
 		c.Assert(slice.AllOf(t.a, even), Equals, t.allOf)
 	}
 }
+
+func (s *testSliceSuite) TestSliceContains(c *C) {
+	ss := []string{"a", "b", "c"}
+	c.Assert(slice.Contains(ss, "a"), IsTrue)
+	c.Assert(slice.Contains(ss, "d"), IsFalse)
+
+	us := []uint64{1, 2, 3}
+	c.Assert(slice.Contains(us, uint64(1)), IsTrue)
+	c.Assert(slice.Contains(us, uint64(4)), IsFalse)
+
+	is := []int64{1, 2, 3}
+	c.Assert(slice.Contains(is, int64(1)), IsTrue)
+	c.Assert(slice.Contains(is, int64(4)), IsFalse)
+}

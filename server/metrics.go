@@ -24,7 +24,13 @@ var (
 			Name:      "time_jump_back_total",
 			Help:      "Counter of system time jumps backward.",
 		})
-
+	bucketReportCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "bucket_report",
+			Help:      "Counter of bucket report.",
+		}, []string{"address", "store", "type", "status"})
 	regionHeartbeatCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -85,6 +91,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
+	bucketReportLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_bucket_report_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled bucket report requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
+		}, []string{"address", "store"})
+
 	regionHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -133,5 +148,7 @@ func init() {
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(serverInfo)
+	prometheus.MustRegister(bucketReportCounter)
+	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 }

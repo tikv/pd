@@ -235,11 +235,3 @@ func (s *GlobalConfigTestSuite) TestClientWatch(c *C) {
 		}
 	}
 }
-
-func (s *GlobalConfigTestSuite) TestClientWatchTimeout(c *C) {
-	ctx, cancel := context.WithCancel(s.server.Context())
-	wc, _ := s.watchGlobalConfig(ctx)
-	cancel()
-	_, opened := <-wc
-	c.Assert(opened, Equals, false)
-}
