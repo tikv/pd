@@ -17,9 +17,9 @@ package placement
 import (
 	"math"
 	"sort"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -28,7 +28,7 @@ import (
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
 	mu struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		cached bool
 	}
 	RuleFits     []*RuleFit

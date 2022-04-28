@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tikv/pd/pkg/encryption"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/versioninfo"
@@ -285,7 +285,7 @@ func initByLDFlags(edition string) {
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
-	mu sync.RWMutex
+	mu syncutil.RWMutex
 	// AddPeer is the default rate of adding peers for store limit (per minute).
 	AddPeer float64
 	// RemovePeer is the default rate of removing peers for store limit (per minute).

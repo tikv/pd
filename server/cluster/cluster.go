@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -96,7 +97,7 @@ type Server interface {
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	wg sync.WaitGroup
 
 	serverCtx context.Context

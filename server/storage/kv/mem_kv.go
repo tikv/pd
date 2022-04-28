@@ -15,15 +15,14 @@
 package kv
 
 import (
-	"sync"
-
 	"github.com/google/btree"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 type memoryKV struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	tree *btree.BTree
 }
 
