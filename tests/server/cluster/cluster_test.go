@@ -863,10 +863,11 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	rep.EnablePlacementRules = false
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = svr.GetRaftCluster().RemoveStore(11, true)
+	err = svr.GetRaftCluster().BuryStore(11, true)
 	c.Assert(err, IsNil)
 	err = svr.SetReplicationConfig(rep)
-	c.Assert(err, NotNil)
+	c.Assert(err, IsNil)
+	c.Assert(len(svr.GetScheduleConfig().StoreLimit), Equals, 0)
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
