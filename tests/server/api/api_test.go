@@ -254,7 +254,7 @@ func doTestRequest(srv *tests.TestServer) {
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	input := map[string]interface{}{
-		"enable-audit": true,
+		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
@@ -302,7 +302,7 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 2"), Equals, true)
 
 	input = map[string]interface{}{
-		"enable-audit": false,
+		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)

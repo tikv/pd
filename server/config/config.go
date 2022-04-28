@@ -107,6 +107,8 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
+	ServiceCfg ServiceConfig `toml:"service" json:"service"`
+
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
@@ -571,6 +573,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		return err
 	}
 	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
+		return err
+	}
+
+	if err := c.ServiceCfg.adjust(configMetaData.Child("service")); err != nil {
 		return err
 	}
 
@@ -1086,6 +1092,27 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
+// ServiceConfig
+type ServiceConfig struct {
+	// EnableAudit controls the switch of the audit middleware
+	EnableAudit bool `toml:"enable-audit" json:"enable-audit,string"`
+	// EnableRateLimit controls the switch of the rate limit middleware
+	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit,string"`
+}
+
+// Clone returns a cloned PD server config.
+func (c *ServiceConfig) Clone() *ServiceConfig {
+	cfg := *c
+	return &cfg
+}
+
+func (c *ServiceConfig) adjust(meta *configMetaData) error {
+	if !meta.IsDefined("enable-audit") {
+		c.EnableAudit = defaultEnableAuditMiddleware
+	}
+	return nil
+}
+
 // PDServerConfig is the configuration for pd server.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
@@ -1110,8 +1137,6 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
-	// EnableAudit controls the switch of the audit middleware
-	EnableAudit bool `toml:"enable-audit" json:"enable-audit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1136,9 +1161,6 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
-	}
-	if !meta.IsDefined("enable-audit") {
-		c.EnableAudit = defaultEnableAuditMiddleware
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

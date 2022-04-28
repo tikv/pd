@@ -812,6 +812,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
 	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
 	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
+	cfg.ServiceCfg = *s.persistOptions.GetServiceConfig().Clone()
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
@@ -951,6 +952,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetServiceConfig gets the service config information.
+func (s *Server) GetServiceConfig() *config.ServiceConfig {
+	return s.persistOptions.GetServiceConfig().Clone()
+}
+
+// SetServiceConfig sets the service config.
+func (s *Server) SetServiceConfig(cfg config.ServiceConfig) error {
+	old := s.persistOptions.GetServiceConfig()
+	s.persistOptions.SetServiceConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetServiceConfig(old)
+		log.Error("failed to update Service config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
