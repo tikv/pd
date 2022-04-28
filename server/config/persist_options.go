@@ -92,7 +92,7 @@ func (o *PersistOptions) GetServiceConfig() *ServiceConfig {
 	return o.serviceConfig.Load().(*ServiceConfig)
 }
 
-// SetPDServerConfig sets the PD configuration.
+// SetServiceConfig sets the PD configuration.
 func (o *PersistOptions) SetServiceConfig(cfg *ServiceConfig) {
 	o.serviceConfig.Store(cfg)
 }

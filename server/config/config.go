@@ -1092,12 +1092,10 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-// ServiceConfig
+// ServiceConfig is the configuration for PD service such as HTTP API and gRPC.
 type ServiceConfig struct {
 	// EnableAudit controls the switch of the audit middleware
 	EnableAudit bool `toml:"enable-audit" json:"enable-audit,string"`
-	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit,string"`
 }
 
 // Clone returns a cloned PD server config.

@@ -561,7 +561,7 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 // @Tags config
 // @Summary Get Service config.
 // @Produce json
-// @Success 200 {object} config.Service
+// @Success 200 {object} config.ServiceConfig
 // @Router /config/service [get]
 func (h *confHandler) GetServiceConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceConfig())
