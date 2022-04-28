@@ -16,7 +16,6 @@ package storage
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -26,6 +25,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
@@ -43,7 +43,7 @@ const (
 type levelDBBackend struct {
 	*endpoint.StorageEndpoint
 	ekm                 *encryptionkm.KeyManager
-	mu                  sync.RWMutex
+	mu                  syncutil.RWMutex
 	batchRegions        map[string]*metapb.Region
 	batchSize           int
 	cacheSize           int
