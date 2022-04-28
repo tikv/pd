@@ -22,12 +22,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -38,7 +38,7 @@ import (
 // It is thread safe.
 type RuleManager struct {
 	storage endpoint.RuleStorage
-	sync.RWMutex
+	syncutil.RWMutex
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
