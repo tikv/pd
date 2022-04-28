@@ -1074,7 +1074,12 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 	}
 	split, err := rc.HandleAskSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskSplitResponse{
@@ -1112,7 +1117,12 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	}
 	split, err := rc.HandleAskBatchSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskBatchSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskBatchSplitResponse{
