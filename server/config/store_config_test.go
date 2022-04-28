@@ -17,8 +17,9 @@ package config
 import (
 	"crypto/tls"
 	"encoding/json"
-	. "github.com/pingcap/check"
 	"net/http"
+
+	. "github.com/pingcap/check"
 )
 
 var _ = Suite(&testTiKVConfigSuite{})

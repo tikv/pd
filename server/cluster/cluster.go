@@ -17,7 +17,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/net"
 	"math"
 	"net/http"
 	"strconv"
@@ -35,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/net"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -156,8 +156,8 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 }
 
 // GetStoreConfig returns the store config.
-func (c *RaftCluster) GetStoreConfigManager() *config.StoreConfigManager {
-	return c.storeConfigManager
+func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
+	return c.storeConfigManager.GetStoreConfig()
 }
 
 // LoadClusterStatus loads the cluster status.
@@ -272,14 +272,14 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
-	go c.runSyncConfig(c.storeConfigManager)
+	go c.runSyncConfig()
 	c.running = true
 
 	return nil
 }
 
 // runSyncConfig runs the job to sync config.
-func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
+func (c *RaftCluster) runSyncConfig() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
@@ -287,14 +287,14 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 	defer ticker.Stop()
 	stores := c.GetStores()
 
-	index := syncConfig(manager, stores, 0)
+	index := syncConfig(c.storeConfigManager, stores, 0)
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			index = syncConfig(manager, stores, index)
+			index = syncConfig(c.storeConfigManager, stores, index)
 			if index >= len(stores) {
 				index = 0
 				stores = c.GetStores()
@@ -306,7 +306,7 @@ func (c *RaftCluster) runSyncConfig(manager *config.StoreConfigManager) {
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
 	for ; index < len(stores); index++ {
 		// filter out the stores that are tiflash
-		if store := stores[index]; store.IsTiFlash() {
+		if store := stores[index]; core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
 		}
 		// it will try next store if the current store is failed.
@@ -507,6 +507,11 @@ func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
 // IsSchedulerDisabled checks if a scheduler is disabled.
 func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
 	return c.coordinator.isSchedulerDisabled(name)
+}
+
+// IsSchedulerAllowed checks if a scheduler is allowed.
+func (c *RaftCluster) IsSchedulerAllowed(name string) (bool, error) {
+	return c.coordinator.isSchedulerAllowed(name)
 }
 
 // IsSchedulerExisted checks if a scheduler is existed.

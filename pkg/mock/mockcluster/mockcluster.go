@@ -76,8 +76,8 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 }
 
 // GetStoreConfig returns the store config.
-func (mc *Cluster) GetStoreConfigManager() *config.StoreConfigManager {
-	return mc.StoreConfigManager
+func (mc *Cluster) GetStoreConfig() *config.StoreConfig {
+	return mc.StoreConfigManager.GetStoreConfig()
 }
 
 // GetOpts returns the cluster configuration.

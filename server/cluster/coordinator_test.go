@@ -251,7 +251,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 
 func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.GetStoreConfig())
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
 	}, func(co *coordinator) { co.run() }, c)
 	defer cleanup()
 
@@ -894,6 +894,18 @@ func (s *testCoordinatorSuite) TestRestart(c *C) {
 	region = waitAddLearner(c, stream, region, 3)
 	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
 	waitPromoteLearner(c, stream, region, 3)
+}
+
+func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
+	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+	defer cleanup()
+	_, err := co.isSchedulerAllowed("test")
+	c.Assert(err, NotNil)
+	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
+	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
+	c.Assert(paused, Equals, true)
+	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
+	c.Assert(allowed, Equals, false)
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {

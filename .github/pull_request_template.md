@@ -3,14 +3,10 @@ Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/
 PR Title Format:
 1. pkg [, pkg2, pkg3]: what's changed
 2. *: what's changed
-
-
-If you want to open the **Challenge Program** pull request, please use the following template:
-https://raw.githubusercontent.com/tikv/.github/master/.github/PULL_REQUEST_TEMPLATE/challenge-program.md
-You can use it with query parameters: https://github.com/tikv/pd/compare/master...${you branch}?template=challenge-program.md
 -->
 
 ### What problem does this PR solve?
+
 <!--
 
 Please create an issue first to describe the problem.
@@ -21,10 +17,11 @@ For more info, check https://github.com/tikv/pd/blob/master/CONTRIBUTING.md#link
 -->
 Issue Number: Close #xxx
 
-### What is changed and how it works?
+### What is changed and how does it work?
+
 <!--
 
-You could use "commit message" code block to add more description to the final commit message.
+You could use the "commit message" code block to add more description to the final commit message.
 For more info, check https://github.com/tikv/pd/blob/master/CONTRIBUTING.md#format-of-the-commit-message.
 
 -->
@@ -38,7 +35,7 @@ For more info, check https://github.com/tikv/pd/blob/master/CONTRIBUTING.md#form
 
 Tests
 
-<!-- At least one of them must be included. -->
+<!-- At least one of these tests must be included. -->
 
 - Unit test
 - Integration test
@@ -48,7 +45,7 @@ Tests
 Code changes
 
 - Has configuration change
-- Has HTTP API interfaces change (Don't forget to [add the declarative for API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
+- Has HTTP API interfaces changed (Don't forget to [add the declarative for the new API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
 - Has persistent data change
 
 Side effects
