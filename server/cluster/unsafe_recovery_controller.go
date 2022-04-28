@@ -17,6 +17,7 @@ package cluster
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -243,8 +244,14 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 	storeID := heartbeat.Stats.StoreId
 	now := time.Now()
 
-	if expire, requested := u.storePlanExpires[storeID]; !requested || expire.Before(now) {
-		if requested {
+	if reported, exist := u.storeReports[storeID]; reported != nil || !exist {
+		// the plan has been executed, no need to dispatch again
+		// or no need to displan plan to this store(e.g. Tiflash)
+		return
+	}
+
+	if expire, dispatched := u.storePlanExpires[storeID]; !dispatched || expire.Before(now) {
+		if dispatched {
 			log.Info(fmt.Sprintf("Unsafe Recovery store %d recovery plan execution timeout, retry", storeID))
 		}
 		// Dispatch the recovery plan to the store, and the plan may be empty.
@@ -261,6 +268,11 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 	}
 
 	if heartbeat.StoreReport == nil {
+		return false, nil
+	}
+
+	if _, dispatched := u.storePlanExpires[storeID]; !dispatched {
+		// if the plan isn't ever dispatched, but get a report, it must be illegal, just ignore it
 		return false, nil
 	}
 
@@ -351,7 +363,7 @@ func (u *unsafeRecoveryController) getForceLeaderPlanDigest() []string {
 func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() []string {
 	var output []string
 	for storeID, plan := range u.storeRecoveryPlans {
-		if plan.GetDemotes() == nil {
+		if len(plan.GetDemotes()) == 0 && len(plan.GetTombstones()) == 0 {
 			continue
 		}
 		output = append(output, fmt.Sprintf(" - store %d", storeID))
@@ -391,11 +403,8 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
 		numFailedVoters := 0
 		numLiveVoters := 0
 
-		for _, peer := range region.Peers {
-			if peer.Role == metapb.PeerRole_Learner {
-				continue
-			}
-			if _, ok := u.failedStores[peer.StoreId]; ok {
+		for _, voter := range voters {
+			if _, ok := u.failedStores[voter.StoreId]; ok {
 				numFailedVoters += 1
 			} else {
 				numLiveVoters += 1
@@ -409,12 +418,10 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
 	var outgoingVoters []*metapb.Peer
 
 	for _, peer := range region.Peers {
-		if peer.Role == metapb.PeerRole_Learner {
-			continue
-		}
 		if peer.Role == metapb.PeerRole_Voter || peer.Role == metapb.PeerRole_IncomingVoter {
 			incomingVoters = append(incomingVoters, peer)
-		} else if peer.Role == metapb.PeerRole_Voter || peer.Role == metapb.PeerRole_DemotingVoter {
+		}
+		if peer.Role == metapb.PeerRole_Voter || peer.Role == metapb.PeerRole_DemotingVoter {
 			outgoingVoters = append(outgoingVoters, peer)
 		}
 	}
@@ -425,6 +432,7 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
 func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
+		// TODO: if peer is outgoing, no need to demote it.
 		if _, ok := u.failedStores[peer.StoreId]; ok {
 			failedPeers = append(failedPeers, peer)
 		}
@@ -444,7 +452,8 @@ type regionItem struct {
 // 6. consider Tiflash
 // 7. consider commit merge
 // 8. add test cases
-// 9. [DONE] add abort
+// 9. consider in the midst joint state, after exit, may no need to demote
+// 10. add report step to avoid wrong information
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
@@ -562,39 +571,23 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 	return result
 }
 
-// update updates the tree with the region.
+// Insert the peer report of one region int the tree.
 // It finds and deletes all the overlapped regions first, and then
 // insert the new region.
-func (t *regionTree) update(item *regionItem) bool {
+func (t *regionTree) insert(item *regionItem) bool {
 	overlaps := t.getOverlaps(item)
 
-	foundSelf := false
-	for _, old := range overlaps {
-		if item.Region().GetId() == old.Region().GetId() {
-			foundSelf = true
-			// not only check epoch for peers of the same region
-			if item.IsStale(old) {
-				return false
-			}
-		} else if item.IsEpochStale(old) {
-			return false
-		}
+	if t.contains(item.Region().GetId()) {
+		// it's ensured by the `buildUpFromReports` that only insert the latest peer of one region.
+		panic("region shouldn't be updated twice")
 	}
 
-	if !foundSelf {
-		// the ranges are not overlapped before and after, so use hash map
-		// to get the origin region info
-		if origin := t.regions[item.Region().GetId()]; origin != nil {
-			if item.IsStale(origin) {
-				return false
-			}
-			if origin.IsStale(item) {
-				t.tree.Delete(origin)
-			}
-		}
-	}
 	for _, old := range overlaps {
-		t.tree.Delete(old)
+		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
+		if old.IsEpochStale(item) {
+			panic("region's epoch shouldn't be staler than old ones")
+		}
+		return false
 	}
 	t.regions[item.Region().GetId()] = item
 	t.tree.ReplaceOrInsert(item)
@@ -613,15 +606,35 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 
-	newestRegionTree := newRegionTree()
 	peersMap := make(map[uint64][]*regionItem)
 	// Go through all the peer reports to build up the newest region tree
 	for storeID, storeReport := range u.storeReports {
 		for _, peerReport := range storeReport.PeerReports {
 			item := &regionItem{report: peerReport, storeID: storeID}
 			peersMap[item.Region().GetId()] = append(peersMap[item.Region().GetId()], item)
-			newestRegionTree.update(item)
 		}
+	}
+
+	// find the report of the leader
+	newestPeerReports := make([]*regionItem, 0, len(peersMap))
+	for _, peers := range peersMap {
+		var latest *regionItem
+		for _, peer := range peers {
+			if latest == nil || latest.IsEpochStale(peer) {
+				latest = peer
+			}
+		}
+		newestPeerReports = append(newestPeerReports, latest)
+	}
+
+	// sort in descending order of epoch
+	sort.SliceStable(newestPeerReports, func(i, j int) bool {
+		return newestPeerReports[j].IsEpochStale(newestPeerReports[i])
+	})
+
+	newestRegionTree := newRegionTree()
+	for _, peer := range newestPeerReports {
+		newestRegionTree.insert(peer)
 	}
 	return newestRegionTree, peersMap
 }
@@ -645,6 +658,10 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
 		if !u.canElectLeader(region) {
+			if item.(*regionItem).report.IsForceLeader {
+				// already is a force leader, skip but set hasPlan = true
+				return true
+			}
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
 			leader := selectLeader(peersMap, region)
@@ -717,6 +734,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan() bool {
 					// the peer is not in the valid regions, should be deleted directly
 					storeRecoveryPlan := u.getRecoveryPlan(storeID)
 					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, regionID)
+					hasPlan = true
 				}
 			}
 		}
