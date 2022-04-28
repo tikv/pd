@@ -1046,7 +1046,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 			panic(err)
 		}
 	}
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.GetStoreConfig())
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
 	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
 
 	// Put 3 stores.
@@ -1121,16 +1121,15 @@ func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
 	}}
 
 	for _, v := range testdata {
-		manager := config.NewTestStoreConfigManager(v.whiteList)
-		tc.storeConfig = manager.GetStoreConfig()
-		c.Assert(tc.storeConfig.GetRegionMaxSize(), Equals, uint64(144))
-		index := syncConfig(manager, tc.GetStores(), 0)
+		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
+		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+		index := syncConfig(tc.storeConfigManager, tc.GetStores(), 0)
 		if !v.updated {
 			c.Assert(index, Equals, 5)
 		} else {
 			c.Assert(index, Less, 5)
 		}
-		c.Assert(tc.storeConfig.GetRegionMaxSize(), Equals, v.maxRegionSize)
+		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, v.maxRegionSize)
 	}
 }
 
