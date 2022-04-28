@@ -87,6 +87,7 @@ type unsafeRecoveryController struct {
 	cluster      *RaftCluster
 	stage        unsafeRecoveryStage
 	failedStores map[uint64]interface{}
+	timeout      time.Time
 
 	// collected reports from store, if not reported yet, it would be nil
 	storeReports      map[uint64]*pdpb.StoreReport
@@ -133,7 +134,7 @@ func (u *unsafeRecoveryController) IsRunning() bool {
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
-func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]interface{}) error {
+func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]interface{}, timeout uint64) error {
 	if u.IsRunning() {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
@@ -174,19 +175,60 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 		u.getRecoveryPlan(s.GetID())
 	}
 
+	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
 	u.failedStores = failedStores
 	u.changeStage(collectReport)
 	return nil
 }
 
+// Show returns the current status of ongoing unsafe recover operation.
+func (u *unsafeRecoveryController) Show() []string {
+	u.RLock()
+	defer u.RUnlock()
+
+	if u.stage == idle {
+		return []string{"No on-going recovery."}
+	}
+	u.checkTimeout()
+	status := u.output
+	if u.stage != finished && u.stage != failed {
+		status = append(status, u.getReportStatus()...)
+	}
+	return status
+}
+
+// History returns the history logs of the current unsafe recover operation.
+func (u *unsafeRecoveryController) History() []string {
+	u.RLock()
+	defer u.RUnlock()
+
+	if u.stage <= idle {
+		return []string{"No unsafe recover has been triggered since PD restarted."}
+	}
+	u.checkTimeout()
+	return u.output
+}
+
+func (u *unsafeRecoveryController) checkTimeout() bool {
+	if time.Now().After(u.timeout) {
+		u.err = errors.Errorf("Exceeds timeout %v", u.timeout)
+		u.changeStage(failed)
+		return true
+	}
+	return false
+}
+
 // HandleStoreHeartbeat handles the store heartbeat requests and checks whether the stores need to
 // send detailed report back.
 func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
+	if !u.IsRunning() {
+		// no recovery in progress, do nothing
+		return
+	}
 	u.Lock()
 	defer u.Unlock()
 
-	if u.stage == idle || u.stage == finished || u.stage == failed {
-		// no recovery in progress, do nothing
+	if u.checkTimeout() {
 		return
 	}
 
@@ -300,6 +342,7 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 	return false, nil
 }
 
+// Gets the stage of the current unsafe recovery.
 func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
 	u.RLock()
 	defer u.RUnlock()
@@ -837,30 +880,4 @@ func (u *unsafeRecoveryController) getReportStatus() []string {
 		status = append(status, fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports)))
 	}
 	return status
-}
-
-// Show returns the current status of ongoing unsafe recover operation.
-func (u *unsafeRecoveryController) Show() []string {
-	u.RLock()
-	defer u.RUnlock()
-
-	if u.stage == idle {
-		return []string{"No on-going recovery."}
-	}
-	status := u.output
-	if u.stage != finished {
-		status = append(status, u.getReportStatus()...)
-	}
-	return status
-}
-
-// History returns the history logs of the current unsafe recover operation.
-func (u *unsafeRecoveryController) History() []string {
-	u.RLock()
-	defer u.RUnlock()
-
-	if u.stage <= idle {
-		return []string{"No unsafe recover has been triggered since PD restarted."}
-	}
-	return u.output
 }

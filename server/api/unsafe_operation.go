@@ -59,7 +59,13 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	for _, store := range storeSlice {
 		stores[store] = interface{}(nil)
 	}
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores); err != nil {
+	timeout := uint64(600)
+	rawTimeout, exists := input["timeout"]
+	if exists {
+		timeout = uint64(rawTimeout.(float64))
+	}
+
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

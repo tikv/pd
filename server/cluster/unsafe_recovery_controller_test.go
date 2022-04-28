@@ -145,7 +145,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		2: "",
 		3: "",
-	}), IsNil)
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -220,7 +220,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		2: "",
 		3: "",
-	}), IsNil)
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -296,7 +296,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		4: "",
 		5: "",
-	}), IsNil)
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -380,7 +380,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		4: "",
 		5: "",
-	}), IsNil)
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -471,7 +471,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		4: "",
 		5: "",
-	}), IsNil)
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -977,11 +977,11 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		1: "",
 		3: "",
-	}), NotNil)
+	}, 60), NotNil)
 
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
 		1: "",
-	}), IsNil)
+	}, 60), IsNil)
 	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
 	for _, s := range cluster.GetSchedulers() {
 		paused, err := cluster.IsSchedulerAllowed(s)
@@ -993,7 +993,7 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(
 		map[uint64]interface{}{
 			2: "",
-		}), NotNil)
+		}, 60), NotNil)
 }
 
 func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
@@ -1011,7 +1011,7 @@ func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 	failedStores := map[uint64]interface{}{
 		1: "",
 	}
-	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
+	c.Assert(recoveryController.RemoveFailedStores(failedStores, 60), IsNil)
 	askSplitReq := &pdpb.AskSplitRequest{}
 	_, err := cluster.HandleAskSplit(askSplitReq)
 	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
