@@ -17,11 +17,15 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
+
+var once sync.Once
 
 var group = server.ServiceGroup{
 	Name:       "core",
@@ -34,7 +38,12 @@ const apiV2Prefix = "/pd/api/v2/"
 
 // NewV2Handler creates a HTTP handler for API.
 func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, error) {
-	gin.SetMode(gin.ReleaseMode)
+	once.Do(func() {
+		// These global modification will be effective only for the first invoke.
+		_ = godotenv.Load()
+		gin.SetMode(gin.ReleaseMode)
+	})
+
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set("server", svr)
