@@ -21,6 +21,9 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
+// SpeedStatisticalInterval is the speed calculation interval
+var SpeedStatisticalInterval = 5 * time.Minute
+
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
 	syncutil.RWMutex
@@ -36,10 +39,12 @@ func NewManager() *Manager {
 
 // progressIndicator reflects a specified progress.
 type progressIndicator struct {
-	total       float64
-	left        float64
-	startTime   time.Time
-	speedPerSec float64
+	total     float64
+	remaining float64
+	// we use a fixed interval to calculate the latest average speed.
+	lastTimeRemaining float64
+	lastSpeed         float64
+	lastTime          time.Time
 }
 
 // Reset resets the progress manager.
@@ -57,25 +62,45 @@ func (m *Manager) AddProgress(progress string, total float64) (exist bool) {
 
 	if _, exist = m.progesses[progress]; !exist {
 		m.progesses[progress] = &progressIndicator{
-			total:     total,
-			left:      total,
-			startTime: time.Now(),
+			total:             total,
+			remaining:         total,
+			lastTimeRemaining: total,
+			lastTime:          time.Now(),
 		}
 	}
 	return
 }
 
-// UpdateProgress updates a progress into manager if it doesn't exist.
-func (m *Manager) UpdateProgress(progress string, left float64) {
+// UpdateProgressRemaining updates the remaining value of a progress if it exists.
+func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 	m.Lock()
 	defer m.Unlock()
 
 	if p, exist := m.progesses[progress]; exist {
-		p.left = left
-		if p.total < left {
-			p.total = left
+		p.remaining = remaining
+		if p.total < remaining {
+			p.total = remaining
 		}
-		p.speedPerSec = (p.total - p.left) / time.Since(p.startTime).Seconds()
+		// calculate the average speed for every `SpeedStatisticalInterval`
+		if time.Since(p.lastTime) >= SpeedStatisticalInterval {
+			if (p.lastTimeRemaining - remaining) <= 0 {
+				p.lastSpeed = 0
+			} else {
+				p.lastSpeed = (p.lastTimeRemaining - remaining) / time.Since(p.lastTime).Seconds()
+			}
+			p.lastTime = time.Now()
+			p.lastTimeRemaining = remaining
+		}
+	}
+}
+
+// UpdateProgressTotal updates the total value of a progress if it exists.
+func (m *Manager) UpdateProgressTotal(progress string, total float64) {
+	m.Lock()
+	defer m.Unlock()
+
+	if p, exist := m.progesses[progress]; exist {
+		p.total = total
 	}
 }
 
@@ -93,8 +118,8 @@ func (m *Manager) RemoveProgress(progress string) (exist bool) {
 
 // GetProgresses gets progresses according to the filter.
 func (m *Manager) GetProgresses(filter func(p string) bool) []string {
-	m.Lock()
-	defer m.Unlock()
+	m.RLock()
+	defer m.RUnlock()
 
 	processes := []string{}
 	for p := range m.progesses {
@@ -109,14 +134,20 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64) {
 	m.RLock()
 	defer m.RUnlock()
+
 	if p, exist := m.progesses[progress]; exist {
-		process = 1 - p.left/p.total
-		speedPerSec := (p.total - p.left) / time.Since(p.startTime).Seconds()
-		leftSeconds = p.left / speedPerSec
+		process = 1 - p.remaining/p.total
+		currentSpeed = 0
+		// when the progress is newly added
+		if p.lastSpeed == 0 && time.Since(p.lastTime) < SpeedStatisticalInterval {
+			currentSpeed = (p.lastTimeRemaining - p.remaining) / time.Since(p.lastTime).Seconds()
+		} else {
+			currentSpeed = p.lastSpeed
+		}
+		leftSeconds = p.remaining / currentSpeed
 		if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
 			leftSeconds = math.MaxFloat64
 		}
-		currentSpeed = speedPerSec
 		return
 	}
 	return 0, 0, 0

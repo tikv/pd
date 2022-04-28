@@ -1199,7 +1199,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
+		c.resetProgress(storeID, store.GetAddress(), removingAction)
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1267,7 +1267,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.resetRemovingProgress(storeID, store.GetAddress(), removingAction)
+		c.resetProgress(storeID, store.GetAddress(), removingAction)
 	}
 	return err
 }
@@ -1322,7 +1322,7 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateRemovingProgress(id, store.GetAddress(), removingAction, float64(regionSize))
+		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize))
 		// If the store is empty, it can be buried.
 		if regionSize == 0 {
 			if err := c.BuryStore(id, false); err != nil {
@@ -1347,22 +1347,34 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) updateRemovingProgress(storeID uint64, storeAddress string, action string, left float64) {
-	storeLabel := fmt.Sprintf("%d", storeID)
-	progress := encodeRemovingProgressKey(storeID)
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, remaining float64) {
+	storeLabel := strconv.FormatUint(storeID, 10)
+	var progress string
+	//nolint
+	switch action {
+	case removingAction:
+		progress = encodeRemovingProgressKey(storeID)
+	}
 
-	if exist := c.progressManager.AddProgress(progress, left); !exist {
+	if exist := c.progressManager.AddProgress(progress, remaining); !exist {
 		return
 	}
-	c.progressManager.UpdateProgress(progress, left)
+	c.progressManager.UpdateProgressRemaining(progress, remaining)
 	process, ls, _ := c.progressManager.Status(progress)
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
 
-func (c *RaftCluster) resetRemovingProgress(storeID uint64, storeAddress string, action string) {
-	storeLabel := fmt.Sprintf("%d", storeID)
-	if exist := c.progressManager.RemoveProgress(encodeRemovingProgressKey(storeID)); exist {
+func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
+	storeLabel := strconv.FormatUint(storeID, 10)
+	var progress string
+	//nolint
+	switch action {
+	case removingAction:
+		progress = encodeRemovingProgressKey(storeID)
+	}
+
+	if exist := c.progressManager.RemoveProgress(progress); exist {
 		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 	}
