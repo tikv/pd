@@ -21,8 +21,8 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
-// SpeedStatisticalInterval is the speed calculation interval
-var SpeedStatisticalInterval = 5 * time.Minute
+// speedStatisticalInterval is the speed calculation interval
+var speedStatisticalInterval = 5 * time.Minute
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
@@ -82,7 +82,7 @@ func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 			p.total = remaining
 		}
 		// calculate the average speed for every `SpeedStatisticalInterval`
-		if time.Since(p.lastTime) >= SpeedStatisticalInterval {
+		if time.Since(p.lastTime) >= speedStatisticalInterval {
 			if (p.lastTimeRemaining - remaining) <= 0 {
 				p.lastSpeed = 0
 			} else {
@@ -139,7 +139,7 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 		process = 1 - p.remaining/p.total
 		currentSpeed = 0
 		// when the progress is newly added
-		if p.lastSpeed == 0 && time.Since(p.lastTime) < SpeedStatisticalInterval {
+		if p.lastSpeed == 0 && time.Since(p.lastTime) < speedStatisticalInterval {
 			currentSpeed = (p.lastTimeRemaining - p.remaining) / time.Since(p.lastTime).Seconds()
 		} else {
 			currentSpeed = p.lastSpeed
