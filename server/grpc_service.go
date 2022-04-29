@@ -1446,28 +1446,28 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 }
 
 // GetServiceGroup return all service group ids
-func (s *GrpcServer) GetServiceGroup(ctx context.Context, request *pdpb.GetServiceGroupRequest) (*pdpb.GetServiceGroupResponse, error) {
+func (s *GrpcServer) GetAllServiceGroups(ctx context.Context, request *pdpb.GetAllServiceGroupsRequest) (*pdpb.GetAllServiceGroupsResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).GetServiceGroup(ctx, request)
+		return pdpb.NewPDClient(client).GetAllServiceGroups(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.GetServiceGroupResponse), err
+		return rsp.(*pdpb.GetAllServiceGroupsResponse), err
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetServiceGroupResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetAllServiceGroupsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	var storage endpoint.GCSafePointStorage = s.storage
-	serviceGroupList, err := storage.LoadAllServiceGroup()
+	serviceGroupList, err := storage.LoadAllServiceGroups()
 	if err != nil {
 		return nil, err
 	}
 
-	return &pdpb.GetServiceGroupResponse{
+	return &pdpb.GetAllServiceGroupsResponse{
 		Header:         s.header(),
 		ServiceGroupId: serviceGroupList,
 	}, nil
@@ -1540,9 +1540,9 @@ func (s *GrpcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, reques
 	currentRevision := rsp.Header.GetRevision()
 	if currentRevision != request.GetRevision() {
 		return &pdpb.UpdateGCSafePointByServiceGroupResponse{
-			Header:        s.header(),
-			NewSafePoint:  0,
-			ValidRevision: false,
+			Header:       s.header(),
+			Succeeded:    false,
+			NewSafePoint: 0,
 		}, nil
 	}
 	serviceGroupID := string(request.ServiceGroupId)
@@ -1577,9 +1577,9 @@ func (s *GrpcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, reques
 		newSafePoint.SafePoint = oldSafePoint
 	}
 	return &pdpb.UpdateGCSafePointByServiceGroupResponse{
-		Header:        s.header(),
-		NewSafePoint:  newSafePoint.SafePoint,
-		ValidRevision: true,
+		Header:       s.header(),
+		Succeeded:    true,
+		NewSafePoint: newSafePoint.SafePoint,
 	}, nil
 }
 
@@ -1611,7 +1611,8 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 			return nil, err
 		}
 		return &pdpb.UpdateServiceSafePointByServiceGroupResponse{
-			Header: s.header(),
+			Header:    s.header(),
+			Succeeded: true,
 		}, nil
 	}
 
@@ -1630,6 +1631,8 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 		return nil, err
 	}
 	var oldServiceSafePoint, gcSafePoint, newServiceSafePoint uint64 = 0, 0, 0
+	succeeded := false
+
 	if sspOld != nil {
 		oldServiceSafePoint = sspOld.SafePoint
 		newServiceSafePoint = oldServiceSafePoint // case where update denied
@@ -1645,6 +1648,7 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 	caseInit := oldServiceSafePoint == 0 && request.SafePoint >= gcSafePoint
 
 	if caseUpdate || caseInit {
+		succeeded = true
 		ssp := &endpoint.ServiceSafePoint{
 			ServiceID: serviceID,
 			ExpiredAt: now.Unix() + request.TTL,
@@ -1666,27 +1670,28 @@ func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, r
 	}
 
 	return &pdpb.UpdateServiceSafePointByServiceGroupResponse{
-		Header:              s.header(),
-		GcSafePoint:         gcSafePoint,
-		OldServiceSafePoint: oldServiceSafePoint,
-		NewServiceSafePoint: newServiceSafePoint,
+		Header:       s.header(),
+		Succeeded:    succeeded,
+		GcSafePoint:  gcSafePoint,
+		OldSafePoint: oldServiceSafePoint,
+		NewSafePoint: newServiceSafePoint,
 	}, nil
 }
 
-// GetAllServiceGroupGCSafePoint returns all service group's gc safe point
-func (s *GrpcServer) GetAllServiceGroupGCSafePoint(ctx context.Context, request *pdpb.GetAllServiceGroupGCSafePointRequest) (*pdpb.GetAllServiceGroupGCSafePointResponse, error) {
+// GetAllServiceGroupGCSafePoints returns all service group's gc safe point
+func (s *GrpcServer) GetAllServiceGroupGCSafePoints(ctx context.Context, request *pdpb.GetAllServiceGroupGCSafePointsRequest) (*pdpb.GetAllServiceGroupGCSafePointsResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).GetAllServiceGroupGCSafePoint(ctx, request)
+		return pdpb.NewPDClient(client).GetAllServiceGroupGCSafePoints(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.GetAllServiceGroupGCSafePointResponse), err
+		return rsp.(*pdpb.GetAllServiceGroupGCSafePointsResponse), err
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetAllServiceGroupGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetAllServiceGroupGCSafePointsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	var storage endpoint.GCSafePointStorage = s.storage
@@ -1696,9 +1701,9 @@ func (s *GrpcServer) GetAllServiceGroupGCSafePoint(ctx context.Context, request 
 		return nil, err
 	}
 
-	return &pdpb.GetAllServiceGroupGCSafePointResponse{
-		Header:                s.header(),
-		ServiceGroupSafePoint: safePoints,
+	return &pdpb.GetAllServiceGroupGCSafePointsResponse{
+		Header:     s.header(),
+		SafePoints: safePoints,
 	}, nil
 }
 

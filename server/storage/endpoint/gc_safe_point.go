@@ -51,7 +51,7 @@ type GCSafePointStorage interface {
 	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
 
-	LoadAllServiceGroup() ([][]byte, error)
+	LoadAllServiceGroups() ([][]byte, error)
 	LoadMinServiceSafePointByServiceGroup(serviceGroupID string, now time.Time) (*ServiceSafePoint, error)
 	LoadGCWorkerSafePoint(serviceGroupID string) (*GCSafePoint, error)
 	SaveGCWorkerSafePoint(gcSafePoint *GCSafePoint) error
@@ -247,8 +247,8 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByServiceGroup(serviceGroupID 
 	return min, nil
 }
 
-// LoadAllServiceGroup returns a list of all service group IDs
-func (se *StorageEndpoint) LoadAllServiceGroup() ([][]byte, error) {
+// LoadAllServiceGroups returns a list of all service group IDs
+func (se *StorageEndpoint) LoadAllServiceGroups() ([][]byte, error) {
 	prefix := gcSafePointPrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, _, err := se.LoadRange(prefix, prefixEnd, 0)
