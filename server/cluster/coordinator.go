@@ -17,8 +17,8 @@ package cluster
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -57,7 +58,7 @@ const (
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
-	sync.RWMutex
+	syncutil.RWMutex
 
 	wg              sync.WaitGroup
 	ctx             context.Context
@@ -565,7 +566,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
-		storeLabel := fmt.Sprintf("%d", storeID)
+		storeLabel := strconv.FormatUint(storeID, 10)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalLoads[byteTyp])
@@ -599,7 +600,7 @@ func collectPendingInfluence(stores []*core.StoreInfo) {
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
-		storeLabel := fmt.Sprintf("%d", storeID)
+		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])

@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -73,7 +74,7 @@ type Server interface {
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
 	mu struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		streams      map[string]ServerStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc

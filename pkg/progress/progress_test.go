@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package progress_test
+package progress
 
 import (
 	"math"
@@ -21,7 +21,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/progress"
 )
 
 func Test(t *testing.T) {
@@ -34,7 +33,7 @@ type testProgressSuite struct{}
 
 func (s *testProgressSuite) Test(c *C) {
 	n := "test"
-	m := progress.NewManager()
+	m := NewManager()
 	c.Assert(m.AddProgress(n, 100), IsFalse)
 	p, ls, cs := m.Status(n)
 	c.Assert(p, Equals, 0.0)
@@ -42,13 +41,27 @@ func (s *testProgressSuite) Test(c *C) {
 	c.Assert(cs, Equals, 0.0)
 	time.Sleep(time.Second)
 	c.Assert(m.AddProgress(n, 100), IsTrue)
-	m.UpdateProgress(n, 30)
+	speedStatisticalInterval = time.Millisecond
+	defer func() {
+		speedStatisticalInterval = 5 * time.Minute
+	}()
+	time.Sleep(time.Millisecond)
+	m.UpdateProgressRemaining(n, 30)
 	p, ls, cs = m.Status(n)
 	c.Assert(p, Equals, 0.7)
 	// 30/(70/1s+) > 30/70
 	c.Assert(ls, Greater, 30.0/70.0)
 	// 70/1s+ > 70
 	c.Assert(cs, Less, 70.0)
+	// there is no scheduling
+	time.Sleep(time.Millisecond)
+	m.UpdateProgressRemaining(n, 30)
+	p, ls, cs = m.Status(n)
+	c.Assert(p, Equals, 0.7)
+	// the speed in previous `SpeedStatisticalInterval` is zero
+	c.Assert(ls, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+
 	ps := m.GetProgresses(func(p string) bool {
 		return strings.Contains(p, n)
 	})
