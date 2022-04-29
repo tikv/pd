@@ -46,24 +46,19 @@ func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
 }
 
 func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
-<<<<<<< HEAD
-	input := map[uint64]string{1: ""}
-	data, err := json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(c))
-=======
 	input := map[string]interface{}{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
-	err := postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
-	c.Assert(err.Error(), Equals, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n")
+	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
+		tu.StringEqual(c, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
+	c.Assert(err, IsNil)
 	input = map[string]interface{}{"stores": []string{"abc", "def"}}
 	data, _ = json.Marshal(input)
-	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
-	c.Assert(err.Error(), Equals, "\"Store ids are invalid\"\n")
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
+		tu.StringEqual(c, "\"Store ids are invalid\"\n"))
+	c.Assert(err, IsNil)
 	input = map[string]interface{}{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
-	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
->>>>>>> master
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	// Test show
 	var output []string
