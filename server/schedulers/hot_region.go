@@ -178,7 +178,9 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 	}
 	rst := make([]*operator.Operator, 0)
 	for _, op := range ops {
-		needSplit := op.ApproximateSize > h.conf.RegionSizeThreshold && strings.Contains(op.Desc(), "transfer")
+		needSplit := op.ApproximateSize > h.conf.RegionSizeThreshold && !strings.Contains(op.Desc(), "transfer")
+		log.Info("hot region need to split", zap.Uint64("region-id", op.RegionID()),
+			zap.String("desc", op.Desc()), zap.Int64("approximate-size", op.ApproximateSize))
 		if needSplit {
 			if sop, err := createSplitOperator(cluster, op.RegionID()); err != nil {
 				log.Error("failed to create split operator", zap.Error(err))
@@ -187,8 +189,7 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 				hotSplittingStatus.WithLabelValues(h.GetType()).Inc()
 				rst = append(rst, sop)
 			}
-			log.Info("hot region need to split", zap.Uint64("region-id", op.RegionID()),
-				zap.String("desc", op.Desc()))
+
 			delete(h.regionPendings, op.RegionID())
 		} else {
 			rst = append(rst, op)
