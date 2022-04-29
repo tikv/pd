@@ -112,8 +112,8 @@ var hotPendingStatus = prometheus.NewGaugeVec(
 		Help:      "Counter of direction of balance related schedulers.",
 	}, []string{"type", "source", "target"})
 
-var hotSplittingStatus = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
+var hotSplittingStatus = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
 		Namespace: "pd",
 		Subsystem: "scheduler",
 		Name:      "hot_spliting",

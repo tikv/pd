@@ -255,7 +255,7 @@ func (h *hotScheduler) summaryPendingInfluence() {
 		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
 
 		if status := p.op.CheckAndGetStatus(); operator.IsEndStatus(status) {
-			hotSplittingStatus.WithLabelValues(h.GetType()).Add(-1)
+			hotSplittingStatus.WithLabelValues(h.GetType()).Dec()
 			delete(h.regionSplitPendings, id)
 		}
 
