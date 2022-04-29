@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"math"
 	"math/rand"
 	"net/http"
@@ -93,6 +94,10 @@ type hotScheduler struct {
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64]*pendingInfluence
 
+	// regionSplitPendings stores regionID -> *operator.Operator
+	// this records regionID which have hot-split Operator. During filterHotPeers, the hot peers won't be selected.
+	regionSplitPendings map[uint64]interface{}
+
 	// store information, including pending Influence by resource type
 	// Every time `Schedule()` will recalculate it.
 	stInfos map[uint64]*statistics.StoreSummaryInfo
@@ -107,12 +112,13 @@ type hotScheduler struct {
 func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &hotScheduler{
-		name:           HotRegionName,
-		BaseScheduler:  base,
-		types:          []statistics.RWType{statistics.Write, statistics.Read},
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		regionPendings: make(map[uint64]*pendingInfluence),
-		conf:           conf,
+		name:                HotRegionName,
+		BaseScheduler:       base,
+		types:               []statistics.RWType{statistics.Write, statistics.Read},
+		r:                   rand.New(rand.NewSource(time.Now().UnixNano())),
+		regionPendings:      make(map[uint64]*pendingInfluence),
+		regionSplitPendings: make(map[uint64]interface{}, 0),
+		conf:                conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
@@ -162,13 +168,38 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 		return nil
 	}
 
+	var ops []*operator.Operator
 	switch typ {
 	case statistics.Read:
-		return h.balanceHotReadRegions(cluster)
+		ops = h.balanceHotReadRegions(cluster)
 	case statistics.Write:
-		return h.balanceHotWriteRegions(cluster)
+		ops = h.balanceHotWriteRegions(cluster)
 	}
-	return nil
+	rst := make([]*operator.Operator, 0)
+	for _, op := range ops {
+		if op.ApproximateSize > h.conf.RegionSizeThreshold {
+			if sop, err := createSplitOperator(cluster, op.RegionID()); err == nil && sop != nil {
+				h.regionSplitPendings[op.RegionID()] = nil
+				hotSplittingStatus.WithLabelValues(h.GetType()).Inc()
+				rst = append(rst, sop)
+			}
+			delete(h.regionPendings, op.RegionID())
+		} else {
+			rst = append(rst, op)
+		}
+	}
+
+	return rst
+}
+
+func createSplitOperator(cluster schedule.Cluster, regionID uint64) (*operator.Operator, error) {
+	region := cluster.GetRegion(regionID)
+	splitKeys := make([][]byte, 0)
+	keys := region.GetBuckets().GetKeys()
+	for i := 1; i < len(keys)-1; i++ {
+		splitKeys = append(splitKeys, keys[i])
+	}
+	return operator.CreateSplitRegionOperator("hot-split-region", region, operator.OpAdmin, pdpb.CheckPolicy_USEKEY, splitKeys)
 }
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
@@ -222,6 +253,11 @@ func (h *hotScheduler) summaryPendingInfluence() {
 		to := h.stInfos[p.to]
 		maxZombieDur := p.maxZombieDuration
 		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
+
+		if status := p.op.CheckAndGetStatus(); operator.IsEndStatus(status) {
+			hotSplittingStatus.WithLabelValues(h.GetType()).Add(-1)
+			delete(h.regionSplitPendings, id)
+		}
 
 		if needGC {
 			delete(h.regionPendings, id)
@@ -547,7 +583,9 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
 		minHotDegree := bs.GetOpts().GetHotRegionCacheHitsThreshold()
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
+		_, isPending := bs.sche.regionPendings[item.ID()]
+		_, isSpliting := bs.sche.regionSplitPendings[item.ID()]
+		if !isPending && !isSpliting && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
 			// no in pending operator and no need cool down after transfer leader
 			items = append(items, item)
 		}
@@ -797,7 +835,7 @@ func (bs *balanceSolver) isTolerance(src, dst *statistics.StoreLoadDetail, dim i
 	if srcRate <= dstRate {
 		return false
 	}
-	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
 	srcPending := src.LoadPred.Pending().Loads[dim]
 	dstPending := dst.LoadPred.Pending().Loads[dim]
 	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.GetID(), 10), strconv.FormatUint(dst.GetID(), 10)).Set(pendingAmp)

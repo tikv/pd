@@ -78,6 +78,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
 		ForbidRWType:           "none",
+		RegionSizeThreshold:    512,
 	}
 	cfg.apply(defaultConfig)
 	return cfg
@@ -138,6 +139,9 @@ type hotRegionSchedulerConfig struct {
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
 	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
+	// the max region size threshold for hot region
+	// if the region size of the scheduled region is larger than this threshold, it will be replaced by splitting operator first.
+	RegionSizeThreshold int64 `json:"region-size-threshold"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {

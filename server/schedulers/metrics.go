@@ -112,6 +112,14 @@ var hotPendingStatus = prometheus.NewGaugeVec(
 		Help:      "Counter of direction of balance related schedulers.",
 	}, []string{"type", "source", "target"})
 
+var hotSplittingStatus = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_spliting",
+		Help:      "Counter of hot region spliting.",
+	}, []string{"type"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -125,4 +133,5 @@ func init() {
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
+	prometheus.MustRegister(hotSplittingStatus)
 }
