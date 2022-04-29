@@ -3,14 +3,14 @@ module github.com/tikv/pd/client
 go 1.16
 
 // TODO: Remove this once kvproto has been updated
-replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220427045408-abeb7dbc9f22
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220429023313-555dcb1080e7
 
 require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20220330070404-8c4cd3f93748
+	github.com/pingcap/kvproto v0.0.0-20220425052816-e33ae9239820
 	github.com/pingcap/log v0.0.0-20211215031037-e024ba4eb0ee
 	github.com/prometheus/client_golang v1.11.0
 	go.uber.org/goleak v1.1.11
