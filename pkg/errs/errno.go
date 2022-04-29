@@ -132,7 +132,8 @@ var (
 
 // apiutil errors
 var (
-	ErrRedirect = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
+	ErrRedirect       = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
+	ErrOptionNotExist = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
 )
 
 // grpcutil errors

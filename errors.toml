@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed

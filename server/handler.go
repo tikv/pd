@@ -890,10 +890,10 @@ func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
-func (h *Handler) GetSchedulerConfigHandler() http.Handler {
+func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
@@ -901,7 +901,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
-	return mux
+	return mux, nil
 }
 
 // GetOfflinePeer gets the region with offline peer.
@@ -1092,7 +1092,7 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	if err != nil {
 		return err
 	}
-	return apiutil.PostJSON(h.s.GetHTTPClient(), updateURL, body)
+	return apiutil.PostJSONIgnoreResp(h.s.GetHTTPClient(), updateURL, body)
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
