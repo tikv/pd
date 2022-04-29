@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -91,6 +96,11 @@ error = '''
 incorrect system time
 '''
 
+["PD:core:ErrNoStoreForRegionLeader"]
+error = '''
+can not remove store %d since there are no extra up store to store the leader
+'''
+
 ["PD:core:ErrPauseLeaderTransfer"]
 error = '''
 store %v is paused for leader transfer
@@ -98,7 +108,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -116,9 +126,19 @@ error = '''
 store %v has been removed
 '''
 
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
+'''
+
 ["PD:core:ErrStoreUnhealthy"]
 error = '''
 store %v is unhealthy
+'''
+
+["PD:core:ErrStoresNotEnough"]
+error = '''
+can not remove store %v since the number of up stores would be %v while need %v
 '''
 
 ["PD:core:ErrWrongRangeKeys"]
@@ -674,6 +694,16 @@ sync max ts failed, %s
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
 '''
 
 ["PD:url:ErrQueryUnescape"]

@@ -16,10 +16,10 @@ package storage
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -67,7 +67,7 @@ type coreStorage struct {
 
 	useRegionStorage int32
 	regionLoaded     bool
-	mu               sync.Mutex
+	mu               syncutil.Mutex
 }
 
 // NewCoreStorage creates a new core storage with the given default and region storage.

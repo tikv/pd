@@ -22,6 +22,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -133,7 +134,7 @@ func (s *testLabelsStoreSuite) TearDownSuite(c *C) {
 func (s *testLabelsStoreSuite) TestLabelsGet(c *C) {
 	url := fmt.Sprintf("%s/labels", s.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(s.stores))
-	err := readJSON(testDialClient, url, &labels)
+	err := tu.ReadGetJSON(c, testDialClient, url, &labels)
 	c.Assert(err, IsNil)
 }
 
@@ -174,7 +175,7 @@ func (s *testLabelsStoreSuite) TestStoresLabelFilter(c *C) {
 	for _, t := range table {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", s.urlPrefix, t.name, t.value)
 		info := new(StoresInfo)
-		err := readJSON(testDialClient, url, info)
+		err := tu.ReadGetJSON(c, testDialClient, url, info)
 		c.Assert(err, IsNil)
 		checkStoresInfo(c, info.Stores, t.want)
 	}
@@ -285,7 +286,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	// enable placement rules. Report no error any more.
-	c.Assert(postJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`)), IsNil)
+	c.Assert(tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(c)), IsNil)
 	for _, t := range cases {
 		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},

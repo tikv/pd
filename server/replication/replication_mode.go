@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -67,7 +68,7 @@ const persistFileTimeout = time.Second * 10
 type ModeManager struct {
 	initTime time.Time
 
-	sync.RWMutex
+	syncutil.RWMutex
 	config            config.ReplicationModeConfig
 	storage           endpoint.ReplicationStatusStorage
 	cluster           schedule.Cluster

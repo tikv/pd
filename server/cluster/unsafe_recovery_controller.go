@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -29,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -48,7 +48,7 @@ const (
 )
 
 type unsafeRecoveryController struct {
-	sync.RWMutex
+	syncutil.RWMutex
 
 	cluster               *RaftCluster
 	stage                 unsafeRecoveryStage
@@ -79,26 +79,34 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 	}
 }
 
+// IsRunning returns whether there is ongoing unsafe recovery process. If yes, further unsafe
+// recovery requests, schedulers, checkers, AskSplit and AskBatchSplit requests are blocked.
+func (u *unsafeRecoveryController) IsRunning() bool {
+	u.RLock()
+	defer u.RUnlock()
+	return u.stage != ready && u.stage != finished
+}
+
 // RemoveFailedStores removes failed stores from the cluster.
 func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]string) error {
+	if u.IsRunning() {
+		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	u.Lock()
 	defer u.Unlock()
 	if len(failedStores) == 0 {
-		return errors.Errorf("No store specified")
-	}
-	if u.stage != ready && u.stage != finished {
-		return errors.Errorf("Another request is working in progress")
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
 	}
 	u.reset()
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
 		if store != nil && (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
-			return errors.Errorf("Store %v is up and connected", failedStore)
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
 		}
 	}
 	for failedStore := range failedStores {
 		err := u.cluster.BuryStore(failedStore, true)
-		if !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
 			return err
 		}
 	}
@@ -165,6 +173,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				u.executionReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
 				u.numStoresPlanExecuted++
 				if u.numStoresPlanExecuted == len(u.storeRecoveryPlans) {
+					u.cluster.PauseOrResumeScheduler("all", 0)
 					log.Info("Recover finished.")
 					go func() {
 						for _, history := range u.History() {

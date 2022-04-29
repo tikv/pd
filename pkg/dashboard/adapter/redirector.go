@@ -19,10 +19,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"sync"
 
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/tidb-dashboard/pkg/utils"
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 const (
@@ -31,7 +31,7 @@ const (
 
 // Redirector is used to redirect when the dashboard is started in another PD.
 type Redirector struct {
-	mu sync.RWMutex
+	mu syncutil.RWMutex
 
 	name      string
 	tlsConfig *tls.Config

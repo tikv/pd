@@ -15,14 +15,14 @@
 package cluster
 
 import (
-	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 )
 
 type prepareChecker struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	reactiveRegions map[uint64]int
 	start           time.Time
 	sum             int
