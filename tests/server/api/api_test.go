@@ -251,67 +251,6 @@ func doTestRequest(srv *tests.TestServer) {
 	resp.Body.Close()
 }
 
-func (s *testMiddlewareSuite) TestAuditMiddleware(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/addAuditMiddleware", "return(true)"), IsNil)
-	leader := s.cluster.GetServer(s.cluster.GetLeader())
-
-	input := map[string]interface{}{
-		"enable-audit": true,
-	}
-	data, err := json.Marshal(input)
-	c.Assert(err, IsNil)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
-	resp, err := dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
-
-	oldLeaderName := leader.GetServer().Name()
-	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
-	mustWaitLeader(c, s.cluster.GetServers())
-	leader = s.cluster.GetServer(s.cluster.GetLeader())
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "test")
-
-	input = map[string]interface{}{
-		"enable-audit": false,
-	}
-	data, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
-
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/pd/api/v1/fail/", nil)
-	resp, err = dialClient.Do(req)
-	c.Assert(err, IsNil)
-	_, err = io.ReadAll(resp.Body)
-	resp.Body.Close()
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
-	c.Assert(resp.Header.Get("audit-label"), Equals, "")
-
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/api/addAuditMiddleware"), IsNil)
-}
-
 func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 	input := map[string]interface{}{
@@ -339,6 +278,28 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
 	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1"), Equals, true)
+
+	// resign to test persist config
+	oldLeaderName := leader.GetServer().Name()
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	mustWaitLeader(c, s.cluster.GetServers())
+	leader = s.cluster.GetServer(s.cluster.GetLeader())
+
+	timeUnix = time.Now().Unix() - 20
+	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	c.Assert(err, IsNil)
+
+	req, _ = http.NewRequest("GET", leader.GetAddr()+"/metrics", nil)
+	resp, err = dialClient.Do(req)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	content, _ = io.ReadAll(resp.Body)
+	output = string(content)
+	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 2"), Equals, true)
 
 	input = map[string]interface{}{
 		"enable-audit": false,

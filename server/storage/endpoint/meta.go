@@ -107,6 +107,12 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if err := store.Unmarshal([]byte(str)); err != nil {
 				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
+			if store.State == metapb.StoreState_Offline {
+				store.NodeState = metapb.NodeState_Removing
+			}
+			if store.State == metapb.StoreState_Tombstone {
+				store.NodeState = metapb.NodeState_Removed
+			}
 			leaderWeight, err := se.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
