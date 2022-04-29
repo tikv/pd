@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -177,12 +178,17 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 	}
 	rst := make([]*operator.Operator, 0)
 	for _, op := range ops {
-		if op.ApproximateSize > h.conf.RegionSizeThreshold {
-			if sop, err := createSplitOperator(cluster, op.RegionID()); err == nil && sop != nil {
+		needSplit := op.ApproximateSize > h.conf.RegionSizeThreshold && strings.Contains(op.Desc(), "transfer")
+		if needSplit {
+			if sop, err := createSplitOperator(cluster, op.RegionID()); err != nil {
+				log.Error("failed to create split operator", zap.Error(err))
+			} else {
 				h.regionSplitPendings[op.RegionID()] = nil
 				hotSplittingStatus.WithLabelValues(h.GetType()).Inc()
 				rst = append(rst, sop)
 			}
+			log.Info("hot region need to split", zap.Uint64("region-id", op.RegionID()),
+				zap.String("desc", op.Desc()))
 			delete(h.regionPendings, op.RegionID())
 		} else {
 			rst = append(rst, op)
