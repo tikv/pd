@@ -747,6 +747,11 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	return nil
 }
 
+// IsPreapred return if the prepare checker is ready.
+func (c *RaftCluster) IsPreapred() bool {
+	return c.coordinator.prepareChecker.isPrepared()
+}
+
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -813,7 +818,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
-	if !c.coordinator.prepareChecker.isPrepared() || isNew {
+	if !c.IsPreapred() || isNew {
 		c.coordinator.prepareChecker.collect(region)
 	}
 
