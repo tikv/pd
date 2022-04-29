@@ -15,8 +15,9 @@
 package operator
 
 import (
-	"sync"
 	"time"
+
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 // Only record non-end status and one end status.
@@ -24,7 +25,7 @@ type statusTimes [firstEndStatus + 1]time.Time
 
 // OpStatusTracker represents the status of an operator.
 type OpStatusTracker struct {
-	rw         sync.RWMutex
+	rw         syncutil.RWMutex
 	current    OpStatus    // Current status
 	reachTimes statusTimes // Time when reach the current status
 }

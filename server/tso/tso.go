@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/election"
@@ -48,7 +48,7 @@ const (
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
 type tsoObject struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	physical   time.Time
 	logical    int64
 	updateTime time.Time

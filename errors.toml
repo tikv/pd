@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -119,6 +124,11 @@ store %v not found
 ["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
+'''
+
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
 '''
 
 ["PD:core:ErrStoreUnhealthy"]
@@ -684,6 +694,16 @@ sync max ts failed, %s
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
 '''
 
 ["PD:url:ErrQueryUnescape"]
