@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build tools
-// +build tools
+//go:build !deadlock
+// +build !deadlock
 
-package tools
+package syncutil
 
-import (
-	_ "github.com/AlekSi/gocov-xml"
-	_ "github.com/axw/gocov/gocov"
-	_ "github.com/mgechev/revive"
-	_ "github.com/pingcap/errors/errdoc-gen"
-	_ "github.com/pingcap/failpoint/failpoint-ctl"
-	_ "github.com/swaggo/swag/cmd/swag"
-	_ "golang.org/x/tools/cmd/goimports"
-	_ "gotest.tools/gotestsum"
-)
+import "sync"
+
+// Mutex is a mutual exclusion lock. The zero value for a Mutex is an unlocked mutex.
+//
+// Mutex must not be copied after first use.
+type Mutex struct {
+	sync.Mutex
+}
+
+// RWMutex is a reader/writer mutual exclusion lock.
+// The lock can be held by an arbitrary number of readers or a single writer.
+// The zero value for a RWMutex is an unlocked mutex.
+//
+// RWMutex must not be copied after first use.
+type RWMutex struct {
+	sync.RWMutex
+}

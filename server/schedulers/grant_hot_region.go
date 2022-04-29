@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -88,7 +88,7 @@ func init() {
 }
 
 type grantHotRegionSchedulerConfig struct {
-	mu          sync.RWMutex
+	mu          syncutil.RWMutex
 	storage     endpoint.ConfigStorage
 	cluster     schedule.Cluster
 	StoreIDs    []uint64 `json:"store-id"`

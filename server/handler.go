@@ -23,7 +23,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -33,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -84,11 +84,11 @@ type Handler struct {
 	s               *Server
 	opt             *config.PersistOptions
 	pluginChMap     map[string]chan string
-	pluginChMapLock sync.RWMutex
+	pluginChMapLock syncutil.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
+	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: syncutil.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -868,6 +868,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}

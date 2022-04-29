@@ -19,12 +19,12 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -107,7 +107,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 }
 
 type hotRegionSchedulerConfig struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	storage            endpoint.ConfigStorage
 	lastQuerySupported bool
 

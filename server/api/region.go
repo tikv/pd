@@ -885,6 +885,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
