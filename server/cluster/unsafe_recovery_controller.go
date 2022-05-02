@@ -86,6 +86,7 @@ type unsafeRecoveryController struct {
 
 	cluster      *RaftCluster
 	stage        unsafeRecoveryStage
+	step         uint64
 	failedStores map[uint64]interface{}
 	timeout      time.Time
 
@@ -101,21 +102,16 @@ type unsafeRecoveryController struct {
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
-	return &unsafeRecoveryController{
-		cluster:            cluster,
-		stage:              idle,
-		failedStores:       make(map[uint64]interface{}),
-		storeReports:       make(map[uint64]*pdpb.StoreReport),
-		numStoresReported:  0,
-		storePlanExpires:   make(map[uint64]time.Time),
-		storeRecoveryPlans: make(map[uint64]*pdpb.RecoveryPlan),
-		output:             make([]string, 0),
-		err:                nil,
+	u := &unsafeRecoveryController{
+		cluster: cluster,
 	}
+	u.reset()
+	return u
 }
 
 func (u *unsafeRecoveryController) reset() {
 	u.stage = idle
+	u.step = 0
 	u.failedStores = make(map[uint64]interface{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
@@ -149,7 +145,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
 		if store == nil {
-			return errors.Errorf("Store %v doesn't exist", failedStore)
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v doesn't exist", failedStore))
 		} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
 			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
 		}
@@ -171,8 +167,6 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 			continue
 		}
 		u.storeReports[s.GetID()] = nil
-		// generate empty plan to request peer report
-		u.getRecoveryPlan(s.GetID())
 	}
 
 	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
@@ -233,7 +227,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	}
 
 	allCollected := false
-	allCollected, u.err = u.collectReport(heartbeat, resp)
+	allCollected, u.err = u.collectReport(heartbeat)
 	if u.err != nil {
 		u.changeStage(failed)
 		return
@@ -305,22 +299,29 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 	if expire, dispatched := u.storePlanExpires[storeID]; !dispatched || expire.Before(now) {
 		if dispatched {
-			log.Info(fmt.Sprintf("Unsafe Recovery store %d recovery plan execution timeout, retry", storeID))
+			log.Info(fmt.Sprintf("Unsafe recovery store %d recovery plan execution timeout, retry", storeID))
 		}
 		// Dispatch the recovery plan to the store, and the plan may be empty.
 		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
+		resp.RecoveryPlan.Step = u.step
 		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
 	}
 }
 
 // It collects and checks if store reports have been fully collected.
-func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) (bool, error) {
+func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest) (bool, error) {
 	storeID := heartbeat.Stats.StoreId
 	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
 		return false, errors.Errorf("Receive heartbeat from failed store %d", storeID)
 	}
 
 	if heartbeat.StoreReport == nil {
+		return false, nil
+	}
+
+	if heartbeat.StoreReport.GetStep() != u.step {
+		log.Info(fmt.Sprintf("Unsafe recovery receives invalid store report with step %d, current step %d", heartbeat.StoreReport.GetStep(), u.step))
+		// invalid store report, ignore
 		return false, nil
 	}
 
@@ -377,6 +378,10 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output = append(output, u.getCreateEmptyRegionPlanDigest()...)
 	case finished:
 		u.cluster.PauseOrResumeScheduler("all", 0)
+		if u.step > 1 {
+			// == 1 means no operation has done, no need to invalid cache
+			// TODO: invalid cache
+		}
 		output = append(output, "Unsafe recovery finished")
 	case failed:
 		u.cluster.PauseOrResumeScheduler("all", 0)
@@ -394,6 +399,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		u.storeReports[k] = nil
 	}
 	u.numStoresReported = 0
+	u.step += 1
 }
 
 func (u *unsafeRecoveryController) getForceLeaderPlanDigest() []string {
@@ -509,7 +515,7 @@ type regionItem struct {
 // 7. consider commit merge
 // 8. add test cases
 // 9. consider in the midst joint state, after exit, may no need to demote
-// 10. add report step to avoid wrong information
+// 11. clean region cache
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {

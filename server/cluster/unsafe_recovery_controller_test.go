@@ -59,6 +59,8 @@ func applyRecoveryPlan(c *C, reports *pdpb.StoreReport, resp *pdpb.StoreHeartbea
 		return
 	}
 
+	reports.Step = plan.GetStep()
+
 	for _, create := range plan.GetCreates() {
 		reports.PeerReports = append(reports.PeerReports, &pdpb.PeerReport{
 			RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -169,6 +171,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 		c.Assert(len(resp.RecoveryPlan.Creates), Equals, 0)
 		c.Assert(len(resp.RecoveryPlan.Demotes), Equals, 0)
 		c.Assert(resp.RecoveryPlan.ForceLeader, IsNil)
+		c.Assert(resp.RecoveryPlan.Step, Equals, uint64(1))
 		applyRecoveryPlan(c, report, resp)
 	}
 
@@ -283,6 +286,77 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 // TODO:
 // 1. handle retry
 // 2. force leader is not executed correctly
+// 3. in the midst of joint state
+
+func (s *testUnsafeRecoverSuite) TestRecoveryTimeout(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(5, "6.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
+		4: "",
+		5: "",
+	}, 1), IsNil)
+
+	time.Sleep(time.Second)
+	req := newStoreHeartbeat(2, nil)
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, failed)
+}
+
+func (s *testUnsafeRecoverSuite) TestRecoveryStep(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
+		2: "",
+		3: "",
+	}, 1), IsNil)
+
+	report := &pdpb.StoreReport{
+		PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
+		},
+	}
+
+	req := newStoreHeartbeat(1, report)
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	// step is not set, ignore
+	c.Assert(recoveryController.GetStage(), Equals, collectReport)
+
+	// valid store report
+	req.StoreReport.Step = 1
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
+
+	// duplicate report with same step, ignore
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
+	applyRecoveryPlan(c, report, resp)
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, demoteFailedVoter)
+	applyRecoveryPlan(c, report, resp)
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, finished)
+}
 
 func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 	_, opt, _ := newTestScheduleConfig()
@@ -452,7 +526,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 
 	for storeID, report := range reports {
 		if result, ok := expect_results[storeID]; ok {
-			c.Assert(report, DeepEquals, result)
+			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
 		}
@@ -542,7 +616,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 
 	for storeID, report := range reports {
 		if result, ok := expect_results[storeID]; ok {
-			c.Assert(report, DeepEquals, result)
+			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
 		}
