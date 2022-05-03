@@ -44,8 +44,8 @@ const (
 //   |           |
 //   +-----------+
 //         |
-//         |
-//         v
+//         |                      +-----+
+//         v                      |     v
 //   +-----------+             +-----------+               +-----------+
 //   |           |------------>|           |               |           |
 //   |  collect  |             |  force    |               |  failed   |
@@ -74,6 +74,7 @@ const (
 const (
 	idle unsafeRecoveryStage = iota
 	collectReport
+	forceLeaderForCommitMerge
 	forceLeader
 	demoteFailedVoter
 	createEmptyRegion
@@ -234,45 +235,48 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	}
 
 	if allCollected {
-		hasPlan := true
+		newestRegionTree, peersMap := u.buildUpFromReports()
+		// clean up previous plan
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+
 		switch u.stage {
 		case collectReport:
-			if u.generateForceLeaderPlan() {
+			if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
+				u.changeStage(forceLeaderForCommitMerge)
+			} else if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
 				u.changeStage(forceLeader)
-			} else if u.generateCreateEmptyRegionPlan() {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
 				u.changeStage(createEmptyRegion)
-			} else {
-				hasPlan = false
 			}
-		case forceLeader:
-			if u.generateDemoteFailedVoterPlan() {
+		case forceLeader, forceLeaderForCommitMerge:
+			if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
+				u.changeStage(forceLeaderForCommitMerge)
+			} else if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
+				u.changeStage(forceLeader)
+			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
 				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan() {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
 				u.changeStage(createEmptyRegion)
-			} else {
-				hasPlan = false
 			}
 		case demoteFailedVoter:
 			// may still have plan to do, recheck again
-			if u.generateForceLeaderPlan() {
+			if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
 				u.changeStage(forceLeader)
-			} else if u.generateDemoteFailedVoterPlan() {
+			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
 				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan() {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
 				u.changeStage(createEmptyRegion)
-			} else {
-				hasPlan = false
 			}
 		case createEmptyRegion:
-			if u.generateCreateEmptyRegionPlan() {
+			if u.generateCreateEmptyRegionPlan(newestRegionTree) {
 				u.changeStage(createEmptyRegion)
-			} else {
-				hasPlan = false
 			}
 		default:
 			panic("unreachable")
 		}
 
+		hasPlan := len(u.storeRecoveryPlans) != 0
 		if !hasPlan {
 			if u.err == nil {
 				u.changeStage(finished)
@@ -325,11 +329,6 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 		return false, nil
 	}
 
-	if _, dispatched := u.storePlanExpires[storeID]; !dispatched {
-		// if the plan isn't ever dispatched, but get a report, it must be illegal, just ignore it
-		return false, nil
-	}
-
 	if report, exists := u.storeReports[storeID]; exists {
 		// if receive duplicated report from the same TiKV, use the latest one
 		u.storeReports[storeID] = heartbeat.StoreReport
@@ -367,6 +366,9 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 			}
 		}
 		output = append(output, fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores))
+	case forceLeaderForCommitMerge:
+		output = append(output, "Unsafe recovery enters force leader for commit merge stage")
+		output = append(output, u.getForceLeaderPlanDigest()...)
 	case forceLeader:
 		output = append(output, "Unsafe recovery enters force leader stage")
 		output = append(output, u.getForceLeaderPlanDigest()...)
@@ -512,7 +514,6 @@ type regionItem struct {
 // TODO!!!!!!!!!!!!
 // 5. make region tree generic
 // 6. consider Tiflash
-// 7. consider commit merge
 // 8. add test cases
 // 9. consider in the midst joint state, after exit, may no need to demote
 // 11. clean region cache
@@ -664,9 +665,6 @@ func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.Recover
 }
 
 func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
-	// clean up previous plan
-	u.storePlanExpires = make(map[uint64]time.Time)
-	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 
 	peersMap := make(map[uint64][]*regionItem)
 	// Go through all the peer reports to build up the newest region tree
@@ -701,8 +699,7 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 	return newestRegionTree, peersMap
 }
 
-func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
-	newestRegionTree, peersMap := u.buildUpFromReports()
+func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, for_commit_merge bool) bool {
 	hasPlan := false
 
 	selectLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
@@ -718,11 +715,20 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
+		report := item.(*regionItem).report
 		region := item.(*regionItem).Region()
 		if !u.canElectLeader(region) {
-			if item.(*regionItem).report.IsForceLeader {
-				// already is a force leader, skip but set hasPlan = true
+			if report.IsForceLeader {
+				// already is a force leader, skip
 				return true
+			}
+			if for_commit_merge && !report.HasCommitMerge {
+				// check force leader only for ones has commit merge to avoid the case that
+				// target region can't catch up log for the source region due to force leader
+				// propose an empty raft log on being leader
+				return true
+			} else if !for_commit_merge && report.HasCommitMerge {
+				panic("unreachable")
 			}
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
@@ -747,8 +753,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan() bool {
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan() bool {
-	newestRegionTree, peersMap := u.buildUpFromReports()
+func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
 	hasPlan := false
 
 	findForceLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
@@ -804,8 +809,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan() bool {
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan() bool {
-	newestRegionTree, _ := u.buildUpFromReports()
+func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree) bool {
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
