@@ -160,7 +160,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 
 	u.reset()
 	for _, s := range u.cluster.GetStores() {
-		// TODO: check TiFlash
+		// Tiflash isn't supportted yet, so just do not collect store reports of Tiflash
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
 		}
@@ -462,7 +462,7 @@ func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() []string {
 	return output
 }
 
-func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
+func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, only_incoming bool) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0
 		numLiveVoters := 0
@@ -490,10 +490,15 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
 		}
 	}
 
-	return hasQuorum(incomingVoters) && hasQuorum(outgoingVoters)
+	return hasQuorum(incomingVoters) && (only_incoming || hasQuorum(outgoingVoters))
 }
 
 func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*metapb.Peer {
+	// if it can form a quorum after exiting the joint state, then no need to demotes any peer
+	if u.canElectLeader(region, true) {
+		return nil
+	}
+
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
 		// TODO: if peer is outgoing, no need to demote it.
@@ -513,9 +518,7 @@ type regionItem struct {
 
 // TODO!!!!!!!!!!!!
 // 5. make region tree generic
-// 6. consider Tiflash
-// 8. add test cases
-// 9. consider in the midst joint state, after exit, may no need to demote
+// 6. demote then check force leader
 // 11. clean region cache
 
 // Less returns true if the region start key is less than the other.
@@ -566,7 +569,18 @@ func (r *regionItem) IsRaftStale(origin *regionItem) bool {
 		if rs.GetLastIndex() < os.GetLastIndex() {
 			return true
 		} else if rs.GetLastIndex() == os.GetLastIndex() {
-			return rs.GetHardState().GetCommit() < os.GetHardState().GetCommit()
+			if rs.GetHardState().GetCommit() < os.GetHardState().GetCommit() {
+				return true
+			} else if rs.GetHardState().GetCommit() == os.GetHardState().GetCommit() {
+				// better use voter rather than learner
+				for _, peer := range r.Region().GetPeers() {
+					if peer.StoreId == r.storeID {
+						if peer.Role == metapb.PeerRole_DemotingVoter || peer.Role == metapb.PeerRole_Learner {
+							return true
+						}
+					}
+				}
+			}
 		}
 	}
 	return false
@@ -702,7 +716,7 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, for_commit_merge bool) bool {
 	hasPlan := false
 
-	selectLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
+	selectLeader := func(region *metapb.Region) *regionItem {
 		var leader *regionItem
 		for _, peer := range peersMap[region.GetId()] {
 			if leader == nil || leader.IsRaftStale(peer) {
@@ -712,13 +726,22 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 		return leader
 	}
 
+	hasForceLeader := func(region *metapb.Region) bool {
+		for _, peer := range peersMap[region.GetId()] {
+			if peer.report.IsForceLeader {
+				return true
+			}
+		}
+		return false
+	}
+
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		report := item.(*regionItem).report
 		region := item.(*regionItem).Region()
-		if !u.canElectLeader(region) {
-			if report.IsForceLeader {
+		if !u.canElectLeader(region, false) {
+			if hasForceLeader(region) {
 				// already is a force leader, skip
 				return true
 			}
@@ -732,7 +755,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 			}
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
-			leader := selectLeader(peersMap, region)
+			leader := selectLeader(region)
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
 			if storeRecoveryPlan.ForceLeader == nil {
 				storeRecoveryPlan.ForceLeader = &pdpb.ForceLeader{}
@@ -771,7 +794,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 	// considering the failed stores
 	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
 		region := item.(*regionItem).Region()
-		if !u.canElectLeader(region) {
+		if !u.canElectLeader(region, false) {
 			leader := findForceLeader(peersMap, region)
 			if leader == nil {
 				// can't find the force leader, maybe a newly split region, skip
@@ -794,7 +817,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 		for _, peerReport := range storeReport.PeerReports {
 			regionID := peerReport.GetRegionState().Region.Id
 			if !newestRegionTree.contains(regionID) {
-				if u.canElectLeader(peerReport.GetRegionState().Region) {
+				if u.canElectLeader(peerReport.GetRegionState().Region, false) {
 					// find invalid peer but it has quorum
 					continue
 				} else {
