@@ -70,9 +70,13 @@ type timestampOracle struct {
 	dcLocation    string
 }
 
-func (t *timestampOracle) setTSOPhysical(next time.Time) {
+func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
+	// Do not update the zero physical time if the `force` flag is false.
+	if t.tsoMux.physical == typeutil.ZeroTime && !force {
+		return
+	}
 	// make sure the ts won't fall back
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
@@ -216,7 +220,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	tsoCounter.WithLabelValues("sync_ok", t.dcLocation).Inc()
 	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	t.setTSOPhysical(next)
+	t.setTSOPhysical(next, true)
 	return nil
 }
 
@@ -343,7 +347,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		}
 	}
 	// save into memory
-	t.setTSOPhysical(next)
+	t.setTSOPhysical(next, false)
 
 	return nil
 }

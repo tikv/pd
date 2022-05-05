@@ -1330,7 +1330,19 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterReset", func() {
+			allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+			if err != nil {
+				panic(err)
+			}
+			err = allocator.UpdateTSO()
+			if err != nil {
+				panic(err)
+			}
+		})
+	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
