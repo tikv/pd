@@ -1516,8 +1516,8 @@ func (s *GrpcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, r
 
 // UpdateGCSafePointByServiceGroup used by gc_worker to update their gc safe points
 func (s *GrpcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request *pdpb.UpdateGCSafePointByServiceGroupRequest) (*pdpb.UpdateGCSafePointByServiceGroupResponse, error) {
-	s.updateSafePointByServiceGroupLock.Lock()
-	defer s.updateSafePointByServiceGroupLock.Unlock()
+	s.serviceGroupSafePointLock.Lock()
+	defer s.serviceGroupSafePointLock.Unlock()
 
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointByServiceGroup(ctx, request)
@@ -1585,8 +1585,8 @@ func (s *GrpcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, reques
 
 // UpdateServiceSafePointByServiceGroup for services like CDC/BR/Lightning to update gc safe points in PD
 func (s *GrpcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, request *pdpb.UpdateServiceSafePointByServiceGroupRequest) (*pdpb.UpdateServiceSafePointByServiceGroupResponse, error) {
-	s.updateSafePointByServiceGroupLock.Lock()
-	defer s.updateSafePointByServiceGroupLock.Unlock()
+	s.serviceGroupSafePointLock.Lock()
+	defer s.serviceGroupSafePointLock.Unlock()
 
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointByServiceGroup(ctx, request)
