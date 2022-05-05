@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -119,6 +124,11 @@ store %v not found
 ["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
+'''
+
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
 '''
 
 ["PD:core:ErrStoreUnhealthy"]

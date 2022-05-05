@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )
 
@@ -72,28 +73,28 @@ func (s *testCheckerSuite) testErrCases(c *C) {
 	input := make(map[string]interface{})
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs)
-	c.Assert(err, NotNil)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// negative delay
 	input["delay"] = -10
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs)
-	c.Assert(err, NotNil)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/merge", pauseArgs, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 
 	// wrong name
 	name := "dummy"
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
-	c.Assert(err, NotNil)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
-	c.Assert(err, NotNil)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 }
 
 func (s *testCheckerSuite) testGetStatus(name string, c *C) {
@@ -101,14 +102,14 @@ func (s *testCheckerSuite) testGetStatus(name string, c *C) {
 
 	// normal run
 	resp := make(map[string]interface{})
-	err := readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	err := tu.ReadGetJSON(c, testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsFalse)
 	// paused
 	err = handler.PauseOrResumeChecker(name, 30)
 	c.Assert(err, IsNil)
 	resp = make(map[string]interface{})
-	err = readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	err = tu.ReadGetJSON(c, testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsTrue)
 	// resumed
@@ -116,7 +117,7 @@ func (s *testCheckerSuite) testGetStatus(name string, c *C) {
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	resp = make(map[string]interface{})
-	err = readJSON(testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
+	err = tu.ReadGetJSON(c, testDialClient, fmt.Sprintf("%s/%s", s.urlPrefix, name), &resp)
 	c.Assert(err, IsNil)
 	c.Assert(resp["paused"], IsFalse)
 }
@@ -129,7 +130,7 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err := handler.IsCheckerPaused(name)
 	c.Assert(err, IsNil)
@@ -137,7 +138,7 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	time.Sleep(time.Second)
 	isPaused, err = handler.IsCheckerPaused(name)
@@ -149,12 +150,12 @@ func (s *testCheckerSuite) testPauseOrResume(name string, c *C) {
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/"+name, pauseArgs, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	isPaused, err = handler.IsCheckerPaused(name)
 	c.Assert(err, IsNil)
