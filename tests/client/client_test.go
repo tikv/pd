@@ -185,6 +185,43 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	wg.Wait()
 }
 
+func (s *clientTestSuite) TestUpdateAfterReset(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 2)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cli := setupCli(c, s.ctx, endpoints)
+
+	testutil.WaitUntil(c, func() bool {
+		_, _, err := cli.GetTS(context.TODO())
+		return err == nil
+	})
+	// Transfer leader to trigger the TSO resetting.
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/updateAfterReset", "return(true)"), IsNil)
+	oldLeaderName := cluster.WaitLeader()
+	err = cluster.GetServer(oldLeaderName).ResignLeader()
+	c.Assert(err, IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/updateAfterReset"), IsNil)
+	newLeaderName := cluster.WaitLeader()
+	c.Assert(newLeaderName, Not(Equals), oldLeaderName)
+	// Request a new TSO.
+	testutil.WaitUntil(c, func() bool {
+		_, _, err := cli.GetTS(context.TODO())
+		return err == nil
+	})
+	// Transfer leader back.
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`), IsNil)
+	err = cluster.GetServer(newLeaderName).ResignLeader()
+	c.Assert(err, IsNil)
+	// Should NOT panic here.
+	testutil.WaitUntil(c, func() bool {
+		_, _, err := cli.GetTS(context.TODO())
+		return err == nil
+	})
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"), IsNil)
+}
+
 func (s *clientTestSuite) TestTSOAllocatorLeader(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
