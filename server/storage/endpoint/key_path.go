@@ -111,9 +111,9 @@ func gcSafePointPathByServiceGroup(serviceGroupID string) string {
 	return path.Join(gcServiceGroupPath, "gc_safepoint", serviceGroupID)
 }
 
-// serviceSafePointPath returns the path of services' safe point
+// ServiceSafePointPath returns the path of services' safe point
 // /gc_servicegroup/service_safepoint/$service_group_id/$service_id
-func serviceSafePointPath(serviceGroupID, serviceID string) string {
+func ServiceSafePointPath(serviceGroupID, serviceID string) string {
 	return path.Join(gcServiceGroupPath, "service_safepoint", serviceGroupID, serviceID)
 }
 

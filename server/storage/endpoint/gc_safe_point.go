@@ -219,7 +219,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByServiceGroup(serviceGroupID 
 		return nil, nil
 	}
 
-	min := &ServiceSafePoint{SafePoint: math.MaxInt64}
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
 	for i, key := range keys {
 		ssp := &ServiceSafePoint{}
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
@@ -288,14 +288,14 @@ func (se *StorageEndpoint) SaveGCWorkerSafePoint(gcSafePoint *GCSafePoint) error
 
 // RemoveServiceSafePointByServiceGroup removes a service safe point
 func (se *StorageEndpoint) RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error {
-	key := serviceSafePointPath(serviceGroupID, serviceID)
+	key := ServiceSafePointPath(serviceGroupID, serviceID)
 	return se.Remove(key)
 }
 
 // LoadServiceSafePoint reads ServiceSafePoint for the given service group and service name
 // return nil if no safepoint not exist
 func (se *StorageEndpoint) LoadServiceSafePoint(serviceGroupID, serviceID string) (*ServiceSafePoint, error) {
-	value, err := se.Load(serviceSafePointPath(serviceGroupID, serviceID))
+	value, err := se.Load(ServiceSafePointPath(serviceGroupID, serviceID))
 	if err != nil || value == "" {
 		return nil, err
 	}
@@ -311,7 +311,7 @@ func (se *StorageEndpoint) SaveServiceSafePointByServiceGroup(serviceGroupID str
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
-	key := serviceSafePointPath(serviceGroupID, ssp.ServiceID)
+	key := ServiceSafePointPath(serviceGroupID, ssp.ServiceID)
 	value, err := json.Marshal(ssp)
 	if err != nil {
 		return err
