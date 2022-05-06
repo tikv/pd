@@ -198,7 +198,7 @@ func (u *unsafeRecoveryController) History() []string {
 	u.Lock()
 	defer u.Unlock()
 
-	if u.stage <= idle {
+	if u.stage == idle {
 		return []string{"No unsafe recover has been triggered since PD restarted."}
 	}
 	u.checkTimeout()
@@ -206,6 +206,10 @@ func (u *unsafeRecoveryController) History() []string {
 }
 
 func (u *unsafeRecoveryController) checkTimeout() bool {
+	if u.stage == finished || u.stage == failed {
+		return false
+	}
+
 	if time.Now().After(u.timeout) {
 		u.err = errors.Errorf("Exceeds timeout %v", u.timeout)
 		u.changeStage(failed)
@@ -325,7 +329,7 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 	}
 
 	if heartbeat.StoreReport.GetStep() != u.step {
-		log.Info("Unsafe recovery receives invalid store report with step %d, current step %d",
+		log.Info("Unsafe recovery receives invalid store report",
 			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtain-step", heartbeat.StoreReport.GetStep()))
 		// invalid store report, ignore
 		return false, nil
@@ -355,6 +359,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.stage = stage
 
 	var output []string
+	timeStr := time.Now().Format("2006-01-02 15:04:05")
 	switch u.stage {
 	case idle:
 	case collectReport:
@@ -367,18 +372,18 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 				stores += ", "
 			}
 		}
-		output = append(output, fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores))
+		output = append(output, fmt.Sprintf("Unsafe recovery enters collect report stage at %s: failed stores %s", timeStr, stores))
 	case forceLeaderForCommitMerge:
-		output = append(output, "Unsafe recovery enters force leader for commit merge stage")
+		output = append(output, "Unsafe recovery enters force leader for commit merge stage at "+timeStr)
 		output = append(output, u.getForceLeaderPlanDigest()...)
 	case forceLeader:
-		output = append(output, "Unsafe recovery enters force leader stage")
+		output = append(output, "Unsafe recovery enters force leader stage at "+timeStr)
 		output = append(output, u.getForceLeaderPlanDigest()...)
 	case demoteFailedVoter:
-		output = append(output, "Unsafe recovery enters demote failed voter stage")
+		output = append(output, "Unsafe recovery enters demote failed voter stage at "+timeStr)
 		output = append(output, u.getDemoteFailedVoterPlanDigest()...)
 	case createEmptyRegion:
-		output = append(output, "Unsafe recovery enters create empty region stage")
+		output = append(output, "Unsafe recovery enters create empty region stage at "+timeStr)
 		output = append(output, u.getCreateEmptyRegionPlanDigest()...)
 	case finished:
 		u.cluster.PauseOrResumeScheduler("all", 0)
@@ -386,10 +391,10 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 			// == 1 means no operation has done, no need to invalid cache
 			u.cluster.DropCacheAllRegion()
 		}
-		output = append(output, "Unsafe recovery finished")
+		output = append(output, "Unsafe recovery finished at "+timeStr)
 	case failed:
 		u.cluster.PauseOrResumeScheduler("all", 0)
-		output = append(output, fmt.Sprintf("Unsafe recovery failed: %v", u.err))
+		output = append(output, fmt.Sprintf("Unsafe recovery failed at %s: %v", timeStr, u.err))
 	}
 
 	u.output = append(u.output, output...)
@@ -503,6 +508,9 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
+		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
+			continue
+		}
 		if _, ok := u.failedStores[peer.StoreId]; ok {
 			failedPeers = append(failedPeers, peer)
 		}
