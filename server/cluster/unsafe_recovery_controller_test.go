@@ -451,7 +451,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOneLearner(c *C) {
 
 	advanceUntilFinished(c, recoveryController, reports)
 
-	expect_results := map[uint64]*pdpb.StoreReport{
+	expects := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -465,7 +465,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOneLearner(c *C) {
 	}
 
 	for storeID, report := range reports {
-		if result, ok := expect_results[storeID]; ok {
+		if result, ok := expects[storeID]; ok {
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
@@ -571,7 +571,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryJointState(c *C) {
 
 	advanceUntilFinished(c, recoveryController, reports)
 
-	expect_results := map[uint64]*pdpb.StoreReport{
+	expects := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -654,7 +654,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryJointState(c *C) {
 	}
 
 	for storeID, report := range reports {
-		if result, ok := expect_results[storeID]; ok {
+		if result, ok := expects[storeID]; ok {
 			log.Info(fmt.Sprintf("store %d %v %v", storeID, report.PeerReports, result.PeerReports))
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
@@ -874,7 +874,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 
 	advanceUntilFinished(c, recoveryController, reports)
 
-	expect_results := map[uint64]*pdpb.StoreReport{
+	expects := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -902,7 +902,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 	}
 
 	for storeID, report := range reports {
-		if result, ok := expect_results[storeID]; ok {
+		if result, ok := expects[storeID]; ok {
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
@@ -965,7 +965,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 
 	advanceUntilFinished(c, recoveryController, reports)
 
-	expect_results := map[uint64]*pdpb.StoreReport{
+	expects := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -992,7 +992,7 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 	}
 
 	for storeID, report := range reports {
-		if result, ok := expect_results[storeID]; ok {
+		if result, ok := expects[storeID]; ok {
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)

@@ -462,7 +462,7 @@ func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() []string {
 	return output
 }
 
-func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, only_incoming bool) bool {
+func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, onlyIncoming bool) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0
 		numLiveVoters := 0
@@ -490,7 +490,7 @@ func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, only_in
 		}
 	}
 
-	return hasQuorum(incomingVoters) && (only_incoming || hasQuorum(outgoingVoters))
+	return hasQuorum(incomingVoters) && (onlyIncoming || hasQuorum(outgoingVoters))
 }
 
 func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*metapb.Peer {
@@ -658,8 +658,11 @@ func (t *regionTree) insert(item *regionItem) bool {
 		if old.IsEpochStale(item) {
 			panic("region's epoch shouldn't be staler than old ones")
 		}
+	}
+	if len(overlaps) != 0 {
 		return false
 	}
+
 	t.regions[item.Region().GetId()] = item
 	t.tree.ReplaceOrInsert(item)
 	return true
@@ -707,7 +710,7 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 	return newestRegionTree, peersMap
 }
 
-func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, for_commit_merge bool) bool {
+func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, forCommitMerge bool) bool {
 	hasPlan := false
 
 	selectLeader := func(region *metapb.Region) *regionItem {
@@ -739,12 +742,12 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 				// already is a force leader, skip
 				return true
 			}
-			if for_commit_merge && !report.HasCommitMerge {
+			if forCommitMerge && !report.HasCommitMerge {
 				// check force leader only for ones has commit merge to avoid the case that
 				// target region can't catch up log for the source region due to force leader
 				// propose an empty raft log on being leader
 				return true
-			} else if !for_commit_merge && report.HasCommitMerge {
+			} else if !forCommitMerge && report.HasCommitMerge {
 				panic("unreachable")
 			}
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
