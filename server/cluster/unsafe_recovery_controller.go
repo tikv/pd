@@ -676,7 +676,6 @@ func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.Recover
 }
 
 func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
-
 	peersMap := make(map[uint64][]*regionItem)
 	// Go through all the peer reports to build up the newest region tree
 	for storeID, storeReport := range u.storeReports {
