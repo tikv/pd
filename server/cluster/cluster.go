@@ -935,6 +935,11 @@ func (c *RaftCluster) DropCacheRegion(id uint64) {
 	c.core.RemoveRegionIfExist(id)
 }
 
+// DropCacheAllRegion removes all regions from the cache.
+func (c *RaftCluster) DropCacheAllRegion() {
+	c.core.ResetCache()
+}
+
 // GetMetaStores gets stores from cluster.
 func (c *RaftCluster) GetMetaStores() []*metapb.Store {
 	return c.core.GetMetaStores()

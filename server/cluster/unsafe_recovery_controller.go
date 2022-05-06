@@ -382,7 +382,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		u.cluster.PauseOrResumeScheduler("all", 0)
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
-			// TODO: invalid cache
+			u.cluster.DropCacheAllRegion()
 		}
 		output = append(output, "Unsafe recovery finished")
 	case failed:
@@ -501,7 +501,6 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		// TODO: if peer is outgoing, no need to demote it.
 		if _, ok := u.failedStores[peer.StoreId]; ok {
 			failedPeers = append(failedPeers, peer)
 		}
@@ -515,11 +514,6 @@ type regionItem struct {
 	report  *pdpb.PeerReport
 	storeID uint64
 }
-
-// TODO!!!!!!!!!!!!
-// 5. make region tree generic
-// 6. demote then check force leader
-// 11. clean region cache
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
