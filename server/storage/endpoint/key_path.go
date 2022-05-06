@@ -31,7 +31,8 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
-	gcServiceGroupPath         = "gc_servicegroup"
+	serviceGroupServicePath    = "gc_servicegroup/service_safepoint"
+	serviceGroupGCPath         = "gc_servicegroup/gc_safepoint"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -108,19 +109,19 @@ func MinResolvedTSPath() string {
 // gcSafePointPathByServiceGroup returns the path of the gc_worker's safe point
 // /gc_servicegroup/gc_safepoint/$service_group_id
 func gcSafePointPathByServiceGroup(serviceGroupID string) string {
-	return path.Join(gcServiceGroupPath, "gc_safepoint", serviceGroupID)
+	return path.Join(serviceGroupGCPath, serviceGroupID)
 }
 
 // ServiceSafePointPath returns the path of services' safe point
 // /gc_servicegroup/service_safepoint/$service_group_id/$service_id
 func ServiceSafePointPath(serviceGroupID, serviceID string) string {
-	return path.Join(gcServiceGroupPath, "service_safepoint", serviceGroupID, serviceID)
+	return path.Join(serviceGroupServicePath, serviceGroupID, serviceID)
 }
 
 func serviceSafePointPrefixPath(serviceGroupID string) string {
-	return path.Join(gcServiceGroupPath, "service_safepoint", serviceGroupID) + "/"
+	return path.Join(serviceGroupServicePath, serviceGroupID) + "/"
 }
 
 func gcSafePointPrefixPath() string {
-	return path.Join(gcServiceGroupPath, "gc_safepoint") + "/"
+	return serviceGroupGCPath + "/"
 }
