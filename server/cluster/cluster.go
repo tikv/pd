@@ -288,24 +288,22 @@ func (c *RaftCluster) runSyncConfig() {
 	defer ticker.Stop()
 	stores := c.GetStores()
 
-	index := syncConfig(c.storeConfigManager, stores, 0)
+	syncConfig(c.storeConfigManager, stores)
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			index = syncConfig(c.storeConfigManager, stores, index)
-			if index >= len(stores) {
-				index = 0
+			if !syncConfig(c.storeConfigManager, stores) {
 				stores = c.GetStores()
 			}
 		}
 	}
 }
 
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, index int) int {
-	for ; index < len(stores); index++ {
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+	for index := 0; index < len(stores); index++ {
 		// filter out the stores that are tiflash
 		if store := stores[index]; core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
 			continue
@@ -313,13 +311,13 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo, in
 		// it will try next store if the current store is failed.
 		address := net.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
 		if err := manager.Observer(address); err != nil {
-			log.Warn("sync store config failed", zap.Error(err))
+			log.Warn("sync store config failed, it will ", zap.Error(err))
 			continue
 		}
 		// it will only try one store.
-		return index
+		return true
 	}
-	return len(stores)
+	return false
 }
 
 // LoadClusterInfo loads cluster related info.

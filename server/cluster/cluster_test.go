@@ -1123,12 +1123,7 @@ func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
-		index := syncConfig(tc.storeConfigManager, tc.GetStores(), 0)
-		if !v.updated {
-			c.Assert(index, Equals, 5)
-		} else {
-			c.Assert(index, Less, 5)
-		}
+		c.Assert(syncConfig(tc.storeConfigManager, tc.GetStores()), Equals, v.updated)
 		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, v.maxRegionSize)
 	}
 }
