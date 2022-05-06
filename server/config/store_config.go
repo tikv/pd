@@ -125,7 +125,8 @@ func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
 		return nil
 	}
 
-	if smallSize := size % c.GetRegionSplitSize(); smallSize < mergeSize {
+	if smallSize := size % c.GetRegionSplitSize(); smallSize <= mergeSize && smallSize != 0 {
+		log.Info("region size is too small", zap.Uint64("size", size), zap.Uint64("mergeSize", mergeSize), zap.Uint64("smallSize", smallSize))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-size, " +
 			"it will be merged again")
 	}
@@ -138,7 +139,7 @@ func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 		return nil
 	}
 
-	if smallKeys := keys % c.GetRegionSplitKeys(); smallKeys < mergeKeys {
+	if smallKeys := keys % c.GetRegionSplitKeys(); smallKeys <= mergeKeys && smallKeys > 0 {
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-keys")
 	}
 	return nil

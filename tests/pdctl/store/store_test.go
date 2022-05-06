@@ -264,6 +264,16 @@ func (s *storeTestSuite) TestStore(c *C) {
 	_, ok = allRemovePeerLimit["2"]["add-peer"]
 	c.Assert(ok, IsFalse)
 
+	// put enough stores for replica.
+	for id := 1000; id <= 1005; id++ {
+		store2 := &metapb.Store{
+			Id:            uint64(id),
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store2)
+	}
+
 	// store delete <store_id> command
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
@@ -273,6 +283,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
@@ -295,17 +306,50 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Unknown state: Invalid_state"), IsTrue)
 
+	// store cancel-delete <store_id> command
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
+	c.Assert(limit, Equals, storelimit.Unlimited)
+	args = []string{"-u", pdAddr, "store", "cancel-delete", "1"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "1"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
+	c.Assert(limit, Equals, 20.0)
+
 	// store delete addr <address>
 	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(string(output), Equals, "Success!\n")
+	c.Assert(err, IsNil)
+
+	args = []string{"-u", pdAddr, "store", "3"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
+	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+
+	// store cancel-delete addr <address>
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
+	c.Assert(limit, Equals, storelimit.Unlimited)
+	args = []string{"-u", pdAddr, "store", "cancel-delete", "addr", "tikv3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(string(output), Equals, "Success!\n")
 	c.Assert(err, IsNil)
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
+	storeInfo = new(api.StoreInfo)
 	c.Assert(json.Unmarshal(output, &storeInfo), IsNil)
-	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
-	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Offline)
+	c.Assert(storeInfo.Store.State, Equals, metapb.StoreState_Up)
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
+	c.Assert(limit, Equals, 25.0)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "remove-tombstone"}

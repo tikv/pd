@@ -20,6 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -75,7 +76,7 @@ func (s *testTrendSuite) TestTrend(c *C) {
 	mustRegionHeartbeat(c, svr, region6)
 
 	var trend Trend
-	err = readJSON(testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
+	err = tu.ReadGetJSON(c, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
 	c.Assert(err, IsNil)
 
 	// Check store states.

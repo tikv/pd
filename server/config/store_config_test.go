@@ -85,14 +85,48 @@ func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 	testdata := []struct {
 		size      uint64
 		mergeSize uint64
+		keys      uint64
+		mergeKeys uint64
 		pass      bool
 	}{{
 		size:      144 + 20,
 		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		size:      144 + 1,
+		mergeSize: 20,
+		keys:      1440000 + 10000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		size:      144 + 2,
+		mergeSize: 50,
+		keys:      1440000 + 20000,
+		mergeKeys: 500000,
+		pass:      false,
+	}, {
+		size:      144 + 3,
+		mergeSize: 50,
+		keys:      1440000 + 30000,
+		mergeKeys: 500000,
+		pass:      true,
+	}, {
+		size:      1 + 1,
+		mergeSize: 20,
+		keys:      10000 + 10000,
+		mergeKeys: 500000,
+		pass:      true,
 	}}
 	config := &StoreConfig{}
 	for _, v := range testdata {
-		c.Assert(config.CheckRegionSize(v.size-1, v.mergeSize), IsNil)
-		c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
+		if v.pass {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), IsNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), IsNil)
+		} else {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), NotNil)
+		}
 	}
 }

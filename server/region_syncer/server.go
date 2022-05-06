@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -73,7 +74,7 @@ type Server interface {
 // RegionSyncer is used to sync the region information without raft.
 type RegionSyncer struct {
 	mu struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		streams      map[string]ServerStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
@@ -131,7 +132,12 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			requests = append(requests, first.GetMeta())
 			stats = append(stats, first.GetStat())
-			buckets = append(buckets, first.GetBuckets())
+			// bucket should not be nil to avoid grpc marshal panic.
+			bucket := &metapb.Buckets{}
+			if b := first.GetBuckets(); b != nil {
+				bucket = b
+			}
+			buckets = append(buckets, bucket)
 			leaders = append(leaders, first.GetLeader())
 			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)
@@ -140,7 +146,12 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				region := <-regionNotifier
 				requests = append(requests, region.GetMeta())
 				stats = append(stats, region.GetStat())
-				buckets = append(buckets, region.GetBuckets())
+				// bucket should not be nil to avoid grpc marshal panic.
+				bucket := &metapb.Buckets{}
+				if b := region.GetBuckets(); b != nil {
+					bucket = b
+				}
+				buckets = append(buckets, bucket)
 				leaders = append(leaders, region.GetLeader())
 				s.history.Record(region)
 			}
@@ -300,7 +311,11 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 			leader = r.GetLeader()
 		}
 		leaders[i] = leader
-		buckets[i] = r.GetBuckets()
+		// bucket should not be nil to avoid grpc marshal panic.
+		buckets[i] = &metapb.Buckets{}
+		if r.GetBuckets() != nil {
+			buckets[i] = r.GetBuckets()
+		}
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},

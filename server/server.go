@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -145,7 +146,7 @@ type Server struct {
 	closeCallbacks []func()
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock sync.Mutex
+	serviceSafePointLock syncutil.Mutex
 
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
@@ -1329,7 +1330,14 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			if err = alllocator.UpdateTSO(); err != nil {
+				panic(err)
+			}
+		})
+	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1487,9 +1495,4 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 		}
 	}
 	return false
-}
-
-// SplitAndScatterRegions TODO
-func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	return nil, errors.New("no implemented")
 }

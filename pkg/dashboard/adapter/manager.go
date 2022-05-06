@@ -113,15 +113,12 @@ func (m *Manager) updateInfo() {
 		return
 	}
 
-	allHasClientUrls := true
 	for _, member := range m.members {
 		if len(member.GetClientUrls()) == 0 {
-			allHasClientUrls = false
+			log.Warn("failed to get member client urls")
+			m.members = nil
+			return
 		}
-	}
-	if !allHasClientUrls {
-		log.Warn("failed to get member client urls")
-		m.members = nil
 	}
 }
 
