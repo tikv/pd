@@ -217,7 +217,6 @@ func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
-
 	stateStr := r.URL.Query().Get("state")
 	var err error
 	if strings.EqualFold(stateStr, metapb.StoreState_Up.String()) {

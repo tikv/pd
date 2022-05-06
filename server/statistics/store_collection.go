@@ -44,6 +44,10 @@ type storeStatistics struct {
 	RegionCount     int
 	LeaderCount     int
 	LabelCounter    map[string]int
+	Preparing       int
+	Serving         int
+	Removing        int
+	Removed         int
 }
 
 func newStoreStatistics(opt *config.PersistOptions, storeConfig *config.StoreConfig) *storeStatistics {
@@ -82,10 +86,17 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		} else {
 			s.Up++
 		}
+		if store.IsPreparing() {
+			s.Preparing++
+		} else {
+			s.Serving++
+		}
 	case metapb.NodeState_Removing:
 		s.Offline++
+		s.Removing++
 	case metapb.NodeState_Removed:
 		s.Tombstone++
+		s.Removed++
 		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
@@ -151,6 +162,10 @@ func (s *storeStatistics) Collect() {
 	metrics["store_tombstone_count"] = float64(s.Tombstone)
 	metrics["store_low_space_count"] = float64(s.LowSpace)
 	metrics["store_slow_count"] = float64(s.Slow)
+	metrics["store_preparing_count"] = float64(s.Preparing)
+	metrics["store_serving_count"] = float64(s.Serving)
+	metrics["store_removing_count"] = float64(s.Removing)
+	metrics["store_removed_count"] = float64(s.Removed)
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
 	metrics["storage_size"] = float64(s.StorageSize)
