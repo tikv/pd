@@ -182,7 +182,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 		}},
 	}
 	c.Assert(recoveryController.GetStage(), Equals, collectReport)
-	for storeID, _ := range reports {
+	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
@@ -259,7 +259,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 	}
 	c.Assert(recoveryController.GetStage(), Equals, collectReport)
 	// require peer report
-	for storeID, _ := range reports {
+	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
@@ -318,7 +318,7 @@ func (s *testUnsafeRecoverSuite) TestForceLeaderFail(c *C) {
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
-		1: &pdpb.StoreReport{
+		1: {
 			PeerReports: []*pdpb.PeerReport{
 				{
 					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -365,7 +365,7 @@ func (s *testUnsafeRecoverSuite) TestForceLeaderForCommitMerge(c *C) {
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
-		1: &pdpb.StoreReport{
+		1: {
 			PeerReports: []*pdpb.PeerReport{
 				{
 					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -699,7 +699,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryStep(c *C) {
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
-		1: &pdpb.StoreReport{
+		1: {
 			PeerReports: []*pdpb.PeerReport{
 				{
 					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -783,7 +783,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 	}
 	c.Assert(recoveryController.GetStage(), Equals, collectReport)
 	// require peer report
-	for storeID, _ := range reports {
+	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
