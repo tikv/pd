@@ -1233,12 +1233,7 @@ func (s *Server) campaignLeader() {
 	defer func() {
 		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-			if err != nil {
-				panic(err)
-			}
-			err = allocator.UpdateTSO()
-			if err != nil {
+			if err = alllocator.UpdateTSO(); err != nil {
 				panic(err)
 			}
 		})
