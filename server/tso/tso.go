@@ -297,6 +297,9 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 // 1. The saved time is monotonically increasing.
 // 2. The physical time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
+//
+// NOTICE: this function should be called after the TSO in memory has been initialized
+// and should not be called when the TSO in memory has been reset anymore.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
 	prevPhysical, prevLogical := t.getTSO()
 	tsoGauge.WithLabelValues("tso", t.dcLocation).Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
