@@ -132,7 +132,7 @@ func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
 	return nil
 }
 
-// CheckRegionSize return error if the smallest region's size is less than mergeSize
+// CheckRegionKeys return error if the smallest region's keys is less than mergeKeys
 func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 	if keys < c.GetRegionMaxKeys() {
 		return nil
