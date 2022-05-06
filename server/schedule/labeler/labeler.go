@@ -193,7 +193,7 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 		return rule
 	}
 	if len(rule.Labels) == 0 {
-		l.storage.DeleteRule(id)
+		l.storage.DeleteRegionRule(id)
 		delete(l.labelRules, id)
 		return nil
 	}
