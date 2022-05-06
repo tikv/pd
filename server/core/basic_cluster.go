@@ -424,8 +424,8 @@ func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
 	}
 }
 
-// ResetCache drops all region cache.
-func (bc *BasicCluster) ResetCache() {
+// ResetRegionCache drops all region cache.
+func (bc *BasicCluster) ResetRegionCache() {
 	bc.Lock()
 	defer bc.Unlock()
 	bc.Regions = NewRegionsInfo()

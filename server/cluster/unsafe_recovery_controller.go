@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 type unsafeRecoveryStage int
@@ -178,8 +179,8 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]in
 
 // Show returns the current status of ongoing unsafe recover operation.
 func (u *unsafeRecoveryController) Show() []string {
-	u.RLock()
-	defer u.RUnlock()
+	u.Lock()
+	defer u.Unlock()
 
 	if u.stage == idle {
 		return []string{"No on-going recovery."}
@@ -194,8 +195,8 @@ func (u *unsafeRecoveryController) Show() []string {
 
 // History returns the history logs of the current unsafe recover operation.
 func (u *unsafeRecoveryController) History() []string {
-	u.RLock()
-	defer u.RUnlock()
+	u.Lock()
+	defer u.Unlock()
 
 	if u.stage <= idle {
 		return []string{"No unsafe recover has been triggered since PD restarted."}
@@ -303,7 +304,7 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 	if expire, dispatched := u.storePlanExpires[storeID]; !dispatched || expire.Before(now) {
 		if dispatched {
-			log.Info(fmt.Sprintf("Unsafe recovery store %d recovery plan execution timeout, retry", storeID))
+			log.Info("Unsafe recovery store recovery plan execution timeout, retry", zap.Uint64("store-id", storeID))
 		}
 		// Dispatch the recovery plan to the store, and the plan may be empty.
 		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
@@ -324,7 +325,8 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 	}
 
 	if heartbeat.StoreReport.GetStep() != u.step {
-		log.Info(fmt.Sprintf("Unsafe recovery receives invalid store report with step %d, current step %d", heartbeat.StoreReport.GetStep(), u.step))
+		log.Info("Unsafe recovery receives invalid store report with step %d, current step %d",
+			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtain-step", heartbeat.StoreReport.GetStep()))
 		// invalid store report, ignore
 		return false, nil
 	}
@@ -813,10 +815,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 		for _, peerReport := range storeReport.PeerReports {
 			regionID := peerReport.GetRegionState().Region.Id
 			if !newestRegionTree.contains(regionID) {
-				if u.canElectLeader(peerReport.GetRegionState().Region, false) {
-					// find invalid peer but it has quorum
-					continue
-				} else {
+				if !u.canElectLeader(peerReport.GetRegionState().Region, false) {
 					// the peer is not in the valid regions, should be deleted directly
 					storeRecoveryPlan := u.getRecoveryPlan(storeID)
 					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, regionID)
@@ -892,14 +891,15 @@ func (u *unsafeRecoveryController) getReportStatus() []string {
 		status = append(status, fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports)))
 		var reported, unreported, undispatched string
 		for storeID, report := range u.storeReports {
+			str := strconv.FormatUint(storeID, 10) + ", "
 			if report == nil {
 				if _, requested := u.storePlanExpires[storeID]; !requested {
-					undispatched += strconv.FormatUint(storeID, 10) + ", "
+					undispatched += str
 				} else {
-					unreported += strconv.FormatUint(storeID, 10) + ", "
+					unreported += str
 				}
 			} else {
-				reported += strconv.FormatUint(storeID, 10) + ", "
+				reported += str
 			}
 		}
 		status = append(status, " - Stores that have not dispatched plan: "+undispatched)
