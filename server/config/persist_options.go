@@ -135,6 +135,13 @@ func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
+// SetLocationLabels sets the location labels.
+func (o *PersistOptions) SetLocationLabels(labels []string) {
+	v := o.GetReplicationConfig().Clone()
+	v.LocationLabels = labels
+	o.SetReplicationConfig(v)
+}
+
 // GetIsolationLevel returns the isolation label for each region.
 func (o *PersistOptions) GetIsolationLevel() string {
 	return o.GetReplicationConfig().IsolationLevel
@@ -317,6 +324,11 @@ func (o *PersistOptions) GetPatrolRegionInterval() time.Duration {
 // GetMaxStoreDownTime returns the max down time of a store.
 func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
+}
+
+// GetMaxStorePreparingTime returns the max preparing time of a store.
+func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
+	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
 }
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.

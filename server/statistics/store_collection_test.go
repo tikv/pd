@@ -63,6 +63,10 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	stats := storeStats.stats
 
 	c.Assert(stats.Up, Equals, 6)
+	c.Assert(stats.Preparing, Equals, 7)
+	c.Assert(stats.Serving, Equals, 0)
+	c.Assert(stats.Removing, Equals, 1)
+	c.Assert(stats.Removed, Equals, 1)
 	c.Assert(stats.Down, Equals, 1)
 	c.Assert(stats.Offline, Equals, 1)
 	c.Assert(stats.RegionCount, Equals, 0)

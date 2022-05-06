@@ -14,8 +14,9 @@
 package net
 
 import (
-	. "github.com/pingcap/check"
 	"testing"
+
+	. "github.com/pingcap/check"
 )
 
 func Test(t *testing.T) {
