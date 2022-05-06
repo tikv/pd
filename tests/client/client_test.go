@@ -187,7 +187,8 @@ func (s *clientTestSuite) TestLeaderTransfer(c *C) {
 	wg.Wait()
 }
 
-func (s *clientTestSuite) TestUpdateAfterReset(c *C) {
+// More details can be found in this issue: https://github.com/tikv/pd/issues/4884
+func (s *clientTestSuite) TestUpdateAfterResetTSO(c *C) {
 	cluster, err := tests.NewTestCluster(s.ctx, 2)
 	c.Assert(err, IsNil)
 	defer cluster.Destroy()
@@ -200,11 +201,11 @@ func (s *clientTestSuite) TestUpdateAfterReset(c *C) {
 		return err == nil
 	})
 	// Transfer leader to trigger the TSO resetting.
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/updateAfterReset", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"), IsNil)
 	oldLeaderName := cluster.WaitLeader()
 	err = cluster.GetServer(oldLeaderName).ResignLeader()
 	c.Assert(err, IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/updateAfterReset"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"), IsNil)
 	newLeaderName := cluster.WaitLeader()
 	c.Assert(newLeaderName, Not(Equals), oldLeaderName)
 	// Request a new TSO.
