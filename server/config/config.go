@@ -653,6 +653,9 @@ type ScheduleConfig struct {
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
+	// MaxStorePreparingTime is the max duration after which
+	// a store will be considered to be preparing.
+	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
@@ -797,6 +800,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
+	// using a large duration means disable it
+	defaultMaxStorePreparingTime = 1000000 * time.Hour
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -816,6 +821,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	adjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
 	if !meta.IsDefined("leader-schedule-limit") {
 		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}

@@ -1046,7 +1046,9 @@ func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
+	cluster.Lock()
 	cluster.unsafeRecoveryController = recoveryController
+	cluster.Unlock()
 	failedStores := map[uint64]interface{}{
 		1: "",
 	}
