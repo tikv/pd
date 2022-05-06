@@ -166,7 +166,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	ops, err := r.scatterRegions(regionMap, failures, group, retryLimit)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -196,20 +196,20 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+	ops, err := r.scatterRegions(regionMap, failures, group, retryLimit)
 	if err != nil {
 		return nil, nil, err
 	}
 	return ops, failures, nil
 }
 
-// ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
+// scatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 // RetryTimes indicates the retry times if any of the regions failed to relocate during scattering. There will be
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
-func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
+func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
 	if len(regions) < 1 {
 		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
 		return nil, errors.New("empty region")
