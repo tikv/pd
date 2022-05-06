@@ -194,7 +194,7 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 	return se.Save(key, string(value))
 }
 
-// RemoveServiceGCSafePoint removes a GC safeoint for the service
+// RemoveServiceGCSafePoint removes a GC safepoint for the service
 func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
 	if serviceID == gcWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
