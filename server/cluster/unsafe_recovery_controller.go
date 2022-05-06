@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -29,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
@@ -48,7 +48,7 @@ const (
 )
 
 type unsafeRecoveryController struct {
-	sync.RWMutex
+	syncutil.RWMutex
 
 	cluster               *RaftCluster
 	stage                 unsafeRecoveryStage

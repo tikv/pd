@@ -21,13 +21,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -84,7 +84,7 @@ var (
 type hotScheduler struct {
 	name string
 	*BaseScheduler
-	sync.RWMutex
+	syncutil.RWMutex
 	types []statistics.RWType
 	r     *rand.Rand
 

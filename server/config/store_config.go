@@ -132,7 +132,7 @@ func (m *StoreConfigManager) Observer(address string) error {
 	}
 	old := m.GetStoreConfig()
 	if cfg != nil && !reflect.DeepEqual(cfg, old) {
-		log.Info("sync the store config successful", zap.String("tikv-address", address), zap.String("store-config", cfg.String()))
+		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()))
 		m.config.Store(cfg)
 	}
 	return nil
