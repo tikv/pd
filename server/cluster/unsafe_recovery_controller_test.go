@@ -164,9 +164,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFinished(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -240,9 +240,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryFailed(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -312,9 +312,9 @@ func (s *testUnsafeRecoverSuite) TestForceLeaderFail(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -359,9 +359,9 @@ func (s *testUnsafeRecoverSuite) TestForceLeaderForCommitMerge(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -431,9 +431,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOneLearner(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -482,9 +482,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryJointState(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		4: "",
-		5: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -672,9 +672,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryTimeout(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		4: "",
-		5: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
 	}, 1), IsNil)
 
 	time.Sleep(time.Second)
@@ -693,9 +693,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryStep(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		2: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
 	}, 1), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -744,9 +744,9 @@ func (s *testUnsafeRecoverSuite) TestRecoveryOnHealthyRegions(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		4: "",
-		5: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -828,9 +828,9 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap1(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		4: "",
-		5: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -919,9 +919,9 @@ func (s *testUnsafeRecoverSuite) TestRangeOverlap2(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		4: "",
-		5: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
 	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -1013,13 +1013,13 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	recoveryController := newUnsafeRecoveryController(cluster)
 
 	// Store 3 doesn't exist, reject to remove.
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		1: "",
-		3: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		1: {},
+		3: {},
 	}, 60), NotNil)
 
-	c.Assert(recoveryController.RemoveFailedStores(map[uint64]interface{}{
-		1: "",
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		1: {},
 	}, 60), IsNil)
 	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
 	for _, s := range cluster.GetSchedulers() {
@@ -1030,8 +1030,8 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 
 	// Store 2's last heartbeat is recent, and is not allowed to be removed.
 	c.Assert(recoveryController.RemoveFailedStores(
-		map[uint64]interface{}{
-			2: "",
+		map[uint64]struct{}{
+			2: {},
 		}, 60), NotNil)
 }
 
@@ -1049,8 +1049,8 @@ func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 	cluster.Lock()
 	cluster.unsafeRecoveryController = recoveryController
 	cluster.Unlock()
-	failedStores := map[uint64]interface{}{
-		1: "",
+	failedStores := map[uint64]struct{}{
+		1: {},
 	}
 	c.Assert(recoveryController.RemoveFailedStores(failedStores, 60), IsNil)
 	askSplitReq := &pdpb.AskSplitRequest{}

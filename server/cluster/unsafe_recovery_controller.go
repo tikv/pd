@@ -89,7 +89,7 @@ type unsafeRecoveryController struct {
 	cluster      *RaftCluster
 	stage        unsafeRecoveryStage
 	step         uint64
-	failedStores map[uint64]interface{}
+	failedStores map[uint64]struct{}
 	timeout      time.Time
 
 	// collected reports from store, if not reported yet, it would be nil
@@ -114,7 +114,7 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 func (u *unsafeRecoveryController) reset() {
 	u.stage = idle
 	u.step = 0
-	u.failedStores = make(map[uint64]interface{})
+	u.failedStores = make(map[uint64]struct{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
 	u.storePlanExpires = make(map[uint64]time.Time)
@@ -132,7 +132,7 @@ func (u *unsafeRecoveryController) IsRunning() bool {
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
-func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]interface{}, timeout uint64) error {
+func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]struct{}, timeout uint64) error {
 	if u.IsRunning() {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}

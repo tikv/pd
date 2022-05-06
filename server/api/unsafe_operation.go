@@ -55,14 +55,14 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
 		return
 	}
-	stores := make(map[uint64]interface{})
+	stores := make(map[uint64]struct{})
 	for _, store := range storeSlice {
-		stores[store] = interface{}(nil)
+		stores[store] = struct{}{}
 	}
 	timeout := uint64(600)
-	rawTimeout, exists := input["timeout"]
+	rawTimeout, exists := input["timeout"].(float64)
 	if exists {
-		timeout = uint64(rawTimeout.(float64))
+		timeout = uint64(rawTimeout)
 	}
 
 	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout); err != nil {
