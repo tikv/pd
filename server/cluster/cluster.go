@@ -307,7 +307,13 @@ func (c *RaftCluster) runSyncConfig() {
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
 	for index := 0; index < len(stores); index++ {
 		// filter out the stores that are tiflash
-		if store := stores[index]; core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		store := stores[index]
+		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+			continue
+		}
+
+		// filter out the stores that are not up.
+		if !(store.IsPreparing() || store.IsServing()) {
 			continue
 		}
 		// it will try next store if the current store is failed.
