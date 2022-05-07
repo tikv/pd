@@ -151,6 +151,11 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	return true
 }
 
+// IsTiFlash returns true if the store is tiflash.
+func (s *StoreInfo) IsTiFlash() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
 // IsUp returns true if store is serving or preparing.
 func (s *StoreInfo) IsUp() bool {
 	return s.IsServing() || s.IsPreparing()
@@ -742,5 +747,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash) && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
 }
