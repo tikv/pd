@@ -14,7 +14,10 @@
 
 package statistics
 
-import "github.com/tikv/pd/server/core"
+import (
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/statistics/buckets"
+)
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
@@ -25,4 +28,8 @@ type RegionStatInformer interface {
 	// RegionReadStats return the storeID -> read stat of peers on this store.
 	// The result only includes peers that are hot enough.
 	RegionReadStats() map[uint64][]*HotPeerStat
+}
+
+type BucketStatInformer interface {
+	BucketsStats(degree int) map[uint64][]*buckets.BucketStat
 }

@@ -17,6 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"strconv"
 	"time"
 
@@ -50,10 +51,12 @@ type Cluster struct {
 	*placement.RuleManager
 	*labeler.RegionLabeler
 	*statistics.HotStat
+	*buckets.HotBucketCache
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
+	ctx context.Context
 }
 
 // NewCluster creates a new Cluster
@@ -62,9 +65,11 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
 		HotStat:            statistics.NewHotStat(ctx),
+		HotBucketCache:     buckets.NewBucketsCache(ctx),
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
 		StoreConfigManager: config.NewStoreConfigManager(nil),
+		ctx:                ctx,
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -128,6 +133,13 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.Read, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (mc *Cluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree)
+	mc.HotBucketCache.CheckAsync(task)
+	return task.WaitRet(mc.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.

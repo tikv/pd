@@ -28,6 +28,7 @@ type Cluster interface {
 
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
+	statistics.BucketStatInformer
 
 	operator.ClusterInformer
 
