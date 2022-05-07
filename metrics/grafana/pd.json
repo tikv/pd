@@ -5589,7 +5589,7 @@
             {
               "exemplar": true,
               "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-leader\"}",
-              "hide": false,
+              "hide": true,
               "interval": "",
               "legendFormat": "exp-key-rate-read-leader-{{store}}",
               "refId": "B"
@@ -5597,7 +5597,7 @@
             {
               "exemplar": true,
               "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-region\"}",
-              "hide": false,
+              "hide": true,
               "interval": "",
               "legendFormat": "exp-key-rate-read-region-{{store}}",
               "refId": "C"
