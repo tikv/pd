@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -104,11 +105,12 @@ type unsafeRecoveryController struct {
 	err    error
 }
 
+// The information for one stage of the recovery process.
 type StageOutput struct {
 	Info    string              `json:"info,omitempty"`
+	Time    string              `json:"time,omitempty"`
 	Actions map[string][]string `json:"actions,omitempty"`
 	Details []string            `json:"details,omitempty"`
-	Time    string              `json:"time"`
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
@@ -211,6 +213,33 @@ func (u *unsafeRecoveryController) History() []StageOutput {
 	}
 	u.checkTimeout()
 	return u.output
+}
+
+func (u *unsafeRecoveryController) getReportStatus() StageOutput {
+	var status StageOutput
+	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
+	if u.numStoresReported != len(u.storeReports) {
+		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports))
+		var reported, unreported, undispatched string
+		for storeID, report := range u.storeReports {
+			str := strconv.FormatUint(storeID, 10) + ", "
+			if report == nil {
+				if _, requested := u.storePlanExpires[storeID]; !requested {
+					undispatched += str
+				} else {
+					unreported += str
+				}
+			} else {
+				reported += str
+			}
+		}
+		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Trim(undispatched, ", "))
+		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Trim(reported, ", "))
+		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Trim(unreported, ", "))
+	} else {
+		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
+	}
+	return status
 }
 
 func (u *unsafeRecoveryController) checkTimeout() bool {
@@ -913,31 +942,4 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		hasPlan = true
 	}
 	return hasPlan
-}
-
-func (u *unsafeRecoveryController) getReportStatus() StageOutput {
-	var status StageOutput
-	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
-	if u.numStoresReported != len(u.storeReports) {
-		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports))
-		var reported, unreported, undispatched string
-		for storeID, report := range u.storeReports {
-			str := strconv.FormatUint(storeID, 10) + ", "
-			if report == nil {
-				if _, requested := u.storePlanExpires[storeID]; !requested {
-					undispatched += str
-				} else {
-					unreported += str
-				}
-			} else {
-				reported += str
-			}
-		}
-		status.Details = append(status.Details, "Stores that have not dispatched plan: "+undispatched)
-		status.Details = append(status.Details, "Stores that have reported to PD: "+reported)
-		status.Details = append(status.Details, "Stores that have not reported to PD: "+unreported)
-	} else {
-		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
-	}
-	return status
 }
