@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
@@ -104,7 +105,7 @@ type StoreConfigManager struct {
 // NewStoreConfigManager creates a new StoreConfigManager.
 func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
 	schema := "http"
-	if ts, ok := client.Transport.(*http.Transport); ok && ts.TLSClientConfig != nil && len(ts.TLSClientConfig.Certificates) > 0 {
+	if netutil.IsEnableHttps(client) {
 		schema = "https"
 	}
 

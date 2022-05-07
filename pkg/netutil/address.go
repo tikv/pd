@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package net
+package netutil
 
-import "net"
+import (
+	"net"
+	"net/http"
+)
 
 // fork from tidb, pr: https://github.com/pingcap/tidb/pull/20546
 
@@ -38,4 +41,19 @@ func ResolveLoopBackAddr(address, backAddress string) string {
 		}
 	}
 	return address
+}
+
+// IsEnableHttps returns true if client use tls.
+func IsEnableHttps(client *http.Client) bool {
+	if client == nil {
+		return false
+	}
+	ts, ok := client.Transport.(*http.Transport)
+	if !ok {
+		return false
+	}
+	if ts.TLSClientConfig != nil && ts.TLSClientConfig.RootCAs != nil {
+		return true
+	}
+	return false
 }

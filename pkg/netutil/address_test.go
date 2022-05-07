@@ -11,9 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package net
+package netutil
 
 import (
+	"crypto/tls"
+	"net/http"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -41,4 +43,22 @@ func (s *testNetSuite) TestResolveLoopBackAddr(c *C) {
 	for _, n := range nodes {
 		c.Assert(ResolveLoopBackAddr(n.address, n.backAddress), Equals, "192.168.130.22:2379")
 	}
+}
+
+func (s *testNetSuite) TestIsEnableHttps(c *C) {
+	c.Assert(IsEnableHttps(http.DefaultClient), IsFalse)
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   nil,
+		},
+	}
+	c.Assert(IsEnableHttps(httpClient), IsFalse)
+	httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   &tls.Config{},
+		},
+	}
+	c.Assert(IsEnableHttps(httpClient), IsFalse)
 }

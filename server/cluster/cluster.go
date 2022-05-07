@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/net"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -311,7 +311,7 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 			continue
 		}
 		// it will try next store if the current store is failed.
-		address := net.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
 		if err := manager.Observer(address); err != nil {
 			log.Warn("sync store config failed, it will try next store", zap.Error(err))
 			continue
