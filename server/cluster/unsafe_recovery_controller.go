@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -99,8 +100,15 @@ type unsafeRecoveryController struct {
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
-	output []string
+	output []StageOutput
 	err    error
+}
+
+type StageOutput struct {
+	Info    string              `json:"info,omitempty"`
+	Actions map[string][]string `json:"actions,omitempty"`
+	Details []string            `json:"details,omitempty"`
+	Time    string              `json:"time"`
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
@@ -119,7 +127,7 @@ func (u *unsafeRecoveryController) reset() {
 	u.numStoresReported = 0
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-	u.output = make([]string, 0)
+	u.output = make([]StageOutput, 0)
 	u.err = nil
 }
 
@@ -178,28 +186,28 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 }
 
 // Show returns the current status of ongoing unsafe recover operation.
-func (u *unsafeRecoveryController) Show() []string {
+func (u *unsafeRecoveryController) Show() []StageOutput {
 	u.Lock()
 	defer u.Unlock()
 
 	if u.stage == idle {
-		return []string{"No on-going recovery."}
+		return []StageOutput{{Info: "No on-going recovery."}}
 	}
 	u.checkTimeout()
 	status := u.output
 	if u.stage != finished && u.stage != failed {
-		status = append(status, u.getReportStatus()...)
+		status = append(status, u.getReportStatus())
 	}
 	return status
 }
 
 // History returns the history logs of the current unsafe recover operation.
-func (u *unsafeRecoveryController) History() []string {
+func (u *unsafeRecoveryController) History() []StageOutput {
 	u.Lock()
 	defer u.Unlock()
 
 	if u.stage == idle {
-		return []string{"No unsafe recover has been triggered since PD restarted."}
+		return []StageOutput{{Info: "No unsafe recover has been triggered since PD restarted."}}
 	}
 	u.checkTimeout()
 	return u.output
@@ -358,8 +366,8 @@ func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
 func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.stage = stage
 
-	var output []string
-	timeStr := time.Now().Format("2006-01-02 15:04:05")
+	var output StageOutput
+	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	switch u.stage {
 	case idle:
 	case collectReport:
@@ -372,35 +380,37 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 				stores += ", "
 			}
 		}
-		output = append(output, fmt.Sprintf("Unsafe recovery enters collect report stage at %s: failed stores %s", timeStr, stores))
+		output.Info = fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores)
 	case forceLeaderForCommitMerge:
-		output = append(output, "Unsafe recovery enters force leader for commit merge stage at "+timeStr)
-		output = append(output, u.getForceLeaderPlanDigest()...)
+		output.Info = "Unsafe recovery enters force leader for commit merge stage"
+		output.Actions = u.getForceLeaderPlanDigest()
 	case forceLeader:
-		output = append(output, "Unsafe recovery enters force leader stage at "+timeStr)
-		output = append(output, u.getForceLeaderPlanDigest()...)
+		output.Info = "Unsafe recovery enters force leader stage"
+		output.Actions = u.getForceLeaderPlanDigest()
 	case demoteFailedVoter:
-		output = append(output, "Unsafe recovery enters demote failed voter stage at "+timeStr)
-		output = append(output, u.getDemoteFailedVoterPlanDigest()...)
+		output.Info = "Unsafe recovery enters demote failed voter stage"
+		output.Actions = u.getDemoteFailedVoterPlanDigest()
 	case createEmptyRegion:
-		output = append(output, "Unsafe recovery enters create empty region stage at "+timeStr)
-		output = append(output, u.getCreateEmptyRegionPlanDigest()...)
+		output.Info = "Unsafe recovery enters create empty region stage"
+		output.Actions = u.getCreateEmptyRegionPlanDigest()
 	case finished:
 		u.cluster.PauseOrResumeScheduler("all", 0)
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
 			u.cluster.DropCacheAllRegion()
 		}
-		output = append(output, "Unsafe recovery finished at "+timeStr)
+		output.Info = "Unsafe recovery finished"
 	case failed:
 		u.cluster.PauseOrResumeScheduler("all", 0)
-		output = append(output, fmt.Sprintf("Unsafe recovery failed at %s: %v", timeStr, u.err))
+		output.Info = fmt.Sprintf("Unsafe recovery failed: %v", u.err)
 	}
 
-	u.output = append(u.output, output...)
-	for _, o := range output {
-		log.Info(o)
+	u.output = append(u.output, output)
+	data, err := json.Marshal(output)
+	if err != nil {
+		panic(err)
 	}
+	log.Info(string(data))
 
 	// reset store reports to nil instead of delete, because it relays on the item
 	// to decide which store it needs to collect the report from.
@@ -411,8 +421,8 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.step += 1
 }
 
-func (u *unsafeRecoveryController) getForceLeaderPlanDigest() []string {
-	var output []string
+func (u *unsafeRecoveryController) getForceLeaderPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
 	for storeID, plan := range u.storeRecoveryPlans {
 		forceLeaders := plan.GetForceLeader()
 		if forceLeaders == nil {
@@ -425,19 +435,18 @@ func (u *unsafeRecoveryController) getForceLeaderPlanDigest() []string {
 				regions += ", "
 			}
 		}
-		output = append(output, fmt.Sprintf(" - store %d", storeID))
-		output = append(output, fmt.Sprintf("   - force leader on regions: %s", regions))
+		outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
 	}
-	return output
+	return outputs
 }
 
-func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() []string {
-	var output []string
+func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
 	for storeID, plan := range u.storeRecoveryPlans {
 		if len(plan.GetDemotes()) == 0 && len(plan.GetTombstones()) == 0 {
 			continue
 		}
-		output = append(output, fmt.Sprintf(" - store %d", storeID))
+		output := []string{}
 		for _, demote := range plan.GetDemotes() {
 			peers := ""
 			for _, peer := range demote.GetFailedVoters() {
@@ -446,27 +455,29 @@ func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() []string {
 					peers += ", "
 				}
 			}
-			output = append(output, fmt.Sprintf("   - region %d demotes peers %s", demote.GetRegionId(), peers))
+			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), peers))
 		}
 		for _, tombstone := range plan.GetTombstones() {
-			output = append(output, fmt.Sprintf("   - tombstone the peer of region %d", tombstone))
+			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
 		}
+		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
-	return output
+	return outputs
 }
 
-func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() []string {
-	var output []string
+func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
 	for storeID, plan := range u.storeRecoveryPlans {
 		if plan.GetCreates() == nil {
 			continue
 		}
-		output = append(output, fmt.Sprintf(" - store %d", storeID))
+		output := []string{}
 		for _, region := range plan.GetCreates() {
-			output = append(output, fmt.Sprintf("   - create region %v", core.RegionToHexMeta(region)))
+			output = append(output, fmt.Sprintf("create region %v", core.RegionToHexMeta(region)))
 		}
+		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
-	return output
+	return outputs
 }
 
 func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, onlyIncoming bool) bool {
@@ -893,10 +904,11 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) getReportStatus() []string {
-	var status []string
+func (u *unsafeRecoveryController) getReportStatus() StageOutput {
+	var status StageOutput
+	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	if u.numStoresReported != len(u.storeReports) {
-		status = append(status, fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports)))
+		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports))
 		var reported, unreported, undispatched string
 		for storeID, report := range u.storeReports {
 			str := strconv.FormatUint(storeID, 10) + ", "
@@ -910,11 +922,11 @@ func (u *unsafeRecoveryController) getReportStatus() []string {
 				reported += str
 			}
 		}
-		status = append(status, " - Stores that have not dispatched plan: "+undispatched)
-		status = append(status, " - Stores that have reported to PD: "+reported)
-		status = append(status, " - Stores that have not reported to PD: "+unreported)
+		status.Details = append(status.Details, "Stores that have not dispatched plan: "+undispatched)
+		status.Details = append(status.Details, "Stores that have reported to PD: "+reported)
+		status.Details = append(status.Details, "Stores that have not reported to PD: "+unreported)
 	} else {
-		status = append(status, fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports)))
+		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
 	}
 	return status
 }

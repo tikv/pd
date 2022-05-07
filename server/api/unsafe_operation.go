@@ -75,7 +75,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 // @Tags unsafe
 // @Summary Show the current status of failed stores removal.
 // @Produce json
-// Success 200 {object} []string
+// Success 200 {object} []StageOutput
 // @Router /admin/unsafe/remove-failed-stores/show [GET]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -85,7 +85,7 @@ func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWri
 // @Tags unsafe
 // @Summary Show the history of failed stores removal.
 // @Produce json
-// Success 200 {object} []string
+// Success 200 {object} []StageOutput
 // @Router /admin/unsafe/remove-failed-stores/history [GET]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalHistory(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
