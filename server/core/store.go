@@ -151,6 +151,11 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	return true
 }
 
+// IsUp returns true if store is serving or preparing.
+func (s *StoreInfo) IsUp() bool {
+	return s.IsServing() || s.IsPreparing()
+}
+
 // IsPreparing checks if the store's state is preparing.
 func (s *StoreInfo) IsPreparing() bool {
 	return s.GetNodeState() == metapb.NodeState_Preparing
