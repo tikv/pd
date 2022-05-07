@@ -155,7 +155,7 @@ func (s *clientTLSTestSuite) testTLSReload(
 				TLSClientConfig:   tlsConfig,
 			},
 		}
-		c.Assert(netutil.IsEnableHttps(httpClient), IsTrue)
+		c.Assert(netutil.IsEnableHTTPS(httpClient), IsTrue)
 	}
 	// 2. concurrent client dialing while certs become expired
 	errc := make(chan error, 1)

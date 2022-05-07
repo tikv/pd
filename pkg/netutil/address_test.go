@@ -46,19 +46,19 @@ func (s *testNetSuite) TestResolveLoopBackAddr(c *C) {
 }
 
 func (s *testNetSuite) TestIsEnableHttps(c *C) {
-	c.Assert(IsEnableHttps(http.DefaultClient), IsFalse)
+	c.Assert(IsEnableHTTPS(http.DefaultClient), IsFalse)
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   nil,
 		},
 	}
-	c.Assert(IsEnableHttps(httpClient), IsFalse)
+	c.Assert(IsEnableHTTPS(httpClient), IsFalse)
 	httpClient = &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   &tls.Config{},
 		},
 	}
-	c.Assert(IsEnableHttps(httpClient), IsFalse)
+	c.Assert(IsEnableHTTPS(httpClient), IsFalse)
 }

@@ -43,8 +43,8 @@ func ResolveLoopBackAddr(address, backAddress string) string {
 	return address
 }
 
-// IsEnableHttps returns true if client use tls.
-func IsEnableHttps(client *http.Client) bool {
+// IsEnableHTTPS returns true if client use tls.
+func IsEnableHTTPS(client *http.Client) bool {
 	if client == nil {
 		return false
 	}

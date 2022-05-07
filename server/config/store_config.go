@@ -105,7 +105,7 @@ type StoreConfigManager struct {
 // NewStoreConfigManager creates a new StoreConfigManager.
 func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
 	schema := "http"
-	if netutil.IsEnableHttps(client) {
+	if netutil.IsEnableHTTPS(client) {
 		schema = "https"
 	}
 
@@ -125,8 +125,8 @@ func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
 	return manager
 }
 
-// Observer is used to observe the config change.
-func (m *StoreConfigManager) Observer(address string) error {
+// ObserveConfig is used to observe the config change.
+func (m *StoreConfigManager) ObserveConfig(address string) error {
 	cfg, err := m.source.GetConfig(address)
 	if err != nil {
 		return err
