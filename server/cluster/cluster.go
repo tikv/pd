@@ -117,7 +117,7 @@ type RaftCluster struct {
 	storage            storage.Storage
 	minResolvedTS      uint64
 	// Keep the previous store limit settings when removing a store.
-	prevStoreLimit map[uint64]map[storelimit.Type]*storelimit.StoreLimit
+	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	clusterID                uint64
@@ -222,7 +222,7 @@ func (c *RaftCluster) InitCluster(
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
+	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 }
 
 // Start starts a cluster.
@@ -1117,12 +1117,13 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		// record the current store limit in memory
+		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
+			storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
+		}
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
-		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
-			storelimit.AddPeer:    store.GetStoreLimit(storelimit.AddPeer),
-			storelimit.RemovePeer: store.GetStoreLimit(storelimit.RemovePeer),
-		}
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
@@ -1279,16 +1280,14 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return nil
 	}
 
-	limiter := c.prevStoreLimit[storeID]
 	options := []core.StoreCreateOption{core.UpStore()}
-	// To prevent panic we check if the store limit is nil. There are two cases may cause this problem:
-	// 1. when we start a new cluster, the store limit is only initialized for the first time scheduling
-	// 2. once the PD leader transfer, the previous store limit may be lost, we suggest changing it manually
-	if limiter[storelimit.AddPeer] != nil {
-		options = append(options, core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer].Rate()))
-	}
-	if limiter[storelimit.RemovePeer] != nil {
-		options = append(options, core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer].Rate()))
+	// get the previous store limit recorded in memory
+	limiter, exist := c.prevStoreLimit[storeID]
+	if exist {
+		options = append(options,
+			core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer]),
+			core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer]),
+		)
 	}
 	newStore := store.Clone(options...)
 	log.Warn("store has been up",
@@ -1296,6 +1295,11 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
+		if exist {
+			// persist the store limit
+			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+		}
 		c.resetProgress(storeID, store.GetAddress(), removingAction)
 	}
 	return err
