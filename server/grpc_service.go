@@ -104,9 +104,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
-	leadID := s.member.GetEtcdLeader()
+	leaderID := s.member.GetEtcdLeader()
 	for _, m := range members {
-		if m.MemberId == leadID {
+		if m.MemberId == leaderID {
 			etcdLeader = m
 			break
 		}
