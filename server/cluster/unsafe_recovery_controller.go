@@ -209,7 +209,7 @@ func (u *unsafeRecoveryController) getReportStatus() StageOutput {
 	var status StageOutput
 	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	if u.numStoresReported != len(u.storeReports) {
-		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d):", u.numStoresReported, len(u.storeReports))
+		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d)", u.numStoresReported, len(u.storeReports))
 		var reported, unreported, undispatched string
 		for storeID, report := range u.storeReports {
 			str := strconv.FormatUint(storeID, 10) + ", "
@@ -357,7 +357,7 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 
 	if heartbeat.StoreReport.GetStep() != u.step {
 		log.Info("Unsafe recovery receives invalid store report",
-			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtain-step", heartbeat.StoreReport.GetStep()))
+			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtained-step", heartbeat.StoreReport.GetStep()))
 		// invalid store report, ignore
 		return false, nil
 	}
