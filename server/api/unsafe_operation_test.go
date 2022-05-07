@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var _ = Suite(&testUnsafeAPISuite{})
@@ -72,11 +73,7 @@ func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
 	c.Assert(err, IsNil)
 
 	// Test show
-	var output []string
+	var output []cluster.StageOutput
 	err = tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
-	c.Assert(err, IsNil)
-
-	// Test history
-	err = tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/remove-failed-stores/history", &output)
 	c.Assert(err, IsNil)
 }

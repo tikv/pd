@@ -41,38 +41,40 @@ const (
 )
 
 // Stage transition graph: for more details, please check `unsafeRecoveryController.HandleStoreHeartbeat()`
-//   +-----------+
-//   |           |
-//   |   idle    |
-//   |           |
-//   +-----------+
-//         |
-//         |                      +-----+
-//         v                      |     v
-//   +-----------+             +-----------+               +-----------+
-//   |           |------------>|           |               |           |
-//   |  collect  |             |  force    |               |  failed   |
-//   |  report   |      +------|  leader   |-------+------>|           |
-//   |           |      |      |           |       |       +-----------+
-//   +-----------+      |      +-----------+       |
-//                      |         |     ^          |
-//                      |         |     |          |
-//                      |         v     |          |
-//                      |      +-----------+       |
-//                      |      |           |       |
-//                      |      |  demote   |       |
-//                      +------|  voter    |-------+
-//                      |      |           |       |
-//                      |      +-----------+       |
-//                      |         |     ^          |
-//                      |         |     |          |
-//                      |         v     |          |
-//                      |      +-----------+       |
-//   +-----------+      |      |           |       |
-//   |           |      |      |  create   |       |
-//   | finished  |      |      |  region   |-------+
-//   |           |<-----+------|           |
-//   +-----------+             +-----------+
+//  +-----------+
+//  |           |
+//  |   idle    |
+//  |           |
+//  +-----------+
+//        |
+//        |
+//        |
+//        v            +-----------+
+//  +-----------+      |           |          +-----------+           +-----------+
+//  |           |----->|   force   |--------->|           |           |           |
+//  |  collect  |      | LeaderFor |          |  force    |           |  failed   |
+//  |  Report   |      |CommitMerge|    +-----|  Leader   |-----+---->|           |
+//  |           |      |           |    |     |           |     |     +-----------+
+//  +-----------+      +-----------+    |     +-----------+     |
+//                          |           |        |     ^        |
+//                          |           |        |     |        |
+//                          |           |        |     |        |
+//                          |           |        v     |        |
+//                          |           |     +-----------+     |
+//                          |           |     |           |     |
+//                          |           |     |  demote   |     |
+//                          |           +-----|  Voter    |-----+
+//                          |           |     |           |     |
+//                          |           |     +-----------+     |
+//                          |           |        |     ^        |
+//                          |           |        |     |        |
+//                          |           |        v     |        |
+//                          |           |     +-----------+     |
+//  +-----------+           |           |     |           |     |
+//  |           |           |           |     |  create   |     |
+//  | finished  |           |           |     |  Region   |-----+
+//  |           |<----------+-----------+-----|           |
+//  +-----------+                             +-----------+
 //
 const (
 	idle unsafeRecoveryStage = iota
@@ -105,7 +107,7 @@ type unsafeRecoveryController struct {
 	err    error
 }
 
-// The information for one stage of the recovery process.
+// StageOutput is the information for one stage of the recovery process.
 type StageOutput struct {
 	Info    string              `json:"info,omitempty"`
 	Time    string              `json:"time,omitempty"`
@@ -201,18 +203,6 @@ func (u *unsafeRecoveryController) Show() []StageOutput {
 		status = append(status, u.getReportStatus())
 	}
 	return status
-}
-
-// History returns the history logs of the current unsafe recover operation.
-func (u *unsafeRecoveryController) History() []StageOutput {
-	u.Lock()
-	defer u.Unlock()
-
-	if u.stage == idle {
-		return []StageOutput{{Info: "No unsafe recover has been triggered since PD restarted."}}
-	}
-	u.checkTimeout()
-	return u.output
 }
 
 func (u *unsafeRecoveryController) getReportStatus() StageOutput {

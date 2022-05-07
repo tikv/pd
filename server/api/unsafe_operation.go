@@ -81,13 +81,3 @@ func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWri
 	rc := getCluster(r)
 	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().Show())
 }
-
-// @Tags unsafe
-// @Summary Show the history of failed stores removal.
-// @Produce json
-// Success 200 {object} []StageOutput
-// @Router /admin/unsafe/remove-failed-stores/history [GET]
-func (h *unsafeOperationHandler) GetFailedStoresRemovalHistory(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
-	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().History())
-}

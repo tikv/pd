@@ -44,7 +44,6 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 	}
 	cmd.PersistentFlags().Float64("timeout", 600, "timeout in seconds")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
-	cmd.AddCommand(NewRemoveFailedStoresHistoryCommand())
 	return cmd
 }
 
@@ -54,15 +53,6 @@ func NewRemoveFailedStoresShowCommand() *cobra.Command {
 		Use:   "show",
 		Short: "Show the status of ongoing failed stores removal",
 		Run:   removeFailedStoresShowCommandFunc,
-	}
-}
-
-// NewRemoveFailedStoresHistoryCommand returns the unsafe remove failed stores history command.
-func NewRemoveFailedStoresHistoryCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "history",
-		Short: "Show the history of failed stores removal",
-		Run:   removeFailedStoresHistoryCommandFunc,
 	}
 }
 
@@ -99,18 +89,6 @@ func removeFailedStoresShowCommandFunc(cmd *cobra.Command, args []string) {
 	var resp string
 	var err error
 	prefix := fmt.Sprintf("%s/remove-failed-stores/show", unsafePrefix)
-	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Println(resp)
-}
-
-func removeFailedStoresHistoryCommandFunc(cmd *cobra.Command, args []string) {
-	var resp string
-	var err error
-	prefix := fmt.Sprintf("%s/remove-failed-stores/history", unsafePrefix)
 	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)
