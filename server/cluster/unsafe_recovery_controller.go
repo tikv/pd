@@ -259,7 +259,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				u.changeStage(forceLeaderForCommitMerge)
 			} else if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
 				u.changeStage(forceLeader)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
 				u.changeStage(createEmptyRegion)
 			}
 		case forceLeader, forceLeaderForCommitMerge:
@@ -269,7 +269,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				u.changeStage(forceLeader)
 			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
 				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
 				u.changeStage(createEmptyRegion)
 			}
 		case demoteFailedVoter:
@@ -278,11 +278,11 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				u.changeStage(forceLeader)
 			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
 				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree) {
+			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
 				u.changeStage(createEmptyRegion)
 			}
 		case createEmptyRegion:
-			if u.generateCreateEmptyRegionPlan(newestRegionTree) {
+			if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
 				u.changeStage(createEmptyRegion)
 			}
 		default:
@@ -846,7 +846,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree) bool {
+func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
@@ -875,6 +875,17 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		region := item.(*regionItem).Region()
 		storeID := item.(*regionItem).storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
+			// paranoid check: shouldn't overlap with any of the peers
+			for _, peers := range peersMap {
+				for _, peer := range peers {
+					if bytes.Compare(region.StartKey, peer.Region().StartKey) <= 0 && (len(region.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, region.EndKey) < 0) ||
+						(len(peer.Region().EndKey) == 0 || bytes.Compare(region.StartKey, peer.Region().EndKey) < 0) && (len(region.EndKey) == 0 || bytes.Compare(peer.Region().EndKey, region.EndKey) <= 0) {
+						u.err = errors.Errorf("Find overlap peer %d with newly created empty region", peer.Region().Id)
+						return false
+					}
+				}
+			}
+
 			newRegion, err := createRegion(lastEnd, region.StartKey, storeID)
 			if err != nil {
 				u.err = err
