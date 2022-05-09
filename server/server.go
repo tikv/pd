@@ -101,11 +101,10 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg                *config.Config
-	storeConfigManager *config.StoreConfigManager
-	etcdCfg            *embed.Config
-	persistOptions     *config.PersistOptions
-	handler            *Handler
+	cfg            *config.Config
+	etcdCfg        *embed.Config
+	persistOptions *config.PersistOptions
+	handler        *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -243,13 +242,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	rand.Seed(time.Now().UnixNano())
 
 	s := &Server{
-		cfg:                cfg,
-		persistOptions:     config.NewPersistOptions(cfg),
-		member:             &member.Member{},
-		ctx:                ctx,
-		startTimestamp:     time.Now().Unix(),
-		DiagnosticsServer:  sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		storeConfigManager: config.NewStoreConfigManager(&cfg.Security),
+		cfg:               cfg,
+		persistOptions:    config.NewPersistOptions(cfg),
+		member:            &member.Member{},
+		ctx:               ctx,
+		startTimestamp:    time.Now().Unix(),
+		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 	s.handler = newHandler(s)
 
@@ -412,7 +410,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient, s.storeConfigManager)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -692,11 +690,6 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
-}
-
-// GetStoreConfigManager returns the store config manager
-func (s *Server) GetStoreConfigManager() *config.StoreConfigManager {
-	return s.storeConfigManager
 }
 
 // GetAddr returns the server urls for clients.
@@ -1334,7 +1327,14 @@ func (s *Server) campaignLeader() {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			if err = alllocator.UpdateTSO(); err != nil {
+				panic(err)
+			}
+		})
+	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
