@@ -192,9 +192,9 @@ func (s *clientTestSuite) TestUpdateAfterResetTSO(c *C) {
 	defer cluster.Destroy()
 
 	endpoints := s.runServer(c, cluster)
-	cli := setupCli(c, s.ctx, endpoints)
+	cli := s.setupCli(c, endpoints, false)
 
-	testutil.WaitUntil(c, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
@@ -207,7 +207,7 @@ func (s *clientTestSuite) TestUpdateAfterResetTSO(c *C) {
 	newLeaderName := cluster.WaitLeader()
 	c.Assert(newLeaderName, Not(Equals), oldLeaderName)
 	// Request a new TSO.
-	testutil.WaitUntil(c, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
@@ -216,7 +216,7 @@ func (s *clientTestSuite) TestUpdateAfterResetTSO(c *C) {
 	err = cluster.GetServer(newLeaderName).ResignLeader()
 	c.Assert(err, IsNil)
 	// Should NOT panic here.
-	testutil.WaitUntil(c, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
