@@ -72,6 +72,8 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
+
+	HotRegionMoveMaxSize = 512
 )
 
 var (
@@ -448,7 +450,12 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		for _, srcPeerStat := range bs.filterHotPeers() {
 			bs.cur.srcPeerStat = srcPeerStat
 			bs.cur.region = bs.getRegion()
-			if bs.cur.region == nil {
+			region := bs.cur.region
+			if region == nil {
+				continue
+			}
+			if bs.opTy == movePeer && region.GetApproximateSize() > bs.GetOpts().GetHotRegionSplitSize() {
+				schedulerCounter.WithLabelValues("hot_region_split").Inc()
 				continue
 			}
 			for _, dstStore := range bs.filterDstStores() {
@@ -797,7 +804,7 @@ func (bs *balanceSolver) isTolerance(src, dst *statistics.StoreLoadDetail, dim i
 	if srcRate <= dstRate {
 		return false
 	}
-	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
 	srcPending := src.LoadPred.Pending().Loads[dim]
 	dstPending := dst.LoadPred.Pending().Loads[dim]
 	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.GetID(), 10), strconv.FormatUint(dst.GetID(), 10)).Set(pendingAmp)

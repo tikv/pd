@@ -16,6 +16,8 @@ package schedulers
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 
 	"math"
 	"net/http"
@@ -38,7 +40,6 @@ const (
 	SplitBucketType = "split-bucket"
 
 	DefaultHotDegree = 3
-	DefaultSplitSize = 512
 )
 
 func init() {
@@ -60,25 +61,30 @@ func init() {
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree:          DefaultHotDegree,
-		SplitRegionSize: DefaultSplitSize,
+		Degree: DefaultHotDegree,
 	}
 }
 
 type splitBucketSchedulerConfig struct {
-	mu              syncutil.RWMutex
-	storage         endpoint.ConfigStorage
-	Degree          int   `json:"degree"`
-	SplitRegionSize int64 `json:"split_region_size"`
+	mu      syncutil.RWMutex
+	storage endpoint.ConfigStorage
+	Degree  int `json:"degree"`
 }
 
-func (c *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
+	conf.mu.RLock()
+	defer conf.mu.RUnlock()
 	return &splitBucketSchedulerConfig{
-		Degree:          c.Degree,
-		SplitRegionSize: c.SplitRegionSize,
+		Degree: conf.Degree,
 	}
+}
+
+func (conf *splitBucketSchedulerConfig) persistLocked() error {
+	data, err := schedule.EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	return conf.storage.SaveScheduleConfig(SplitBucketName, data)
 }
 
 type splitBucketScheduler struct {
@@ -92,11 +98,47 @@ type splitBucketHandler struct {
 	rd   *render.Render
 }
 
-func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	h.conf.mu.RLock()
 	defer h.conf.mu.RUnlock()
 	conf := h.conf.Clone()
 	_ = h.rd.JSON(w, http.StatusOK, conf)
+}
+
+func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	h.conf.mu.Lock()
+	defer h.conf.mu.Unlock()
+	rd := render.New(render.Options{IndentJSON: true})
+	oldc, _ := json.Marshal(h.conf)
+	data, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := json.Unmarshal(data, h.conf); err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	newc, _ := json.Marshal(h.conf)
+	if !bytes.Equal(oldc, newc) {
+		h.conf.persistLocked()
+		rd.Text(w, http.StatusOK, "success")
+	}
+
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(data, &m); err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok := findSameField(h.conf, m)
+	if ok {
+		rd.Text(w, http.StatusOK, "no changed")
+		return
+	}
+
+	rd.Text(w, http.StatusBadRequest, "config item not found")
 }
 
 func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
@@ -133,7 +175,7 @@ func (s *splitBucketScheduler) ServerHTTP(w http.ResponseWriter, r *http.Request
 }
 
 // IsScheduleAllowed return true.
-func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
 	return true
 }
 
@@ -144,7 +186,9 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	degree := math.MinInt32
 	var splitKeys [][]byte
 	var region *core.RegionInfo
+	hotRegionSplitSize := cluster.GetOpts().GetHotRegionSplitSize()
 	for regionID, buckets := range hotBuckets {
+		schedulerCounter.WithLabelValues(s.GetName(), "bucket-len").Add(float64(len(buckets)))
 		region = cluster.GetRegion(regionID)
 		// skip if region is not exist
 		if region == nil {
@@ -152,7 +196,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 			continue
 		}
 		// region size is less than split region size
-		if region.GetApproximateKeys() <= conf.SplitRegionSize {
+		if region.GetApproximateKeys() <= hotRegionSplitSize {
 			schedulerCounter.WithLabelValues(s.GetName(), "region-too-small").Inc()
 			continue
 		}

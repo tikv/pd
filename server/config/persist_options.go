@@ -513,6 +513,15 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
+// GetHotRegionSplitSize returns the hot region split size.
+func (o *PersistOptions) GetHotRegionSplitSize() int64 {
+	size := o.GetScheduleConfig().HotRegionSplitSize
+	if size == 0 {
+		size = DefaultHotRegionSplitSize
+	}
+	return size
+}
+
 // IsDebugMetricsEnabled returns if debug metrics is enabled.
 func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.GetScheduleConfig().EnableDebugMetrics

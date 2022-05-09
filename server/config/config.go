@@ -253,6 +253,9 @@ const (
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
 	defaultLogFormat = "text"
+
+	// DefaultHotRegionSplitSize is the threashold for hot region move size.
+	DefaultHotRegionSplitSize = int64(512)
 )
 
 // Special keys for Labels
@@ -753,6 +756,9 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// the threshold size of the hot region to be split as a hot region.
+	HotRegionSplitSize int64 `toml:"hot-region-split-size" json:"hot-region-split-size,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
