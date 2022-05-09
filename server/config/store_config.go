@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/slice"
-
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
