@@ -123,9 +123,9 @@ func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
 
 func (t *testHotBucketCache) TestInherit(c *C) {
 	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("50"), []byte("60")}, 0))
-	originBucketItem.stats[0].hotDegree = 3
-	originBucketItem.stats[1].hotDegree = 2
-	originBucketItem.stats[2].hotDegree = 10
+	originBucketItem.stats[0].HotDegree = 3
+	originBucketItem.stats[1].HotDegree = 2
+	originBucketItem.stats[2].HotDegree = 10
 
 	testdata := []struct {
 		buckets *metapb.Buckets
@@ -153,7 +153,7 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
 		c.Assert(buckets.stats, HasLen, len(v.expect))
 		for k, v := range v.expect {
-			c.Assert(buckets.stats[k].hotDegree, Equals, v)
+			c.Assert(buckets.stats[k].HotDegree, Equals, v)
 		}
 	}
 }
@@ -203,8 +203,8 @@ func (t *testHotBucketCache) TestBucketTreeItemClone(c *C) {
 		c.Assert(copy.endKey, BytesEquals, v.endKey)
 		c.Assert(copy.stats, HasLen, v.count)
 		if v.count > 0 && v.strict {
-			c.Assert(copy.stats[0].startKey, BytesEquals, v.startKey)
-			c.Assert(copy.stats[len(copy.stats)-1].endKey, BytesEquals, v.endKey)
+			c.Assert(copy.stats[0].StartKey, BytesEquals, v.startKey)
+			c.Assert(copy.stats[len(copy.stats)-1].EndKey, BytesEquals, v.endKey)
 		}
 	}
 }
@@ -237,7 +237,7 @@ func (t *testHotBucketCache) TestClip(c *C) {
 		stats := item.clip(origins)
 		c.Assert(stats, HasLen, v.count)
 		if v.count > 0 {
-			c.Assert(stats[0].startKey, BytesEquals, v.startKey)
+			c.Assert(stats[0].StartKey, BytesEquals, v.startKey)
 		}
 	}
 }
@@ -245,17 +245,17 @@ func (t *testHotBucketCache) TestClip(c *C) {
 func (t *testHotBucketCache) TestCalculateHotDegree(c *C) {
 	origin := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("010"), []byte("100")}, uint64(0)))
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].hotDegree, Equals, -1)
+	c.Assert(origin.stats[0].HotDegree, Equals, -1)
 
 	// case1: the dimension of read will be hot
-	origin.stats[0].loads = []uint64{minHotThresholds[0] + 1, minHotThresholds[1] + 1, 0, 0, 0, 0}
+	origin.stats[0].Loads = []uint64{minHotThresholds[0] + 1, minHotThresholds[1] + 1, 0, 0, 0, 0}
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].hotDegree, Equals, 0)
+	c.Assert(origin.stats[0].HotDegree, Equals, 0)
 
 	// case1: the dimension of write will be hot
-	origin.stats[0].loads = []uint64{0, 0, 0, minHotThresholds[3] + 1, minHotThresholds[4] + 1, 0}
+	origin.stats[0].Loads = []uint64{0, 0, 0, minHotThresholds[3] + 1, minHotThresholds[4] + 1, 0}
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].hotDegree, Equals, 1)
+	c.Assert(origin.stats[0].HotDegree, Equals, 1)
 }
 
 func newTestBuckets(regionID uint64, version uint64, keys [][]byte, flow uint64) *metapb.Buckets {

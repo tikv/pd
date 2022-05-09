@@ -64,9 +64,9 @@ func (s *testHotBucketTaskCache) TestColdHot(c *C) {
 			item := hotBuckets[v.buckets.RegionId]
 			c.Assert(item, NotNil)
 			if v.isHot {
-				c.Assert(item[0].hotDegree, Equals, i+1)
+				c.Assert(item[0].HotDegree, Equals, i+1)
 			} else {
-				c.Assert(item[0].hotDegree, Equals, -i-1)
+				c.Assert(item[0].HotDegree, Equals, -i-1)
 			}
 		}
 	}
@@ -87,8 +87,8 @@ func (s *testHotBucketTaskCache) TestCheckBucketsTask(c *C) {
 	item := hotBuckets[uint64(1)]
 	c.Assert(item, NotNil)
 	c.Assert(item, HasLen, 2)
-	c.Assert(item[0].hotDegree, Equals, -1)
-	c.Assert(item[1].hotDegree, Equals, -1)
+	c.Assert(item[0].HotDegree, Equals, -1)
+	c.Assert(item[1].HotDegree, Equals, -1)
 
 	// case2: add bucket successful and the hot degree should inherit from the old one.
 	buckets = newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, 0)
@@ -98,7 +98,7 @@ func (s *testHotBucketTaskCache) TestCheckBucketsTask(c *C) {
 	time.Sleep(time.Millisecond * 10)
 	item = hotBuckets[uint64(2)]
 	c.Assert(item, HasLen, 1)
-	c.Assert(item[0].hotDegree, Equals, -2)
+	c.Assert(item[0].HotDegree, Equals, -2)
 
 	// case3：add bucket successful and the hot degree should inherit from the old one.
 	buckets = newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0)
@@ -108,7 +108,7 @@ func (s *testHotBucketTaskCache) TestCheckBucketsTask(c *C) {
 	time.Sleep(time.Millisecond * 10)
 	item = hotBuckets[uint64(1)]
 	c.Assert(item, HasLen, 1)
-	c.Assert(item[0].hotDegree, Equals, -2)
+	c.Assert(item[0].HotDegree, Equals, -2)
 }
 
 func (s *testHotBucketTaskCache) TestCollectBucketStatsTask(c *C) {
