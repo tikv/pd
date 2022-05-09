@@ -22,6 +22,7 @@ import (
 const (
 	clusterPath                = "raft"
 	configPath                 = "config"
+	selfProtectionPath         = "self_protection"
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"

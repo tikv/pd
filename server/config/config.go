@@ -107,8 +107,6 @@ type Config struct {
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
-	ServiceCfg ServiceConfig `toml:"service" json:"service"`
-
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
@@ -234,7 +232,6 @@ const (
 	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
 	defaultMaxResetTSGap                    = 24 * time.Hour
 	defaultMinResolvedTSPersistenceInterval = 0
-	defaultEnableAuditMiddleware            = false
 	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
@@ -573,10 +570,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		return err
 	}
 	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
-		return err
-	}
-
-	if err := c.ServiceCfg.adjust(configMetaData.Child("service")); err != nil {
 		return err
 	}
 
@@ -1096,25 +1089,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
-}
-
-// ServiceConfig is the configuration for PD service such as HTTP API and gRPC.
-type ServiceConfig struct {
-	// EnableAudit controls the switch of the audit middleware
-	EnableAudit bool `toml:"enable-audit" json:"enable-audit,string"`
-}
-
-// Clone returns a cloned PD server config.
-func (c *ServiceConfig) Clone() *ServiceConfig {
-	cfg := *c
-	return &cfg
-}
-
-func (c *ServiceConfig) adjust(meta *configMetaData) error {
-	if !meta.IsDefined("enable-audit") {
-		c.EnableAudit = defaultEnableAuditMiddleware
-	}
-	return nil
 }
 
 // PDServerConfig is the configuration for pd server.

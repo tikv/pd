@@ -148,7 +148,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/config/default", confHandler.GetDefaultConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/schedule", confHandler.GetScheduleConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/schedule", confHandler.SetScheduleConfig, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/config/service", confHandler.GetServiceConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/pd-server", confHandler.GetPDServerConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/replicate", confHandler.GetReplicationConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/replicate", confHandler.SetReplicationConfig, setMethods("POST"), setAuditBackend(localLog))
@@ -282,6 +281,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
+
+	selfProtectionHandler := newSelfProtectionConfHandler(svr, rd)
+	registerFunc(clusterRouter, "/self_protection/config", selfProtectionHandler.GetSelfProtectionConfig, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "/self_protection/config", selfProtectionHandler.SetSelfProtectionConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

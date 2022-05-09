@@ -161,7 +161,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
 
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
@@ -189,7 +189,7 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, false)
 
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
@@ -262,7 +262,7 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
 	timeUnix := time.Now().Unix() - 20
 	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
@@ -310,7 +310,7 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, false)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
@@ -330,7 +330,7 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)

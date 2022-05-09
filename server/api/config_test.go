@@ -283,34 +283,6 @@ func (s *testConfigSuite) TestConfigDefault(c *C) {
 	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }
 
-func (s *testConfigSuite) TestConfigService(c *C) {
-	addrGet := fmt.Sprintf("%s/config/service", s.urlPrefix)
-	sc := &config.ServiceConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, false)
-
-	addrPost := fmt.Sprintf("%s/config", s.urlPrefix)
-	// test update enable-audit
-	ms := map[string]interface{}{
-		"enable-audit": "true",
-	}
-	postData, err := json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(tu.CheckPostJSON(testDialClient, addrPost, postData, tu.StatusOK(c)), IsNil)
-	sc = &config.ServiceConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, true)
-	ms = map[string]interface{}{
-		"enable-audit": "false",
-	}
-	postData, err = json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(tu.CheckPostJSON(testDialClient, addrPost, postData, tu.StatusOK(c)), IsNil)
-	sc = &config.ServiceConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, false)
-}
-
 func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	addrPost := fmt.Sprintf("%s/config", s.urlPrefix)
 
