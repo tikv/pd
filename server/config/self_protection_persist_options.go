@@ -35,12 +35,12 @@ func NewSelfProtectionPersistOptions(cfg *SelfProtectionConfig) *SelfProtectionP
 	return o
 }
 
-// GetSelfProtectionConfig returns pd self protection configurations.
+// GetAuditConfig returns pd self protection configurations.
 func (o *SelfProtectionPersistOptions) GetAuditConfig() *AuditConfig {
 	return o.audit.Load().(*AuditConfig)
 }
 
-// SetSelfProtectionConfig sets the PD self protection configuration.
+// SetAuditConfig sets the PD self protection configuration.
 func (o *SelfProtectionPersistOptions) SetAuditConfig(cfg *AuditConfig) {
 	o.audit.Store(cfg)
 }

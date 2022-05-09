@@ -283,8 +283,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 
 	selfProtectionHandler := newSelfProtectionConfHandler(svr, rd)
-	registerFunc(clusterRouter, "/self_protection/config", selfProtectionHandler.GetSelfProtectionConfig, setMethods("GET"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/self_protection/config", selfProtectionHandler.SetSelfProtectionConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/self_protection/config", selfProtectionHandler.GetSelfProtectionConfig, setMethods("GET"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/self_protection/config", selfProtectionHandler.SetSelfProtectionConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

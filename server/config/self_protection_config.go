@@ -23,6 +23,7 @@ type SelfProtectionConfig struct {
 	AuditConfig `json:"audit"`
 }
 
+// NewSelfProtectionConfig returns a new self-protection config
 func NewSelfProtectionConfig() *SelfProtectionConfig {
 	audit := AuditConfig{
 		EnableAudit: defaultEnableAuditMiddleware,

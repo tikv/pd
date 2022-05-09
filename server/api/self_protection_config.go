@@ -52,7 +52,7 @@ func (h *selfProtectionConfHandler) GetSelfProtectionConfig(w http.ResponseWrite
 }
 
 // @Tags self_protection
-// @Summary Update some self-proteciton config items.
+// @Summary Update some self-proteciton's config items.
 // @Accept json
 // @Param body body object false "json params"
 // @Produce json
@@ -99,8 +99,7 @@ func (h *selfProtectionConfHandler) SetSelfProtectionConfig(w http.ResponseWrite
 
 func (h *selfProtectionConfHandler) updateSelfProtectionConfig(cfg *config.SelfProtectionConfig, key string, value interface{}) error {
 	kp := strings.Split(key, ".")
-	switch kp[0] {
-	case "audit":
+	if kp[0] == "audit" {
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
