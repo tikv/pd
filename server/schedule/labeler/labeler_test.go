@@ -320,11 +320,7 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 }
 
 func (s *testLabelerSuite) checkRuleInMemoryAndStoage(c *C, ruleID string, exist bool) {
-	existInMemory := NotNil
-	if !exist {
-		existInMemory = IsNil
-	}
-	c.Assert(s.labeler.labelRules[ruleID], existInMemory)
+	c.Assert(s.labeler.labelRules[ruleID] != nil, Equals, exist)
 	existInStorage := false
 	s.labeler.storage.LoadRegionRules(func(k, v string) {
 		if k == ruleID {
