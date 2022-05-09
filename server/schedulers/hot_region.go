@@ -455,7 +455,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				continue
 			}
 			if bs.opTy == movePeer && region.GetApproximateSize() > bs.GetOpts().GetHotRegionSplitSize() {
-				schedulerCounter.WithLabelValues("hot_region_split").Inc()
+				schedulerCounter.WithLabelValues(fmt.Sprintf("hot-region-%s", bs.rwTy), "hot_region_split").Inc()
 				continue
 			}
 			for _, dstStore := range bs.filterDstStores() {

@@ -132,11 +132,6 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok := findSameField(h.conf, m)
-	if ok {
-		rd.Text(w, http.StatusOK, "no changed")
-		return
-	}
 
 	rd.Text(w, http.StatusBadRequest, "config item not found")
 }
@@ -206,7 +201,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		}
 		for _, bucket := range buckets {
 			keys := checkSplit(region, bucket)
-			if hg := bucket.GetHotDegree(); hg > degree && len(keys) > 0 {
+			if hg := bucket.HotDegree; hg > degree && len(keys) > 0 {
 				splitKeys = keys
 				degree = hg
 			}

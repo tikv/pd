@@ -16,6 +16,7 @@ package buckets
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -122,6 +123,7 @@ func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
 }
 
 func (t *testHotBucketCache) TestInherit(c *C) {
+	// init: key range |10 20|20-50|50-60|(3 2 10)
 	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("50"), []byte("60")}, 0))
 	originBucketItem.stats[0].HotDegree = 3
 	originBucketItem.stats[1].HotDegree = 2
@@ -148,11 +150,13 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 		expect:  []int{0},
 	}}
 
-	for _, v := range testdata {
+	for i, v := range testdata {
+		fmt.Printf("case:%d\n", i)
 		buckets := convertToBucketTreeItem(v.buckets)
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
 		c.Assert(buckets.stats, HasLen, len(v.expect))
 		for k, v := range v.expect {
+			fmt.Println(k)
 			c.Assert(buckets.stats[k].HotDegree, Equals, v)
 		}
 	}
@@ -205,39 +209,6 @@ func (t *testHotBucketCache) TestBucketTreeItemClone(c *C) {
 		if v.count > 0 && v.strict {
 			c.Assert(copy.stats[0].StartKey, BytesEquals, v.startKey)
 			c.Assert(copy.stats[len(copy.stats)-1].EndKey, BytesEquals, v.endKey)
-		}
-	}
-}
-
-func (t *testHotBucketCache) TestClip(c *C) {
-	origins := []*BucketTreeItem{
-		convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("60")}, uint64(0))),
-		convertToBucketTreeItem(newTestBuckets(2, 1, [][]byte{[]byte("80"), []byte("100")}, uint64(0))),
-	}
-
-	testdata := []struct {
-		buckets  *metapb.Buckets
-		count    int
-		startKey []byte
-	}{{
-		buckets:  newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0),
-		startKey: []byte("10"),
-		count:    3,
-	}, {
-		buckets:  newTestBuckets(1, 1, [][]byte{[]byte("20"), []byte("50")}, 0),
-		startKey: []byte("20"),
-		count:    2,
-	}, {
-		buckets:  newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("100")}, 0),
-		startKey: []byte("50"),
-		count:    0,
-	}}
-	for _, v := range testdata {
-		item := convertToBucketTreeItem(v.buckets)
-		stats := item.clip(origins)
-		c.Assert(stats, HasLen, v.count)
-		if v.count > 0 {
-			c.Assert(stats[0].StartKey, BytesEquals, v.startKey)
 		}
 	}
 }

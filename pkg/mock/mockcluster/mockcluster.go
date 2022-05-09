@@ -17,7 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/server/statistics/buckets"
+
 	"strconv"
 	"time"
 
@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )

@@ -33,9 +33,19 @@ var (
 			Help:      "The distribution of bucket flow bytes",
 			Buckets:   prometheus.LinearBuckets(-100, 10, 20),
 		})
+
+	bucketsHotHandlerDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "bucket_hot_degree_duration",
+			Help:      "Bucketed histogram of processing time (s) of handled buckets.",
+			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(bucketsHeartbeatIntervalHist)
 	prometheus.MustRegister(bucketsHotDegreeHist)
+	prometheus.MustRegister(bucketsHotHandlerDuration)
 }

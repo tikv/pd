@@ -16,7 +16,6 @@ package buckets
 
 import (
 	"context"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
@@ -26,6 +25,16 @@ const (
 	checkBucketsTaskType flowItemTaskKind = iota
 	collectBucketStatsTaskType
 )
+
+func (kind flowItemTaskKind) String() string {
+	switch kind {
+	case checkBucketsTaskType:
+		return "check_buckets"
+	case collectBucketStatsTaskType:
+		return "collect_bucket_stats"
+	}
+	return "unknown"
+}
 
 // flowBucketsItemTask indicates the task in flowItem queue
 type flowBucketsItemTask interface {
@@ -56,7 +65,7 @@ func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
 
 type collectBucketStatsTask struct {
 	minDegree int
-	ret       chan map[uint64][]*BucketStat // RegionID ==> []*Buckets
+	ret       chan map[uint64][]*BucketStat // RegionID ==>Buckets
 }
 
 // NewCollectBucketStatsTask creates task to collect bucket stats.
