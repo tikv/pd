@@ -41,7 +41,7 @@ func (s *testUnsafeAPISuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Serving, nil)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
 }
 
 func (s *testUnsafeAPISuite) TearDownSuite(c *C) {

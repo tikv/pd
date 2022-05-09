@@ -412,14 +412,12 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output.Info = "Unsafe recovery enters create empty region stage"
 		output.Actions = u.getCreateEmptyRegionPlanDigest()
 	case finished:
-		u.cluster.PauseOrResumeScheduler("all", 0)
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
 			u.cluster.DropCacheAllRegion()
 		}
 		output.Info = "Unsafe recovery finished"
 	case failed:
-		u.cluster.PauseOrResumeScheduler("all", 0)
 		output.Info = fmt.Sprintf("Unsafe recovery failed: %v", u.err)
 	}
 

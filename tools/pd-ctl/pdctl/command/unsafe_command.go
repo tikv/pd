@@ -77,7 +77,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	timeout, err := cmd.Flags().GetFloat64("timeout")
 	if err != nil {
-		cmd.Usage()
+		cmd.Println(err)
 		return
 	} else if timeout != 600 {
 		postInput["timeout"] = timeout
