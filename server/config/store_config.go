@@ -51,7 +51,10 @@ type StoreConfig struct {
 
 // Coprocessor is the config of coprocessor.
 type Coprocessor struct {
-	RegionMaxSize   string `json:"region-max-size"`
+	// RegionMaxSize is the max size of a region, if the region size is larger than this value, region will be
+	// split by RegionSplitSize.
+	RegionMaxSize string `json:"region-max-size"`
+	// RegionSplitSize is the split size of a region, region will according to this value to split.
 	RegionSplitSize string `json:"region-split-size"`
 	RegionMaxKeys   int    `json:"region-max-keys"`
 	RegionSplitKeys int    `json:"region-split-keys"`
@@ -100,12 +103,14 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 
 // CheckRegionSize return error if the smallest region's size is less than mergeSize
 func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
+	// the merged region will not be split if it's size less than region max size.
 	if size < c.GetRegionMaxSize() {
 		return nil
 	}
 
+	// the smallest of the split regions can not be merge again, so it's size should less merge size.
 	if smallSize := size % c.GetRegionSplitSize(); smallSize <= mergeSize && smallSize != 0 {
-		log.Info("region size is too small", zap.Uint64("size", size), zap.Uint64("mergeSize", mergeSize), zap.Uint64("smallSize", smallSize))
+		log.Debug("region size is too small", zap.Uint64("size", size), zap.Uint64("merge-size", mergeSize), zap.Uint64("small-size", smallSize))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-size, " +
 			"it will be merged again")
 	}
@@ -119,6 +124,7 @@ func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 	}
 
 	if smallKeys := keys % c.GetRegionSplitKeys(); smallKeys <= mergeKeys && smallKeys > 0 {
+		log.Debug("region keys is too small", zap.Uint64("keys", keys), zap.Uint64("merge-keys", mergeKeys), zap.Uint64("smallSize", smallKeys))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-keys")
 	}
 	return nil

@@ -85,33 +85,31 @@ func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 		mergeKeys uint64
 		pass      bool
 	}{{
+		// case 1: the merged region size is smaller than the max region size
+		size:      96 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 2: the smallest region is 68MiB，it can't be merged again.
 		size:      144 + 20,
 		mergeSize: 20,
 		keys:      1440000 + 200000,
 		mergeKeys: 200000,
 		pass:      true,
 	}, {
-		size:      144 + 1,
-		mergeSize: 20,
-		keys:      1440000 + 10000,
-		mergeKeys: 200000,
-		pass:      true,
-	}, {
+		// case 3: the smallest region is 50MiB，it can be merged again.
 		size:      144 + 2,
 		mergeSize: 50,
 		keys:      1440000 + 20000,
 		mergeKeys: 500000,
 		pass:      false,
 	}, {
+		// case4: the smallest region is 51MiB，it can't be merged again.
 		size:      144 + 3,
 		mergeSize: 50,
 		keys:      1440000 + 30000,
-		mergeKeys: 500000,
-		pass:      true,
-	}, {
-		size:      1 + 1,
-		mergeSize: 20,
-		keys:      10000 + 10000,
 		mergeKeys: 500000,
 		pass:      true,
 	}}
