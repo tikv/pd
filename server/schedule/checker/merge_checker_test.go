@@ -107,14 +107,12 @@ func (s *testMergeCheckerSuite) TestBasic(c *C) {
 	c.Assert(ops, IsNil)
 
 	// it can merge if the max region size of the store is greater than the target region size.
-	s.cluster.StoreConfigManager.UpdateConfig(&config.StoreConfig{Coprocessor: config.Coprocessor{
-		RegionMaxSize: "1Gib",
-	}})
+	config := s.cluster.GetStoreConfig()
+	config.RegionMaxSize = "10Gib"
+
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, NotNil)
-	s.cluster.StoreConfigManager.UpdateConfig(&config.StoreConfig{Coprocessor: config.Coprocessor{
-		RegionMaxSize: "144Mib",
-	}})
+	config.RegionMaxSize = "144Mib"
 	ops = s.mc.Check(s.regions[2])
 	c.Assert(ops, IsNil)
 	// change the size back
