@@ -58,7 +58,7 @@ func (s *testProgressSuite) Test(c *C) {
 	m.UpdateProgressRemaining(n, 30)
 	p, ls, cs = m.Status(n)
 	c.Assert(p, Equals, 0.7)
-	// the speed in previous `SpeedStatisticalInterval` is zero
+	// the speed in previous `speedStatisticalInterval` is zero
 	c.Assert(ls, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 

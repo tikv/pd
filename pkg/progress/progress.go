@@ -81,7 +81,7 @@ func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 		if p.total < remaining {
 			p.total = remaining
 		}
-		// calculate the average speed for every `SpeedStatisticalInterval`
+		// calculate the average speed for every `speedStatisticalInterval`
 		if time.Since(p.lastTime) >= speedStatisticalInterval {
 			if (p.lastTimeRemaining - remaining) <= 0 {
 				p.lastSpeed = 0
