@@ -902,8 +902,6 @@ func (s *testUnsafeRecoverSuite) TestRecoveryCreateEmptyRegion(c *C) {
 
 	for storeID, report := range reports {
 		if expect, ok := expects[storeID]; ok {
-			fmt.Println(report.PeerReports)
-			fmt.Println(expect.PeerReports)
 			c.Assert(report.PeerReports, DeepEquals, expect.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)

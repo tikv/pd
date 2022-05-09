@@ -424,7 +424,8 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.output = append(u.output, output)
 	data, err := json.Marshal(output)
 	if err != nil {
-		panic(err)
+		u.err = err
+		return
 	}
 	log.Info(string(data))
 

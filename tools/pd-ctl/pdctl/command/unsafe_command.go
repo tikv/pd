@@ -67,7 +67,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	for _, strStore := range strStores {
 		store, err := strconv.ParseUint(strStore, 10, 64)
 		if err != nil {
-			cmd.Usage()
+			cmd.Println(err)
 			return
 		}
 		stores = append(stores, store)
