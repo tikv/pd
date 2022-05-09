@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-// FindJSONFullTagByChildTag is used to find field by child json tag recursively and return the full tag of field
+// FindJSONFullTagByChildTag is used to find field by child json tag recursively and return the full tag of field.
 // If we have both "a.c" and "b.c" config items, for a given c, it's hard for us to decide which config item it represents.
 // We'd better to naming a config item without duplication.
 func FindJSONFullTagByChildTag(t reflect.Type, tag string) string {
