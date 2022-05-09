@@ -63,6 +63,14 @@ func (rs RegionsInfo) GetValues(tag regionpkg.StatTag) []uint64 {
 		for i, region := range rs {
 			values[i] = region.GetKeysRead()
 		}
+	case regionpkg.WriteQueryNum:
+		for i, region := range rs {
+			values[i] = region.GetWriteQueryNum()
+		}
+	case regionpkg.ReadQueryNum:
+		for i, region := range rs {
+			values[i] = region.GetReadQueryNum()
+		}
 	case regionpkg.Integration:
 		for i, region := range rs {
 			values[i] = region.GetBytesWritten() + region.GetBytesRead()

@@ -113,6 +113,8 @@ type RegionInfo struct {
 	ReadBytes       uint64        `json:"read_bytes"`
 	WrittenKeys     uint64        `json:"written_keys"`
 	ReadKeys        uint64        `json:"read_keys"`
+	WriteQueryNum   uint64        `json:"write_query_num"`
+	ReadQueryNum    uint64        `json:"read_query_num"`
 	ApproximateSize int64         `json:"approximate_size"`
 	ApproximateKeys int64         `json:"approximate_keys"`
 	Buckets         []string      `json:"buckets,omitempty"`
@@ -158,8 +160,10 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
 	s.WrittenBytes = r.GetBytesWritten()
 	s.WrittenKeys = r.GetKeysWritten()
+	s.WriteQueryNum = r.GetWriteQueryNum()
 	s.ReadBytes = r.GetBytesRead()
 	s.ReadKeys = r.GetKeysRead()
+	s.ReadQueryNum = r.GetReadQueryNum()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())

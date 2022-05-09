@@ -122,6 +122,17 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core
 		core.SetWrittenKeys(1 * 1024 * 1024),
 		core.SetReadBytes(200 * 1024 * 1024),
 		core.SetReadKeys(2 * 1024 * 1024),
+		core.SetQueryStats(&pdpb.QueryStats{
+			GC:                     10,
+			Get:                    10,
+			Scan:                   10,
+			Coprocessor:            10,
+			Delete:                 10,
+			DeleteRange:            10,
+			Put:                    10,
+			Prewrite:               10,
+			AcquirePessimisticLock: 10,
+		}),
 	}
 	newOpts = append(newOpts, opts...)
 	region := core.NewRegionInfo(metaRegion, leader, newOpts...)
@@ -146,8 +157,10 @@ func (s *testRegionSuite) TestRegion(c *C) {
 	c.Assert(readJSON(testDialClient, url, &r1m), IsNil)
 	c.Assert(r1m["written_bytes"].(float64), Equals, float64(r.GetBytesWritten()))
 	c.Assert(r1m["written_keys"].(float64), Equals, float64(r.GetKeysWritten()))
+	c.Assert(r1m["write_query_num"].(float64), Equals, float64(r.GetWriteQueryNum()))
 	c.Assert(r1m["read_bytes"].(float64), Equals, float64(r.GetBytesRead()))
 	c.Assert(r1m["read_keys"].(float64), Equals, float64(r.GetKeysRead()))
+	c.Assert(r1m["read_query_num"].(float64), Equals, float64(r.GetReadQueryNum()))
 	keys := r1m["buckets"].([]interface{})
 	c.Assert(keys, HasLen, 2)
 	c.Assert(keys[0].(string), Equals, core.HexRegionKeyStr([]byte("a")))
