@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -113,7 +114,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	ok := findSameField(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
 		return http.StatusOK, "no changed"
 	}
