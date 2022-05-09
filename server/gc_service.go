@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// GcServer wraps Server to provide garbage collection service.
 type GcServer struct {
 	*Server
 }
@@ -63,9 +64,8 @@ func (s *GcServer) safePointRollbackHeader(requestSafePoint, requiredSafePoint u
 	})
 }
 
-// GetAllServiceGroups return all service group ids
+// GetAllServiceGroups return all service group IDs.
 func (s *GcServer) GetAllServiceGroups(ctx context.Context, request *gcpb.GetAllServiceGroupsRequest) (*gcpb.GetAllServiceGroupsResponse, error) {
-
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &gcpb.GetAllServiceGroupsResponse{Header: s.notBootstrappedHeader()}, nil
@@ -77,14 +77,37 @@ func (s *GcServer) GetAllServiceGroups(ctx context.Context, request *gcpb.GetAll
 		return nil, err
 	}
 
+	serviceGroupIDs := make([][]byte, 0, len(serviceGroupList))
+	for _, sg := range serviceGroupList {
+		serviceGroupIDs = append(serviceGroupIDs, []byte(sg))
+	}
+
 	return &gcpb.GetAllServiceGroupsResponse{
 		Header:         s.header(),
-		ServiceGroupId: serviceGroupList,
+		ServiceGroupId: serviceGroupIDs,
 	}, nil
 }
 
-// GetMinServiceSafePointByServiceGroup returns given service group's min service safe point
+// getServiceRevisionByServiceGroup return etcd ModRevision of given service group.
+// It's used to detect new service safe point between `GetMinServiceSafePointByServiceGroup` & `UpdateGCSafePointByServiceGroup`.
+// Return -1 if the service group is not existed.
+func (s *GcServer) getServiceRevisionByServiceGroup(ctx context.Context, serviceGroupID string) (int64, error) {
+	servicePath := endpoint.GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID)
+	rsp, err := s.client.Get(ctx, servicePath)
+	if err != nil {
+		return -1, err
+	}
+	if rsp == nil {
+		return -1, nil
+	}
+	return rsp.Kvs[0].ModRevision, nil
+}
+
+// GetMinServiceSafePointByServiceGroup returns given service group's min service safe point.
 func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, request *gcpb.GetMinServiceSafePointByServiceGroupRequest) (*gcpb.GetMinServiceSafePointByServiceGroupResponse, error) {
+	// Lock to ensure that there is no other change between `min` and `currentRevison`.
+	s.serviceGroupSafePointLock.Lock()
+	defer s.serviceGroupSafePointLock.Unlock()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -106,9 +129,12 @@ func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, req
 	if min != nil {
 		returnSafePoint = min.SafePoint
 	}
-	// perform a get operation on a non-existing key to obtain current etcd revision number from response header
-	rsp, _ := s.client.Get(ctx, "NA")
-	currentRevision := rsp.Header.GetRevision()
+
+	currentRevision, err := s.getServiceRevisionByServiceGroup(ctx, serviceGroupID)
+	if err != nil {
+		return nil, err
+	}
+
 	return &gcpb.GetMinServiceSafePointByServiceGroupResponse{
 		Header:    s.header(),
 		SafePoint: returnSafePoint,
@@ -116,7 +142,7 @@ func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, req
 	}, nil
 }
 
-// UpdateGCSafePointByServiceGroup used by gc_worker to update their gc safe points
+// UpdateGCSafePointByServiceGroup used by gc_worker to update their gc safe points.
 func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request *gcpb.UpdateGCSafePointByServiceGroupRequest) (*gcpb.UpdateGCSafePointByServiceGroupResponse, error) {
 	s.serviceGroupSafePointLock.Lock()
 	defer s.serviceGroupSafePointLock.Unlock()
@@ -127,10 +153,13 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 	}
 
 	var storage endpoint.GCSafePointStorage = s.storage
+	serviceGroupID := string(request.ServiceGroupId)
 
-	// check if revision changed since last min calculation
-	rsp, _ := s.client.Get(ctx, "NA")
-	currentRevision := rsp.Header.GetRevision()
+	// check if revision changed since last min calculation.
+	currentRevision, err := s.getServiceRevisionByServiceGroup(ctx, serviceGroupID)
+	if err != nil {
+		return nil, err
+	}
 	requestRevision := request.GetRevision()
 	if currentRevision != requestRevision {
 		return &gcpb.UpdateGCSafePointByServiceGroupResponse{
@@ -139,17 +168,16 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 			NewSafePoint: 0,
 		}, nil
 	}
-	serviceGroupID := string(request.ServiceGroupId)
-	newSafePoint := &endpoint.GCSafePoint{
+
+	newSafePoint := &endpoint.ServiceGroupGCSafePoint{
 		ServiceGroupID: serviceGroupID,
 		SafePoint:      request.SafePoint,
 	}
-
-	prev, err := storage.LoadGCWorkerSafePoint(serviceGroupID)
+	prev, err := storage.LoadGCSafePointByServiceGroup(serviceGroupID)
 	if err != nil {
 		return nil, err
 	}
-	// if no previous safepoint, treat it as 0
+	// if no previous safepoint, treat it as 0.
 	var oldSafePoint uint64 = 0
 	if prev != nil {
 		oldSafePoint = prev.SafePoint
@@ -157,7 +185,7 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 
 	response := &gcpb.UpdateGCSafePointByServiceGroupResponse{}
 
-	// fail to store due to safe point rollback
+	// fail to store due to safe point rollback.
 	if newSafePoint.SafePoint < oldSafePoint {
 		log.Warn("trying to update gc_worker safe point",
 			zap.String("service-group-id", serviceGroupID),
@@ -169,8 +197,8 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 		return response, nil
 	}
 
-	// save the safe point to storage
-	if err := storage.SaveGCWorkerSafePoint(newSafePoint); err != nil {
+	// save the safe point to storage.
+	if err := storage.SaveGCSafePointByServiceGroup(newSafePoint); err != nil {
 		return nil, err
 	}
 	response.Header = s.header()
@@ -178,11 +206,12 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 	response.NewSafePoint = newSafePoint.SafePoint
 	log.Info("updated gc_worker safe point",
 		zap.String("service-group-id", serviceGroupID),
-		zap.Uint64("safe-point", newSafePoint.SafePoint))
+		zap.Uint64("safe-point", newSafePoint.SafePoint),
+		zap.Uint64("old-safe-point", oldSafePoint))
 	return response, nil
 }
 
-// UpdateServiceSafePointByServiceGroup for services like CDC/BR/Lightning to update gc safe points in PD
+// UpdateServiceSafePointByServiceGroup for services like CDC/BR/Lightning to update gc safe points in PD.
 func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, request *gcpb.UpdateServiceSafePointByServiceGroupRequest) (*gcpb.UpdateServiceSafePointByServiceGroupResponse, error) {
 	s.serviceGroupSafePointLock.Lock()
 	defer s.serviceGroupSafePointLock.Unlock()
@@ -195,7 +224,7 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 	var storage endpoint.GCSafePointStorage = s.storage
 	serviceGroupID := string(request.ServiceGroupId)
 	serviceID := string(request.ServiceId)
-	// a less than 0 ttl means to remove the safe point, immediately return after the deletion request
+	// a less than 0 ttl means to remove the safe point, immediately return after the deletion request.
 	if request.TTL <= 0 {
 		if err := storage.RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID); err != nil {
 			return nil, err
@@ -212,19 +241,19 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
-	sspOld, err := storage.LoadServiceSafePoint(serviceGroupID, serviceID)
+	sspOld, err := storage.LoadServiceSafePointByServiceGroup(serviceGroupID, serviceID)
 	if err != nil {
 		return nil, err
 	}
-	gcsp, err := storage.LoadGCWorkerSafePoint(serviceGroupID)
+	gcsp, err := storage.LoadGCSafePointByServiceGroup(serviceGroupID)
 	if err != nil {
 		return nil, err
 	}
 
 	response := &gcpb.UpdateServiceSafePointByServiceGroupResponse{}
-	// safePointLowerBound is the minimum request.SafePoint for update request to succeed
-	// it is oldServiceSafePoint if oldServiceSafePoint exists, else gcSafePoint if it exists
-	// otherwise it's set to 0, indicate all safePoint accepted
+	// safePointLowerBound is the minimum request.SafePoint for update request to succeed.
+	// It is oldServiceSafePoint if oldServiceSafePoint exists, else gcSafePoint if it exists.
+	// Otherwise it's set to 0, indicate all safePoint accepted.
 	var safePointLowerBound uint64 = 0
 	if gcsp != nil {
 		safePointLowerBound = gcsp.SafePoint
@@ -235,7 +264,7 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 		response.OldSafePoint = sspOld.SafePoint
 	}
 
-	// request.SafePoint smaller than safePointLowerBound, we have a safePointRollBack
+	// request.SafePoint smaller than safePointLowerBound, we have a safePointRollBack.
 	if request.SafePoint < safePointLowerBound {
 		response.Header = s.safePointRollbackHeader(request.SafePoint, safePointLowerBound)
 		response.Succeeded = false
@@ -249,7 +278,7 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 		ExpiredAt: now.Unix() + request.TTL,
 		SafePoint: request.SafePoint,
 	}
-	// handles overflow
+	// Handles overflow.
 	if math.MaxInt64-now.Unix() <= request.TTL {
 		ssp.ExpiredAt = math.MaxInt64
 	}
@@ -264,25 +293,24 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 	return response, nil
 }
 
-// GetAllServiceGroupGCSafePoints returns all service group's gc safe point
+// GetAllServiceGroupGCSafePoints returns all service group's gc safe point.
 func (s *GcServer) GetAllServiceGroupGCSafePoints(ctx context.Context, request *gcpb.GetAllServiceGroupGCSafePointsRequest) (*gcpb.GetAllServiceGroupGCSafePointsResponse, error) {
-
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &gcpb.GetAllServiceGroupGCSafePointsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	var storage endpoint.GCSafePointStorage = s.storage
-	serviceIDs, gcSafePoints, err := storage.LoadAllServiceGroupGCSafePoints()
+	gcSafePoints, err := storage.LoadAllServiceGroupGCSafePoints()
 	if err != nil {
 		return nil, err
 	}
 
-	safePoints := make([]*gcpb.ServiceGroupSafePoint, 0, 2)
-	for i := range serviceIDs {
+	safePoints := make([]*gcpb.ServiceGroupSafePoint, 0, len(gcSafePoints))
+	for _, sp := range gcSafePoints {
 		safePoints = append(safePoints, &gcpb.ServiceGroupSafePoint{
-			ServiceGroupId: serviceIDs[i],
-			SafePoint:      gcSafePoints[i],
+			ServiceGroupId: []byte(sp.ServiceGroupID),
+			SafePoint:      sp.SafePoint,
 		})
 	}
 	return &gcpb.GetAllServiceGroupGCSafePointsResponse{

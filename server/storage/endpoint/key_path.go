@@ -31,8 +31,9 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
-	serviceGroupServicePath    = "gc_servicegroup/service_safepoint"
-	serviceGroupGCPath         = "gc_servicegroup/gc_safepoint"
+
+	gcServiceGroupGCSafePointPath      = "gc_servicegroup/gc_safepoint"
+	gcServiceGroupServiceSafePointPath = "gc_servicegroup/service_safepoint"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -101,27 +102,31 @@ func gcSafePointServicePath(serviceID string) string {
 	return path.Join(gcSafePointPath(), "service", serviceID)
 }
 
+// gcSafePointPathByServiceGroup returns the path of the gc safe point of speicified service group.
+// Path: /gc_servicegroup/gc_safepoint/$service_group_id
+func gcSafePointPathByServiceGroup(serviceGroupID string) string {
+	return path.Join(gcServiceGroupGCSafePointPath, serviceGroupID)
+}
+
+// GCServiceSafePointPrefixPathByServiceGroup returns the prefix path of the service safe point of speicified service group.
+// Path: /gc_servicegroup/service_safepoint/$service_group_id
+func GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID string) string {
+	return path.Join(gcServiceGroupServiceSafePointPath, serviceGroupID) + "/"
+}
+
+// GCServiceSafePointPathByServiceGroup returns the path of a service's safe point of speicified service group.
+// Path: /gc_servicegroup/service_safepoint/$service_group_id/$service_id
+func GCServiceSafePointPathByServiceGroup(serviceGroupID, serviceID string) string {
+	return path.Join(GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID), serviceID)
+}
+
+// gcServiceGroupGCSafePointPrefixPath returns the prefix path of gc safe point for all service groups.
+// Path: /gc_servicegroup/gc_safepoint/
+func gcServiceGroupGCSafePointPrefixPath() string {
+	return gcServiceGroupGCSafePointPath + "/"
+}
+
 // MinResolvedTSPath returns the min resolved ts path
 func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
-}
-
-// gcSafePointPathByServiceGroup returns the path of the gc_worker's safe point
-// /gc_servicegroup/gc_safepoint/$service_group_id
-func gcSafePointPathByServiceGroup(serviceGroupID string) string {
-	return path.Join(serviceGroupGCPath, serviceGroupID)
-}
-
-// ServiceSafePointPath returns the path of services' safe point
-// /gc_servicegroup/service_safepoint/$service_group_id/$service_id
-func ServiceSafePointPath(serviceGroupID, serviceID string) string {
-	return path.Join(serviceGroupServicePath, serviceGroupID, serviceID)
-}
-
-func serviceSafePointPrefixPath(serviceGroupID string) string {
-	return path.Join(serviceGroupServicePath, serviceGroupID) + "/"
-}
-
-func gcSafePointPrefixPath() string {
-	return serviceGroupGCPath + "/"
 }
