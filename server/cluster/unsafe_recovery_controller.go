@@ -883,9 +883,11 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 			// paranoid check: shouldn't overlap with any of the peers
 			for _, peers := range peersMap {
 				for _, peer := range peers {
-					if bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 && (len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0) ||
-						(len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) && (len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().EndKey, newRegion.EndKey) <= 0) {
-						u.err = errors.Errorf("Find overlap peer %v with newly created empty region", peer.Region())
+					if (bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 &&
+						(len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0)) ||
+						((len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) &&
+							(len(newRegion.EndKey) == 0 || (len(peer.Region().EndKey) != 0 && bytes.Compare(peer.Region().EndKey, newRegion.EndKey) <= 0))) {
+						u.err = errors.Errorf("Find overlap peer %v with newly created empty region %v", core.RegionToHexMeta(peer.Region()), core.RegionToHexMeta(newRegion))
 						return false
 					}
 				}

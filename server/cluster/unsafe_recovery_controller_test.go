@@ -839,7 +839,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryCreateEmptyRegion(c *C) {
 					Region: &metapb.Region{
 						Id:          1002,
 						StartKey:    []byte("e"),
-						EndKey:      []byte("f"),
+						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}}}},
@@ -866,7 +866,7 @@ func (s *testUnsafeRecoverSuite) TestRecoveryCreateEmptyRegion(c *C) {
 					Region: &metapb.Region{
 						Id:          1002,
 						StartKey:    []byte("e"),
-						EndKey:      []byte("f"),
+						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
@@ -888,15 +888,6 @@ func (s *testUnsafeRecoverSuite) TestRecoveryCreateEmptyRegion(c *C) {
 						EndKey:      []byte("e"),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 						Peers:       []*metapb.Peer{{Id: 4, StoreId: 1}}}}},
-			{
-				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
-				RegionState: &raft_serverpb.RegionLocalState{
-					Region: &metapb.Region{
-						Id:          5,
-						StartKey:    []byte("f"),
-						EndKey:      []byte(""),
-						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-						Peers:       []*metapb.Peer{{Id: 6, StoreId: 1}}}}},
 		}},
 	}
 
