@@ -51,6 +51,11 @@ func (kv *memoryKV) Load(key string) (string, error) {
 	return item.(memoryKVItem).value, nil
 }
 
+func (kv *memoryKV) LoadRevision(key string) (string, int64, error) {
+	value, err := kv.Load(key)
+	return value, REVISION_UNAVAILABLE, err
+}
+
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
 		rangeLimit, ok := val.(int)

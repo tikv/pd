@@ -64,6 +64,7 @@ type TestServer struct {
 	sync.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
+	gcServer   *server.GcServer
 	state      int32
 }
 
@@ -91,6 +92,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	return &TestServer{
 		server:     svr,
 		grpcServer: &server.GrpcServer{Server: svr},
+		gcServer:   &server.GcServer{Server: svr},
 		state:      Initial,
 	}, nil
 }
@@ -356,6 +358,12 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetRaftCluster().GetStoreRegions(storeID)
+}
+
+func (s *TestServer) GetGCService() *server.GcServer {
+	s.RLock()
+	defer s.RUnlock()
+	return s.gcServer
 }
 
 // BootstrapCluster is used to bootstrap the cluster.

@@ -48,18 +48,23 @@ func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
 }
 
 func (kv *etcdKVBase) Load(key string) (string, error) {
+	value, _, err := kv.LoadRevision(key)
+	return value, err
+}
+
+func (kv *etcdKVBase) LoadRevision(key string) (string, int64, error) {
 	key = path.Join(kv.rootPath, key)
 
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
-		return "", err
+		return "", REVISION_UNAVAILABLE, err
 	}
 	if n := len(resp.Kvs); n == 0 {
-		return "", nil
+		return "", REVISION_UNAVAILABLE, nil
 	} else if n > 1 {
-		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+		return "", REVISION_UNAVAILABLE, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
-	return string(resp.Kvs[0].Value), nil
+	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
 }
 
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/gcpb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"google.golang.org/grpc"
 )
@@ -84,6 +85,14 @@ func MustNewGrpcClient(c *check.C, addr string) pdpb.PDClient {
 
 	c.Assert(err, check.IsNil)
 	return pdpb.NewPDClient(conn)
+}
+
+// MustNewGCClient must create a new GC client.
+func MustNewGCClient(c *check.C, addr string) gcpb.GCClient {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+
+	c.Assert(err, check.IsNil)
+	return gcpb.NewGCClient(conn)
 }
 
 // CleanServer is used to clean data directory.

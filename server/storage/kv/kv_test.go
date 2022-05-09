@@ -52,7 +52,7 @@ func (s *testKVSuite) TestEtcd(c *C) {
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 
 	kv := NewEtcdKVBase(client, rootPath)
-	s.testReadWrite(c, kv)
+	s.testReadWrite(c, kv, true)
 	s.testRange(c, kv)
 }
 
@@ -63,30 +63,69 @@ func (s *testKVSuite) TestLevelDB(c *C) {
 	kv, err := NewLevelDBKV(dir)
 	c.Assert(err, IsNil)
 
-	s.testReadWrite(c, kv)
+	s.testReadWrite(c, kv, false)
 	s.testRange(c, kv)
 }
 
 func (s *testKVSuite) TestMemKV(c *C) {
 	kv := NewMemoryKV()
-	s.testReadWrite(c, kv)
+	s.testReadWrite(c, kv, false)
 	s.testRange(c, kv)
 }
 
-func (s *testKVSuite) testReadWrite(c *C, kv Base) {
+func (s *testKVSuite) testReadWrite(c *C, kv Base, isEtcd bool) {
+	rev := int64(-1)
+	nextRevision := func() {
+		if isEtcd {
+			if rev == -1 {
+				rev = 1
+			}
+			rev += 1
+		}
+	}
+
 	v, err := kv.Load("key")
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "")
+
+	v, revision, err := kv.LoadRevision("key")
+	c.Assert(err, IsNil)
+	c.Assert(revision, Equals, int64(-1))
+	c.Assert(v, Equals, "")
+
 	err = kv.Save("key", "value")
 	c.Assert(err, IsNil)
+	nextRevision()
+
 	v, err = kv.Load("key")
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "value")
+
+	v, revision, err = kv.LoadRevision("key")
+	c.Assert(err, IsNil)
+	c.Assert(v, Equals, "value")
+	c.Assert(revision, Equals, rev)
+
+	err = kv.Save("key", "value1")
+	c.Assert(err, IsNil)
+	nextRevision()
+	v, revision, err = kv.LoadRevision("key")
+	c.Assert(err, IsNil)
+	c.Assert(v, Equals, "value1")
+	c.Assert(revision, Equals, rev)
+
 	err = kv.Remove("key")
 	c.Assert(err, IsNil)
+
 	v, err = kv.Load("key")
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "")
+
+	v, revision, err = kv.LoadRevision("key")
+	c.Assert(err, IsNil)
+	c.Assert(revision, Equals, int64(-1))
+	c.Assert(v, Equals, "")
+
 	err = kv.Remove("key")
 	c.Assert(err, IsNil)
 }

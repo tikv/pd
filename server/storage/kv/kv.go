@@ -14,9 +14,12 @@
 
 package kv
 
+const REVISION_UNAVAILABLE = -1
+
 // Base is an abstract interface for load/save pd cluster data.
 type Base interface {
 	Load(key string) (string, error)
+	LoadRevision(key string) (string, int64, error)
 	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
 	Save(key, value string) error
 	Remove(key string) error

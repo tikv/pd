@@ -93,14 +93,15 @@ func (s *GcServer) GetAllServiceGroups(ctx context.Context, request *gcpb.GetAll
 // Return -1 if the service group is not existed.
 func (s *GcServer) getServiceRevisionByServiceGroup(ctx context.Context, serviceGroupID string) (int64, error) {
 	servicePath := endpoint.GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID)
-	rsp, err := s.client.Get(ctx, servicePath)
-	if err != nil {
-		return -1, err
-	}
-	if rsp == nil {
-		return -1, nil
-	}
-	return rsp.Kvs[0].ModRevision, nil
+	_, revision, err := s.storage.LoadRevision(servicePath)
+	return revision, err
+}
+
+// touchServiceRevisionByServiceGroup advance revision service group path.
+// It's used when new service safe point is saved.
+func (s *GcServer) touchServiceRevisionByServiceGroup(ctx context.Context, serviceGroupID string) error {
+	servicePath := endpoint.GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID)
+	return s.storage.Save(servicePath, "")
 }
 
 // GetMinServiceSafePointByServiceGroup returns given service group's min service safe point.
@@ -282,6 +283,15 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 	if math.MaxInt64-now.Unix() <= request.TTL {
 		ssp.ExpiredAt = math.MaxInt64
 	}
+
+	if sspOld == nil {
+		// Touch service revision to advance revision, for indicating that a new service safe point is added.
+		// Should be invoked before `SaveServiceSafePointByServiceGroup`, to avoid touch fail after new service safe point is saved.
+		if err := s.touchServiceRevisionByServiceGroup(ctx, serviceGroupID); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := storage.SaveServiceSafePointByServiceGroup(serviceGroupID, ssp); err != nil {
 		return nil, err
 	}
