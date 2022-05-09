@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -319,60 +318,48 @@ func (b *BucketTreeItem) contains(key []byte) bool {
 // rule2: if the cross buckets are not hot, it will inherit the coldest one.
 // rule3: if some cross buckets are hot and the others are cold, it will inherit the hottest one.
 func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
-	// it will not inherit if the end key of the new item is less than the start key of the old item.
-	// such as: new item: |----a----| |----b----|
-	// origins item:      |----c----| |----d----|
 	if len(origins) == 0 || len(b.stats) == 0 || bytes.Compare(b.endKey, origins[0].startKey) < 0 {
 		return
 	}
 
-	newItem := b.stats
-	bucketStats := b.clip(origins)
+	newItems := b.stats
+	oldItems := make([]*BucketStat, 0)
+	for _, bucketTree := range origins {
+		oldItems = append(oldItems, bucketTree.stats...)
+	}
+	// details: https://leetcode.cn/problems/interval-list-intersections/solution/jiu-pa-ni-bu-dong-shuang-zhi-zhen-by-hyj8/
+	for p1, p2 := 0, 0; p1 < len(newItems) && p2 < len(oldItems); {
+		newItem, oldItem := newItems[p1], oldItems[p2]
+		left := maxKey(newItem.startKey, oldItems[p2].startKey)
+		right := minKey(newItem.endKey, oldItems[p2].endKey)
 
-	// p1/p2: the hot stats of the new/old index
-	for p1, p2 := 0, 0; p1 < len(newItem) && p2 < len(bucketStats); {
-		oldDegree := bucketStats[p2].hotDegree
-		newDegree := newItem[p1].hotDegree
-		// new bucket should interim old if the hot degree of the new bucket is less than zero.
-		if oldDegree < 0 && newDegree <= 0 && oldDegree < newDegree {
-			newItem[p1].hotDegree = oldDegree
+		// bucket should inherit the old bucket hot degree if they have some intersection.
+		// skip if the left is equal to the right key, such as [10 20] [20 30].
+		if bytes.Compare(left, right) < 0 {
+			log.Info("inherit bucket %s from %s", zap.ByteString("left", left), zap.ByteString("right", right))
+			oldDegree := oldItems[p2].hotDegree
+			newDegree := newItems[p1].hotDegree
+			// new bucket should interim old if the hot degree of the new bucket is less than zero.
+			if oldDegree < 0 && newDegree <= 0 && oldDegree < newDegree {
+				newItem.hotDegree = oldDegree
+			}
+			// if oldDegree is greater than zero and the new bucket, the new bucket should inherit the old hot degree.
+			if oldDegree > 0 && oldDegree > newDegree {
+				newItem.hotDegree = oldDegree
+			}
 		}
-		// if oldDegree is greater than zero and the new bucket, the new bucket should inherit the old hot degree.
-		if oldDegree > 0 && oldDegree > newDegree {
-			newItem[p1].hotDegree = oldDegree
-		}
-
-		if bytes.Compare(newItem[p1].endKey, bucketStats[p2].endKey) > 0 {
+		// move the left item to the next, old should move first if they are equal.
+		if bytes.Compare(newItem.endKey, oldItem.endKey) > 0 {
 			p2++
-		} else if bytes.Equal(newItem[p1].endKey, bucketStats[p2].endKey) {
-			p2++
-			p1++
 		} else {
 			p1++
 		}
 	}
 }
 
-// clip origins bucket to BucketStat array
-func (b *BucketTreeItem) clip(origins []*BucketTreeItem) []*BucketStat {
-	// the first buckets should contain the start key.
-	if len(origins) == 0 || !origins[0].contains(b.startKey) {
-		return nil
-	}
-	bucketStats := make([]*BucketStat, 0)
-	index := sort.Search(len(origins[0].stats), func(i int) bool {
-		return bytes.Compare(b.startKey, origins[0].stats[i].endKey) < 0
-	})
-	bucketStats = append(bucketStats, origins[0].stats[index:]...)
-	for i := 1; i < len(origins); i++ {
-		bucketStats = append(bucketStats, origins[i].stats...)
-	}
-	return bucketStats
-}
-
 func (b *BucketStat) String() string {
-	return fmt.Sprintf("[region-id:%d][start-key:%s][end-key-key:%s][hot-degree:%d][interval-ms:%d][loads:%v]",
-		b.regionID, b.startKey, b.endKey, b.hotDegree, b.interval, b.loads)
+	return fmt.Sprintf("[region-id:%d][start-key:%s][end-key-key:%s][hot-degree:%d][interval:%d(ms)][loads:%v]",
+		b.regionID, core.HexRegionKeyStr(b.startKey), core.HexRegionKeyStr(b.endKey), b.hotDegree, b.interval, b.loads)
 }
 
 // convertToBucketTreeItem converts the bucket stat to bucket tree item.
