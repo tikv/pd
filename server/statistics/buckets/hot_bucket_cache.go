@@ -104,11 +104,11 @@ func (h *HotBucketCache) putItem(item *BucketTreeItem, overlaps []*BucketTreeIte
 	}
 	for _, overlap := range overlaps {
 		if overlap.status == alive {
-			log.Info("delete region from cache", zap.Uint64("regionID", overlap.regionID))
+			log.Info("delete buckets from cache", zap.Uint64("region-id", overlap.regionID))
 			delete(h.bucketsOfRegion, overlap.regionID)
 		}
 	}
-	log.Info("put item into cache", zap.Uint64("regionID", item.regionID), zap.ByteString("startKey", item.startKey), zap.ByteString("endKey", item.endKey))
+	log.Info("put buckets into cache", zap.Stringer("region-id", item))
 	h.bucketsOfRegion[item.regionID] = item
 	h.ring.Put(item)
 }
@@ -186,7 +186,7 @@ func (h *HotBucketCache) getBucketsByKeyRange(startKey, endKey []byte) (items []
 func (h *HotBucketCache) collectBucketsMetrics(stats *BucketTreeItem) {
 	bucketsHeartbeatIntervalHist.Observe(float64(stats.interval))
 	for _, bucket := range stats.stats {
-		log.Info("collect bucket hot degree metrics ", zap.Any("bucket", bucket))
+		log.Info("collect bucket hot degree metrics", zap.Any("bucket", bucket))
 		bucketsHotDegreeHist.Observe(float64(bucket.hotDegree))
 	}
 }
