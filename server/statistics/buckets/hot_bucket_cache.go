@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -130,7 +131,9 @@ func (h *HotBucketCache) updateItems() {
 		case <-h.ctx.Done():
 			return
 		case task := <-h.taskQueue:
+			start := time.Now()
 			task.runTask(h)
+			bucketsHotHandlerDuration.WithLabelValues(task.taskType().String()).Observe(time.Since(start).Seconds())
 		}
 	}
 }
@@ -368,22 +371,26 @@ func (b *BucketTreeItem) clip(origins []*BucketTreeItem) []*BucketStat {
 }
 
 func (b *BucketStat) String() string {
-	return fmt.Sprintf("[region-id:%d][start-key:%s][end-key-key:%s][hot-degree:%d][interval:%d][loads:%v]",
+	return fmt.Sprintf("[region-id:%d][start-key:%s][end-key-key:%s][hot-degree:%d][interval-ms:%d][loads:%v]",
 		b.regionID, b.startKey, b.endKey, b.hotDegree, b.interval, b.loads)
 }
 
 // convertToBucketTreeItem converts the bucket stat to bucket tree item.
 func convertToBucketTreeItem(buckets *metapb.Buckets) *BucketTreeItem {
 	items := make([]*BucketStat, len(buckets.Keys)-1)
-	interval := buckets.PeriodInMs / 1000
+	interval := buckets.PeriodInMs
+	// interval may be zero after the tikv initial.
+	if interval == 0 {
+		interval = 10 * 1000
+	}
 	for i := 0; i < len(buckets.Keys)-1; i++ {
 		loads := []uint64{
-			buckets.Stats.ReadBytes[i] / interval,
-			buckets.Stats.ReadKeys[i] / interval,
-			buckets.Stats.ReadQps[i] / interval,
-			buckets.Stats.WriteBytes[i] / interval,
-			buckets.Stats.WriteKeys[i] / interval,
-			buckets.Stats.WriteQps[i] / interval,
+			buckets.Stats.ReadBytes[i] * 1000 / interval,
+			buckets.Stats.ReadKeys[i] * 1000 / interval,
+			buckets.Stats.ReadQps[i] * 1000 / interval,
+			buckets.Stats.WriteBytes[i] * 1000 / interval,
+			buckets.Stats.WriteKeys[i] * 1000 / interval,
+			buckets.Stats.WriteQps[i] * 1000 / interval,
 		}
 		items[i] = &BucketStat{
 			regionID:  buckets.RegionId,
@@ -399,7 +406,7 @@ func convertToBucketTreeItem(buckets *metapb.Buckets) *BucketTreeItem {
 		endKey:   getEndKey(buckets),
 		regionID: buckets.RegionId,
 		stats:    items,
-		interval: buckets.GetPeriodInMs() / 1000,
+		interval: buckets.GetPeriodInMs(),
 		version:  buckets.Version,
 		status:   alive,
 	}
