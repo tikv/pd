@@ -309,12 +309,11 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 		}
 
 		hasPlan := len(u.storeRecoveryPlans) != 0
-		if !hasPlan {
-			if u.err == nil {
-				u.changeStage(finished)
-			} else {
-				u.changeStage(failed)
-			}
+		if u.err != nil {
+			u.changeStage(failed)
+			return
+		} else if !hasPlan {
+			u.changeStage(finished)
 			return
 		}
 	}
@@ -575,23 +574,6 @@ func (r *regionItem) IsEpochStale(other *regionItem) bool {
 	re := r.Region().GetRegionEpoch()
 	oe := other.Region().GetRegionEpoch()
 	return re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()
-}
-
-func (r *regionItem) IsStale(origin *regionItem) bool {
-	if r.Region().GetId() != origin.Region().GetId() {
-		panic("should compare peers of same region")
-	}
-
-	// compare region epoch, last log term, last log index and commit index in order
-	if r.IsEpochStale(origin) {
-		return true
-	}
-	re := r.Region().GetRegionEpoch()
-	oe := origin.Region().GetRegionEpoch()
-	if re.GetVersion() == oe.GetVersion() && re.GetConfVer() == oe.GetConfVer() {
-		return r.IsRaftStale(origin)
-	}
-	return false
 }
 
 func (r *regionItem) IsRaftStale(origin *regionItem) bool {
@@ -894,21 +876,20 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		region := item.(*regionItem).Region()
 		storeID := item.(*regionItem).storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			// paranoid check: shouldn't overlap with any of the peers
-			for _, peers := range peersMap {
-				for _, peer := range peers {
-					if bytes.Compare(region.StartKey, peer.Region().StartKey) <= 0 && (len(region.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, region.EndKey) < 0) ||
-						(len(peer.Region().EndKey) == 0 || bytes.Compare(region.StartKey, peer.Region().EndKey) < 0) && (len(region.EndKey) == 0 || bytes.Compare(peer.Region().EndKey, region.EndKey) <= 0) {
-						u.err = errors.Errorf("Find overlap peer %d with newly created empty region", peer.Region().Id)
-						return false
-					}
-				}
-			}
-
 			newRegion, err := createRegion(lastEnd, region.StartKey, storeID)
 			if err != nil {
 				u.err = err
 				return false
+			}
+			// paranoid check: shouldn't overlap with any of the peers
+			for _, peers := range peersMap {
+				for _, peer := range peers {
+					if bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 && (len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0) ||
+						(len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) && (len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().EndKey, newRegion.EndKey) <= 0) {
+						u.err = errors.Errorf("Find overlap peer %v with newly created empty region", peer.Region())
+						return false
+					}
+				}
 			}
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
@@ -921,6 +902,7 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 	if u.err != nil {
 		return false
 	}
+
 	if !bytes.Equal(lastEnd, []byte("")) {
 		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
 		if err != nil {
