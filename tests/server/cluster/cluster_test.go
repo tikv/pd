@@ -1105,7 +1105,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	opt := rc.GetOpts()
-	scheduleCfg := opt.GetScheduleConfig()
+	scheduleCfg := opt.GetScheduleConfig().Clone()
 	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
 	c.Assert(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg), IsNil)
 	err = leaderServer.Stop()
