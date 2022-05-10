@@ -37,7 +37,7 @@ import (
 type unsafeRecoveryStage int
 
 const (
-	storeRequestInterval = time.Second * 60
+	storeRequestInterval = time.Second * 40
 )
 
 // Stage transition graph: for more details, please check `unsafeRecoveryController.HandleStoreHeartbeat()`

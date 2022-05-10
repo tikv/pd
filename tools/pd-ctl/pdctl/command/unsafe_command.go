@@ -42,7 +42,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Short: "Remove failed stores unsafely",
 		Run:   removeFailedStoresCommandFunc,
 	}
-	cmd.PersistentFlags().Float64("timeout", 600, "timeout in seconds")
+	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	return cmd
 }
@@ -79,7 +79,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	if err != nil {
 		cmd.Println(err)
 		return
-	} else if timeout != 600 {
+	} else if timeout != 300 {
 		postInput["timeout"] = timeout
 	}
 	postJSON(cmd, prefix, postInput)
