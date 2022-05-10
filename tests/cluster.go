@@ -360,6 +360,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return s.server.GetRaftCluster().GetStoreRegions(storeID)
 }
 
+// GetGCService returns the gc service.
 func (s *TestServer) GetGCService() *server.GcServer {
 	s.RLock()
 	defer s.RUnlock()

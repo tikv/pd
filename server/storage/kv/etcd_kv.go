@@ -57,12 +57,12 @@ func (kv *etcdKVBase) LoadRevision(key string) (string, int64, error) {
 
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
-		return "", REVISION_UNAVAILABLE, err
+		return "", RevisionUnavailable, err
 	}
 	if n := len(resp.Kvs); n == 0 {
-		return "", REVISION_UNAVAILABLE, nil
+		return "", RevisionUnavailable, nil
 	} else if n > 1 {
-		return "", REVISION_UNAVAILABLE, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+		return "", RevisionUnavailable, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
 	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
 }
