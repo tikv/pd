@@ -90,8 +90,9 @@ const (
 type unsafeRecoveryController struct {
 	syncutil.RWMutex
 
-	cluster      *RaftCluster
-	stage        unsafeRecoveryStage
+	cluster *RaftCluster
+	stage   unsafeRecoveryStage
+	// the round of recovery, which is an increasing number to identify the reports of each round
 	step         uint64
 	failedStores map[uint64]struct{}
 	timeout      time.Time
@@ -103,6 +104,7 @@ type unsafeRecoveryController struct {
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
+	// accumulated output for the whole recovery process
 	output []StageOutput
 	err    error
 }
@@ -731,6 +733,9 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 }
 
 func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, forCommitMerge bool) bool {
+	if u.err != nil {
+		return false
+	}
 	hasPlan := false
 
 	selectLeader := func(region *metapb.Region) *regionItem {
@@ -768,7 +773,8 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 				// propose an empty raft log on being leader
 				return true
 			} else if !forCommitMerge && report.HasCommitMerge {
-				panic("unreachable")
+				u.err = errors.Errorf("unexpected commit merge state for report %v", report)
+				return false
 			}
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
@@ -794,6 +800,9 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 }
 
 func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
+	if u.err != nil {
+		return false
+	}
 	hasPlan := false
 
 	findForceLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
@@ -847,6 +856,9 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 }
 
 func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
+	if u.err != nil {
+		return false
+	}
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
