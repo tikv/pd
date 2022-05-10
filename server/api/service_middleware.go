@@ -30,38 +30,38 @@ import (
 	"github.com/unrolled/render"
 )
 
-type selfProtectionHandler struct {
+type serviceMiddlewareHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newSelfProtectionHandler(svr *server.Server, rd *render.Render) *selfProtectionHandler {
-	return &selfProtectionHandler{
+func newServiceMiddlewareHandler(svr *server.Server, rd *render.Render) *serviceMiddlewareHandler {
+	return &serviceMiddlewareHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-// @Tags self_protection
-// @Summary Get Self Protection config.
+// @Tags service_middleware
+// @Summary Get Service Middleware config.
 // @Produce json
 // @Success 200 {object} config.Config
-// @Router /self-proteciton/config [get]
-func (h *selfProtectionHandler) GetSelfProtectionConfig(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetSelfProtectionConfig())
+// @Router /service-middleware/config [get]
+func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceMiddlewareConfig())
 }
 
-// @Tags self_protection
-// @Summary Update some self-proteciton's config items.
+// @Tags service_middleware
+// @Summary Update some service-middleware's config items.
 // @Accept json
 // @Param body body object false "json params"
 // @Produce json
 // @Success 200 {string} string "The config is updated."
 // @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /self-proteciton/config [post]
-func (h *selfProtectionHandler) SetSelfProtectionConfig(w http.ResponseWriter, r *http.Request) {
-	cfg := h.svr.GetSelfProtectionConfig()
+// @Router /service-middleware/config [post]
+func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
+	cfg := h.svr.GetServiceMiddlewareConfig()
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -77,27 +77,27 @@ func (h *selfProtectionHandler) SetSelfProtectionConfig(w http.ResponseWriter, r
 
 	for k, v := range conf {
 		if s := strings.Split(k, "."); len(s) > 1 {
-			if err := h.updateSelfProtectionConfig(cfg, k, v); err != nil {
+			if err := h.updateServiceMiddlewareConfig(cfg, k, v); err != nil {
 				h.rd.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			continue
 		}
-		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.SelfProtectionConfig{}), k)
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.ServiceMiddlewareConfig{}), k)
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
-		if err := h.updateSelfProtectionConfig(cfg, key, v); err != nil {
+		if err := h.updateServiceMiddlewareConfig(cfg, key, v); err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The self-protection config is updated.")
+	h.rd.JSON(w, http.StatusOK, "The service-middleware config is updated.")
 }
 
-func (h *selfProtectionHandler) updateSelfProtectionConfig(cfg *config.SelfProtectionConfig, key string, value interface{}) error {
+func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.ServiceMiddlewareConfig, key string, value interface{}) error {
 	kp := strings.Split(key, ".")
 	if kp[0] == "audit" {
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
@@ -105,7 +105,7 @@ func (h *selfProtectionHandler) updateSelfProtectionConfig(cfg *config.SelfProte
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *selfProtectionHandler) updateAudit(config *config.SelfProtectionConfig, key string, value interface{}) error {
+func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
 	data, err := json.Marshal(map[string]interface{}{key: value})
 	if err != nil {
 		return err

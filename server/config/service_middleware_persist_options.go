@@ -22,51 +22,51 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-// SelfProtectionPersistOptions wraps all self protection configurations that need to persist to storage and
+// ServiceMiddlewarePersistOptions wraps all service middleware configurations that need to persist to storage and
 // allows to access them safely.
-type SelfProtectionPersistOptions struct {
+type ServiceMiddlewarePersistOptions struct {
 	audit atomic.Value
 }
 
-// NewSelfProtectionPersistOptions creates a new SelfProtectionPersistOptions instance.
-func NewSelfProtectionPersistOptions(cfg *SelfProtectionConfig) *SelfProtectionPersistOptions {
-	o := &SelfProtectionPersistOptions{}
+// NewServiceMiddlewarePersistOptions creates a new ServiceMiddlewarePersistOptions instance.
+func NewServiceMiddlewarePersistOptions(cfg *ServiceMiddlewareConfig) *ServiceMiddlewarePersistOptions {
+	o := &ServiceMiddlewarePersistOptions{}
 	o.audit.Store(&cfg.AuditConfig)
 	return o
 }
 
-// GetAuditConfig returns pd self protection configurations.
-func (o *SelfProtectionPersistOptions) GetAuditConfig() *AuditConfig {
+// GetAuditConfig returns pd service middleware configurations.
+func (o *ServiceMiddlewarePersistOptions) GetAuditConfig() *AuditConfig {
 	return o.audit.Load().(*AuditConfig)
 }
 
-// SetAuditConfig sets the PD self protection configuration.
-func (o *SelfProtectionPersistOptions) SetAuditConfig(cfg *AuditConfig) {
+// SetAuditConfig sets the PD service middleware configuration.
+func (o *ServiceMiddlewarePersistOptions) SetAuditConfig(cfg *AuditConfig) {
 	o.audit.Store(cfg)
 }
 
 // IsAuditEnabled returns whether audit middleware is enabled
-func (o *SelfProtectionPersistOptions) IsAuditEnabled() bool {
+func (o *ServiceMiddlewarePersistOptions) IsAuditEnabled() bool {
 	return o.GetAuditConfig().EnableAudit
 }
 
 // Persist saves the configuration to the storage.
-func (o *SelfProtectionPersistOptions) Persist(storage endpoint.SelfProtectionStorage) error {
-	cfg := &SelfProtectionConfig{
+func (o *ServiceMiddlewarePersistOptions) Persist(storage endpoint.ServiceMiddlewareStorage) error {
+	cfg := &ServiceMiddlewareConfig{
 		AuditConfig: *o.GetAuditConfig(),
 	}
-	err := storage.SaveSelfProtectionConfig(cfg)
-	failpoint.Inject("persistSelfProtectionFail", func() {
+	err := storage.SaveServiceMiddlewareConfig(cfg)
+	failpoint.Inject("persistServiceMiddlewareFail", func() {
 		err = errors.New("fail to persist")
 	})
 	return err
 }
 
 // Reload reloads the configuration from the storage.
-func (o *SelfProtectionPersistOptions) Reload(storage endpoint.SelfProtectionStorage) error {
-	cfg := NewSelfProtectionConfig()
+func (o *ServiceMiddlewarePersistOptions) Reload(storage endpoint.ServiceMiddlewareStorage) error {
+	cfg := NewServiceMiddlewareConfig()
 
-	isExist, err := storage.LoadSelfProtectionConfig(cfg)
+	isExist, err := storage.LoadServiceMiddlewareConfig(cfg)
 	if err != nil {
 		return err
 	}

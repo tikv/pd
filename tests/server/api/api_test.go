@@ -157,11 +157,11 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled(), Equals, true)
 
 	labels := make(map[string]interface{})
 	labels["testkey"] = "testvalue"
@@ -185,11 +185,11 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled(), Equals, false)
 
 	header := mustRequestSuccess(c, leader.GetServer())
 	c.Assert(header.Get("service-label"), Equals, "")
@@ -209,7 +209,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -232,7 +232,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -258,11 +258,11 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled(), Equals, true)
 	timeUnix := time.Now().Unix() - 20
 	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
@@ -306,11 +306,11 @@ func (s *testMiddlewareSuite) TestAuditPrometheusBackend(c *C) {
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, false)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled(), Equals, false)
 }
 
 func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
@@ -326,11 +326,11 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetSelfProtectionPersistOptions().IsAuditEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled(), Equals, true)
 
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)
@@ -357,7 +357,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -380,7 +380,7 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/self_protection/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()

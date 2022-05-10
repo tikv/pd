@@ -18,24 +18,24 @@ const (
 	defaultEnableAuditMiddleware = false
 )
 
-// SelfProtectionConfig is is the configuration for PD Self Protection.
-type SelfProtectionConfig struct {
+// ServiceMiddlewareConfig is is the configuration for PD Service middleware.
+type ServiceMiddlewareConfig struct {
 	AuditConfig `json:"audit"`
 }
 
-// NewSelfProtectionConfig returns a new self-protection config
-func NewSelfProtectionConfig() *SelfProtectionConfig {
+// NewServiceMiddlewareConfig returns a new service middleware config
+func NewServiceMiddlewareConfig() *ServiceMiddlewareConfig {
 	audit := AuditConfig{
 		EnableAudit: defaultEnableAuditMiddleware,
 	}
-	cfg := &SelfProtectionConfig{
+	cfg := &ServiceMiddlewareConfig{
 		AuditConfig: audit,
 	}
 	return cfg
 }
 
-// Clone returns a cloned self protection configuration.
-func (c *SelfProtectionConfig) Clone() *SelfProtectionConfig {
+// Clone returns a cloned service middleware configuration.
+func (c *ServiceMiddlewareConfig) Clone() *ServiceMiddlewareConfig {
 	cfg := *c
 	return &cfg
 }

@@ -100,12 +100,12 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg                          *config.Config
-	selfProtectionCfg            *config.SelfProtectionConfig
-	etcdCfg                      *embed.Config
-	selfProtectionPersistOptions *config.SelfProtectionPersistOptions
-	persistOptions               *config.PersistOptions
-	handler                      *Handler
+	cfg                             *config.Config
+	serviceMiddlewareCfg            *config.ServiceMiddlewareConfig
+	etcdCfg                         *embed.Config
+	serviceMiddlewarePersistOptions *config.ServiceMiddlewarePersistOptions
+	persistOptions                  *config.PersistOptions
+	handler                         *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -239,17 +239,17 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
-	selfProtectionCfg := config.NewSelfProtectionConfig()
+	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
-		cfg:                          cfg,
-		persistOptions:               config.NewPersistOptions(cfg),
-		selfProtectionCfg:            selfProtectionCfg,
-		selfProtectionPersistOptions: config.NewSelfProtectionPersistOptions(selfProtectionCfg),
-		member:                       &member.Member{},
-		ctx:                          ctx,
-		startTimestamp:               time.Now().Unix(),
-		DiagnosticsServer:            sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                             cfg,
+		persistOptions:                  config.NewPersistOptions(cfg),
+		serviceMiddlewareCfg:            serviceMiddlewareCfg,
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
+		member:                          &member.Member{},
+		ctx:                             ctx,
+		startTimestamp:                  time.Now().Unix(),
+		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 	s.handler = newHandler(s)
 
@@ -767,9 +767,9 @@ func (s *Server) GetPersistOptions() *config.PersistOptions {
 	return s.persistOptions
 }
 
-// GetSelfProtectionPersistOptions returns the self protection persist option.
-func (s *Server) GetSelfProtectionPersistOptions() *config.SelfProtectionPersistOptions {
-	return s.selfProtectionPersistOptions
+// GetServiceMiddlewarePersistOptions returns the service middleware persist option.
+func (s *Server) GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions {
+	return s.serviceMiddlewarePersistOptions
 }
 
 // GetHBStreams returns the heartbeat streams.
@@ -811,10 +811,10 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	return members, err
 }
 
-// GetSelfProtectionConfig gets the self protection config information.
-func (s *Server) GetSelfProtectionConfig() *config.SelfProtectionConfig {
-	cfg := s.selfProtectionCfg.Clone()
-	cfg.AuditConfig = *s.selfProtectionPersistOptions.GetAuditConfig()
+// GetServiceMiddlewareConfig gets the service middleware config information.
+func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
+	cfg := s.serviceMiddlewareCfg.Clone()
+	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig()
 	return cfg
 }
 
@@ -967,15 +967,15 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 
 // GetAuditConfig gets the audit config information.
 func (s *Server) GetAuditConfig() *config.AuditConfig {
-	return s.selfProtectionPersistOptions.GetAuditConfig().Clone()
+	return s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
 }
 
 // SetAuditConfig sets the audit config.
 func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
-	old := s.selfProtectionPersistOptions.GetAuditConfig()
-	s.selfProtectionPersistOptions.SetAuditConfig(&cfg)
-	if err := s.selfProtectionPersistOptions.Persist(s.storage); err != nil {
-		s.selfProtectionPersistOptions.SetAuditConfig(old)
+	old := s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	s.serviceMiddlewarePersistOptions.SetAuditConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetAuditConfig(old)
 		log.Error("failed to update Audit config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
@@ -1454,7 +1454,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	err = s.selfProtectionPersistOptions.Reload(s.storage)
+	err = s.serviceMiddlewarePersistOptions.Reload(s.storage)
 	if err != nil {
 		return err
 	}

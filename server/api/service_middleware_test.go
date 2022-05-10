@@ -26,15 +26,15 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-var _ = Suite(&testSelfProtectionSuite{})
+var _ = Suite(&testServiceMiddlewareSuite{})
 
-type testSelfProtectionSuite struct {
+type testServiceMiddlewareSuite struct {
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testSelfProtectionSuite) SetUpSuite(c *C) {
+func (s *testServiceMiddlewareSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
 		cfg.Replication.EnablePlacementRules = false
 	})
@@ -44,19 +44,19 @@ func (s *testSelfProtectionSuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
-func (s *testSelfProtectionSuite) TearDownSuite(c *C) {
+func (s *testServiceMiddlewareSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testSelfProtectionSuite) TestConfigAudit(c *C) {
-	addr := fmt.Sprintf("%s/self_protection/config", s.urlPrefix)
+func (s *testServiceMiddlewareSuite) TestConfigAudit(c *C) {
+	addr := fmt.Sprintf("%s/service-middleware/config", s.urlPrefix)
 	ms := map[string]interface{}{
 		"enable-audit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c)), IsNil)
-	sc := &config.SelfProtectionConfig{}
+	sc := &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, true)
 	ms = map[string]interface{}{
@@ -65,7 +65,7 @@ func (s *testSelfProtectionSuite) TestConfigAudit(c *C) {
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c)), IsNil)
-	sc = &config.SelfProtectionConfig{}
+	sc = &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, false)
 
@@ -76,14 +76,14 @@ func (s *testSelfProtectionSuite) TestConfigAudit(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "config item audit not found")), IsNil)
 
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/config/persistSelfProtectionFail", "return(true)"), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"), IsNil)
 	ms = map[string]interface{}{
 		"audit.enable-audit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(c, http.StatusBadRequest)), IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/config/persistSelfProtectionFail"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"), IsNil)
 
 	ms = map[string]interface{}{
 		"audit.audit": "false",

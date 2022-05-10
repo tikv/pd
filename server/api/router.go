@@ -282,9 +282,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 
-	selfProtectionHandler := newSelfProtectionHandler(svr, rd)
-	registerFunc(apiRouter, "/self_protection/config", selfProtectionHandler.GetSelfProtectionConfig, setMethods("GET"))
-	registerFunc(apiRouter, "/self_protection/config", selfProtectionHandler.SetSelfProtectionConfig, setMethods("POST"), setAuditBackend(localLog))
+	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
+	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
+	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

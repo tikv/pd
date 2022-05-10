@@ -20,17 +20,17 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-// SelfProtectionStorage defines the storage operations on the self protection.
-type SelfProtectionStorage interface {
-	LoadSelfProtectionConfig(cfg interface{}) (bool, error)
-	SaveSelfProtectionConfig(cfg interface{}) error
+// ServiceMiddlewareStorage defines the storage operations on the service middleware.
+type ServiceMiddlewareStorage interface {
+	LoadServiceMiddlewareConfig(cfg interface{}) (bool, error)
+	SaveServiceMiddlewareConfig(cfg interface{}) error
 }
 
-var _ SelfProtectionStorage = (*StorageEndpoint)(nil)
+var _ ServiceMiddlewareStorage = (*StorageEndpoint)(nil)
 
-// LoadSelfProtectionConfig loads self protection config from selfProtectionPath then unmarshal it to cfg.
-func (se *StorageEndpoint) LoadSelfProtectionConfig(cfg interface{}) (bool, error) {
-	value, err := se.Load(selfProtectionPath)
+// LoadServiceMiddlewareConfig loads service middleware config from serviceMiddlewarePath then unmarshal it to cfg.
+func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg interface{}) (bool, error) {
+	value, err := se.Load(serviceMiddlewarePath)
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -41,11 +41,11 @@ func (se *StorageEndpoint) LoadSelfProtectionConfig(cfg interface{}) (bool, erro
 	return true, nil
 }
 
-// SaveSelfProtectionConfig stores marshallable cfg to the selfProtectionPath.
-func (se *StorageEndpoint) SaveSelfProtectionConfig(cfg interface{}) error {
+// SaveServiceMiddlewareConfig stores marshallable cfg to the serviceMiddlewarePath.
+func (se *StorageEndpoint) SaveServiceMiddlewareConfig(cfg interface{}) error {
 	value, err := json.Marshal(cfg)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 	}
-	return se.Save(selfProtectionPath, string(value))
+	return se.Save(serviceMiddlewarePath, string(value))
 }
