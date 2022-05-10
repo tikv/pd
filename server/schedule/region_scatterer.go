@@ -296,10 +296,6 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // StoreID set
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		for _, peer := range peers {
-			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				// It is both sourcePeer and targetPeer itself, no need to select.
-				continue
-			}
 			for {
 				candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
 				newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
