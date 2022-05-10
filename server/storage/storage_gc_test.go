@@ -86,7 +86,7 @@ func (s *testStorageFopGCSuite) TestLoadAllServiceGroup(c *C) {
 	storage := NewStorageWithMemoryBackend()
 	serviceGroups, err := storage.LoadAllServiceGroups()
 	c.Assert(err, IsNil)
-	c.Assert(serviceGroups, DeepEquals, []string{"default_rawkv"})
+	c.Assert(serviceGroups, DeepEquals, []string{endpoint.ServiceGroupRawKVDefault})
 }
 
 func (s *testStorageFopGCSuite) TestLoadServiceSafePointByServiceGroup(c *C) {

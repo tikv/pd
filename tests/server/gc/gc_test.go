@@ -16,13 +16,16 @@ package gc_test
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"sync"
 	"testing"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/gcpb"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
@@ -76,11 +79,11 @@ func (s *testGCSuite) mustNewGCService(c *C) (gcSvc *server.GcServer, cli gcpb.G
 	return
 }
 
-func (s *testGCSuite) TestXxx(c *C) {
+func (s *testGCSuite) TestGCService(c *C) {
 	_, cli, cluster, clusterID := s.mustNewGCService(c)
 	defer cluster.Destroy()
 
-	serviceGroupRawKV := []byte("default_rawkv")
+	serviceGroupRawKV := []byte(endpoint.ServiceGroupRawKVDefault)
 	serviceGroupTxnKV := []byte("default_txnkv")
 	serviceID1 := []byte("svc1")
 	serviceID2 := []byte("svc2")
@@ -121,6 +124,7 @@ func (s *testGCSuite) TestXxx(c *C) {
 		c.Assert(resp.GetHeader().GetError().GetType(), Equals, gcpb.ErrorType_SAFEPOINT_ROLLBACK)
 		c.Assert(resp.GetSucceeded(), IsFalse)
 	}
+	// now: svc1: 100
 
 	// Update GC safe point with revision mismatch
 	{
@@ -131,7 +135,7 @@ func (s *testGCSuite) TestXxx(c *C) {
 		respGc, err := cli.GetMinServiceSafePointByServiceGroup(s.ctx, reqGc)
 		c.Assert(err, IsNil)
 		c.Assert(respGc.SafePoint, Equals, uint64(100))
-		// c.Assert(respGc.Revision, Equals, int64(12))
+		// c.Assert(respGc.Revision, Equals, ?): Revision value is not stable. Don't check it.
 
 		reqSvc := &gcpb.UpdateServiceSafePointByServiceGroupRequest{
 			Header:         newRequestHeader(clusterID),
@@ -162,6 +166,7 @@ func (s *testGCSuite) TestXxx(c *C) {
 		c.Assert(respUpdate.Succeeded, IsFalse)
 		c.Assert(respUpdate.GetHeader().GetError().GetType(), Equals, gcpb.ErrorType_REVISION_MISMATCH)
 	}
+	// now: svc1: 100, svc2: 50
 
 	// Retry update GC safe point
 	{
@@ -172,7 +177,6 @@ func (s *testGCSuite) TestXxx(c *C) {
 		respGc, err := cli.GetMinServiceSafePointByServiceGroup(s.ctx, reqGc)
 		c.Assert(err, IsNil)
 		c.Assert(respGc.SafePoint, Equals, uint64(50))
-		// c.Assert(respGc.Revision, Equals, int64(12))
 
 		reqSvc := &gcpb.UpdateServiceSafePointByServiceGroupRequest{
 			Header:         newRequestHeader(clusterID),
@@ -209,6 +213,48 @@ func (s *testGCSuite) TestXxx(c *C) {
 		c.Assert(err, IsNil)
 		c.Assert(respUpdate.Succeeded, IsFalse)
 		c.Assert(respUpdate.GetHeader().GetError().GetType(), Equals, gcpb.ErrorType_SAFEPOINT_ROLLBACK)
+	}
+	// now: svc1: 100, svc2: 80, gc: 50
+
+	// Remove svc2
+	{
+		reqSvc := &gcpb.UpdateServiceSafePointByServiceGroupRequest{
+			Header:         newRequestHeader(clusterID),
+			ServiceGroupId: serviceGroupRawKV,
+			ServiceId:      serviceID2,
+			TTL:            0,
+		}
+		respSvc, err := cli.UpdateServiceSafePointByServiceGroup(s.ctx, reqSvc)
+		c.Assert(err, IsNil)
+		expected := &gcpb.UpdateServiceSafePointByServiceGroupResponse{
+			Header:    respSvc.GetHeader(),
+			Succeeded: true,
+		}
+		c.Assert(respSvc, DeepEquals, expected)
+
+		reqGc := &gcpb.GetMinServiceSafePointByServiceGroupRequest{
+			Header:         newRequestHeader(clusterID),
+			ServiceGroupId: serviceGroupRawKV,
+		}
+		respGc, err := cli.GetMinServiceSafePointByServiceGroup(s.ctx, reqGc)
+		c.Assert(err, IsNil)
+		c.Assert(respGc.SafePoint, Equals, uint64(100))
+	}
+	// now: svc1: 100, gc: 50
+
+	// Add svc2 with safe point roll back
+	{
+		reqSvc := &gcpb.UpdateServiceSafePointByServiceGroupRequest{
+			Header:         newRequestHeader(clusterID),
+			ServiceGroupId: serviceGroupRawKV,
+			ServiceId:      serviceID2,
+			TTL:            math.MaxInt64,
+			SafePoint:      49,
+		}
+		respSvc, err := cli.UpdateServiceSafePointByServiceGroup(s.ctx, reqSvc)
+		c.Assert(err, IsNil)
+		c.Assert(respSvc.Succeeded, IsFalse)
+		c.Assert(respSvc.GetHeader().GetError().GetType(), Equals, gcpb.ErrorType_SAFEPOINT_ROLLBACK)
 	}
 
 	// Another service group with no service safe point
@@ -247,4 +293,126 @@ func (s *testGCSuite) TestXxx(c *C) {
 		}
 		c.Assert(resp.GetSafePoints(), DeepEquals, expected)
 	}
+}
+
+func (s *testGCSuite) TestConcurrency(c *C) {
+	count := 500
+	concurrency := 10
+
+	svc, _, cluster, clusterID := s.mustNewGCService(c)
+	defer cluster.Destroy()
+
+	serviceGroupID := []byte(endpoint.ServiceGroupRawKVDefault)
+	closeCh := make(chan struct{})
+
+	updateGcSafePoint := func(safepoint uint64, revision int64) {
+		reqUpdate := &gcpb.UpdateGCSafePointByServiceGroupRequest{
+			Header:         newRequestHeader(clusterID),
+			ServiceGroupId: serviceGroupID,
+			SafePoint:      safepoint,
+			Revision:       revision,
+		}
+		_, err := svc.UpdateGCSafePointByServiceGroup(s.ctx, reqUpdate)
+		c.Assert(err, IsNil)
+
+	}
+	updateGcSafePoint(0, -1)
+
+	gcWorkerThread := func() {
+		for {
+			reqMin := &gcpb.GetMinServiceSafePointByServiceGroupRequest{
+				Header:         newRequestHeader(clusterID),
+				ServiceGroupId: serviceGroupID,
+			}
+			respMin, err := svc.GetMinServiceSafePointByServiceGroup(s.ctx, reqMin)
+			c.Assert(err, IsNil)
+
+			if respMin.SafePoint == 0 {
+				continue
+			}
+
+			updateGcSafePoint(respMin.SafePoint, respMin.Revision)
+
+			select {
+			case <-closeCh:
+				return
+			default:
+			}
+		}
+	}
+
+	updateSvcSafePoint := func(svcName string, safepoint uint64) {
+		reqSvc := &gcpb.UpdateServiceSafePointByServiceGroupRequest{
+			Header:         newRequestHeader(clusterID),
+			ServiceGroupId: serviceGroupID,
+			ServiceId:      []byte(svcName),
+			TTL:            math.MaxInt64,
+			SafePoint:      safepoint,
+		}
+		respSvc, err := svc.UpdateServiceSafePointByServiceGroup(s.ctx, reqSvc)
+		c.Assert(err, IsNil)
+		c.Assert(respSvc.Succeeded, IsTrue)
+	}
+
+	svcThread := func(svcName string) {
+		for i := 1; i <= count; i++ {
+			updateSvcSafePoint(svcName, uint64(i*10))
+		}
+	}
+
+	tikvThread := func() {
+		for {
+			reqGc := &gcpb.GetAllServiceGroupGCSafePointsRequest{
+				Header: newRequestHeader(clusterID),
+			}
+			respGc, err := svc.GetAllServiceGroupGCSafePoints(s.ctx, reqGc)
+			c.Assert(err, IsNil)
+			c.Assert(len(respGc.GetSafePoints()), Equals, 1)
+
+			gcSafePoint := respGc.GetSafePoints()[0].SafePoint
+
+			reqMin := &gcpb.GetMinServiceSafePointByServiceGroupRequest{
+				Header:         newRequestHeader(clusterID),
+				ServiceGroupId: serviceGroupID,
+			}
+			respMin, err := svc.GetMinServiceSafePointByServiceGroup(s.ctx, reqMin)
+			c.Assert(err, IsNil)
+
+			c.Assert(gcSafePoint <= respMin.SafePoint, IsTrue)
+
+			select {
+			case <-closeCh:
+				return
+			default:
+			}
+		}
+	}
+
+	wgSvc := sync.WaitGroup{}
+	wgGc := sync.WaitGroup{}
+
+	for i := 0; i < concurrency; i++ {
+		i := i
+		wgSvc.Add(1)
+		go func() {
+			defer wgSvc.Done()
+			svcThread(fmt.Sprintf("svc_%v", i))
+		}()
+	}
+
+	wgGc.Add(1)
+	go func() {
+		defer wgGc.Done()
+		gcWorkerThread()
+	}()
+
+	wgGc.Add(1)
+	go func() {
+		defer wgGc.Done()
+		tikvThread()
+	}()
+
+	wgSvc.Wait()
+	close(closeCh)
+	wgGc.Wait()
 }

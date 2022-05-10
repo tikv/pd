@@ -74,13 +74,13 @@ func (s *testKVSuite) TestMemKV(c *C) {
 }
 
 func (s *testKVSuite) testReadWrite(c *C, kv Base, isEtcd bool) {
-	rev := int64(-1)
+	Rev := int64(-1)
 	nextRevision := func() {
 		if isEtcd {
-			if rev == -1 {
-				rev = 1
+			if Rev == -1 {
+				Rev = 1
 			}
-			rev += 1
+			Rev += 1
 		}
 	}
 
@@ -104,7 +104,7 @@ func (s *testKVSuite) testReadWrite(c *C, kv Base, isEtcd bool) {
 	v, revision, err = kv.LoadRevision("key")
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "value")
-	c.Assert(revision, Equals, rev)
+	c.Assert(revision, Equals, Rev)
 
 	err = kv.Save("key", "value1")
 	c.Assert(err, IsNil)
@@ -112,7 +112,7 @@ func (s *testKVSuite) testReadWrite(c *C, kv Base, isEtcd bool) {
 	v, revision, err = kv.LoadRevision("key")
 	c.Assert(err, IsNil)
 	c.Assert(v, Equals, "value1")
-	c.Assert(revision, Equals, rev)
+	c.Assert(revision, Equals, Rev)
 
 	err = kv.Remove("key")
 	c.Assert(err, IsNil)

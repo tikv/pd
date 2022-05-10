@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/gcpb"
 	"github.com/pingcap/log"
@@ -78,8 +79,8 @@ func (s *GcServer) GetAllServiceGroups(ctx context.Context, request *gcpb.GetAll
 	}
 
 	serviceGroupIDs := make([][]byte, 0, len(serviceGroupList))
-	for _, sg := range serviceGroupList {
-		serviceGroupIDs = append(serviceGroupIDs, []byte(sg))
+	for _, sgid := range serviceGroupList {
+		serviceGroupIDs = append(serviceGroupIDs, []byte(sgid))
 	}
 
 	return &gcpb.GetAllServiceGroupsResponse{
@@ -90,25 +91,35 @@ func (s *GcServer) GetAllServiceGroups(ctx context.Context, request *gcpb.GetAll
 
 // getServiceRevisionByServiceGroup return etcd ModRevision of given service group.
 // It's used to detect new service safe point between `GetMinServiceSafePointByServiceGroup` & `UpdateGCSafePointByServiceGroup`.
-// Return -1 if the service group is not existed.
+// Return `kv.RevisionUnavailable` if the service group is not existed.
 func (s *GcServer) getServiceRevisionByServiceGroup(serviceGroupID string) (int64, error) {
 	servicePath := endpoint.GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID)
 	_, revision, err := s.storage.LoadRevision(servicePath)
 	return revision, err
 }
 
-// touchServiceRevisionByServiceGroup advance revision service group path.
+// touchServiceRevisionByServiceGroup advances revision of service group path.
 // It's used when new service safe point is saved.
 func (s *GcServer) touchServiceRevisionByServiceGroup(serviceGroupID string) error {
 	servicePath := endpoint.GCServiceSafePointPrefixPathByServiceGroup(serviceGroupID)
 	return s.storage.Save(servicePath, "")
 }
 
+func (s *GcServer) getNow() (time.Time, error) {
+	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
+	return now, err
+}
+
 // GetMinServiceSafePointByServiceGroup returns given service group's min service safe point.
 func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, request *gcpb.GetMinServiceSafePointByServiceGroupRequest) (*gcpb.GetMinServiceSafePointByServiceGroupResponse, error) {
-	// Lock to ensure that there is no other change between `min` and `currentRevison`.
-	s.serviceGroupSafePointLock.Lock()
-	defer s.serviceGroupSafePointLock.Unlock()
+	// Lock to ensure that there is no other change between `min` and `currentRevision`.
+	// Also note that `storage.LoadMinServiceSafePointByServiceGroup` is not thread-safe.
+	s.gcServiceGroupLock.Lock()
+	defer s.gcServiceGroupLock.Unlock()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -117,11 +128,12 @@ func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, req
 
 	var storage endpoint.GCSafePointStorage = s.storage
 	serviceGroupID := string(request.ServiceGroupId)
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+
+	now, err := s.getNow()
 	if err != nil {
 		return nil, err
 	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
+
 	min, err := storage.LoadMinServiceSafePointByServiceGroup(serviceGroupID, now)
 	if err != nil {
 		return nil, err
@@ -145,8 +157,8 @@ func (s *GcServer) GetMinServiceSafePointByServiceGroup(ctx context.Context, req
 
 // UpdateGCSafePointByServiceGroup used by gc_worker to update their gc safe points.
 func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request *gcpb.UpdateGCSafePointByServiceGroupRequest) (*gcpb.UpdateGCSafePointByServiceGroupResponse, error) {
-	s.serviceGroupSafePointLock.Lock()
-	defer s.serviceGroupSafePointLock.Unlock()
+	s.gcServiceGroupLock.Lock()
+	defer s.gcServiceGroupLock.Unlock()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -214,8 +226,8 @@ func (s *GcServer) UpdateGCSafePointByServiceGroup(ctx context.Context, request 
 
 // UpdateServiceSafePointByServiceGroup for services like CDC/BR/Lightning to update gc safe points in PD.
 func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, request *gcpb.UpdateServiceSafePointByServiceGroupRequest) (*gcpb.UpdateServiceSafePointByServiceGroupResponse, error) {
-	s.serviceGroupSafePointLock.Lock()
-	defer s.serviceGroupSafePointLock.Unlock()
+	s.gcServiceGroupLock.Lock()
+	defer s.gcServiceGroupLock.Unlock()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -236,11 +248,10 @@ func (s *GcServer) UpdateServiceSafePointByServiceGroup(ctx context.Context, req
 		}, nil
 	}
 
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	now, err := s.getNow()
 	if err != nil {
 		return nil, err
 	}
-	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
 	sspOld, err := storage.LoadServiceSafePointByServiceGroup(serviceGroupID, serviceID)
 	if err != nil {

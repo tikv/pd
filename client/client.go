@@ -134,7 +134,7 @@ type Client interface {
 
 	// GetGCAllServiceGroups returns a list containing all service groups that has safe point in pd
 	GetGCAllServiceGroups(ctx context.Context) ([]string, error)
-	// GetGCMinServiceSafePointByServiceGroup return the minimum of all service safe point of the given group
+	// GetGCMinServiceSafePointByServiceGroup returns the minimum of all service safe point of the given group
 	// It also returns the current revision of the pd storage, with in which the min is valid
 	// If none is found, it will return 0 as min
 	GetGCMinServiceSafePointByServiceGroup(ctx context.Context, serviceGroupID string) (safePoint uint64, revision int64, err error)
@@ -1943,7 +1943,6 @@ func (c *client) GetGCAllServiceGroups(ctx context.Context) ([]string, error) {
 		return nil, errors.WithStack(err)
 	}
 
-	// have to return a slice of string
 	returnSlice := make([]string, 0, len(resp.ServiceGroupId))
 	for _, serviceGroupID := range resp.ServiceGroupId {
 		returnSlice = append(returnSlice, string(serviceGroupID))
@@ -1999,7 +1998,6 @@ func (c *client) UpdateGCSafePointByServiceGroup(ctx context.Context, serviceGro
 		c.ScheduleCheckLeader()
 		return false, 0, errors.WithStack(err)
 	}
-	// if requested safepoint is the new safepoint, then update succeeded
 	return resp.Succeeded, resp.NewSafePoint, nil
 }
 
