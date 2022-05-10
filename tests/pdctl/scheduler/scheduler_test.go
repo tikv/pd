@@ -420,4 +420,10 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	c.Assert(err, IsNil)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
+
+	// test split bucket scheduler
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "split-bucket-scheduler"}, nil)
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
+	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 }

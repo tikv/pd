@@ -176,6 +176,7 @@ func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
 
 // Schedule return operators if some bucket is too hot.
 func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	conf := s.conf.Clone()
 	hotBuckets := cluster.BucketsStats(conf.Degree)
 	degree := math.MinInt32
@@ -215,6 +216,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
+		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		return []*operator.Operator{op}
 	}
 	return nil
