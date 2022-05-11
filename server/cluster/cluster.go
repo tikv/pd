@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -117,7 +118,7 @@ type RaftCluster struct {
 	storage            storage.Storage
 	minResolvedTS      uint64
 	// Keep the previous store limit settings when removing a store.
-	prevStoreLimit map[uint64]map[storelimit.Type]*storelimit.StoreLimit
+	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	clusterID                uint64
@@ -148,15 +149,14 @@ type Status struct {
 
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
+	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:          ctx,
-		running:            false,
-		clusterID:          clusterID,
-		regionSyncer:       regionSyncer,
-		httpClient:         httpClient,
-		etcdClient:         etcdClient,
-		storeConfigManager: manager,
+		serverCtx:    ctx,
+		running:      false,
+		clusterID:    clusterID,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -222,7 +222,7 @@ func (c *RaftCluster) InitCluster(
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]*storelimit.StoreLimit)
+	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 }
 
 // Start starts a cluster.
@@ -261,13 +261,13 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-
+	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
-	c.wg.Add(7)
+	c.wg.Add(8)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -275,9 +275,57 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
+	go c.runSyncConfig()
 	c.running = true
 
 	return nil
+}
+
+// runSyncConfig runs the job to sync tikv config.
+func (c *RaftCluster) runSyncConfig() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	stores := c.GetStores()
+
+	syncConfig(c.storeConfigManager, stores)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("sync store config job is stopped")
+			return
+		case <-ticker.C:
+			if !syncConfig(c.storeConfigManager, stores) {
+				stores = c.GetStores()
+			}
+		}
+	}
+}
+
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+	for index := 0; index < len(stores); index++ {
+		// filter out the stores that are tiflash
+		store := stores[index]
+		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+			continue
+		}
+
+		// filter out the stores that are not up.
+		if !(store.IsPreparing() || store.IsServing()) {
+			continue
+		}
+		// it will try next store if the current store is failed.
+		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		if err := manager.ObserveConfig(address); err != nil {
+			log.Warn("sync store config failed, it will try next store", zap.Error(err))
+			continue
+		}
+		// it will only try one store.
+		return true
+	}
+	return false
 }
 
 // LoadClusterInfo loads cluster related info.
@@ -1117,12 +1165,13 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), float64(c.core.GetStoreRegionSize(storeID)))
 		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		// record the current store limit in memory
+		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
+			storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
+		}
 		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
 		// And considering the store state has changed, RemoveStore is actually successful.
-		c.prevStoreLimit[storeID] = map[storelimit.Type]*storelimit.StoreLimit{
-			storelimit.AddPeer:    store.GetStoreLimit(storelimit.AddPeer),
-			storelimit.RemovePeer: store.GetStoreLimit(storelimit.RemovePeer),
-		}
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
@@ -1279,16 +1328,14 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return nil
 	}
 
-	limiter := c.prevStoreLimit[storeID]
 	options := []core.StoreCreateOption{core.UpStore()}
-	// To prevent panic we check if the store limit is nil. There are two cases may cause this problem:
-	// 1. when we start a new cluster, the store limit is only initialized for the first time scheduling
-	// 2. once the PD leader transfer, the previous store limit may be lost, we suggest changing it manually
-	if limiter[storelimit.AddPeer] != nil {
-		options = append(options, core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer].Rate()))
-	}
-	if limiter[storelimit.RemovePeer] != nil {
-		options = append(options, core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer].Rate()))
+	// get the previous store limit recorded in memory
+	limiter, exist := c.prevStoreLimit[storeID]
+	if exist {
+		options = append(options,
+			core.ResetStoreLimit(storelimit.AddPeer, limiter[storelimit.AddPeer]),
+			core.ResetStoreLimit(storelimit.RemovePeer, limiter[storelimit.RemovePeer]),
+		)
 	}
 	newStore := store.Clone(options...)
 	log.Warn("store has been up",
@@ -1296,6 +1343,11 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
+		if exist {
+			// persist the store limit
+			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+		}
 		c.resetProgress(storeID, store.GetAddress(), removingAction)
 	}
 	return err
@@ -1639,7 +1691,7 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.hotStat.StoresStats)
@@ -1653,7 +1705,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	statsMap.Reset()
 
 	c.coordinator.resetSchedulerMetrics()
