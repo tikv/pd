@@ -76,3 +76,51 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	manager = NewStoreConfigManager(client)
 	c.Assert(manager.source.(*TiKVConfigSource).schema, Equals, "http")
 }
+
+func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
+	testdata := []struct {
+		size      uint64
+		mergeSize uint64
+		keys      uint64
+		mergeKeys uint64
+		pass      bool
+	}{{
+		// case 1: the merged region size is smaller than the max region size
+		size:      96 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 2: the smallest region is 68MiB，it can't be merged again.
+		size:      144 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 3: the smallest region is 50MiB，it can be merged again.
+		size:      144 + 2,
+		mergeSize: 50,
+		keys:      1440000 + 20000,
+		mergeKeys: 500000,
+		pass:      false,
+	}, {
+		// case4: the smallest region is 51MiB，it can't be merged again.
+		size:      144 + 3,
+		mergeSize: 50,
+		keys:      1440000 + 30000,
+		mergeKeys: 500000,
+		pass:      true,
+	}}
+	config := &StoreConfig{}
+	for _, v := range testdata {
+		if v.pass {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), IsNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), IsNil)
+		} else {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), NotNil)
+		}
+	}
+}
