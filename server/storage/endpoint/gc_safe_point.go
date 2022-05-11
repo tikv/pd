@@ -34,6 +34,12 @@ type ServiceSafePoint struct {
 	SafePoint uint64 `json:"safe_point"`
 }
 
+// ServiceGroupGCSafePoint is gcWorker's safepoint for specific service group
+type ServiceGroupGCSafePoint struct {
+	ServiceGroupID string `json:"service_group_id"`
+	SafePoint      uint64 `json:"safe_point"`
+}
+
 // GCSafePointStorage defines the storage operations on the GC safe point.
 type GCSafePointStorage interface {
 	LoadGCSafePoint() (uint64, error)
@@ -42,6 +48,17 @@ type GCSafePointStorage interface {
 	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
 	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
+
+	LoadAllServiceGroups() ([]string, error)
+	// Service safe point interfaces.
+	SaveServiceSafePointByServiceGroup(serviceGroupID string, ssp *ServiceSafePoint) error
+	LoadServiceSafePointByServiceGroup(serviceGroupID, serviceID string) (*ServiceSafePoint, error)
+	LoadMinServiceSafePointByServiceGroup(serviceGroupID string, now time.Time) (*ServiceSafePoint, error)
+	RemoveServiceSafePointByServiceGroup(serviceGroupID, serviceID string) error
+	// GC safe point interfaces.
+	SaveGCSafePointByServiceGroup(gcSafePoint *ServiceGroupGCSafePoint) error
+	LoadGCSafePointByServiceGroup(serviceGroupID string) (*ServiceGroupGCSafePoint, error)
+	LoadAllServiceGroupGCSafePoints() ([]*ServiceGroupGCSafePoint, error)
 }
 
 var _ GCSafePointStorage = (*StorageEndpoint)(nil)
