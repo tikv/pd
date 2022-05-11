@@ -18,8 +18,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strconv"
 
-	"math"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -179,9 +179,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	conf := s.conf.Clone()
 	hotBuckets := cluster.BucketsStats(conf.Degree)
-	degree := math.MinInt32
-	var splitKeys [][]byte
-	var origin *core.RegionInfo
+	var splitBucket *buckets.BucketStat
 	hotRegionSplitSize := cluster.GetOpts().GetHotRegionSplitSize()
 	for regionID, buckets := range hotBuckets {
 		schedulerCounter.WithLabelValues(s.GetName(), "bucket-len").Add(float64(len(buckets)))
@@ -201,36 +199,30 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 			continue
 		}
 		for _, bucket := range buckets {
-			keys := checkSplit(region, bucket)
-			if hg := bucket.HotDegree; hg > degree && len(keys) > 0 {
-				splitKeys = keys
-				degree = hg
-				origin = region
+			// the key range of the bucket must less than the region.
+			if bytes.Compare(region.GetStartKey(), bucket.StartKey) > 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) < 0 {
+				schedulerCounter.WithLabelValues(s.GetName(), "region-not-match").Inc()
+				return nil
+			}
+			if splitBucket == nil || bucket.HotDegree > splitBucket.HotDegree {
+				splitBucket = bucket
 			}
 		}
 	}
-	if len(splitKeys) > 0 {
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, origin, operator.OpSplit,
-			pdpb.CheckPolicy_USEKEY, splitKeys)
+	if splitBucket != nil {
+		region := cluster.GetRegion(splitBucket.RegionID)
+		op, err := operator.CreateSplitRegionOperator(SplitBucketType, cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
+			pdpb.CheckPolicy_USEKEY, [][]byte{splitBucket.StartKey, splitBucket.EndKey})
 		if err != nil {
 			log.Info("create split operator failed", zap.Error(err))
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
+		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
+		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}
 	return nil
-}
-
-func checkSplit(region *core.RegionInfo, state *buckets.BucketStat) [][]byte {
-	splitKeys := make([][]byte, 0)
-	if bytes.Compare(state.StartKey, region.GetStartKey()) > 0 {
-		splitKeys = append(splitKeys, state.StartKey)
-	}
-
-	if bytes.Compare(state.EndKey, region.GetEndKey()) < 0 {
-		splitKeys = append(splitKeys, state.EndKey)
-	}
-	return splitKeys
 }
