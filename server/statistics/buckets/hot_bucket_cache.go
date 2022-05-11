@@ -186,9 +186,8 @@ func (h *HotBucketCache) getBucketsByKeyRange(startKey, endKey []byte) (items []
 
 // collectBucketsMetrics collects the metrics of the hot stats.
 func (h *HotBucketCache) collectBucketsMetrics(stats *BucketTreeItem) {
-	bucketsHeartbeatIntervalHist.Observe(float64(stats.interval))
+	bucketsHeartbeatIntervalHist.Observe(float64(stats.interval) / 1000)
 	for _, bucket := range stats.stats {
-		log.Info("collect bucket hot degree metrics", zap.Any("bucket", bucket))
 		bucketsHotDegreeHist.Observe(float64(bucket.HotDegree))
 	}
 }

@@ -181,11 +181,11 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	hotBuckets := cluster.BucketsStats(conf.Degree)
 	degree := math.MinInt32
 	var splitKeys [][]byte
-	var region *core.RegionInfo
+	var origin *core.RegionInfo
 	hotRegionSplitSize := cluster.GetOpts().GetHotRegionSplitSize()
 	for regionID, buckets := range hotBuckets {
 		schedulerCounter.WithLabelValues(s.GetName(), "bucket-len").Add(float64(len(buckets)))
-		region = cluster.GetRegion(regionID)
+		region := cluster.GetRegion(regionID)
 		// skip if region is not exist
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
@@ -205,11 +205,12 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 			if hg := bucket.HotDegree; hg > degree && len(keys) > 0 {
 				splitKeys = keys
 				degree = hg
+				origin = region
 			}
 		}
 	}
 	if len(splitKeys) > 0 {
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(SplitBucketType, origin, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKeys)
 		if err != nil {
 			log.Info("create split operator failed", zap.Error(err))
