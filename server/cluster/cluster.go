@@ -747,8 +747,8 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	return nil
 }
 
-// IsPreapred return if the prepare checker is ready.
-func (c *RaftCluster) IsPreapred() bool {
+// IsPrepared return if the prepare checker is ready.
+func (c *RaftCluster) IsPrepared() bool {
 	return c.coordinator.prepareChecker.isPrepared()
 }
 
@@ -818,7 +818,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
-	if !c.IsPreapred() || isNew {
+	if !c.IsPrepared() && isNew {
 		c.coordinator.prepareChecker.collect(region)
 	}
 
