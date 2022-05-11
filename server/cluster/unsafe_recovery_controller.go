@@ -270,6 +270,11 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 
 	if allCollected {
 		newestRegionTree, peersMap := u.buildUpFromReports()
+		if u.err != nil {
+			u.changeStage(failed)
+			return
+		}
+
 		// clean up previous plan
 		u.storePlanExpires = make(map[uint64]time.Time)
 		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
@@ -668,27 +673,27 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 // Insert the peer report of one region int the tree.
 // It finds and deletes all the overlapped regions first, and then
 // insert the new region.
-func (t *regionTree) insert(item *regionItem) bool {
+func (t *regionTree) insert(item *regionItem) (bool, error) {
 	overlaps := t.getOverlaps(item)
 
 	if t.contains(item.Region().GetId()) {
 		// it's ensured by the `buildUpFromReports` that only insert the latest peer of one region.
-		panic("region shouldn't be updated twice")
+		return false, errors.Errorf("region %v shouldn't be updated twice", item.Region().GetId())
 	}
 
 	for _, old := range overlaps {
 		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
 		if old.IsEpochStale(item) {
-			panic("region's epoch shouldn't be staler than old ones")
+			return false, errors.Errorf("region's epoch shouldn't be staler than old ones")
 		}
 	}
 	if len(overlaps) != 0 {
-		return false
+		return false, nil
 	}
 
 	t.regions[item.Region().GetId()] = item
 	t.tree.ReplaceOrInsert(item)
-	return true
+	return true, nil
 }
 
 func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.RecoveryPlan {
@@ -727,7 +732,7 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 
 	newestRegionTree := newRegionTree()
 	for _, peer := range newestPeerReports {
-		newestRegionTree.insert(peer)
+		_, u.err = newestRegionTree.insert(peer)
 	}
 	return newestRegionTree, peersMap
 }
