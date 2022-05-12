@@ -478,12 +478,9 @@ func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() map[string][
 		for _, demote := range plan.GetDemotes() {
 			peers := ""
 			for _, peer := range demote.GetFailedVoters() {
-				peers += fmt.Sprintf("{%v}", peer)
-				if peer != demote.GetFailedVoters()[len(demote.GetFailedVoters())-1] {
-					peers += ", "
-				}
+				peers += fmt.Sprintf("{ %v}, ", peer) // the extra space is intentional
 			}
-			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), peers))
+			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Trim(peers, ", ")))
 		}
 		for _, tombstone := range plan.GetTombstones() {
 			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
@@ -501,7 +498,11 @@ func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() map[string][
 		}
 		output := []string{}
 		for _, region := range plan.GetCreates() {
-			output = append(output, fmt.Sprintf("create region %v", core.RegionToHexMeta(region)))
+			info := core.RegionToHexMeta(region).String()
+			// avoid json escape character to make the output readable
+			info = strings.ReplaceAll(info, "<", "{ ") // the extra space is intentional
+			info = strings.ReplaceAll(info, ">", "}")
+			output = append(output, fmt.Sprintf("create region %v", info))
 		}
 		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
