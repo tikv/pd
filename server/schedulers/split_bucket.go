@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"strconv"
+	"strings"
 
 	"net/http"
 
@@ -190,7 +191,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 			continue
 		}
 		// region size is less than split region size
-		if region.GetApproximateKeys() <= hotRegionSplitSize {
+		if region.GetApproximateSize() <= hotRegionSplitSize {
 			schedulerCounter.WithLabelValues(s.GetName(), "region-too-small").Inc()
 			continue
 		}
@@ -200,7 +201,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		}
 		for _, bucket := range buckets {
 			// the key range of the bucket must less than the region.
-			if !(bytes.Compare(region.GetStartKey(), bucket.StartKey) <= 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) >= 0) {
+			if bytes.Compare(region.GetStartKey(), bucket.StartKey) > 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) < 0 {
 				log.Info("bucket not match region", zap.String("region-start-key", core.HexRegionKeyStr(region.GetStartKey())),
 					zap.String("region-end-key", core.HexRegionKeyStr(region.GetStartKey())), zap.Stringer("bucket", bucket))
 				schedulerCounter.WithLabelValues(s.GetName(), "region-not-match").Inc()
@@ -213,8 +214,17 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	}
 	if splitBucket != nil {
 		region := cluster.GetRegion(splitBucket.RegionID)
+		splitKey := make([][]byte, 0)
+		hexSplitKey := make([]string, 0)
+		if !bytes.Equal(region.GetStartKey(), splitBucket.StartKey) {
+			splitKey = append(splitKey, splitBucket.StartKey)
+			hexSplitKey = append(hexSplitKey, core.HexRegionKeyStr(splitBucket.StartKey))
+		}
+		if !bytes.Equal(region.GetEndKey(), splitBucket.EndKey) {
+			splitKey = append(splitKey, splitBucket.EndKey)
+		}
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
-			pdpb.CheckPolicy_USEKEY, [][]byte{splitBucket.StartKey, splitBucket.EndKey})
+			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			log.Info("create split operator failed", zap.Error(err))
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
@@ -223,6 +233,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
+		op.AdditionalInfos["region-split-key"] = strings.Join(hexSplitKey, ",")
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}
