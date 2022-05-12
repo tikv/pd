@@ -50,19 +50,23 @@ func testGCSafePoints() []*endpoint.KeySpaceGCSafePoint {
 			SpaceID:   "KeySpace5",
 			SafePoint: math.MaxUint64,
 		},
+		{
+			SpaceID:   endpoint.KeySpaceRawKVDefault,
+			SafePoint: 3000,
+		},
 	}
 }
 
-func (s *testStorageGCSuite) TestLoadKeySpaceGCSafePoint(c *C) {
+func (s *testStorageGCSuite) TestLoadGCSafePointByKeySpace(c *C) {
 	storage := NewStorageWithMemoryBackend()
 	testData := testGCSafePoints()
-	r, e := storage.LoadKeySpaceGCSafePoint("testKeySpace")
+	r, e := storage.LoadGCSafePointByKeySpace("testKeySpace")
 	c.Assert(r, IsNil)
 	c.Assert(e, IsNil)
 	for _, safePoint := range testData {
-		err := storage.SaveKeySpaceGCSafePoint(safePoint)
+		err := storage.SaveGCSafePointByKeySpace(safePoint)
 		c.Assert(err, IsNil)
-		loaded, err := storage.LoadKeySpaceGCSafePoint(safePoint.SpaceID)
+		loaded, err := storage.LoadGCSafePointByKeySpace(safePoint.SpaceID)
 		c.Assert(err, IsNil)
 		c.Assert(safePoint, DeepEquals, loaded)
 	}
@@ -72,7 +76,7 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	storage := NewStorageWithMemoryBackend()
 	testData := testGCSafePoints()
 	for _, safePoint := range testData {
-		err := storage.SaveKeySpaceGCSafePoint(safePoint)
+		err := storage.SaveGCSafePointByKeySpace(safePoint)
 		c.Assert(err, IsNil)
 	}
 	gcSafePoints, err := storage.LoadAllKeySpaceGCSafePoints()
@@ -96,7 +100,7 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			c.Assert(storage.SaveServiceSafePoint(spaceID, serviceSafePoint), IsNil)
+			c.Assert(storage.SaveServiceSafePointByKeySpace(spaceID, serviceSafePoint), IsNil)
 		}
 	}
 
@@ -110,7 +114,7 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 
 func (s *testStorageGCSuite) TestLoadAllKeySpaces(c *C) {
 	storage := NewStorageWithMemoryBackend()
-	keySpaces, err := storage.LoadAllKeySpaces()
+	keySpaces, err := storage.LoadAllKeySpaceGCSafePoints()
 	c.Assert(err, IsNil)
 	c.Assert(keySpaces, DeepEquals, []*endpoint.KeySpaceGCSafePoint{{SpaceID: endpoint.KeySpaceRawKVDefault}})
 }
@@ -131,12 +135,12 @@ func (s *testStorageGCSuite) TestLoadServiceSafePoint(c *C) {
 
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			c.Assert(storage.SaveServiceSafePoint(spaceID, serviceSafePoint), IsNil)
+			c.Assert(storage.SaveServiceSafePointByKeySpace(spaceID, serviceSafePoint), IsNil)
 		}
 	}
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			key := endpoint.ServiceSafePointPath(spaceID, serviceSafePoint.ServiceID)
+			key := endpoint.KeySpaceServiceSafePointPath(spaceID, serviceSafePoint.ServiceID)
 			value, err := storage.Load(key)
 			c.Assert(err, IsNil)
 			ssp := &endpoint.ServiceSafePoint{}
@@ -163,21 +167,21 @@ func (s *testStorageGCSuite) TestRemoveServiceSafePoint(c *C) {
 	// save service safe points
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			c.Assert(storage.SaveServiceSafePoint(spaceID, serviceSafePoint), IsNil)
+			c.Assert(storage.SaveServiceSafePointByKeySpace(spaceID, serviceSafePoint), IsNil)
 		}
 	}
 
 	// remove service safe points
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			c.Assert(storage.RemoveServiceSafePoint(spaceID, serviceSafePoint.ServiceID), IsNil)
+			c.Assert(storage.RemoveServiceSafePointByKeySpace(spaceID, serviceSafePoint.ServiceID), IsNil)
 		}
 	}
 
 	// check that service safe points are empty
 	for _, spaceID := range spaceIDs {
 		for _, serviceSafePoint := range serviceSafePoints {
-			safepoint, err := storage.LoadServiceSafePoint(spaceID, serviceSafePoint.ServiceID)
+			safepoint, err := storage.LoadServiceSafePointByKeySpace(spaceID, serviceSafePoint.ServiceID)
 			c.Assert(err, IsNil)
 			c.Assert(safepoint, IsNil)
 		}
@@ -199,26 +203,26 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 
 	testKeySpace := "test"
 	for _, serviceSafePoint := range serviceSafePoints {
-		c.Assert(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoint), IsNil)
+		c.Assert(storage.SaveServiceSafePointByKeySpace(testKeySpace, serviceSafePoint), IsNil)
 	}
-	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime)
+	minSafePoint, err := storage.LoadMinServiceSafePointByKeySpace(testKeySpace, currentTime)
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint, DeepEquals, serviceSafePoints[0])
 
 	// this should remove safePoint with ServiceID 0 due to expiration
 	// and find the safePoint with ServiceID 1
-	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(150*time.Second))
+	minSafePoint2, err := storage.LoadMinServiceSafePointByKeySpace(testKeySpace, currentTime.Add(150*time.Second))
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint2, DeepEquals, serviceSafePoints[1])
 
 	// verify that service safe point with ServiceID 0 has been removed
-	ssp, err := storage.LoadServiceSafePoint(testKeySpace, "0")
+	ssp, err := storage.LoadServiceSafePointByKeySpace(testKeySpace, "0")
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
 
 	// this should remove all service safe points
 	// and return nil
-	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
+	ssp, err = storage.LoadMinServiceSafePointByKeySpace(testKeySpace, currentTime.Add(500*time.Second))
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
 }

@@ -38,6 +38,7 @@ type Storage interface {
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
+	endpoint.KeySpaceGCSafePointStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
