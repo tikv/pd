@@ -2176,7 +2176,7 @@ func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, l
 		}
 		return
 	}
-	return "", 0, 0, 0, fmt.Errorf("no progress found for the given store ID: %s", storeID)
+	return "", 0, 0, 0, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the given store ID: %s", storeID))
 }
 
 // GetProgressByAction returns the progress details for a given action.
@@ -2187,7 +2187,7 @@ func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float6
 
 	progresses := c.progressManager.GetProgresses(filter)
 	if len(progresses) == 0 {
-		return 0, 0, 0, fmt.Errorf("no progress found for the action: %s", action)
+		return 0, 0, 0, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the action: %s", action))
 	}
 	var p, l, s float64
 	for _, progress := range progresses {

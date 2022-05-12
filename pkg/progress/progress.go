@@ -19,6 +19,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
@@ -139,7 +140,7 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 	if p, exist := m.progesses[progress]; exist {
 		process = 1 - p.remaining/p.total
 		if process < 0 {
-			err = fmt.Errorf("the remaining: %v is larger than the total: %v", p.remaining, p.total)
+			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
 			return
 		}
 		currentSpeed = 0
@@ -155,6 +156,6 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 		}
 		return
 	}
-	err = fmt.Errorf("no such progress: %s", progress)
+	err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progress))
 	return
 }
