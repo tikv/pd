@@ -217,7 +217,6 @@ func (h *storeHandler) SetStoreState(w http.ResponseWriter, r *http.Request) {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
 		return
 	}
-
 	stateStr := r.URL.Query().Get("state")
 	var err error
 	if strings.EqualFold(stateStr, metapb.StoreState_Up.String()) {
@@ -635,6 +634,10 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 		}
 
 		action, progress, leftSeconds, currentSpeed := h.Handler.GetProgressByID(v)
+		if progress == 0 && leftSeconds == 0 && currentSpeed == 0 {
+			h.rd.JSON(w, http.StatusNotFound, "no progress found for the given store ID")
+			return
+		}
 		sp := &Progress{
 			StoreID:      storeID,
 			Action:       action,
@@ -648,6 +651,10 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 	}
 	if v := r.URL.Query().Get("action"); v != "" {
 		progress, leftSeconds, currentSpeed := h.Handler.GetProgressByAction(v)
+		if progress == 0 && leftSeconds == 0 && currentSpeed == 0 {
+			h.rd.JSON(w, http.StatusNotFound, "no progress found for the action")
+			return
+		}
 		sp := &Progress{
 			Action:       v,
 			Progress:     progress,

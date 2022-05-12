@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	. "github.com/pingcap/check"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -145,6 +147,15 @@ func (s *clientTLSTestSuite) testTLSReload(
 	endpoints := make([]string, 0, len(testServers))
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+		tlsConfig, err := s.GetConfig().Security.ToTLSConfig()
+		c.Assert(err, IsNil)
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+				TLSClientConfig:   tlsConfig,
+			},
+		}
+		c.Assert(netutil.IsEnableHTTPS(httpClient), IsTrue)
 	}
 	// 2. concurrent client dialing while certs become expired
 	errc := make(chan error, 1)

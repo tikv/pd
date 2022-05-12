@@ -954,6 +954,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "No data",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -978,7 +979,7 @@
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "fields": "",
           "values": false
@@ -991,9 +992,9 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg(pd_cluster_progress{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", action=\"removing\"} > 0) by (instance)",
+          "expr": "avg(pd_cluster_progress{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", action=\"removing\"} > 0)",
           "interval": "",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -1011,6 +1012,7 @@
             "mode": "thresholds"
           },
           "mappings": [],
+          "noValue": "No data",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1019,7 +1021,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "percentunit"
         },
         "overrides": []
       },
@@ -1033,7 +1036,7 @@
       "options": {
         "reduceOptions": {
           "calcs": [
-            "lastNotNull"
+            "last"
           ],
           "fields": "",
           "values": false
@@ -1046,9 +1049,9 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg(pd_cluster_progress{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", action=\"preparing\"} > 1) by (instance)",
+          "expr": "avg(pd_cluster_progress{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", action=\"preparing\"} > 0)",
           "interval": "",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -5812,7 +5815,7 @@
             {
               "exemplar": true,
               "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-leader\"}",
-              "hide": false,
+              "hide": true,
               "interval": "",
               "legendFormat": "exp-key-rate-read-leader-{{store}}",
               "refId": "B"
@@ -5820,7 +5823,7 @@
             {
               "exemplar": true,
               "expr": "pd_scheduler_hot_peers_summary{type=\"exp-key-rate-read-region\"}",
-              "hide": false,
+              "hide": true,
               "interval": "",
               "legendFormat": "exp-key-rate-read-region-{{store}}",
               "refId": "C"
