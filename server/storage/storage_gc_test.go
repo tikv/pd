@@ -106,7 +106,6 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	for i, safePoint := range testData {
 		c.Assert(gcSafePoints[i], DeepEquals, safePoint)
 	}
-
 }
 
 func (s *testStorageGCSuite) TestLoadAllKeySpaces(c *C) {
