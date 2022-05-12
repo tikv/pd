@@ -40,6 +40,8 @@ const (
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
 	EngineTiFlash = "tiflash"
+	// Store with <EngineKey, EngineTiFlashMPP> label is a tiflash_mpp node, aka tiflash ReadNode.
+	// It's only for MPP computation and doesn't store any region data.
 	EngineTiFlashMPP = "tiflash_mpp"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"

@@ -473,14 +473,18 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 
-    // Because there is no region data on the TiFlash ReadNodes,
-    // so neither srcStore nor dstStore should be tiflash_mpp node.
-    if bs.best.srcStore.IsTiFlashMPP() || bs.best.dstStore.IsTiFlashMPP() {
-        log.Error("Got hot region(srcStore) in tiflash_mpp node or scheduling to tiflash_mpp node",
-            zap.Bool("srcStore is tiflash_mpp", bs.best.srcStore.IsTiFlashMPP()),
-            zap.Bool("dstStore is tiflash_mpp", bs.best.dstStore.IsTiFlashMPP()))
-        return false
-    }
+	// Because there is no region data on the TiFlash ReadNodes,
+	// so neither srcStore nor dstStore should be tiflash_mpp node.
+	if bs.best.srcStore.IsTiFlashMPP() {
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "tiflash-mpp-as-src-hot-store").Inc()
+		log.Error("tiflash_mpp node is source hot store, which is unexpected")
+		return false
+	}
+	if bs.best.dstStore.IsTiFlashMPP() {
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "tiflash-mpp-as-dst-store").Inc()
+		log.Error("tiflash_mpp node is target store for hot region, which is unexpected")
+		return false
+	}
 
 	if bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
