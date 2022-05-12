@@ -3286,7 +3286,7 @@
           "description": "99% operator region size",
           "fill": 0,
           "gridPos": {
-            "h": 7,
+            "h": 8,
             "w": 12,
             "x": 12,
             "y": 42
