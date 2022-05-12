@@ -411,8 +411,6 @@ github.com/pingcap/kvproto v0.0.0-20200411081810-b85805c9476c/go.mod h1:IOdRDPLy
 github.com/pingcap/kvproto v0.0.0-20220330070404-8c4cd3f93748/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
 github.com/pingcap/kvproto v0.0.0-20220429093005-2839fa5a1ed6 h1:gT4uxwuZzTniXdzp4mPoZjhNkDNEuZBt7HESOuLRyMI=
 github.com/pingcap/kvproto v0.0.0-20220429093005-2839fa5a1ed6/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
-github.com/pingcap/kvproto v0.0.0-20220512080918-81900420f7d9 h1:VVmdbuGfpJVeJxtaYOUn4fp9caD8kL2EGNJDmNiB5nk=
-github.com/pingcap/kvproto v0.0.0-20220512080918-81900420f7d9/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
 github.com/pingcap/log v0.0.0-20191012051959-b742a5d432e9/go.mod h1:4rbK1p9ILyIfb6hU7OG2CiWSqMXnp3JMbiaVJ6mvoY8=
 github.com/pingcap/log v0.0.0-20200511115504-543df19646ad/go.mod h1:4rbK1p9ILyIfb6hU7OG2CiWSqMXnp3JMbiaVJ6mvoY8=
 github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7/go.mod h1:8AanEdAHATuRurdGxZXBz0At+9avep+ub7U1AGYLIMM=
