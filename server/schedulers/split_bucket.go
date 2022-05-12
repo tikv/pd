@@ -200,9 +200,11 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		}
 		for _, bucket := range buckets {
 			// the key range of the bucket must less than the region.
-			if bytes.Compare(region.GetStartKey(), bucket.StartKey) > 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) < 0 {
+			if !(bytes.Compare(region.GetStartKey(), bucket.StartKey) <= 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) >= 0) {
+				log.Info("bucket not match region", zap.String("region-start-key", core.HexRegionKeyStr(region.GetStartKey())),
+					zap.String("region-end-key", core.HexRegionKeyStr(region.GetStartKey())), zap.Stringer("bucket", bucket))
 				schedulerCounter.WithLabelValues(s.GetName(), "region-not-match").Inc()
-				return nil
+				continue
 			}
 			if splitBucket == nil || bucket.HotDegree > splitBucket.HotDegree {
 				splitBucket = bucket
