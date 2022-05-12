@@ -113,6 +113,7 @@ func GetRegionStatKind(rwTy RWType, dim int) RegionStatKind {
 type StoreSummaryInfo struct {
 	*core.StoreInfo
 	isTiFlash  bool
+	isTiFlashMPP  bool
 	PendingSum *Influence
 }
 
@@ -129,6 +130,7 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
 			isTiFlash:  core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash),
+			isTiFlashMPP:  core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlashMPP),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -156,6 +158,11 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 // IsTiFlash returns true if the store is TiFlash.
 func (s *StoreSummaryInfo) IsTiFlash() bool {
 	return s.isTiFlash
+}
+
+// IsTiFlashMPP returns true if the store is tiflash_mpp node, aka TiFlash ReadNode.
+func (s *StoreSummaryInfo) IsTiFlashMPP() bool {
+	return s.isTiFlashMPP
 }
 
 // GetPendingInfluence returns the current pending influence.

@@ -739,6 +739,7 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	return false
 }
 
+// IsTiFlashRelatedStore returns if the store has <engine, tiflash> or <engine, tiflash_mpp> label.
 func IsTiFlashRelatedStore(store *metapb.Store) bool {
 	for _, l := range store.GetLabels() {
 		if l.GetKey() == EngineKey && (l.GetValue() == EngineTiFlash || l.GetValue() == EngineTiFlashMPP) {
