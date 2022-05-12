@@ -335,7 +335,6 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 		// bucket should inherit the old bucket hot degree if they have some intersection.
 		// skip if the left is equal to the right key, such as [10 20] [20 30].
 		if bytes.Compare(left, right) < 0 {
-			log.Info("inherit bucket %s from %s", zap.ByteString("left", left), zap.ByteString("right", right))
 			oldDegree := oldItems[p2].HotDegree
 			newDegree := newItems[p1].HotDegree
 			// new bucket should interim old if the hot degree of the new bucket is less than zero.
