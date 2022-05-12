@@ -34,6 +34,12 @@ type ServiceSafePoint struct {
 	SafePoint uint64 `json:"safe_point"`
 }
 
+// KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
+type KeySpaceGCSafePoint struct {
+	SpaceID   string `json:"space_id"`
+	SafePoint uint64 `json:"safe_point"`
+}
+
 // GCSafePointStorage defines the storage operations on the GC safe point.
 type GCSafePointStorage interface {
 	LoadGCSafePoint() (uint64, error)
@@ -42,6 +48,17 @@ type GCSafePointStorage interface {
 	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
 	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
 	RemoveServiceGCSafePoint(serviceID string) error
+
+	LoadAllKeySpaces() ([]*KeySpaceGCSafePoint, error)
+	// Service safe point interfaces.
+	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint) error
+	LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error)
+	LoadMinServiceSafePoint(spaceID string, now time.Time) (*ServiceSafePoint, error)
+	RemoveServiceSafePoint(spaceID, serviceID string) error
+	// GC safe point interfaces.
+	SaveKeySpaceGCSafePoint(gcSafePoint *KeySpaceGCSafePoint) error
+	LoadKeySpaceGCSafePoint(spaceID string) (*KeySpaceGCSafePoint, error)
+	LoadAllKeySpaceGCSafePoints() ([]*KeySpaceGCSafePoint, error)
 }
 
 var _ GCSafePointStorage = (*StorageEndpoint)(nil)
