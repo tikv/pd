@@ -1457,8 +1457,9 @@ func (c *RaftCluster) checkStores() {
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
 		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize))
+		regionCount := c.core.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
-		if regionSize == 0 {
+		if regionCount == 0 {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
@@ -1624,7 +1625,11 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 		return
 	}
 	c.progressManager.UpdateProgressRemaining(progress, remaining)
-	process, ls, _ := c.progressManager.Status(progress)
+	process, ls, _, err := c.progressManager.Status(progress)
+	if err != nil {
+		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
+		return
+	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
@@ -2153,14 +2158,17 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 }
 
 // GetProgressByID returns the progress details for a given store ID.
-func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, ls, cs float64) {
+func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, ls, cs float64, err error) {
 	filter := func(progress string) bool {
 		s := strings.Split(progress, "-")
 		return len(s) == 2 && s[1] == storeID
 	}
 	progress := c.progressManager.GetProgresses(filter)
 	if len(progress) != 0 {
-		process, ls, cs = c.progressManager.Status(progress[0])
+		process, ls, cs, err = c.progressManager.Status(progress[0])
+		if err != nil {
+			return
+		}
 		if strings.HasPrefix(progress[0], removingAction) {
 			action = removingAction
 		} else if strings.HasPrefix(progress[0], preparingAction) {
@@ -2168,24 +2176,28 @@ func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, l
 		}
 		return
 	}
-	return "", 0, 0, 0
+	return "", 0, 0, 0, fmt.Errorf("no progress found for the given store ID: %s", storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
-func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float64) {
+func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float64, err error) {
 	filter := func(progress string) bool {
 		return strings.HasPrefix(progress, action)
 	}
 
 	progresses := c.progressManager.GetProgresses(filter)
 	if len(progresses) == 0 {
-		return 0, 0, 0
+		return 0, 0, 0, fmt.Errorf("no progress found for the action: %s", action)
 	}
+	var p, l, s float64
 	for _, progress := range progresses {
-		p, l, c := c.progressManager.Status(progress)
+		p, l, s, err = c.progressManager.Status(progress)
+		if err != nil {
+			return
+		}
 		process += p
 		ls += l
-		cs += c
+		cs += s
 	}
 	num := float64(len(progresses))
 	process /= num
