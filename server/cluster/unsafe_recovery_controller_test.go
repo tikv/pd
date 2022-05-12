@@ -473,6 +473,59 @@ func (s *testUnsafeRecoverySuite) TestOneLearner(c *C) {
 	}
 }
 
+func (s *testUnsafeRecoverySuite) TestUninitializedPeer(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 60), IsNil)
+
+	reports := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					// uninitialized region that has no peer list
+					Region: &metapb.Region{
+						Id: 1001,
+					}}},
+		}},
+	}
+
+	advanceUntilFinished(c, recoveryController, reports)
+
+	expects := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1,
+						StartKey:    []byte(""),
+						EndKey:      []byte(""),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+						Peers: []*metapb.Peer{
+							{Id: 2, StoreId: 1}}}}},
+		}},
+	}
+
+	for storeID, report := range reports {
+		if result, ok := expects[storeID]; ok {
+			fmt.Printf("%+v, %+v", report.PeerReports, result.PeerReports)
+			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
+		} else {
+			c.Assert(len(report.PeerReports), Equals, 0)
+		}
+	}
+}
+
 func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())

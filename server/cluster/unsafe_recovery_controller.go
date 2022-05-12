@@ -448,18 +448,22 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 func (u *unsafeRecoveryController) getForceLeaderPlanDigest() map[string][]string {
 	outputs := make(map[string][]string)
 	for storeID, plan := range u.storeRecoveryPlans {
+		output := []string{}
 		forceLeaders := plan.GetForceLeader()
-		if forceLeaders == nil {
-			continue
-		}
-		regions := ""
-		for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-			regions += fmt.Sprintf("%d", regionID)
-			if i != len(forceLeaders.GetEnterForceLeaders())-1 {
-				regions += ", "
+		if forceLeaders != nil {
+			regions := ""
+			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
+				regions += fmt.Sprintf("%d", regionID)
+				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
+					regions += ", "
+				}
 			}
+			output = append(output, fmt.Sprintf("force leader on regions: %s", regions))
 		}
-		outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
+		for _, tombstone := range plan.GetTombstones() {
+			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
+		}
+		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
 	return outputs
 }
@@ -576,6 +580,10 @@ func (r *regionItem) Region() *metapb.Region {
 	return r.report.GetRegionState().GetRegion()
 }
 
+func (r *regionItem) IsInitialized() bool {
+	return len(r.Region().Peers) != 0
+}
+
 func (r *regionItem) IsEpochStale(other *regionItem) bool {
 	re := r.Region().GetRegionEpoch()
 	oe := other.Region().GetRegionEpoch()
@@ -622,6 +630,10 @@ func newRegionTree() *regionTree {
 		regions: make(map[uint64]*regionItem),
 		tree:    btree.New(defaultBTreeDegree),
 	}
+}
+
+func (t *regionTree) size() int {
+	return t.tree.Len()
 }
 
 func (t *regionTree) contains(regionID uint64) bool {
@@ -684,7 +696,7 @@ func (t *regionTree) insert(item *regionItem) (bool, error) {
 	for _, old := range overlaps {
 		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
 		if old.IsEpochStale(item) {
-			return false, errors.Errorf("region's epoch shouldn't be staler than old ones")
+			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, old)
 		}
 	}
 	if len(overlaps) != 0 {
@@ -768,6 +780,12 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 		report := item.(*regionItem).report
 		region := item.(*regionItem).Region()
 		if !u.canElectLeader(region, false) {
+			if !item.(*regionItem).IsInitialized() {
+				storeRecoveryPlan := u.getRecoveryPlan(item.(*regionItem).storeID)
+				storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
+				hasPlan = true
+				return true
+			}
 			if hasForceLeader(region) {
 				// already is a force leader, skip
 				return true
@@ -784,6 +802,10 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
 			// so find which peer should to be the leader instead of using peer info in the region tree.
 			leader := selectLeader(region)
+			if leader == nil {
+				u.err = errors.Errorf("can't select leader for region %v", region)
+				return false
+			}
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
 			if storeRecoveryPlan.ForceLeader == nil {
 				storeRecoveryPlan.ForceLeader = &pdpb.ForceLeader{}
@@ -900,6 +922,9 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 			// paranoid check: shouldn't overlap with any of the peers
 			for _, peers := range peersMap {
 				for _, peer := range peers {
+					if !peer.IsInitialized() {
+						continue
+					}
 					if (bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 &&
 						(len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0)) ||
 						((len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) &&
@@ -921,7 +946,14 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		return false
 	}
 
-	if !bytes.Equal(lastEnd, []byte("")) {
+	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
+		if lastStoreID == 0 {
+			// the last store id is invalid, so choose a random one
+			for storeID := range u.storeReports {
+				lastStoreID = storeID
+				break
+			}
+		}
 		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
 		if err != nil {
 			u.err = err
