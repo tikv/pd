@@ -1432,7 +1432,8 @@ func (c *RaftCluster) checkStores() {
 			threshold := c.getThreshold(stores, store)
 			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 			regionSize := float64(store.GetRegionSize())
-			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || regionSize >= threshold {
+			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || regionSize >= threshold ||
+				c.GetRegionCount() < core.InitClusterRegionThreshold {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
