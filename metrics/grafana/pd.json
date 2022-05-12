@@ -3346,7 +3346,7 @@
           },
           "yaxes": [
             {
-              "format": "opm",
+              "format": "decmbytes",
               "label": null,
               "logBase": 1,
               "max": null,
