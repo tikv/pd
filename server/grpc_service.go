@@ -514,7 +514,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
-	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
+	if !s.GetConfig().Replication.EnablePlacementRules && core.IsTiFlashRelatedStore(store) {
 		return nil, status.Errorf(codes.FailedPrecondition, "placement rules is disabled")
 	}
 

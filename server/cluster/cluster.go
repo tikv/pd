@@ -308,7 +308,7 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 	for index := 0; index < len(stores); index++ {
 		// filter out the stores that are tiflash
 		store := stores[index]
-		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if core.IsTiFlashRelatedStore(store.GetMeta()) {
 			continue
 		}
 
@@ -1778,7 +1778,7 @@ func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatistic
 
 func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
+		c.labelLevelStats.Observe(region, c.getStoresWithoutTiFlashLocked(region), c.opt.GetLocationLabels())
 	}
 }
 
@@ -1792,10 +1792,10 @@ func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.Sto
 	return stores
 }
 
-func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
+func (c *RaftCluster) getStoresWithoutTiFlashLocked(region *core.RegionInfo) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
-		if store := c.core.GetStore(p.StoreId); store != nil && !core.IsStoreContainLabel(store.GetMeta(), key, value) {
+		if store := c.core.GetStore(p.StoreId); store != nil && !core.IsTiFlashRelatedStore(store.GetMeta()) {
 			stores = append(stores, store)
 		}
 	}
@@ -1970,7 +1970,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
+	if core.IsTiFlashRelatedStore(store) {
 		sc = config.StoreLimitConfig{
 			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),

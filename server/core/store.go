@@ -40,6 +40,7 @@ const (
 	EngineKey = "engine"
 	// EngineTiFlash is the tiflash value of the engine label.
 	EngineTiFlash = "tiflash"
+	EngineTiFlashMPP = "tiflash_mpp"
 	// EngineTiKV indicates the tikv engine in metrics
 	EngineTiKV = "tikv"
 )
@@ -738,9 +739,18 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	return false
 }
 
+func IsTiFlashRelatedStore(store *metapb.Store) bool {
+	for _, l := range store.GetLabels() {
+		if l.GetKey() == EngineKey && (l.GetValue() == EngineTiFlash || l.GetValue() == EngineTiFlashMPP) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAvailableForMinResolvedTS returns if the store is available for min resolved ts.
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash) && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !IsTiFlashRelatedStore(s.GetMeta()) && s.GetLeaderCount() != 0
 }

@@ -686,7 +686,7 @@ const (
 )
 
 var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allSpecialEngines = []string{core.EngineTiFlash}
+var allSpecialEngines = []string{core.EngineTiFlash, core.EngineTiFlashMPP}
 
 type isolationFilter struct {
 	scope          string

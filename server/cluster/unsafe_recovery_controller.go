@@ -112,7 +112,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	}
 	u.failedStores = failedStores
 	for _, s := range u.cluster.GetStores() {
-		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsTiFlashRelatedStore(s.GetMeta()) {
 			continue
 		}
 		if _, exists := failedStores[s.GetID()]; exists {
