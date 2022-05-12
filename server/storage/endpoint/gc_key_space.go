@@ -141,9 +141,9 @@ func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID string) (*KeySpaceGCS
 
 // LoadAllKeySpaceGCSafePoints returns slice of key-spaces and their corresponding gc safe points.
 func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints() ([]*KeySpaceGCSafePoint, error) {
-	prefix := AllKeySpacePrefix()
+	prefix := SafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	suffix := KeySpaceGCSafePointSuffix()
+	suffix := GCSafePointSuffix()
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err

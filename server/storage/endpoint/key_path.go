@@ -31,7 +31,8 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
-	keySpacePath               = "keySpace"
+	keySpaceGCPrefix           = "key_space/gc_safepoint"
+	gcSafePointSuffix          = "gc"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -105,45 +106,33 @@ func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
 }
 
-// AllKeySpacePrefix returns prefix for all key-spaces
-// Path: /key-space/
-func AllKeySpacePrefix() string {
-	return keySpacePath + "/"
-}
-
-// keySpacePrefix returns path prefix for given key-space
-// Prefix: /key-space/{space-id}
-func keySpacePrefix(spaceID string) string {
-	return path.Join(keySpacePath, spaceID)
-}
-
-// safePointPrefix returns path prefix for given key-space's safe point
-// Prefix: /key-space/{space-id}/gc/safepoint
-func safePointPrefix(spaceID string) string {
-	return path.Join(keySpacePrefix(spaceID), "gc", "safepoint")
-}
-
 // ServiceSafePointPrefix returns the prefix of given service's service safe point
 // It ends with a "/" for more precise searching
-// Prefix: /key-space/{space-id}/gc/safepoint/service/
+// Prefix: /key-space/gc-safepoint/{space-id}/service/
 func ServiceSafePointPrefix(spaceID string) string {
-	return path.Join(safePointPrefix(spaceID), "service") + "/"
+	return path.Join(keySpaceGCPrefix, spaceID, "service") + "/"
 }
 
 // KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space
-// Path: /key-space/{space-id}/gc/safepoint/gc
+// Path: /key_space/gc_safepoint/{space_id}/gc
 func KeySpaceGCSafePointPath(spaceID string) string {
-	return path.Join(safePointPrefix(spaceID), "gc")
-}
-
-// KeySpaceGCSafePointSuffix returns the postfix for any gc safepoint path
-// Postfix: /gc/safepoint/gc
-func KeySpaceGCSafePointSuffix() string {
-	return "/" + path.Join("gc", "safepoint", "gc")
+	return path.Join(keySpaceGCPrefix, spaceID, gcSafePointSuffix)
 }
 
 // ServiceSafePointPath returns the path of given service's service safe point
-// Path: /key-space/{space-id}/gc/safepoint/service/{service-id}
+// Path: /key_space/gc_safepoint/{space_id}/service/{service-id}
 func ServiceSafePointPath(spaceID, serviceID string) string {
-	return path.Join(safePointPrefix(spaceID), "service", serviceID)
+	return path.Join(ServiceSafePointPrefix(spaceID), serviceID)
+}
+
+// SafePointPrefix returns prefix for all key-spaces
+// Path: /key-space/gc-safepoint/
+func SafePointPrefix() string {
+	return keySpaceGCPrefix + "/"
+}
+
+// GCSafePointSuffix returns the postfix for any gc safepoint path
+// Postfix: /gc
+func GCSafePointSuffix() string {
+	return "/" + gcSafePointSuffix
 }

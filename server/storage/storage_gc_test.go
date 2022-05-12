@@ -47,7 +47,7 @@ func testGCSafePoints() []*endpoint.KeySpaceGCSafePoint {
 			SafePoint: 23333333333,
 		},
 		{
-			SpaceID:   "testKeySpace5",
+			SpaceID:   "KeySpace5",
 			SafePoint: math.MaxUint64,
 		},
 	}
