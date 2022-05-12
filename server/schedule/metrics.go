@@ -93,5 +93,5 @@ func init() {
 	prometheus.MustRegister(operatorWaitCounter)
 	prometheus.MustRegister(scatterCounter)
 	prometheus.MustRegister(scatterDistributionCounter)
-	prometheus.MustRegister()
+	prometheus.MustRegister(operatorSizeHist)
 }
