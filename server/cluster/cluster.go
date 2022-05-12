@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -118,7 +119,7 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            bool
+	running            int64
 	meta               *metapb.Cluster
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
@@ -161,7 +162,6 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
-		running:      false,
 		clusterID:    clusterID,
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
@@ -238,13 +238,13 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server) error {
-	c.Lock()
-	defer c.Unlock()
-
-	if c.running {
+	if c.IsRunning() {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
+
+	c.Lock()
+	defer c.Unlock()
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
 	cluster, err := c.LoadClusterInfo()
@@ -291,7 +291,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
 	go c.runUpdateStoreStats()
-	c.running = true
+	atomic.StoreInt64(&c.running, 1)
 
 	return nil
 }
@@ -493,14 +493,11 @@ func (c *RaftCluster) runReplicationMode() {
 
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
-	c.Lock()
-
-	if !c.running {
-		c.Unlock()
+	if !atomic.CompareAndSwapInt64(&c.running, 1, 0) {
 		return
 	}
 
-	c.running = false
+	c.Lock()
 	c.coordinator.stop()
 	c.cancel()
 	c.Unlock()
@@ -510,16 +507,12 @@ func (c *RaftCluster) Stop() {
 
 // IsRunning return if the cluster is running.
 func (c *RaftCluster) IsRunning() bool {
-	c.RLock()
-	defer c.RUnlock()
-	return c.running
+	return atomic.LoadInt64(&c.running) == 1
 }
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
-	c.RLock()
-	defer c.RUnlock()
-	if c.running {
+	if c.IsRunning() {
 		return c.ctx
 	}
 	return nil
