@@ -38,7 +38,7 @@ var (
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "schedule",
-			Name:      "operator_size",
+			Name:      "operator_region_size",
 			Help:      "Bucketed histogram of operator size.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 20), // 1MB~1TB
 		}, []string{"type"})

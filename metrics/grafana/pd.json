@@ -3319,7 +3319,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_operator_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (type,le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_schedule_operator_region_size_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (type,le))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type,le}}",
