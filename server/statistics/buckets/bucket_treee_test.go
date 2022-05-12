@@ -101,36 +101,36 @@ func maxKey(a, b []byte) []byte {
 }
 
 func (bs *testBucketSuite) TestRingPutItem(c *C) {
-	ring := NewRing(2)
-	ring.Put(newSimpleBucketItem([]byte("002"), []byte("100")))
-	c.Assert(ring.tree.Len(), Equals, 1)
-	ring.Put(newSimpleBucketItem([]byte("100"), []byte("200")))
-	c.Assert(ring.tree.Len(), Equals, 2)
+	bucketTree := NewBucketTree(2)
+	bucketTree.Put(newSimpleBucketItem([]byte("002"), []byte("100")))
+	c.Assert(bucketTree.tree.Len(), Equals, 1)
+	bucketTree.Put(newSimpleBucketItem([]byte("100"), []byte("200")))
+	c.Assert(bucketTree.tree.Len(), Equals, 2)
 
 	// init key range: [002,100], [100,200]
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("000"), []byte("002"))), HasLen, 0)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("000"), []byte("009"))), HasLen, 1)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("010"), []byte("110"))), HasLen, 2)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("200"), []byte("300"))), HasLen, 0)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("000"), []byte("002"))), HasLen, 0)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("000"), []byte("009"))), HasLen, 1)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("010"), []byte("110"))), HasLen, 2)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("200"), []byte("300"))), HasLen, 0)
 
 	// test1： insert one key range, the old overlaps will retain like split buckets.
 	// key range: [002,010],[010,090],[090,100],[100,200]
-	ring.Put(newSimpleBucketItem([]byte("010"), []byte("090")))
-	c.Assert(ring.tree.Len(), Equals, 4)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
+	bucketTree.Put(newSimpleBucketItem([]byte("010"), []byte("090")))
+	c.Assert(bucketTree.tree.Len(), Equals, 4)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
 
 	// test2: insert one key range, the old overlaps will retain like merge .
 	// key range: [001,080], [080,090],[090,100],[100,200]
-	ring.Put(newSimpleBucketItem([]byte("001"), []byte("080")))
-	c.Assert(ring.tree.Len(), Equals, 4)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 2)
+	bucketTree.Put(newSimpleBucketItem([]byte("001"), []byte("080")))
+	c.Assert(bucketTree.tree.Len(), Equals, 4)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 2)
 
 	// test2: insert one keyrange, the old overlaps will retain like merge .
 	// key range: [001,120],[120,200]
-	ring.Put(newSimpleBucketItem([]byte("001"), []byte("120")))
-	c.Assert(ring.tree.Len(), Equals, 2)
-	c.Assert(ring.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
+	bucketTree.Put(newSimpleBucketItem([]byte("001"), []byte("120")))
+	c.Assert(bucketTree.tree.Len(), Equals, 2)
+	c.Assert(bucketTree.GetRange(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
 }
 
 func (bs *testBucketSuite) TestDebris(c *C) {

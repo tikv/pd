@@ -20,19 +20,19 @@ import (
 	"github.com/tikv/pd/pkg/btree"
 )
 
-// Ring is a buffer, the key range must be continuous.
-type Ring struct {
+// BucketTree is a buffer, the key range must be continuous.
+type BucketTree struct {
 	tree *btree.BTree
 }
 
-// NewRing creates a new ring buffer.
-func NewRing(degree int) *Ring {
-	return &Ring{
+// NewBucketTree creates a new bucket tree.
+func NewBucketTree(degree int) *BucketTree {
+	return &BucketTree{
 		tree: btree.New(degree),
 	}
 }
 
-// BucketItem is a ring item.
+// BucketItem is bucket tree item.
 type BucketItem interface {
 	Less(than btree.Item) bool
 	StartKey() []byte
@@ -42,16 +42,16 @@ type BucketItem interface {
 	String() string
 }
 
-// Len returns the length of the ring.
-func (r *Ring) Len() int {
+// Len returns the length of the bucket tree.
+func (r *BucketTree) Len() int {
 	return r.tree.Len()
 }
 
 // GetRange returns the items that belong the key range.
-// cache key range: |001-----100|100-----200|
-// request key range: |005-----120|
+// cache key range:  |001-----100|100-----200|
+// request key range:   |005-----120|
 // return items:     |001-----100|100-----200|
-func (r *Ring) GetRange(item BucketItem) []BucketItem {
+func (r *BucketTree) GetRange(item BucketItem) []BucketItem {
 	var res []BucketItem
 
 	var first BucketItem
@@ -79,8 +79,8 @@ func (r *Ring) GetRange(item BucketItem) []BucketItem {
 	return res
 }
 
-// Put puts a new item into the ring.
-func (r *Ring) Put(item BucketItem) {
+// Put puts a new item into the bucket tree.
+func (r *BucketTree) Put(item BucketItem) {
 	overlaps := r.GetRange(item)
 	for _, overlap := range overlaps {
 		r.tree.Delete(overlap)
