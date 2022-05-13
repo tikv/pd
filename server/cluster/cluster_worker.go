@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
@@ -230,9 +229,5 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 
 // HandleReportBuckets processes buckets reports from client
 func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
-		return err
-	}
-	c.hotBuckets.CheckAsync(buckets.NewCheckPeerTask(b))
-	return nil
+	return c.processReportBuckets(b)
 }
