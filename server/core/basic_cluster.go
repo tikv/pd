@@ -319,6 +319,13 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
+// ResetStores resets the store cache.
+func (bc *BasicCluster) ResetStores() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores = NewStoresInfo()
+}
+
 // DeleteStore deletes a store.
 func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Lock()
