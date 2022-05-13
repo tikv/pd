@@ -50,10 +50,6 @@ func testGCSafePoints() []*endpoint.KeySpaceGCSafePoint {
 			SpaceID:   "KeySpace5",
 			SafePoint: math.MaxUint64,
 		},
-		{
-			SpaceID:   endpoint.KeySpaceRawKVDefault,
-			SafePoint: 3000,
-		},
 	}
 }
 
@@ -79,7 +75,7 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 		err := storage.SaveGCSafePointByKeySpace(safePoint)
 		c.Assert(err, IsNil)
 	}
-	gcSafePoints, err := storage.LoadAllKeySpaceGCSafePoints()
+	gcSafePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
 	for i, safePoint := range testData {
 		c.Assert(gcSafePoints[i], DeepEquals, safePoint)
@@ -105,18 +101,26 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	}
 
 	// verify that service safe points does not interfere with gc safe points.
-	gcSafePoints, err = storage.LoadAllKeySpaceGCSafePoints()
+	gcSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
 	for i, safePoint := range testData {
+		c.Assert(gcSafePoints[i], DeepEquals, safePoint)
+	}
+
+	// verify that when withGCSafePoint set to false, returned safe points are 0s.
+	gcSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(false)
+	c.Assert(err, IsNil)
+	for i, safePoint := range testData {
+		safePoint.SafePoint = 0
 		c.Assert(gcSafePoints[i], DeepEquals, safePoint)
 	}
 }
 
 func (s *testStorageGCSuite) TestLoadAllKeySpaces(c *C) {
 	storage := NewStorageWithMemoryBackend()
-	keySpaces, err := storage.LoadAllKeySpaceGCSafePoints()
+	keySpaces, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
-	c.Assert(keySpaces, DeepEquals, []*endpoint.KeySpaceGCSafePoint{{SpaceID: endpoint.KeySpaceRawKVDefault}})
+	c.Assert(keySpaces, DeepEquals, []*endpoint.KeySpaceGCSafePoint{})
 }
 
 func (s *testStorageGCSuite) TestLoadServiceSafePoint(c *C) {

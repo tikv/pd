@@ -24,12 +24,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-// Predefined key spaces. More key spaces would come from "Multi-tenant".
-const (
-	// KeySpaceRawKVDefault is key space ID for RawKV.
-	KeySpaceRawKVDefault = "default_rawkv"
-)
-
 // KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
 type KeySpaceGCSafePoint struct {
 	SpaceID   string `json:"space_id"`
@@ -46,7 +40,7 @@ type KeySpaceGCSafePointStorage interface {
 	// GC safe point interfaces.
 	SaveGCSafePointByKeySpace(gcSafePoint *KeySpaceGCSafePoint) error
 	LoadGCSafePointByKeySpace(spaceID string) (*KeySpaceGCSafePoint, error)
-	LoadAllKeySpaceGCSafePoints() ([]*KeySpaceGCSafePoint, error)
+	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error)
 }
 
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
@@ -150,7 +144,7 @@ func (se *StorageEndpoint) LoadGCSafePointByKeySpace(spaceID string) (*KeySpaceG
 
 // LoadAllKeySpaceGCSafePoints returns slice of key-spaces and their corresponding gc safe points.
 // It also returns spaceID of any default key spaces that do not have a gc safepoint.
-func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints() ([]*KeySpaceGCSafePoint, error) {
+func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error) {
 	prefix := KeySpaceSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	suffix := KeySpaceGCSafePointSuffix()
@@ -165,22 +159,16 @@ func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints() ([]*KeySpaceGCSafePoint
 			continue
 		}
 		safePoint := &KeySpaceGCSafePoint{}
-		if err = json.Unmarshal([]byte(values[i]), safePoint); err != nil {
-			return nil, err
+		if withGCSafePoint {
+			if err = json.Unmarshal([]byte(values[i]), safePoint); err != nil {
+				return nil, err
+			}
+		} else {
+			spaceID := strings.TrimPrefix(keys[i], prefix)
+			spaceID = strings.TrimSuffix(spaceID, suffix)
+			safePoint.SpaceID = spaceID
 		}
 		safePoints = append(safePoints, safePoint)
-	}
-
-	// make sure all default key spaces are included in result
-	defaultKeySpaces := []string{KeySpaceRawKVDefault}
-	for _, defaultKeySpace := range defaultKeySpaces {
-		value, err := se.Load(KeySpaceGCSafePointPath(defaultKeySpace))
-		if err != nil {
-			return nil, err
-		}
-		if value == "" {
-			safePoints = append(safePoints, &KeySpaceGCSafePoint{SpaceID: defaultKeySpace})
-		}
 	}
 	return safePoints, nil
 }
