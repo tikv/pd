@@ -22,6 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -602,4 +603,54 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 			cache.updateStat(ret)
 		}
 	}
+}
+
+type testMovingAverageCase struct {
+	report []float64
+	expect []float64
+}
+
+func checkMovingAverage(c *C, testCase *testMovingAverageCase) {
+	interval := 1 * time.Second
+	tm := movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
+	var results []float64
+	for _, data := range testCase.report {
+		tm.Add(data, interval)
+		results = append(results, tm.Get())
+	}
+	c.Assert(results, DeepEquals, testCase.expect)
+}
+
+//
+func (t *testHotPeerCache) TestUnstableData(c *C) {
+	cases := []*testMovingAverageCase{
+		{
+			report: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+			expect: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 1, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 1, 1, 1, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 1, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 1, 0, 1},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		},
+	}
+	for i := range cases {
+		checkMovingAverage(c, cases[i])
+	}
+
 }
