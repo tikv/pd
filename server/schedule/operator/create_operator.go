@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math/rand"
 
@@ -129,11 +128,14 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	if len(keys) > 0 {
 		hexKeys := make([]string, len(keys))
 		for i := range keys {
-			hexKeys[i] = hex.EncodeToString(keys[i])
+			hexKeys[i] = core.HexRegionKeyStr(keys[i])
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step), nil
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
+	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
+	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetEndKey())
+	return op, nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
