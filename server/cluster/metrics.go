@@ -96,13 +96,13 @@ var (
 			Help:      "The current progress of corresponding action",
 		}, []string{"address", "store", "action"})
 
-	storeSyncCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	storeSyncConfigEvent = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "cluster",
 			Name:      "store_sync",
-			Help:      "The state of store sync",
-		}, []string{"address", "action"})
+			Help:      "The state of store sync config",
+		}, []string{"address", "state"})
 
 	storesETAGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -125,5 +125,5 @@ func init() {
 	prometheus.MustRegister(bucketEventCounter)
 	prometheus.MustRegister(storesProgressGauge)
 	prometheus.MustRegister(storesETAGauge)
-	prometheus.MustRegister(storeSyncCount)
+	prometheus.MustRegister(storeSyncConfigEvent)
 }

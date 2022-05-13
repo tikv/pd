@@ -319,11 +319,11 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
 		if err := manager.ObserveConfig(address); err != nil {
-			storeSyncCount.WithLabelValues(address, "fail").Inc()
+			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
 		}
-		storeSyncCount.WithLabelValues(address, "succ").Inc()
+		storeSyncConfigEvent.WithLabelValues(address, "succ").Inc()
 		// it will only try one store.
 		return true
 	}
