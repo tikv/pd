@@ -39,7 +39,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "schedule",
 			Name:      "operator_region_size",
-			Help:      "Bucketed histogram of operator size.",
+			Help:      "Bucketed histogram of the operator region size.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 20), // 1MB~1TB
 		}, []string{"type"})
 
