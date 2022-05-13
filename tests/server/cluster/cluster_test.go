@@ -1123,11 +1123,11 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	for _, store := range stores {
 		c.Assert(storage.SaveStore(store), IsNil)
 	}
-	raftCluster, err := rc.LoadClusterInfo()
+	rc, err = rc.LoadClusterInfo()
 	c.Assert(err, IsNil)
-	c.Assert(raftCluster, NotNil)
+	c.Assert(rc, NotNil)
 	// offline a store
-	c.Assert(raftCluster.RemoveStore(1, false), IsNil)
+	c.Assert(rc.RemoveStore(1, false), IsNil)
 	c.Assert(rc.GetStore(1).GetState(), Equals, metapb.StoreState_Offline)
 
 	// transfer PD leader to another PD
@@ -1135,27 +1135,22 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	tc.WaitLeader()
 	leaderServer = tc.GetServer(tc.GetLeader())
 	svr1 := leaderServer.GetServer()
-	rc1 := cluster.NewRaftCluster(s.ctx, svr1.ClusterID(), syncer.NewRegionSyncer(svr1), svr1.GetClient(), svr1.GetHTTPClient())
-	rc1.InitCluster(svr1.GetAllocator(), svr1.GetPersistOptions(), svr1.GetStorage(), svr1.GetBasicCluster())
-	raftCluster1, err := rc1.LoadClusterInfo()
+	rc1 := svr1.GetRaftCluster()
 	c.Assert(err, IsNil)
-	c.Assert(raftCluster1, NotNil)
+	c.Assert(rc1, NotNil)
 	// tombstone a store, and remove its record
-	raftCluster1.BuryStore(1, false)
-	raftCluster1.RemoveTombStoneRecords()
+	c.Assert(rc1.BuryStore(1, false), IsNil)
+	c.Assert(rc1.RemoveTombStoneRecords(), IsNil)
 
 	// transfer PD leader back to the previous PD
 	tc.ResignLeader()
 	tc.WaitLeader()
 	leaderServer = tc.GetServer(tc.GetLeader())
 	svr = leaderServer.GetServer()
-	rc = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
-	raftCluster, err = rc.LoadClusterInfo()
-	c.Assert(err, IsNil)
-	c.Assert(raftCluster, NotNil)
+	rc = svr.GetRaftCluster()
+	c.Assert(rc, NotNil)
 
 	// check store count
-	c.Assert(raftCluster.GetMetaCluster(), DeepEquals, meta)
-	c.Assert(raftCluster.GetStoreCount(), Equals, 3)
+	c.Assert(rc.GetMetaCluster(), DeepEquals, meta)
+	c.Assert(rc.GetStoreCount(), Equals, 3)
 }
