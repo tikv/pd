@@ -56,7 +56,6 @@ type Cluster struct {
 	ID             uint64
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
-	ctx context.Context
 }
 
 // NewCluster creates a new Cluster
@@ -68,7 +67,6 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
 		StoreConfigManager: config.NewStoreConfigManager(nil),
-		ctx:                ctx,
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()

@@ -1519,7 +1519,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		if testcase.kind == statistics.Read {
 			reportInterval = uint64(statistics.ReadReportInterval)
 		}
-		// hot Degree increase
+		// hot degree increase
 		heartbeat(1, 1, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
 		heartbeat(1, 1, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
 		items := heartbeat(1, 1, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)

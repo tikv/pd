@@ -15,6 +15,7 @@
 package operator
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 
@@ -128,7 +129,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	if len(keys) > 0 {
 		hexKeys := make([]string, len(keys))
 		for i := range keys {
-			hexKeys[i] = core.HexRegionKeyStr(keys[i])
+			hexKeys[i] = hex.EncodeToString(keys[i])
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
