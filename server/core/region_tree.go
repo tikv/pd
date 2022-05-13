@@ -226,7 +226,7 @@ func (t *regionTree) scanRanges() []*RegionInfo {
 
 func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regionItem) {
 	item := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: region.GetStartKey()}}}
-	prevItem, nextItem := t.tree.GetAdjacentRegions(item)
+	prevItem, nextItem := t.tree.GetAdjacentItem(item)
 	var prev, next *regionItem
 	if prevItem != nil {
 		prev = prevItem.(*regionItem)

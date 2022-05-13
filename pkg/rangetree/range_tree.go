@@ -32,8 +32,8 @@ func (r *RangeTree) Update(item RangeItem) []RangeItem {
 	overlaps := r.GetOverlaps(item)
 	for _, old := range overlaps {
 		r.tree.Delete(old)
-		debris := old.Debris(item.GetStartKey(), item.GetEndKey())
-		for _, child := range debris {
+		children := old.Debris(item.GetStartKey(), item.GetEndKey())
+		for _, child := range children {
 			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
 				r.tree.ReplaceOrInsert(child)
 			}
@@ -45,12 +45,12 @@ func (r *RangeTree) Update(item RangeItem) []RangeItem {
 
 // GetOverlaps returns the range items that has some intersections with the given items.
 func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
-	// note that Find() gets the last item that is less or equal than the region.
+	// note that Find() gets the last item that is less or equal than the item.
 	// in the case: |_______a_______|_____b_____|___c___|
-	// new region is     |______d______|
-	// Find() will return RangeItem of region_a
-	// and both startKey of region_a and region_b are less than endKey of region_d,
-	// thus they are regarded as overlapped regions.
+	// new item is     |______d______|
+	// Find() will return RangeItem of item_a
+	// and both startKey of item_a and item_b are less than endKey of item_d,
+	// thus they are regarded as overlapped items.
 	result := r.Find(item)
 	if result == nil {
 		result = item
@@ -68,6 +68,7 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 	return overlaps
 }
 
+// Find returns the range item contains the start key.
 func (r *RangeTree) Find(item RangeItem) RangeItem {
 	var result RangeItem
 	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
@@ -75,14 +76,14 @@ func (r *RangeTree) Find(item RangeItem) RangeItem {
 		return false
 	})
 
-	if result == nil || !Contains(result, item.GetStartKey()) {
+	if result == nil || !contains(result, item.GetStartKey()) {
 		return nil
 	}
 
 	return result
 }
 
-func Contains(item RangeItem, key []byte) bool {
+func contains(item RangeItem, key []byte) bool {
 	start, end := item.GetStartKey(), item.GetEndKey()
 	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
 }
@@ -91,22 +92,25 @@ func (r *RangeTree) Remove(item RangeItem) RangeItem {
 	return r.tree.Delete(item).(RangeItem)
 }
 
+// Len returns the count of the range tree.
 func (r *RangeTree) Len() int {
 	return r.tree.Len()
 }
 
-func (r *RangeTree) ScanRange(region RangeItem, f func(item2 RangeItem) bool) {
-	// Find if there is a region with key range [s, d), s < startKey < d
-	startItem := r.Find(region)
+// ScanRange scan the start item util the result of the function is false.
+func (r *RangeTree) ScanRange(start RangeItem, f func(_ RangeItem) bool) {
+	// Find if there is a item with key range [s, d), s < startKey < d
+	startItem := r.Find(start)
 	if startItem == nil {
-		startItem = region
+		startItem = start
 	}
 	r.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
 		return f(item.(RangeItem))
 	})
 }
 
-func (r *RangeTree) GetAdjacentRegions(item RangeItem) (RangeItem, RangeItem) {
+// GetAdjacentItem returns the adjacent range item.
+func (r *RangeTree) GetAdjacentItem(item RangeItem) (RangeItem, RangeItem) {
 	var prev, next RangeItem
 	r.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
 		if bytes.Equal(item.GetStartKey(), i.(RangeItem).GetStartKey()) {
@@ -125,10 +129,12 @@ func (r *RangeTree) GetAdjacentRegions(item RangeItem) (RangeItem, RangeItem) {
 	return prev, next
 }
 
+// GetAt returns the given index item.
 func (r *RangeTree) GetAt(index int) RangeItem {
 	return r.tree.GetAt(index).(RangeItem)
 }
 
+// GetWithIndex returns index and item for the given item.
 func (r *RangeTree) GetWithIndex(item RangeItem) (RangeItem, int) {
 	rst, index := r.tree.GetWithIndex(item)
 	if rst == nil {
