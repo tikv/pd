@@ -67,9 +67,11 @@ func (r *RegionTree) Update(item RegionItem) []RegionItem {
 	overlaps := r.GetOverlaps(item)
 	for _, old := range overlaps {
 		r.tree.Delete(old)
-		deris := old.Debris(item.GetStartKey(), item.GetEndKey())
-		for _, child := range deris {
-			r.tree.ReplaceOrInsert(child)
+		debris := old.Debris(item.GetStartKey(), item.GetEndKey())
+		for _, child := range debris {
+			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
+				r.tree.ReplaceOrInsert(child)
+			}
 		}
 	}
 	r.tree.ReplaceOrInsert(item)
