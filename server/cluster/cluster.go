@@ -614,6 +614,11 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	return c.coordinator.checkers.GetSuspectRegions()
 }
 
+// GetHotStat gets hot stat for test.
+func (c *RaftCluster) GetHotStat() *statistics.HotStat {
+	return c.hotStat
+}
+
 // RemoveSuspectRegion removes region from suspect list.
 func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.coordinator.checkers.RemoveSuspectRegion(id)
