@@ -72,8 +72,6 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
-
-	HotRegionMoveMaxSize = 512
 )
 
 var (

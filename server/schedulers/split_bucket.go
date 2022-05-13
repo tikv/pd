@@ -37,9 +37,12 @@ import (
 )
 
 const (
+	// SplitBucketName is the split bucket name.
 	SplitBucketName = "split-bucket-scheduler"
+	// SplitBucketType is the spilt bucket type.
 	SplitBucketType = "split-bucket"
 
+	// DefaultHotDegree is the default hot region threshold.
 	DefaultHotDegree = 3
 )
 
