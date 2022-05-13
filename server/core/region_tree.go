@@ -103,17 +103,22 @@ func (r *RegionTree) GetOverlaps(item RegionItem) []RegionItem {
 }
 
 func (r *RegionTree) find(item RegionItem) RegionItem {
-	var result *regionItem
+	var result RegionItem
 	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		result = i.(*regionItem)
+		result = i.(RegionItem)
 		return false
 	})
 
-	if result == nil || !result.Contains(item.GetStartKey()) {
+	if result == nil || !Contains(result, item.GetStartKey()) {
 		return nil
 	}
 
 	return result
+}
+
+func Contains(item RegionItem, key []byte) bool {
+	start, end := item.GetStartKey(), item.GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
 }
 
 func (r *RegionTree) remove(item RegionItem) RegionItem {
