@@ -57,6 +57,8 @@ type GlobalConfigItem struct {
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
+	// GCClient provides gc related functionalities.
+	GCClient
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
 	// GetAllMembers gets the members Info from PD
