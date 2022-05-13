@@ -56,7 +56,7 @@ func (t *testStoreStatisticsSuite) TestStoreStatistics(c *C) {
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
-	storeStats := NewStoreStatisticsMap(opt)
+	storeStats := NewStoreStatisticsMap(opt, nil)
 	for _, store := range stores {
 		storeStats.Observe(store, storesStats)
 	}

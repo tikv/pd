@@ -220,6 +220,11 @@ func (s *StoreInfo) GetNodeState() metapb.NodeState {
 	return s.meta.GetNodeState()
 }
 
+// GetStatusAddress returns the http address of the store.
+func (s *StoreInfo) GetStatusAddress() string {
+	return s.meta.GetStatusAddress()
+}
+
 // GetAddress returns the address of the store.
 func (s *StoreInfo) GetAddress() string {
 	return s.meta.GetAddress()

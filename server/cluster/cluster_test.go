@@ -1118,6 +1118,38 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	tc := newTestCluster(s.ctx, opt)
+	stores := newTestStores(5, "2.0.0")
+	for _, s := range stores {
+		c.Assert(tc.putStoreLocked(s), IsNil)
+	}
+	c.Assert(tc.getUpStores(), HasLen, 5)
+
+	testdata := []struct {
+		whiteList     []string
+		maxRegionSize uint64
+		updated       bool
+	}{{
+		whiteList:     []string{},
+		maxRegionSize: uint64(144),
+		updated:       false,
+	}, {
+		whiteList:     []string{"127.0.0.1:5"},
+		maxRegionSize: uint64(10),
+		updated:       true,
+	}}
+
+	for _, v := range testdata {
+		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
+		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+		c.Assert(syncConfig(tc.storeConfigManager, tc.GetStores()), Equals, v.updated)
+		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, v.maxRegionSize)
+	}
+}
+
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -1568,11 +1600,13 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, n)
 	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
-			Id:         i,
-			Address:    fmt.Sprintf("127.0.0.1:%d", i),
-			State:      metapb.StoreState_Up,
-			Version:    version,
-			DeployPath: getTestDeployPath(i),
+			Id:            i,
+			Address:       fmt.Sprintf("127.0.0.1:%d", i),
+			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			State:         metapb.StoreState_Up,
+			Version:       version,
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Serving,
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}

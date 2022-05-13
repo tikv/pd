@@ -158,6 +158,17 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
 		return nil
 	}
+	if err := m.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
+		m.opts.GetMaxMergeRegionSize()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-size-after-merge").Inc()
+		return nil
+	}
+
+	if err := m.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
+		m.opts.GetMaxMergeRegionKeys()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-keys-after-merge").Inc()
+		return nil
+	}
 
 	log.Debug("try to merge region",
 		logutil.ZapRedactStringer("from", core.RegionToHexMeta(region.GetMeta())),
