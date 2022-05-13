@@ -1343,3 +1343,65 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	ts = rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store5TS)
 }
+
+// See https://github.com/tikv/pd/issues/4941
+func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 2)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	svr := leaderServer.GetServer()
+	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	storage := rc.GetStorage()
+	meta := &metapb.Cluster{Id: 123}
+	c.Assert(storage.SaveMeta(meta), IsNil)
+	n := 4
+	stores := make([]*metapb.Store, 0, n)
+	for i := 1; i <= n; i++ {
+		store := &metapb.Store{Id: uint64(i), State: metapb.StoreState_Up}
+		stores = append(stores, store)
+	}
+
+	for _, store := range stores {
+		c.Assert(storage.SaveStore(store), IsNil)
+	}
+	raftCluster, err := rc.LoadClusterInfo()
+	c.Assert(err, IsNil)
+	c.Assert(raftCluster, NotNil)
+	// offline a store
+	c.Assert(raftCluster.RemoveStore(1, false), IsNil)
+	c.Assert(rc.GetStore(1).GetState(), Equals, metapb.StoreState_Offline)
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr1 := leaderServer.GetServer()
+	rc1 := cluster.NewRaftCluster(s.ctx, svr1.ClusterID(), syncer.NewRegionSyncer(svr1), svr1.GetClient(), svr1.GetHTTPClient())
+	rc1.InitCluster(svr1.GetAllocator(), svr1.GetPersistOptions(), svr1.GetStorage(), svr1.GetBasicCluster())
+	raftCluster1, err := rc1.LoadClusterInfo()
+	c.Assert(err, IsNil)
+	c.Assert(raftCluster1, NotNil)
+	// tombstone a store, and remove its record
+	raftCluster1.BuryStore(1, false)
+	raftCluster1.RemoveTombStoneRecords()
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr = leaderServer.GetServer()
+	rc = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	raftCluster, err = rc.LoadClusterInfo()
+	c.Assert(err, IsNil)
+	c.Assert(raftCluster, NotNil)
+
+	// check store count
+	c.Assert(raftCluster.GetMetaCluster(), DeepEquals, meta)
+	c.Assert(raftCluster.GetStoreCount(), Equals, 3)
+}
