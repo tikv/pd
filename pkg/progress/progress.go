@@ -143,6 +143,7 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 	if p, exist := m.progesses[progress]; exist {
 		process = 1 - p.remaining/p.total
 		if process < 0 {
+			process = 0
 			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
 			return
 		}

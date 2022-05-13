@@ -77,3 +77,28 @@ func (s *testProgressSuite) Test(c *C) {
 	c.Assert(m.RemoveProgress(n), IsTrue)
 	c.Assert(m.RemoveProgress(n), IsFalse)
 }
+
+func (s *testProgressSuite) TestAbnormal(c *C) {
+	n := "test"
+	m := NewManager()
+	c.Assert(m.AddProgress(n, 100), IsFalse)
+	p, ls, cs, err := m.Status(n)
+	c.Assert(err, IsNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+	// When offline a store, but there are operators moving region to it, e.g., merge operation
+	m.UpdateProgressRemaining(n, 110)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, IsNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+	// It usually won't happens
+	m.UpdateProgressTotal(n, 10)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, NotNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, 0.0)
+	c.Assert(cs, Equals, 0.0)
+}
