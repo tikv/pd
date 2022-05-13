@@ -134,7 +134,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	}
 	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
 	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetEndKey())
+	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 	return op, nil
 }
 
