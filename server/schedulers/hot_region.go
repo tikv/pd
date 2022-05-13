@@ -376,6 +376,9 @@ type balanceSolver struct {
 	// they may be byte(0), key(1), query(2), and always less than dimLen
 	firstPriority  int
 	secondPriority int
+
+	greatDecRatio float64
+	minorDecRatio float64
 }
 
 func (bs *balanceSolver) init() {
@@ -412,6 +415,7 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
+	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -797,6 +801,7 @@ func (bs *balanceSolver) isTolerance(dim int) bool {
 	}
 	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStore.GetID(), 10), strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
@@ -824,12 +829,12 @@ func (bs *balanceSolver) isBetterForWriteLeader() bool {
 
 func (bs *balanceSolver) isBetter(dim int) bool {
 	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
-	return isHot && decRatio <= bs.sche.conf.GetGreatDecRatio() && bs.isTolerance(dim)
+	return isHot && decRatio <= bs.greatDecRatio && bs.isTolerance(dim)
 }
 
 func (bs *balanceSolver) isNotWorsened(dim int) bool {
-	_, decRatio := bs.getHotDecRatioByPriorities(dim)
-	return decRatio <= bs.sche.conf.GetMinorDecRatio()
+	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
+	return !isHot || decRatio <= bs.minorDecRatio
 }
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
