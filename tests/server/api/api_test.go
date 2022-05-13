@@ -557,20 +557,18 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	pdctl.MustPutRegion(c, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
 
 	// no store removing
-	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
-	var p api.Progress
-	c.Assert(json.Unmarshal(output, &p), IsNil)
-	c.Assert(p.Action, Equals, "removing")
-	c.Assert(p.Progress, Equals, 0.0)
-	c.Assert(p.CurrentSpeed, Equals, 0.0)
-	c.Assert(p.LeftSeconds, Equals, 0.0)
+	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the action"), IsTrue)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
 
 	// remove store 1 and store 2
-	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete)
-	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete)
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
+	_ = sendRequest(c, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
 
 	// size is not changed.
-	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+	var p api.Progress
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "removing")
 	c.Assert(p.Progress, Equals, 0.0)
@@ -582,7 +580,7 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
 	time.Sleep(time.Second)
-	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "removing")
 	// store 1: (60-20)/(60+50) ~= 0.36
@@ -600,7 +598,7 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	c.Assert(p.LeftSeconds, Greater, 2.125)
 	c.Assert(p.LeftSeconds, Less, 2.5)
 
-	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "removing")
 	// store 2: (30-10)/(30+40) ~= 0.285
@@ -616,11 +614,11 @@ func (s *testProgressSuite) TestProgress(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 
-func sendRequest(c *C, url string, method string) []byte {
+func sendRequest(c *C, url string, method string, statusCode int) []byte {
 	req, _ := http.NewRequest(method, url, nil)
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	c.Assert(resp.StatusCode, Equals, statusCode)
 	output, err := io.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
