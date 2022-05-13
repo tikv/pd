@@ -652,5 +652,4 @@ func (t *testHotPeerCache) TestUnstableData(c *C) {
 	for i := range cases {
 		checkMovingAverage(c, cases[i])
 	}
-
 }
