@@ -23,158 +23,35 @@ import (
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/rangetree"
 	"go.uber.org/zap"
 )
 
-// RegionItem is region tree item.
-type RegionItem interface {
-	btree.Item
-	GetStartKey() []byte
-	GetEndKey() []byte
-	// Debris returns the debris after replacing the key range.
-	Debris(startKey, endKey []byte) []RegionItem
-}
-
-type RegionTree struct {
-	tree *btree.BTree
-}
-
-func NewRegionTree(degree int) *RegionTree {
-	return &RegionTree{
-		tree: btree.New(degree),
-	}
-}
-
-var _ btree.Item = &regionItem{}
+var _ rangetree.RangeItem = &regionItem{}
 
 type regionItem struct {
 	region *RegionInfo
 }
 
+// GetStartKey returns the start key of the region.
 func (r *regionItem) GetStartKey() []byte {
 	return r.region.GetStartKey()
 }
 
+// GetEndKey returns the end key of the region.
 func (r *regionItem) GetEndKey() []byte {
 	return r.region.GetEndKey()
 }
 
-func (r *regionItem) Debris(_, _ []byte) []RegionItem {
+// Debris returns nil, don't need to save debris.
+func (r *regionItem) Debris(_, _ []byte) []rangetree.RangeItem {
 	return nil
-}
-
-func (r *RegionTree) Update(item RegionItem) []RegionItem {
-	overlaps := r.GetOverlaps(item)
-	for _, old := range overlaps {
-		r.tree.Delete(old)
-		debris := old.Debris(item.GetStartKey(), item.GetEndKey())
-		for _, child := range debris {
-			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
-				r.tree.ReplaceOrInsert(child)
-			}
-		}
-	}
-	r.tree.ReplaceOrInsert(item)
-	return overlaps
-}
-
-func (r *RegionTree) GetOverlaps(item RegionItem) []RegionItem {
-	// note that find() gets the last item that is less or equal than the region.
-	// in the case: |_______a_______|_____b_____|___c___|
-	// new region is     |______d______|
-	// find() will return regionItem of region_a
-	// and both startKey of region_a and region_b are less than endKey of region_d,
-	// thus they are regarded as overlapped regions.
-	result := r.find(item)
-	if result == nil {
-		result = item
-	}
-
-	var overlaps []RegionItem
-	r.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
-		over := i.(RegionItem)
-		if len(item.GetEndKey()) > 0 && bytes.Compare(item.GetEndKey(), over.GetStartKey()) <= 0 {
-			return false
-		}
-		overlaps = append(overlaps, over)
-		return true
-	})
-	return overlaps
-}
-
-func (r *RegionTree) find(item RegionItem) RegionItem {
-	var result RegionItem
-	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		result = i.(RegionItem)
-		return false
-	})
-
-	if result == nil || !Contains(result, item.GetStartKey()) {
-		return nil
-	}
-
-	return result
-}
-
-func Contains(item RegionItem, key []byte) bool {
-	start, end := item.GetStartKey(), item.GetEndKey()
-	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
-}
-
-func (r *RegionTree) remove(item RegionItem) RegionItem {
-	return r.tree.Delete(item).(RegionItem)
-}
-
-func (r *RegionTree) Len() int {
-	return r.tree.Len()
-}
-
-func (r *RegionTree) scanRange(region RegionItem, f func(item2 RegionItem) bool) {
-	// find if there is a region with key range [s, d), s < startKey < d
-	startItem := r.find(region)
-	if startItem == nil {
-		startItem = region
-	}
-	r.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
-		return f(item.(RegionItem))
-	})
-}
-
-func (r *RegionTree) getAdjacentRegions(item RegionItem) (RegionItem, RegionItem) {
-	var prev, next RegionItem
-	r.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
-		if bytes.Equal(item.GetStartKey(), i.(RegionItem).GetStartKey()) {
-			return true
-		}
-		next = i.(*regionItem)
-		return false
-	})
-	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		if bytes.Equal(item.GetStartKey(), i.(RegionItem).GetStartKey()) {
-			return true
-		}
-		prev = i.(RegionItem)
-		return false
-	})
-	return prev, next
-}
-
-func (r *RegionTree) GetAt(index int) RegionItem {
-	return r.tree.GetAt(index).(RegionItem)
-}
-
-func (r *RegionTree) GetWithIndex(item RegionItem) (RegionItem, int) {
-	rst, index := r.tree.GetWithIndex(item)
-	if rst == nil {
-		return nil, index
-	}
-	return rst.(RegionItem), index
 }
 
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
 	left := r.region.GetStartKey()
-	right := other.(*regionItem).region.GetStartKey()
+	right := other.(rangetree.RangeItem).GetStartKey()
 	return bytes.Compare(left, right) < 0
 }
 
@@ -188,7 +65,7 @@ const (
 )
 
 type regionTree struct {
-	tree *RegionTree
+	tree *rangetree.RangeTree
 	// Statistics
 	totalSize           int64
 	totalWriteBytesRate float64
@@ -197,7 +74,7 @@ type regionTree struct {
 
 func newRegionTree() *regionTree {
 	return &regionTree{
-		tree:                NewRegionTree(defaultBTreeDegree),
+		tree:                rangetree.NewRangeTree(defaultBTreeDegree),
 		totalSize:           0,
 		totalWriteBytesRate: 0,
 		totalWriteKeysRate:  0,
@@ -214,13 +91,6 @@ func (t *regionTree) length() int {
 // getOverlaps gets the regions which are overlapped with the specified region range.
 func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 	item := &regionItem{region: region}
-
-	// note that find() gets the last item that is less or equal than the region.
-	// in the case: |_______a_______|_____b_____|___c___|
-	// new region is     |______d______|
-	// find() will return regionItem of region_a
-	// and both startKey of region_a and region_b are less than endKey of region_d,
-	// thus they are regarded as overlapped regions.
 	result := t.tree.GetOverlaps(item)
 	overlaps := make([]*RegionInfo, len(result))
 	for i, r := range result {
@@ -278,7 +148,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 		return
 	}
 	item := &regionItem{region: region}
-	result := t.tree.find(item)
+	result := t.tree.Find(item)
 	if result == nil || result.(*regionItem).region.GetID() != region.GetID() {
 		return
 	}
@@ -287,7 +157,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
-	t.tree.remove(result)
+	t.tree.Remove(result)
 }
 
 // search returns a region that contains the key.
@@ -320,7 +190,7 @@ func (t *regionTree) searchPrev(regionKey []byte) *RegionInfo {
 // find is a helper function to find an item that contains the regions start
 // key.
 func (t *regionTree) find(region *RegionInfo) *regionItem {
-	item := t.tree.find(&regionItem{region: region})
+	item := t.tree.Find(&regionItem{region: region})
 	if item == nil {
 		return nil
 	}
@@ -335,11 +205,11 @@ func (t *regionTree) find(region *RegionInfo) *regionItem {
 func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
 	region := &RegionInfo{meta: &metapb.Region{StartKey: startKey}}
 	// find if there is a region with key range [s, d), s < startKey < d
-	fn := func(item RegionItem) bool {
+	fn := func(item rangetree.RangeItem) bool {
 		r := item.(*regionItem)
 		return f(r.region)
 	}
-	t.tree.scanRange(&regionItem{region: region}, fn)
+	t.tree.ScanRange(&regionItem{region: region}, fn)
 }
 
 func (t *regionTree) scanRanges() []*RegionInfo {
@@ -356,7 +226,7 @@ func (t *regionTree) scanRanges() []*RegionInfo {
 
 func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regionItem) {
 	item := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: region.GetStartKey()}}}
-	prevItem, nextItem := t.tree.getAdjacentRegions(item)
+	prevItem, nextItem := t.tree.GetAdjacentRegions(item)
 	var prev, next *regionItem
 	if prevItem != nil {
 		prev = prevItem.(*regionItem)
