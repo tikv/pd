@@ -336,7 +336,7 @@ type solution struct {
 	progressiveRank int64
 }
 
-// getExtremeLoad returns the min of the src store and the max of the dst store.
+// getExtremeLoad returns the min load of the src store and the max load of the dst store.
 func (s *solution) getExtremeLoad(dim int) (float64, float64) {
 	return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
 }
@@ -778,7 +778,7 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		case bs.isBetter(bs.firstPriority) && bs.isBetter(bs.secondPriority):
 			// If belong to the case, two dim will be more balanced, the best choice.
 			bs.cur.progressiveRank = -3
-		case bs.isNotWorse(bs.firstPriority) && bs.isBetter(bs.secondPriority):
+		case bs.isNotWorsened(bs.firstPriority) && bs.isBetter(bs.secondPriority):
 			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
 			bs.cur.progressiveRank = -2
 		case bs.isBetter(bs.firstPriority):
@@ -827,7 +827,7 @@ func (bs *balanceSolver) isBetter(dim int) bool {
 	return isHot && decRatio <= bs.sche.conf.GetGreatDecRatio() && bs.isTolerance(dim)
 }
 
-func (bs *balanceSolver) isNotWorse(dim int) bool {
+func (bs *balanceSolver) isNotWorsened(dim int) bool {
 	_, decRatio := bs.getHotDecRatioByPriorities(dim)
 	return decRatio <= bs.sche.conf.GetMinorDecRatio()
 }
