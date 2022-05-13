@@ -154,6 +154,26 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	return true
 }
 
+// IsTiFlash returns true if the store is tiflash.
+func (s *StoreInfo) IsTiFlash() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// IsTiFlashMPP returns true if the store is tiflash_mpp.
+func (s *StoreInfo) IsTiFlashMPP() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlashMPP)
+}
+
+// IsTiFlashRelatedStore returns true if the store is tiflash or tiflash_mpp.
+func (s *StoreInfo) IsTiFlashRelatedStore() bool {
+	return s.IsTiFlash() || s.IsTiFlashMPP()
+}
+
+// IsUp returns true if store is serving or preparing.
+func (s *StoreInfo) IsUp() bool {
+	return s.IsServing() || s.IsPreparing()
+}
+
 // IsPreparing checks if the store's state is preparing.
 func (s *StoreInfo) IsPreparing() bool {
 	return s.GetNodeState() == metapb.NodeState_Preparing
@@ -755,5 +775,5 @@ func IsTiFlashRelatedStore(store *metapb.Store) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !IsTiFlashRelatedStore(s.GetMeta()) && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !s.IsTiFlashRelatedStore() && s.GetLeaderCount() != 0
 }
