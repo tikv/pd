@@ -324,6 +324,38 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*opera
 	return nil
 }
 
+type solution struct {
+	srcStore    *statistics.StoreLoadDetail
+	srcPeerStat *statistics.HotPeerStat
+	region      *core.RegionInfo
+	dstStore    *statistics.StoreLoadDetail
+
+	// progressiveRank measures the contribution for balance.
+	// The smaller the rank, the better this solution is.
+	// If rank < 0, this solution makes thing better.
+	progressiveRank int64
+}
+
+// getExtremeLoad returns the min of the src store and the max of the dst store.
+func (s *solution) getExtremeLoad(dim int) (float64, float64) {
+	return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
+}
+
+// getCurrentLoad returns the current load of the src store and the dst store.
+func (s *solution) getCurrentLoad(dim int) (float64, float64) {
+	return s.srcStore.LoadPred.Current.Loads[dim], s.dstStore.LoadPred.Current.Loads[dim]
+}
+
+// getPendingLoad returns the pending load of the src store and the dst store.
+func (s *solution) getPendingLoad(dim int) (float64, float64) {
+	return s.srcStore.LoadPred.Pending().Loads[dim], s.dstStore.LoadPred.Pending().Loads[dim]
+}
+
+// getPeerRate returns the load of the peer.
+func (s *solution) getPeerRate(rw statistics.RWType, dim int) float64 {
+	return s.srcPeerStat.GetLoad(statistics.GetRegionStatKind(rw, dim))
+}
+
 type balanceSolver struct {
 	schedule.Cluster
 	sche         *hotScheduler
@@ -344,18 +376,6 @@ type balanceSolver struct {
 	// they may be byte(0), key(1), query(2), and always less than dimLen
 	firstPriority  int
 	secondPriority int
-}
-
-type solution struct {
-	srcStore    *statistics.StoreLoadDetail
-	srcPeerStat *statistics.HotPeerStat
-	region      *core.RegionInfo
-	dstStore    *statistics.StoreLoadDetail
-
-	// progressiveRank measures the contribution for balance.
-	// The smaller the rank, the better this solution is.
-	// If rank < 0, this solution makes thing better.
-	progressiveRank int64
 }
 
 func (bs *balanceSolver) init() {
@@ -746,44 +766,23 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 func (bs *balanceSolver) calcProgressiveRank() {
-	src := bs.cur.srcStore
-	dst := bs.cur.dstStore
-	srcLd := src.LoadPred.Min()
-	dstLd := dst.LoadPred.Max()
 	bs.cur.progressiveRank = 0
-	peer := bs.cur.srcPeerStat
 
 	if toResourceType(bs.rwTy, bs.opTy) == writeLeader {
-		if !bs.isTolerance(src, dst, bs.firstPriority) {
-			return
-		}
-		srcRate := srcLd.Loads[bs.firstPriority]
-		dstRate := dstLd.Loads[bs.firstPriority]
-		peerRate := peer.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		if srcRate-peerRate >= dstRate+peerRate {
+		// For write leader, only compare the first priority.
+		if bs.isBetterForWriteLeader() {
 			bs.cur.progressiveRank = -1
 		}
 	} else {
-		firstPriorityDimHot, firstPriorityDecRatio, secondPriorityDimHot, secondPriorityDecRatio := bs.getHotDecRatioByPriorities(srcLd, dstLd, peer)
-		greatDecRatio, minorDecRatio := bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorGreatDecRatio()
 		switch {
-		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
+		case bs.isBetter(bs.firstPriority) && bs.isBetter(bs.secondPriority):
 			// If belong to the case, two dim will be more balanced, the best choice.
-			if !bs.isTolerance(src, dst, bs.firstPriority) || !bs.isTolerance(src, dst, bs.secondPriority) {
-				return
-			}
 			bs.cur.progressiveRank = -3
-		case firstPriorityDecRatio <= minorDecRatio && secondPriorityDimHot && secondPriorityDecRatio <= greatDecRatio:
+		case bs.isNotWorse(bs.firstPriority) && bs.isBetter(bs.secondPriority):
 			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
-			if !bs.isTolerance(src, dst, bs.secondPriority) {
-				return
-			}
 			bs.cur.progressiveRank = -2
-		case firstPriorityDimHot && firstPriorityDecRatio <= greatDecRatio:
+		case bs.isBetter(bs.firstPriority):
 			// If belong to the case, first priority dim will be more balanced, ignore the second priority dim.
-			if !bs.isTolerance(src, dst, bs.firstPriority) {
-				return
-			}
 			bs.cur.progressiveRank = -1
 		}
 	}
@@ -791,20 +790,17 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
-func (bs *balanceSolver) isTolerance(src, dst *statistics.StoreLoadDetail, dim int) bool {
-	srcRate := src.LoadPred.Current.Loads[dim]
-	dstRate := dst.LoadPred.Current.Loads[dim]
+func (bs *balanceSolver) isTolerance(dim int) bool {
+	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
 	if srcRate <= dstRate {
 		return false
 	}
+	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
-	srcPending := src.LoadPred.Pending().Loads[dim]
-	dstPending := dst.LoadPred.Pending().Loads[dim]
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(src.GetID(), 10), strconv.FormatUint(dst.GetID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
-func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *statistics.StoreLoad, peer *statistics.HotPeerStat) (bool, float64, bool, float64) {
+func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (bool, float64) {
 	// we use DecRatio(Decline Ratio) to expect that the dst store's rate should still be less
 	// than the src store's rate after scheduling one peer.
 	getSrcDecRate := func(a, b float64) float64 {
@@ -813,17 +809,27 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(srcLd, dstLd *statistics.Sto
 		}
 		return a - b
 	}
-	checkHot := func(dim int) (bool, float64) {
-		srcRate := srcLd.Loads[dim]
-		dstRate := dstLd.Loads[dim]
-		peerRate := peer.GetLoad(statistics.GetRegionStatKind(bs.rwTy, dim))
-		decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
-		isHot := peerRate >= bs.getMinRate(dim)
-		return isHot, decRatio
-	}
-	firstHot, firstDecRatio := checkHot(bs.firstPriority)
-	secondHot, secondDecRatio := checkHot(bs.secondPriority)
-	return firstHot, firstDecRatio, secondHot, secondDecRatio
+	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
+	peerRate := bs.cur.getPeerRate(bs.rwTy, dim)
+	isHot := peerRate >= bs.getMinRate(dim)
+	decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
+	return isHot, decRatio
+}
+
+func (bs *balanceSolver) isBetterForWriteLeader() bool {
+	srcRate, dstRate := bs.cur.getExtremeLoad(bs.firstPriority)
+	peerRate := bs.cur.getPeerRate(bs.rwTy, bs.firstPriority)
+	return srcRate-peerRate >= dstRate+peerRate && bs.isTolerance(bs.firstPriority)
+}
+
+func (bs *balanceSolver) isBetter(dim int) bool {
+	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
+	return isHot && decRatio <= bs.sche.conf.GetGreatDecRatio() && bs.isTolerance(dim)
+}
+
+func (bs *balanceSolver) isNotWorse(dim int) bool {
+	_, decRatio := bs.getHotDecRatioByPriorities(dim)
+	return decRatio <= bs.sche.conf.GetMinorDecRatio()
 }
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
