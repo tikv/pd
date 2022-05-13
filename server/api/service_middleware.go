@@ -75,6 +75,10 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 		return
 	}
 
+	if len(conf) == 0 {
+		h.rd.JSON(w, http.StatusOK, "The input is empty.")
+	}
+
 	for k, v := range conf {
 		if s := strings.Split(k, "."); len(s) > 1 {
 			if err := h.updateServiceMiddlewareConfig(cfg, k, v); err != nil {

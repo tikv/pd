@@ -69,6 +69,12 @@ func (s *testServiceMiddlewareSuite) TestConfigAudit(c *C) {
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, false)
 
+	// test empty
+	ms = map[string]interface{}{}
+	postData, err = json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c), tu.StringContain(c, "The input is empty.")), IsNil)
+
 	ms = map[string]interface{}{
 		"audit": "false",
 	}
