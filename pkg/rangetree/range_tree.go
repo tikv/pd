@@ -88,6 +88,7 @@ func contains(item RangeItem, key []byte) bool {
 	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
 }
 
+// Remove removes the given item and return the deleted item.
 func (r *RangeTree) Remove(item RangeItem) RangeItem {
 	return r.tree.Delete(item).(RangeItem)
 }
@@ -110,8 +111,7 @@ func (r *RangeTree) ScanRange(start RangeItem, f func(_ RangeItem) bool) {
 }
 
 // GetAdjacentItem returns the adjacent range item.
-func (r *RangeTree) GetAdjacentItem(item RangeItem) (RangeItem, RangeItem) {
-	var prev, next RangeItem
+func (r *RangeTree) GetAdjacentItem(item RangeItem) (prev RangeItem, next RangeItem) {
 	r.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
 		if bytes.Equal(item.GetStartKey(), i.(RangeItem).GetStartKey()) {
 			return true
