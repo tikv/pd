@@ -337,17 +337,17 @@ type solution struct {
 }
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
-func (s *solution) getExtremeLoad(dim int) (float64, float64) {
+func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
 	return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
 }
 
 // getCurrentLoad returns the current load of the src store and the dst store.
-func (s *solution) getCurrentLoad(dim int) (float64, float64) {
+func (s *solution) getCurrentLoad(dim int) (src float64, dst float64) {
 	return s.srcStore.LoadPred.Current.Loads[dim], s.dstStore.LoadPred.Current.Loads[dim]
 }
 
 // getPendingLoad returns the pending load of the src store and the dst store.
-func (s *solution) getPendingLoad(dim int) (float64, float64) {
+func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 	return s.srcStore.LoadPred.Pending().Loads[dim], s.dstStore.LoadPred.Pending().Loads[dim]
 }
 
