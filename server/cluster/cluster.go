@@ -278,6 +278,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		return nil, nil
 	}
 
+	c.core.ResetStores()
 	start := time.Now()
 	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
 		return nil, err
