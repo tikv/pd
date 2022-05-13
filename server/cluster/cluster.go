@@ -131,7 +131,6 @@ type RaftCluster struct {
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
-	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -222,7 +221,6 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
-	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
@@ -1898,9 +1896,7 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 
 // BucketsStats returns hot region's buckets stats.
 func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
-	task := buckets.NewCollectBucketStatsTask(degree)
-	c.hotBuckets.CheckAsync(task)
-	return task.WaitRet(c.Context())
+	return nil
 }
 
 // RegionWriteStats returns hot region's write stats.

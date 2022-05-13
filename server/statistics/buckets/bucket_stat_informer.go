@@ -18,3 +18,14 @@ package buckets
 type BucketStatInformer interface {
 	BucketsStats(degree int) map[uint64][]*BucketStat
 }
+
+// BucketStat is the record the bucket statistics.
+type BucketStat struct {
+	RegionID  uint64
+	StartKey  []byte
+	EndKey    []byte
+	HotDegree int
+	Interval  uint64
+	// see statistics.RegionStatKind
+	Loads []uint64
+}
