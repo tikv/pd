@@ -379,6 +379,7 @@ type balanceSolver struct {
 
 	greatDecRatio float64
 	minorDecRatio float64
+	maxPeerNum    int
 }
 
 func (bs *balanceSolver) init() {
@@ -416,6 +417,7 @@ func (bs *balanceSolver) init() {
 
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
+	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -465,27 +467,31 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
+	checkSolution := func() {
+		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
+			if newOps, newInfl := bs.buildOperators(); len(newOps) > 0 {
+				bs.ops = newOps
+				bs.infl = *newInfl
+				clone := *bs.cur
+				bs.best = &clone
+			}
+		}
+	}
 
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
+		srcStoreID := srcStore.GetID()
 
-		for _, srcPeerStat := range bs.filterHotPeers() {
-			bs.cur.srcPeerStat = srcPeerStat
-			bs.cur.region = bs.getRegion()
-			if bs.cur.region == nil {
+		for _, srcPeerStat := range bs.filterHotPeers(srcStore) {
+			if bs.cur.region = bs.getRegion(srcPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			}
+			bs.cur.srcPeerStat = srcPeerStat
+
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
-					if newOp, newInfl := bs.buildOperator(); newOp != nil {
-						bs.ops = []*operator.Operator{newOp}
-						bs.infl = *newInfl
-						clone := *bs.cur
-						bs.best = &clone
-					}
-				}
+				checkSolution()
 			}
 		}
 	}
@@ -563,10 +569,8 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
 // The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
-	ret := bs.cur.srcStore.HotPeers
-	// Return at most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
-	maxPeerNum := bs.sche.conf.GetMaxPeerNumber()
+func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) []*statistics.HotPeerStat {
+	ret := storeLoad.HotPeers
 
 	// filter pending region
 	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
@@ -577,7 +581,9 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		}
 		return items
 	}
-	if len(ret) <= maxPeerNum {
+
+	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	if len(ret) <= bs.maxPeerNum {
 		nret := make([]*statistics.HotPeerStat, 0, len(ret))
 		for _, peer := range ret {
 			nret = appendItem(nret, peer)
@@ -585,7 +591,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 		return nret
 	}
 
-	union := bs.sortHotPeers(ret, maxPeerNum)
+	union := bs.sortHotPeers(ret)
 	ret = make([]*statistics.HotPeerStat, 0, len(union))
 	for peer := range union {
 		ret = appendItem(ret, peer)
@@ -593,7 +599,7 @@ func (bs *balanceSolver) filterHotPeers() []*statistics.HotPeerStat {
 	return ret
 }
 
-func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum int) map[*statistics.HotPeerStat]struct{} {
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
 	sort.Slice(firstSort, func(i, j int) bool {
@@ -606,8 +612,8 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
 		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
 	})
-	union := make(map[*statistics.HotPeerStat]struct{}, maxPeerNum)
-	for len(union) < maxPeerNum {
+	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
+	for len(union) < bs.maxPeerNum {
 		for len(firstSort) > 0 {
 			peer := firstSort[0]
 			firstSort = firstSort[1:]
@@ -616,7 +622,7 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, maxPeerNum 
 				break
 			}
 		}
-		for len(union) < maxPeerNum && len(secondSort) > 0 {
+		for len(union) < bs.maxPeerNum && len(secondSort) > 0 {
 			peer := secondSort[0]
 			secondSort = secondSort[1:]
 			if _, ok := union[peer]; !ok {
@@ -660,22 +666,22 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 	return true
 }
 
-func (bs *balanceSolver) getRegion() *core.RegionInfo {
-	region := bs.GetRegion(bs.cur.srcPeerStat.ID())
+func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uint64) *core.RegionInfo {
+	region := bs.GetRegion(peerStat.ID())
 	if !bs.isRegionAvailable(region) {
 		return nil
 	}
 
 	switch bs.opTy {
 	case movePeer:
-		srcPeer := region.GetStorePeer(bs.cur.srcStore.GetID())
+		srcPeer := region.GetStorePeer(storeID)
 		if srcPeer == nil {
-			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
+			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", storeID))
 			return nil
 		}
 	case transferLeader:
-		if region.GetLeader().GetStoreId() != bs.cur.srcStore.GetID() {
-			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", bs.cur.srcPeerStat.ID()))
+		if region.GetLeader().GetStoreId() != storeID {
+			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", storeID))
 			return nil
 		}
 	default:
@@ -800,7 +806,7 @@ func (bs *balanceSolver) isTolerance(dim int) bool {
 		return false
 	}
 	srcPending, dstPending := bs.cur.getPendingLoad(dim)
-	pendingAmp := (1 + pendingAmpFactor*srcRate/(srcRate-dstRate))
+	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
 	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStore.GetID(), 10), strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
@@ -1012,70 +1018,15 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.region != nil && bs.cur.region.GetID() == bs.cur.srcPeerStat.ID()
 }
 
-func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistics.Influence) {
+func (bs *balanceSolver) buildOperators() (ops []*operator.Operator, infl *statistics.Influence) {
 	if !bs.isReadyToBuild() {
 		return nil, nil
 	}
-	var (
-		err         error
-		typ         string
-		sourceLabel string
-		targetLabel string
-	)
 
 	srcStoreID := bs.cur.srcStore.GetID()
 	dstStoreID := bs.cur.dstStore.GetID()
-	switch bs.opTy {
-	case movePeer:
-		srcPeer := bs.cur.region.GetStorePeer(srcStoreID) // checked in getRegionAndSrcPeer
-		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
-		sourceLabel = strconv.FormatUint(srcStoreID, 10)
-		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
-
-		if bs.rwTy == statistics.Read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
-			op, err = operator.CreateMoveLeaderOperator(
-				"move-hot-read-leader",
-				bs,
-				bs.cur.region,
-				operator.OpHotRegion,
-				srcStoreID,
-				dstPeer)
-			typ = "move-leader"
-		} else {
-			desc := "move-hot-" + bs.rwTy.String() + "-peer"
-			typ = "move-peer"
-			op, err = operator.CreateMovePeerOperator(
-				desc,
-				bs,
-				bs.cur.region,
-				operator.OpHotRegion,
-				srcStoreID,
-				dstPeer)
-		}
-	case transferLeader:
-		if bs.cur.region.GetStoreVoter(dstStoreID) == nil {
-			return nil, nil
-		}
-		desc := "transfer-hot-" + bs.rwTy.String() + "-leader"
-		typ = "transfer-leader"
-		sourceLabel = strconv.FormatUint(srcStoreID, 10)
-		targetLabel = strconv.FormatUint(dstStoreID, 10)
-		op, err = operator.CreateTransferLeaderOperator(
-			desc,
-			bs,
-			bs.cur.region,
-			srcStoreID,
-			dstStoreID,
-			[]uint64{},
-			operator.OpHotRegion)
-	}
-
-	if err != nil {
-		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
-		return nil, nil
-	}
-
+	sourceLabel := strconv.FormatUint(srcStoreID, 10)
+	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := ""
 	switch bs.cur.progressiveRank {
 	case -3:
@@ -1086,6 +1037,97 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 		dim = dimToString(bs.firstPriority)
 	}
 
+	var getOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
+	switch bs.rwTy {
+	case statistics.Read:
+		getOperator = bs.getReadOperator
+	case statistics.Write:
+		getOperator = bs.getWriteOperator
+	}
+
+	currentOp, typ, err := getOperator(bs.cur.region, srcStoreID, dstStoreID)
+	if err == nil {
+		bs.decorateOperator(currentOp, sourceLabel, targetLabel, typ, dim)
+		ops = []*operator.Operator{currentOp}
+		infl = &statistics.Influence{
+			Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
+			Count: 1,
+		}
+	}
+
+	if err != nil {
+		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
+		return nil, nil
+	}
+
+	return
+}
+
+func (bs *balanceSolver) getReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+	if region.GetStorePeer(dstStoreID) != nil {
+		typ = "transfer-leader"
+		op, err = operator.CreateTransferLeaderOperator(
+			"transfer-hot-read-leader",
+			bs,
+			region,
+			srcStoreID,
+			dstStoreID,
+			[]uint64{},
+			operator.OpHotRegion)
+	} else {
+		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`
+		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
+		if region.GetLeader().GetStoreId() == srcStoreID {
+			typ = "move-leader"
+			op, err = operator.CreateMoveLeaderOperator(
+				"move-hot-read-leader",
+				bs,
+				region,
+				operator.OpHotRegion,
+				srcStoreID,
+				dstPeer)
+		} else {
+			typ = "move-peer"
+			op, err = operator.CreateMovePeerOperator(
+				"move-hot-read-peer",
+				bs,
+				region,
+				operator.OpHotRegion,
+				srcStoreID,
+				dstPeer)
+		}
+	}
+	return
+}
+
+func (bs *balanceSolver) getWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+	if region.GetStorePeer(dstStoreID) != nil {
+		typ = "transfer-leader"
+		op, err = operator.CreateTransferLeaderOperator(
+			"transfer-hot-write-leader",
+			bs,
+			region,
+			srcStoreID,
+			dstStoreID,
+			[]uint64{},
+			operator.OpHotRegion)
+	} else {
+		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`
+		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
+		typ = "move-peer"
+		op, err = operator.CreateMovePeerOperator(
+			"move-hot-write-peer",
+			bs,
+			region,
+			operator.OpHotRegion,
+			srcStoreID,
+			dstPeer)
+	}
+	return
+}
+
+func (bs *balanceSolver) decorateOperator(op *operator.Operator, sourceLabel, targetLabel, typ, dim string) {
 	op.SetPriorityLevel(core.HighPriority)
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
@@ -1093,13 +1135,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *statistic
 		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
 	op.Counters = append(op.Counters,
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), bs.opTy.String()))
-
-	infl = &statistics.Influence{
-		Loads: append(bs.cur.srcPeerStat.Loads[:0:0], bs.cur.srcPeerStat.Loads...),
-		Count: 1,
-	}
-	return op, infl
+		schedulerCounter.WithLabelValues(bs.sche.GetName(), typ))
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
