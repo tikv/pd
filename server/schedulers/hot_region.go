@@ -467,7 +467,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	checkSolution := func() {
+	updateBestSolution := func() {
 		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
 			if newOps, newInfl := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
@@ -491,7 +491,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				checkSolution()
+				updateBestSolution()
 			}
 		}
 	}
@@ -1037,15 +1037,15 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator, infl *stati
 		dim = dimToString(bs.firstPriority)
 	}
 
-	var getOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
+	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
 	case statistics.Read:
-		getOperator = bs.getReadOperator
+		createOperator = bs.createReadOperator
 	case statistics.Write:
-		getOperator = bs.getWriteOperator
+		createOperator = bs.createWriteOperator
 	}
 
-	currentOp, typ, err := getOperator(bs.cur.region, srcStoreID, dstStoreID)
+	currentOp, typ, err := createOperator(bs.cur.region, srcStoreID, dstStoreID)
 	if err == nil {
 		bs.decorateOperator(currentOp, sourceLabel, targetLabel, typ, dim)
 		ops = []*operator.Operator{currentOp}
@@ -1064,7 +1064,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator, infl *stati
 	return
 }
 
-func (bs *balanceSolver) getReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
 		op, err = operator.CreateTransferLeaderOperator(
@@ -1101,7 +1101,7 @@ func (bs *balanceSolver) getReadOperator(region *core.RegionInfo, srcStoreID, ds
 	return
 }
 
-func (bs *balanceSolver) getWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
 		op, err = operator.CreateTransferLeaderOperator(
