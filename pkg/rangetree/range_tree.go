@@ -1,8 +1,21 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package rangetree
 
 import (
 	"bytes"
-
 	"github.com/tikv/pd/pkg/btree"
 )
 
@@ -90,7 +103,10 @@ func contains(item RangeItem, key []byte) bool {
 
 // Remove removes the given item and return the deleted item.
 func (r *RangeTree) Remove(item RangeItem) RangeItem {
-	return r.tree.Delete(item).(RangeItem)
+	if r := r.tree.Delete(item); r != nil {
+		return r.(RangeItem)
+	}
+	return nil
 }
 
 // Len returns the count of the range tree.
@@ -100,7 +116,7 @@ func (r *RangeTree) Len() int {
 
 // ScanRange scan the start item util the result of the function is false.
 func (r *RangeTree) ScanRange(start RangeItem, f func(_ RangeItem) bool) {
-	// Find if there is a item with key range [s, d), s < startKey < d
+	// Find if there is one item with key range [s, d), s < startKey < d
 	startItem := r.Find(start)
 	if startItem == nil {
 		startItem = start
