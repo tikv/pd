@@ -621,9 +621,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
 	}
-	if rc.GetUnsafeRecoveryController() != nil {
-		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
-	}
+	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 	return resp, nil
 }
 
