@@ -46,35 +46,35 @@ const (
 //  |   idle    |
 //  |           |
 //  +-----------+
-//        |
-//        |
-//        |
-//        v            +-----------+
-//  +-----------+      |           |          +-----------+           +-----------+
-//  |           |----->|   force   |--------->|           |           |           |
-//  |  collect  |      | LeaderFor |          |  force    |           |  failed   |
-//  |  Report   |      |CommitMerge|    +-----|  Leader   |-----+---->|           |
-//  |           |      |           |    |     |           |     |     +-----------+
-//  +-----------+      +-----------+    |     +-----------+     |
-//                          |           |        |     ^        |
-//                          |           |        |     |        |
-//                          |           |        |     |        |
-//                          |           |        v     |        |
-//                          |           |     +-----------+     |
-//                          |           |     |           |     |
-//                          |           |     |  demote   |     |
-//                          |           +-----|  Voter    |-----+
-//                          |           |     |           |     |
-//                          |           |     +-----------+     |
-//                          |           |        |     ^        |
-//                          |           |        |     |        |
-//                          |           |        v     |        |
-//                          |           |     +-----------+     |
-//  +-----------+           |           |     |           |     |
-//  |           |           |           |     |  create   |     |
-//  | finished  |           |           |     |  Region   |-----+
-//  |           |<----------+-----------+-----|           |
-//  +-----------+                             +-----------+
+//  	  |
+//  	  |
+//  	  |
+//  	  v              +-----------+
+//  +-----------+        |           |          +-----------+           +-----------+
+//  |           |------->|   force   |--------->|           |           |           |           +-----------+
+//  |  collect  |        | LeaderFor |          |  force    |           | exitForce |           |           |
+//  |  Report   |        |CommitMerge|----+-----|  Leader   |-----+---->|  Leader   |---------->|  failed   |
+//  |           |        |           |    |     |           |     |     |           |           |           |
+//  +-----------+        +-----------+    |     +-----------+     |     +-----------+           +-----------+
+//  	  |  							  |        |     ^        |
+//  	  | 							  |        |     |        |
+//  	  |   							  |        |     |        |
+//  	  |   							  |        v     |        |
+//  	  |   							  |     +-----------+     |
+//  	  |   							  |     |           |     |
+//  	  |   							  |     |  demote   |     |
+//  	  |   							  +-----|  Voter    |-----+
+//  	  |   							  |     |           |     |
+//  	  |   							  |     +-----------+     |
+//  	  |   							  |        |     ^        |
+//  	  |   							  |        |     |        |
+//  	  |   							  |        |     |        |
+//  	  v   			+-----------+     |     +-----------+     |
+//  +-----------+       |           |     |     |           |     |
+//  |           |       | exitForce |     v     |  create   |     |
+//  | finished  |<------|  Leader   |<----------|  Region   |-----+
+//  |           |       |           |           |           |
+//  +-----------+       +-----------+           +-----------+
 //
 const (
 	idle unsafeRecoveryStage = iota
@@ -83,6 +83,7 @@ const (
 	forceLeader
 	demoteFailedVoter
 	createEmptyRegion
+	exitForceLeader
 	finished
 	failed
 )
@@ -235,14 +236,14 @@ func (u *unsafeRecoveryController) getReportStatus() StageOutput {
 }
 
 func (u *unsafeRecoveryController) checkTimeout() bool {
-	if u.stage == finished || u.stage == failed {
+	if u.stage == finished || u.stage == failed || u.stage == exitForceLeader {
+		// exitForceLeader stage is special, it may be triggered after encouter an error, so don't check timeout
 		return false
 	}
 
 	if time.Now().After(u.timeout) {
 		u.err = errors.Errorf("Exceeds timeout %v", u.timeout)
-		u.changeStage(failed)
-		return true
+		return u.handleErr()
 	}
 	return false
 }
@@ -261,71 +262,98 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 		return
 	}
 
-	allCollected := false
-	allCollected, u.err = u.collectReport(heartbeat)
-	if u.err != nil {
-		u.changeStage(failed)
-		return
+	allCollected, err := u.collectReport(heartbeat)
+	if err != nil {
+		u.err = err
+		if u.handleErr() {
+			return
+		}
 	}
 
 	if allCollected {
-		newestRegionTree, peersMap := u.buildUpFromReports()
-		if u.err != nil {
-			u.changeStage(failed)
-			return
+		newestRegionTree, peersMap, err := u.buildUpFromReports()
+		if err != nil {
+			u.err = err
+			if u.handleErr() {
+				return
+			}
 		}
 
 		// clean up previous plan
 		u.storePlanExpires = make(map[uint64]time.Time)
 		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 
-		switch u.stage {
-		case collectReport:
-			if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
-				u.changeStage(forceLeaderForCommitMerge)
-			} else if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
-				u.changeStage(forceLeader)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
-				u.changeStage(createEmptyRegion)
+		stage := u.stage
+		reCheck := false
+		for {
+			switch stage {
+			case collectReport:
+				fallthrough
+			case forceLeaderForCommitMerge:
+				if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
+					u.changeStage(forceLeaderForCommitMerge)
+					break
+				}
+				fallthrough
+			case forceLeader:
+				if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
+					u.changeStage(forceLeader)
+					break
+				}
+				fallthrough
+			case demoteFailedVoter:
+				if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
+					u.changeStage(demoteFailedVoter)
+					break
+				} else if !reCheck {
+					reCheck = true
+					stage = forceLeaderForCommitMerge
+					continue
+				}
+				fallthrough
+			case createEmptyRegion:
+				if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
+					u.changeStage(createEmptyRegion)
+					break
+				}
+				fallthrough
+			case exitForceLeader:
+				// no need to generate plan, empty recovery plan triggers exit force leader on TiKV side
+				if u.generateExitForceLeaderPlan() {
+					u.changeStage(exitForceLeader)
+				}
+			default:
+				panic("unreachable")
 			}
-		case forceLeader, forceLeaderForCommitMerge:
-			if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
-				u.changeStage(forceLeaderForCommitMerge)
-			} else if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
-				u.changeStage(forceLeader)
-			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
-				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
-				u.changeStage(createEmptyRegion)
-			}
-		case demoteFailedVoter:
-			// may still have plan to do, recheck again
-			if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
-				u.changeStage(forceLeader)
-			} else if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
-				u.changeStage(demoteFailedVoter)
-			} else if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
-				u.changeStage(createEmptyRegion)
-			}
-		case createEmptyRegion:
-			if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
-				u.changeStage(createEmptyRegion)
-			}
-		default:
-			panic("unreachable")
-		}
 
-		hasPlan := len(u.storeRecoveryPlans) != 0
-		if u.err != nil {
-			u.changeStage(failed)
-			return
-		} else if !hasPlan {
-			u.changeStage(finished)
-			return
+			hasPlan := len(u.storeRecoveryPlans) != 0
+			if u.err != nil {
+				if u.handleErr() {
+					return
+				}
+			} else if !hasPlan {
+				u.changeStage(finished)
+				return
+			}
+			break
 		}
 	}
 
 	u.dispatchPlan(heartbeat, resp)
+}
+
+func (u *unsafeRecoveryController) handleErr() bool {
+	if u.err != nil {
+		if u.stage == exitForceLeader {
+			u.changeStage(failed)
+			return true
+		}
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+		u.timeout = time.Now().Add(storeRequestInterval)
+		u.changeStage(exitForceLeader)
+	}
+	return false
 }
 
 /// It dispatches recovery plan if any.
@@ -418,6 +446,11 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	case createEmptyRegion:
 		output.Info = "Unsafe recovery enters create empty region stage"
 		output.Actions = u.getCreateEmptyRegionPlanDigest()
+	case exitForceLeader:
+		output.Info = "Unsafe recovery enters exit force leader stage"
+		if u.err != nil {
+			output.Details = append(output.Details, u.err.Error())
+		}
 	case finished:
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
@@ -716,7 +749,7 @@ func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.Recover
 	return u.storeRecoveryPlans[storeID]
 }
 
-func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem) {
+func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem, error) {
 	peersMap := make(map[uint64][]*regionItem)
 	// Go through all the peer reports to build up the newest region tree
 	for storeID, storeReport := range u.storeReports {
@@ -745,9 +778,12 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 
 	newestRegionTree := newRegionTree()
 	for _, peer := range newestPeerReports {
-		_, u.err = newestRegionTree.insert(peer)
+		_, err := newestRegionTree.insert(peer)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	return newestRegionTree, peersMap
+	return newestRegionTree, peersMap, nil
 }
 
 func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, forCommitMerge bool) bool {
@@ -965,4 +1001,16 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		hasPlan = true
 	}
 	return hasPlan
+}
+
+func (u *unsafeRecoveryController) generateExitForceLeaderPlan() bool {
+	for storeID, storeReport := range u.storeReports {
+		for _, peerReport := range storeReport.PeerReports {
+			if peerReport.IsForceLeader {
+				_ = u.getRecoveryPlan(storeID)
+				break
+			}
+		}
+	}
+	return false
 }

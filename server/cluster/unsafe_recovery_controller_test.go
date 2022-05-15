@@ -16,7 +16,6 @@ package cluster
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	. "github.com/pingcap/check"
@@ -24,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/hbstream"
@@ -110,11 +108,16 @@ func applyRecoveryPlan(c *C, storeID uint64, storeReports map[uint64]*pdpb.Store
 					region.RegionEpoch.ConfVer += 1
 					if store == storeID {
 						c.Assert(report.IsForceLeader, IsTrue)
-						report.IsForceLeader = false
 					}
 					break
 				}
 			}
+		}
+	}
+
+	for _, storeReport := range storeReports {
+		for _, report := range storeReport.PeerReports {
+			report.IsForceLeader = false
 		}
 	}
 
@@ -300,6 +303,24 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	c.Assert(resp.RecoveryPlan, IsNil)
+	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		c.Assert(resp.RecoveryPlan, NotNil)
+		applyRecoveryPlan(c, storeID, reports, resp)
+	}
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(c, storeID, reports, resp)
+	}
 	c.Assert(recoveryController.GetStage(), Equals, failed)
 }
 
@@ -518,7 +539,6 @@ func (s *testUnsafeRecoverySuite) TestUninitializedPeer(c *C) {
 
 	for storeID, report := range reports {
 		if result, ok := expects[storeID]; ok {
-			fmt.Printf("%+v, %+v", report.PeerReports, result.PeerReports)
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
@@ -708,7 +728,6 @@ func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 
 	for storeID, report := range reports {
 		if result, ok := expects[storeID]; ok {
-			log.Info(fmt.Sprintf("store %d %v %v", storeID, report.PeerReports, result.PeerReports))
 			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
 		} else {
 			c.Assert(len(report.PeerReports), Equals, 0)
@@ -721,20 +740,80 @@ func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
 	cluster.coordinator.run()
-	for _, store := range newTestStores(5, "6.0.0") {
+	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
-		4: {},
-		5: {},
+		2: {},
+		3: {},
 	}, 1), IsNil)
 
 	time.Sleep(time.Second)
-	req := newStoreHeartbeat(2, nil)
+	req := newStoreHeartbeat(1, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
+	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	recoveryController.HandleStoreHeartbeat(req, resp)
 	c.Assert(recoveryController.GetStage(), Equals, failed)
+}
+
+func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 1), IsNil)
+
+	reports := map[uint64]*pdpb.StoreReport{
+		1: {
+			PeerReports: []*pdpb.PeerReport{
+				{
+					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+					RegionState: &raft_serverpb.RegionLocalState{
+						Region: &metapb.Region{
+							Id:          1001,
+							RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+							Peers: []*metapb.Peer{
+								{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 31, StoreId: 3, Role: metapb.PeerRole_Learner}}}},
+					IsForceLeader: true,
+				},
+			},
+		},
+	}
+
+	advanceUntilFinished(c, recoveryController, reports)
+
+	expects := map[uint64]*pdpb.StoreReport{
+		1: {
+			PeerReports: []*pdpb.PeerReport{
+				{
+					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+					RegionState: &raft_serverpb.RegionLocalState{
+						Region: &metapb.Region{
+							Id:          1001,
+							RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+							Peers: []*metapb.Peer{
+								{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 31, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+			},
+		},
+	}
+
+	for storeID, report := range reports {
+		if result, ok := expects[storeID]; ok {
+			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
+		} else {
+			c.Assert(len(report.PeerReports), Equals, 0)
+		}
+	}
 }
 
 func (s *testUnsafeRecoverySuite) TestStep(c *C) {
