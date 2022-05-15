@@ -97,7 +97,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 		return nil, errs.ErrPrometheusQuery.Wrap(err).FastGenWithCause()
 	}
 
-	if warnings != nil && len(warnings) > 0 {
+	if len(warnings) > 0 {
 		log.Warn("prometheus query returns with warnings", zap.Strings("warnings", warnings))
 	}
 

@@ -136,7 +136,7 @@ func filterTiKVInstances(informer core.StoreSetInformer) []instance {
 	var instances []instance
 	stores := informer.GetStores()
 	for _, store := range stores {
-		if store.IsPreparing() || store.IsServing() {
+		if store.IsUp() {
 			instances = append(instances, instance{id: store.GetID(), address: store.GetAddress()})
 		}
 	}
