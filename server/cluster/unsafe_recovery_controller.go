@@ -236,8 +236,7 @@ func (u *unsafeRecoveryController) getReportStatus() StageOutput {
 }
 
 func (u *unsafeRecoveryController) checkTimeout() bool {
-	if u.stage == finished || u.stage == failed || u.stage == exitForceLeader {
-		// exitForceLeader stage is special, it may be triggered after encouter an error, so don't check timeout
+	if u.stage == finished || u.stage == failed {
 		return false
 	}
 
@@ -457,8 +456,12 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 			u.cluster.DropCacheAllRegion()
 		}
 		output.Info = "Unsafe recovery finished"
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	case failed:
 		output.Info = fmt.Sprintf("Unsafe recovery failed: %v", u.err)
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	}
 
 	u.output = append(u.output, output)
