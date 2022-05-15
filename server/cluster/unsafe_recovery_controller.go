@@ -177,7 +177,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 	u.reset()
 	for _, s := range u.cluster.GetStores() {
 		// Tiflash isn't supportted yet, so just do not collect store reports of Tiflash
-		if s.IsRemoved() || s.IsPhysicallyDestroyed() || core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if s.IsRemoved() || s.IsPhysicallyDestroyed() || s.IsTiFlash() {
 			continue
 		}
 		if _, exists := failedStores[s.GetID()]; exists {

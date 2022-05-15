@@ -263,7 +263,7 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	// test bury store
 	for storeID := uint64(0); storeID <= 4; storeID++ {
 		store := cluster.GetStore(storeID)
-		if store == nil || store.IsPreparing() || store.IsServing() {
+		if store == nil || store.IsUp() {
 			c.Assert(cluster.BuryStore(storeID, false), NotNil)
 		} else {
 			c.Assert(cluster.BuryStore(storeID, false), IsNil)
