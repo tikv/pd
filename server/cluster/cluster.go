@@ -1795,7 +1795,7 @@ func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.Sto
 func (c *RaftCluster) getStoresWithoutTiFlashLocked(region *core.RegionInfo) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
-		if store := c.core.GetStore(p.StoreId); store != nil && !core.IsTiFlashRelatedStore(store.GetMeta()) {
+		if store := c.core.GetStore(p.StoreId); store != nil && !store.IsTiFlashRelatedStore() {
 			stores = append(stores, store)
 		}
 	}

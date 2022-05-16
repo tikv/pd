@@ -67,7 +67,7 @@ func (c *LabelConstraint) MatchStore(store *core.StoreInfo) bool {
 }
 
 // For backward compatibility. Need to remove later.
-// core.EngineKey is exclusive because it prevents PD schedule any region to TiFlash,
+// core.EngineKey is exclusive because it prevents PD scheduling any region to TiFlash,
 // unless user explicitly specifies that a TiFlash replica is required.
 var legacyExclusiveLabels = []string{core.EngineKey, "exclusive"}
 
