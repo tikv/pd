@@ -501,6 +501,16 @@ error = '''
 failed to lookup plugin function
 '''
 
+["PD:progress:ErrProgressNotFound"]
+error = '''
+no progress found for %s
+'''
+
+["PD:progress:ErrProgressWrongStatus"]
+error = '''
+progress status is wrong
+'''
+
 ["PD:prometheus:ErrPrometheusCreateClient"]
 error = '''
 create client error
