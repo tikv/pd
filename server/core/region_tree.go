@@ -43,11 +43,6 @@ func (r *regionItem) GetEndKey() []byte {
 	return r.region.GetEndKey()
 }
 
-// Debris returns nil, don't need to save debris.
-func (r *regionItem) Debris(_, _ []byte) []rangetree.RangeItem {
-	return nil
-}
-
 // Less returns true if the region start key is less than the other.
 func (r *regionItem) Less(other btree.Item) bool {
 	left := r.region.GetStartKey()
