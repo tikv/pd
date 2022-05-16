@@ -83,26 +83,29 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 	if err != nil {
 		return nil, err
 	}
-
 	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	expiredKeys := make([]string, 0)
 	for i, key := range keys {
 		ssp := &ServiceSafePoint{}
 		if err = json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
 
-		// remove expired safe points.
+		// gather expired keys
 		if ssp.ExpiredAt < now.Unix() {
-			go func(key string) {
-				se.Remove(key)
-			}(key)
+			expiredKeys = append(expiredKeys, key)
 			continue
 		}
 		if ssp.SafePoint < min.SafePoint {
 			min = ssp
 		}
 	}
-
+	// remove expired keys
+	go func() {
+		for _, key := range expiredKeys {
+			se.Remove(key)
+		}
+	}()
 	if min.SafePoint == math.MaxUint64 {
 		// no service safe point or all of them are expired.
 		return nil, nil
