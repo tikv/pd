@@ -16,6 +16,7 @@ package rangetree
 
 import (
 	"bytes"
+
 	"github.com/tikv/pd/pkg/btree"
 )
 

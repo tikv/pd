@@ -470,6 +470,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	}
 	oc.operators[regionID] = op
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
+	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
 	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
