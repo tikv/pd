@@ -70,8 +70,8 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 	checker.sum++
 }
 
-func (checker *prepareChecker) isPrepared() bool {
+func (checker *prepareChecker) needCollect() bool {
 	checker.RLock()
 	defer checker.RUnlock()
-	return checker.prepared
+	return time.Since(checker.start) <= collectTimeout && !checker.prepared
 }
