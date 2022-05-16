@@ -211,8 +211,8 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 }
 
 func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/runSchedulerCheckInterval", `return(true)`), IsNil)
-	defer failpoint.Disable("github.com/tikv/pd/server/cluster/runSchedulerCheckInterval")
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker")
 	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	c.Assert(err, IsNil)

@@ -42,6 +42,7 @@ import (
 )
 
 const (
+	runSchedulerCheckInterval  = 3 * time.Second
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	collectFactor              = 0.8
 	collectTimeout             = 5 * time.Minute
@@ -54,8 +55,6 @@ const (
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
 )
-
-var runSchedulerCheckInterval = 3 * time.Second
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
@@ -311,10 +310,10 @@ func (c *coordinator) runUntilStop() {
 }
 
 func (c *coordinator) run() {
-	failpoint.Inject("runSchedulerCheckInterval", func() {
-		runSchedulerCheckInterval = 100 * time.Millisecond
-	})
 	ticker := time.NewTicker(runSchedulerCheckInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {

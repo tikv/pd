@@ -747,7 +747,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	return nil
 }
 
-// IsPrepared return if the prepare checker is ready.
+// IsPrepared return true if the prepare checker is ready.
 func (c *RaftCluster) IsPrepared() bool {
 	return c.coordinator.prepareChecker.isPrepared()
 }
