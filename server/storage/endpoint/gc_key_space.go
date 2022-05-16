@@ -126,6 +126,9 @@ func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID string) (uint64, erro
 		return 0, err
 	}
 	safePoint, err := strconv.ParseUint(value, 16, 64)
+	if err != nil {
+		return 0, err
+	}
 	return safePoint, nil
 }
 
