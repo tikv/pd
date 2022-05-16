@@ -17,6 +17,7 @@ package endpoint
 import (
 	"encoding/json"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,29 +25,23 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-// KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
-type KeySpaceGCSafePoint struct {
-	SpaceID   string `json:"space_id"`
-	SafePoint uint64 `json:"safe_point"`
-}
-
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
 type KeySpaceGCSafePointStorage interface {
 	// Service safe point interfaces.
-	SaveServiceSafePointByKeySpace(spaceID string, ssp *ServiceSafePoint) error
-	LoadServiceSafePointByKeySpace(spaceID, serviceID string) (*ServiceSafePoint, error)
-	LoadMinServiceSafePointByKeySpace(spaceID string, now time.Time) (*ServiceSafePoint, error)
-	RemoveServiceSafePointByKeySpace(spaceID, serviceID string) error
+	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint) error
+	LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error)
+	LoadMinServiceSafePoint(spaceID string, now time.Time) (*ServiceSafePoint, error)
+	RemoveServiceSafePoint(spaceID, serviceID string) error
 	// GC safe point interfaces.
-	SaveGCSafePointByKeySpace(gcSafePoint *KeySpaceGCSafePoint) error
-	LoadGCSafePointByKeySpace(spaceID string) (*KeySpaceGCSafePoint, error)
-	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error)
+	SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error
+	LoadKeySpaceGCSafePoint(spaceID string) (uint64, error)
+	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]string, []uint64, error)
 }
 
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
 
-// SaveServiceSafePointByKeySpace saves service safe point under given key-space.
-func (se *StorageEndpoint) SaveServiceSafePointByKeySpace(spaceID string, ssp *ServiceSafePoint) error {
+// SaveServiceSafePoint saves service safe point under given key-space.
+func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint) error {
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
@@ -58,9 +53,9 @@ func (se *StorageEndpoint) SaveServiceSafePointByKeySpace(spaceID string, ssp *S
 	return se.Save(key, string(value))
 }
 
-// LoadServiceSafePointByKeySpace reads ServiceSafePoint for the given key-space ID and service name.
+// LoadServiceSafePoint reads ServiceSafePoint for the given key-space ID and service name.
 // Return nil if no safepoint not exist.
-func (se *StorageEndpoint) LoadServiceSafePointByKeySpace(spaceID, serviceID string) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error) {
 	value, err := se.Load(KeySpaceServiceSafePointPath(spaceID, serviceID))
 	if err != nil || value == "" {
 		return nil, err
@@ -72,10 +67,10 @@ func (se *StorageEndpoint) LoadServiceSafePointByKeySpace(spaceID, serviceID str
 	return ssp, nil
 }
 
-// LoadMinServiceSafePointByKeySpace returns the minimum safepoint for the given key-space.
+// LoadMinServiceSafePoint returns the minimum safepoint for the given key-space.
 // Note that gc worker safe point are store separately.
 // If no service safe point exist for the given key-space or all the service safe points just expired, return nil.
-func (se *StorageEndpoint) LoadMinServiceSafePointByKeySpace(spaceID string, now time.Time) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time) (*ServiceSafePoint, error) {
 	prefix := KeySpaceServiceSafePointPrefix(spaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
@@ -92,13 +87,11 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByKeySpace(spaceID string, now
 
 		// remove expired safe points.
 		if ssp.ExpiredAt < now.Unix() {
-			err = se.Remove(key)
-			if err != nil {
-				return nil, err
-			}
+			go func(key string) {
+				se.Remove(key)
+			}(key)
 			continue
 		}
-
 		if ssp.SafePoint < min.SafePoint {
 			min = ssp
 		}
@@ -113,62 +106,57 @@ func (se *StorageEndpoint) LoadMinServiceSafePointByKeySpace(spaceID string, now
 	return min, nil
 }
 
-// RemoveServiceSafePointByKeySpace removes GCSafePoint for the given key-space.
-func (se *StorageEndpoint) RemoveServiceSafePointByKeySpace(spaceID, serviceID string) error {
+// RemoveServiceSafePoint removes target ServiceSafePoint
+func (se *StorageEndpoint) RemoveServiceSafePoint(spaceID, serviceID string) error {
 	key := KeySpaceServiceSafePointPath(spaceID, serviceID)
 	return se.Remove(key)
 }
 
-// SaveGCSafePointByKeySpace saves GCSafePoint to the given key-space.
-func (se *StorageEndpoint) SaveGCSafePointByKeySpace(gcSafePoint *KeySpaceGCSafePoint) error {
-	safePoint, err := json.Marshal(gcSafePoint)
-	if err != nil {
-		return err
-	}
-	return se.Save(KeySpaceGCSafePointPath(gcSafePoint.SpaceID), string(safePoint))
+// SaveKeySpaceGCSafePoint saves GCSafePoint to the given key-space.
+func (se *StorageEndpoint) SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error {
+	value := strconv.FormatUint(safePoint, 16)
+	return se.Save(KeySpaceGCSafePointPath(spaceID), value)
 }
 
-// LoadGCSafePointByKeySpace reads GCSafePoint for the given key-space.
-// return nil if safepoint not exist.
-func (se *StorageEndpoint) LoadGCSafePointByKeySpace(spaceID string) (*KeySpaceGCSafePoint, error) {
+// LoadKeySpaceGCSafePoint reads GCSafePoint for the given key-space.
+// Returns 0 if target safepoint not exist.
+func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID string) (uint64, error) {
 	value, err := se.Load(KeySpaceGCSafePointPath(spaceID))
 	if err != nil || value == "" {
-		return nil, err
+		return 0, err
 	}
-	gcSafePoint := &KeySpaceGCSafePoint{}
-	if err := json.Unmarshal([]byte(value), gcSafePoint); err != nil {
-		return nil, err
-	}
-	return gcSafePoint, nil
+	safePoint, err := strconv.ParseUint(value, 16, 64)
+	return safePoint, nil
 }
 
 // LoadAllKeySpaceGCSafePoints returns slice of key-spaces and their corresponding gc safe points.
-// It also returns spaceID of any default key spaces that do not have a gc safepoint.
-func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error) {
+// If withGCSafePoint set to false, returned safePoints slice will be empty.
+func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]string, []uint64, error) {
 	prefix := KeySpaceSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	suffix := KeySpaceGCSafePointSuffix()
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	safePoints := make([]*KeySpaceGCSafePoint, 0, len(values))
+	spaceIDs := make([]string, 0, len(values))
+	safePoints := make([]uint64, 0, len(values))
 	for i := range keys {
-		// skip non gc safe points
+		// skip service safe points
 		if !strings.HasSuffix(keys[i], suffix) {
 			continue
 		}
-		safePoint := &KeySpaceGCSafePoint{}
+		spaceID := strings.TrimPrefix(keys[i], prefix)
+		spaceID = strings.TrimSuffix(spaceID, suffix)
+		spaceIDs = append(spaceIDs, spaceID)
+
 		if withGCSafePoint {
-			if err = json.Unmarshal([]byte(values[i]), safePoint); err != nil {
-				return nil, err
+			value, err := strconv.ParseUint(values[i], 16, 64)
+			if err != nil {
+				return nil, nil, err
 			}
-		} else {
-			spaceID := strings.TrimPrefix(keys[i], prefix)
-			spaceID = strings.TrimSuffix(spaceID, suffix)
-			safePoint.SpaceID = spaceID
+			safePoints = append(safePoints, value)
 		}
-		safePoints = append(safePoints, safePoint)
 	}
-	return safePoints, nil
+	return spaceIDs, safePoints, nil
 }
