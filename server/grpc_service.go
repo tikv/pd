@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -48,8 +49,6 @@ import (
 
 const (
 	heartbeatSendTimeout = 5 * time.Second
-	// store config
-	storeReadyWaitTime = 5 * time.Second
 
 	// tso
 	maxMergeTSORequests    = 10000
@@ -104,9 +103,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
-	leadID := s.member.GetEtcdLeader()
+	leaderID := s.member.GetEtcdLeader()
 	for _, m := range members {
-		if m.MemberId == leadID {
+		if m.MemberId == leaderID {
 			etcdLeader = m
 			break
 		}
@@ -526,19 +525,6 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
-	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(ctx context.Context, url string) {
-			select {
-			// tikv may not ready to serve.
-			case <-time.After(storeReadyWaitTime):
-				if err := s.storeConfigManager.Load(url); err != nil {
-					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
-				}
-			case <-ctx.Done():
-				return
-			}
-		}(s.Server.LoopContext(), store.GetStatusAddress())
-	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -1661,6 +1647,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 		return 0, err
 	}
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}

@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -148,15 +149,14 @@ type Status struct {
 
 // NewRaftCluster create a new cluster.
 func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, manager *config.StoreConfigManager) *RaftCluster {
+	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:          ctx,
-		running:            false,
-		clusterID:          clusterID,
-		regionSyncer:       regionSyncer,
-		httpClient:         httpClient,
-		etcdClient:         etcdClient,
-		storeConfigManager: manager,
+		serverCtx:    ctx,
+		running:      false,
+		clusterID:    clusterID,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
 	}
 }
 
@@ -261,13 +261,13 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-
+	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
-	c.wg.Add(7)
+	c.wg.Add(8)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -275,9 +275,57 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
+	go c.runSyncConfig()
 	c.running = true
 
 	return nil
+}
+
+// runSyncConfig runs the job to sync tikv config.
+func (c *RaftCluster) runSyncConfig() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	stores := c.GetStores()
+
+	syncConfig(c.storeConfigManager, stores)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("sync store config job is stopped")
+			return
+		case <-ticker.C:
+			if !syncConfig(c.storeConfigManager, stores) {
+				stores = c.GetStores()
+			}
+		}
+	}
+}
+
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+	for index := 0; index < len(stores); index++ {
+		// filter out the stores that are tiflash
+		store := stores[index]
+		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+			continue
+		}
+
+		// filter out the stores that are not up.
+		if !(store.IsPreparing() || store.IsServing()) {
+			continue
+		}
+		// it will try next store if the current store is failed.
+		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		if err := manager.ObserveConfig(address); err != nil {
+			log.Warn("sync store config failed, it will try next store", zap.Error(err))
+			continue
+		}
+		// it will only try one store.
+		return true
+	}
+	return false
 }
 
 // LoadClusterInfo loads cluster related info.
@@ -1185,7 +1233,7 @@ func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
 func (c *RaftCluster) getUpStores() []uint64 {
 	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
-		if store.IsPreparing() || store.IsServing() {
+		if store.IsUp() {
 			upStores = append(upStores, store.GetID())
 		}
 	}
@@ -1208,7 +1256,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		return nil
 	}
 
-	if store.IsPreparing() || store.IsServing() {
+	if store.IsUp() {
 		if !forceBury {
 			return errs.ErrStoreIsUp.FastGenByArgs()
 		} else if !store.IsDisconnected() {
@@ -1276,7 +1324,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
-	if store.IsPreparing() || store.IsServing() {
+	if store.IsUp() {
 		return nil
 	}
 
@@ -1398,7 +1446,7 @@ func (c *RaftCluster) checkStores() {
 			}
 		}
 
-		if store.IsPreparing() || store.IsServing() {
+		if store.IsUp() {
 			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 				upStoreCount++
 			}
@@ -1643,7 +1691,7 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.hotStat.StoresStats)
@@ -1657,7 +1705,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
+	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	statsMap.Reset()
 
 	c.coordinator.resetSchedulerMetrics()
