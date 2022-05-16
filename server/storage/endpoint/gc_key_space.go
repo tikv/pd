@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -113,6 +114,9 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 			se.Remove(key)
 		}
 	}()
+	failpoint.Inject("customTimeout", func() {
+		time.Sleep(100 * time.Millisecond)
+	})
 	if min.SafePoint == math.MaxUint64 {
 		// no service safe point or all of them are expired.
 		return nil, nil

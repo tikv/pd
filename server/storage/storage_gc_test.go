@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
@@ -86,6 +87,8 @@ func (s *testStorageGCSuite) TestSaveLoadServiceSafePoint(c *C) {
 }
 
 func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
+	// enable a custom timeout to accommodate async deletion delay
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/customTimeout", "return(true)"), IsNil)
 	storage := NewStorageWithMemoryBackend()
 	currentTime := time.Now()
 	expireAt1 := currentTime.Add(100 * time.Second).Unix()
@@ -113,8 +116,6 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 	c.Assert(minSafePoint2, DeepEquals, serviceSafePoints[1])
 
 	// verify that service safe point with ServiceID 0 has been removed
-	// removal might take some time
-	time.Sleep(time.Millisecond * 100)
 	ssp, err := storage.LoadServiceSafePoint(testKeySpace, "0")
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
@@ -124,6 +125,7 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/customTimeout"), IsNil)
 }
 
 func (s *testStorageGCSuite) TestRemoveServiceSafePoint(c *C) {
