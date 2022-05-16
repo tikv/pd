@@ -28,7 +28,7 @@ import (
 // KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
 type KeySpaceGCSafePoint struct {
 	SpaceID   string `json:"space_id"`
-	SafePoint uint64 `json:"safe_point"`
+	SafePoint uint64 `json:"safe_point,omitempty"`
 }
 
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
@@ -60,15 +60,22 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafe
 }
 
 // LoadServiceSafePoint reads ServiceSafePoint for the given key-space ID and service name.
-// Return nil if no safepoint not exist.
+// Return nil if no safepoint exist for given service or just expired.
 func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error) {
-	value, err := se.Load(KeySpaceServiceSafePointPath(spaceID, serviceID))
+	key := KeySpaceServiceSafePointPath(spaceID, serviceID)
+	value, err := se.Load(key)
 	if err != nil || value == "" {
 		return nil, err
 	}
 	ssp := &ServiceSafePoint{}
 	if err := json.Unmarshal([]byte(value), ssp); err != nil {
 		return nil, err
+	}
+	if ssp.ExpiredAt < time.Now().Unix() {
+		go func() {
+			se.Remove(key)
+		}()
+		return nil, nil
 	}
 	return ssp, nil
 }
