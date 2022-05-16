@@ -15,9 +15,11 @@
 package progress
 
 import (
+	"fmt"
 	"math"
 	"time"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
@@ -81,6 +83,9 @@ func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 		if p.total < remaining {
 			p.total = remaining
 		}
+		if p.lastTimeRemaining < remaining {
+			p.lastTimeRemaining = remaining
+		}
 		// calculate the average speed for every `speedStatisticalInterval`
 		if time.Since(p.lastTime) >= speedStatisticalInterval {
 			if (p.lastTimeRemaining - remaining) <= 0 {
@@ -131,12 +136,17 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 }
 
 // Status returns the current progress status of a give name.
-func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64) {
+func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64, err error) {
 	m.RLock()
 	defer m.RUnlock()
 
 	if p, exist := m.progesses[progress]; exist {
 		process = 1 - p.remaining/p.total
+		if process < 0 {
+			process = 0
+			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
+			return
+		}
 		currentSpeed = 0
 		// when the progress is newly added
 		if p.lastSpeed == 0 && time.Since(p.lastTime) < speedStatisticalInterval {
@@ -150,5 +160,6 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 		}
 		return
 	}
-	return 0, 0, 0
+	err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progress))
+	return
 }
