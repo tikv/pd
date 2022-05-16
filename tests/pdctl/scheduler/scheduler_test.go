@@ -17,7 +17,6 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -426,10 +425,11 @@ func (s *schedulerTestSuite) TestScheduler(c *C) {
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "split-bucket-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
-	fmt.Println("config", echo)
+	c.Assert(strings.Contains(echo, "\"degree\": 3"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler", "set", "degree", "10"}, nil)
-	fmt.Println("set", echo)
+	c.Assert(strings.Contains(echo, "Success"), IsTrue)
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
+	c.Assert(strings.Contains(echo, "\"degree\": 10"), IsTrue)
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
 	c.Assert(strings.Contains(echo, "Success!"), IsTrue)
-	c.Assert(false, IsTrue)
 }

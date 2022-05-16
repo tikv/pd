@@ -37,7 +37,6 @@ const (
 	SplitBucketName = "split-bucket-scheduler"
 	// SplitBucketType is the spilt bucket type.
 	SplitBucketType = "split-bucket"
-
 	// DefaultHotDegree is the default hot region threshold.
 	DefaultHotDegree = 3
 )
@@ -127,12 +126,6 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 		rd.Text(w, http.StatusOK, "success")
 	}
 
-	m := make(map[string]interface{})
-	if err := json.Unmarshal(data, &m); err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	rd.Text(w, http.StatusBadRequest, "config item not found")
 }
 
@@ -169,7 +162,7 @@ func (s *splitBucketScheduler) GetType() string {
 }
 
 // ServerHTTP implement Http server.
-func (s *splitBucketScheduler) ServerHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
