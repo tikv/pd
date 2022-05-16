@@ -274,7 +274,7 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 		{
 			ID: "rule2",
 			Labels: []RegionLabel{
-				{Key: "k2", Value: "v2", TTL: "1000ms"}, // would expired first.},
+				{Key: "k2", Value: "v2", TTL: "1s"}, // would expire first.
 			},
 			RuleType: "key-range",
 
