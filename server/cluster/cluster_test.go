@@ -452,7 +452,8 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	cluster.checkStores()
 	process := "removing-1"
 	// no region moving
-	p, l, cs := cluster.progressManager.Status(process)
+	p, l, cs, err := cluster.progressManager.Status(process)
+	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)
 	c.Assert(l, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
@@ -467,7 +468,8 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	}
 	time.Sleep(time.Second)
 	cluster.checkStores()
-	p, l, cs = cluster.progressManager.Status(process)
+	p, l, cs, err = cluster.progressManager.Status(process)
+	c.Assert(err, IsNil)
 	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
 	// process = 5 / 20 = 0.25
 	c.Assert(p, Equals, 0.25)
