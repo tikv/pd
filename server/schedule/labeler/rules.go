@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
@@ -74,6 +75,11 @@ type LabelRulePatch struct {
 }
 
 func (l *RegionLabel) expireBefore(t time.Time) bool {
+	failpoint.Inject("regionLabelExpireSub1Minute", func() {
+		if l.expire != nil {
+			*l.expire = l.expire.Add(-time.Minute)
+		}
+	})
 	if l.expire == nil {
 		return false
 	}
