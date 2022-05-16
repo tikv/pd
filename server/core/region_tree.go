@@ -73,8 +73,11 @@ type regionTree struct {
 }
 
 func newRegionTree() *regionTree {
+	factory := func(_, _ []byte, _ rangetree.RangeItem) []rangetree.RangeItem {
+		return nil
+	}
 	return &regionTree{
-		tree:                rangetree.NewRangeTree(defaultBTreeDegree),
+		tree:                rangetree.NewRangeTree(defaultBTreeDegree, factory),
 		totalSize:           0,
 		totalWriteBytesRate: 0,
 		totalWriteKeysRate:  0,

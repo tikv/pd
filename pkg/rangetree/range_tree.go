@@ -24,19 +24,21 @@ type RangeItem interface {
 	btree.Item
 	GetStartKey() []byte
 	GetEndKey() []byte
-	// Debris returns the debris after replacing the key range.
-	Debris(startKey, endKey []byte) []RangeItem
 }
+
+type DebrisFactory func(startKey, EndKey []byte, item RangeItem) []RangeItem
 
 // RangeTree is the tree contains RangeItems.
 type RangeTree struct {
-	tree *btree.BTree
+	tree    *btree.BTree
+	factory DebrisFactory
 }
 
 // NewRangeTree is the constructor of the range tree.
-func NewRangeTree(degree int) *RangeTree {
+func NewRangeTree(degree int, factory DebrisFactory) *RangeTree {
 	return &RangeTree{
-		tree: btree.New(degree),
+		tree:    btree.New(degree),
+		factory: factory,
 	}
 }
 
@@ -45,7 +47,7 @@ func (r *RangeTree) Update(item RangeItem) []RangeItem {
 	overlaps := r.GetOverlaps(item)
 	for _, old := range overlaps {
 		r.tree.Delete(old)
-		children := old.Debris(item.GetStartKey(), item.GetEndKey())
+		children := r.factory(item.GetStartKey(), item.GetEndKey(), old)
 		for _, child := range children {
 			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
 				r.tree.ReplaceOrInsert(child)
