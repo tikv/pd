@@ -142,7 +142,8 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 		rd:   render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
 	return router
 }
 
@@ -172,7 +173,7 @@ func (s *splitBucketScheduler) ServerHTTP(w http.ResponseWriter, r *http.Request
 	s.handler.ServeHTTP(w, r)
 }
 
-// IsScheduleAllowed return true.
+//IsScheduleAllowed return true.
 func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
 	return true
 }

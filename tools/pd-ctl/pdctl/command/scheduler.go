@@ -460,6 +460,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigShuffleRegionCommand(),
 		newConfigGrantHotRegionCommand(),
 		newConfigBalanceLeaderCommand(),
+		newSplitBucketCommand(),
 	)
 	return c
 }
@@ -474,6 +475,31 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "show the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
+	return c
+}
+
+func newSplitBucketCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "split-bucket-scheduler",
+		Short: "split-bucket-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	// Deprecated: list command will be deprecated in future version, use show command instead.
+	c.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "list the config item (will be deprecated in feature version, use show command instead)",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",
