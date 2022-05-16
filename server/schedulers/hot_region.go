@@ -467,7 +467,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	updateBestSolution := func() {
+	tryUpdateBestSolution := func() {
 		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
 			if newOps, newInfl := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
@@ -491,7 +491,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				updateBestSolution()
+				tryUpdateBestSolution()
 			}
 		}
 	}
