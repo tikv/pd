@@ -27,6 +27,7 @@ type RangeItem interface {
 	GetEndKey() []byte
 }
 
+// DebrisFactory is the factory that generates some debris when updating items.
 type DebrisFactory func(startKey, EndKey []byte, item RangeItem) []RangeItem
 
 // RangeTree is the tree contains RangeItems.
