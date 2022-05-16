@@ -621,8 +621,6 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
 func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
-	c.RLock()
-	defer c.RUnlock()
 	return c.unsafeRecoveryController
 }
 
