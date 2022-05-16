@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -1646,6 +1647,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 		return 0, err
 	}
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}

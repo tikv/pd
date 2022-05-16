@@ -1233,7 +1233,7 @@ func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
 func (c *RaftCluster) getUpStores() []uint64 {
 	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
-		if store.IsPreparing() || store.IsServing() {
+		if store.IsUp() {
 			upStores = append(upStores, store.GetID())
 		}
 	}
@@ -1256,7 +1256,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		return nil
 	}
 
-	if store.IsPreparing() || store.IsServing() {
+	if store.IsUp() {
 		if !forceBury {
 			return errs.ErrStoreIsUp.FastGenByArgs()
 		} else if !store.IsDisconnected() {
@@ -1324,7 +1324,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 
-	if store.IsPreparing() || store.IsServing() {
+	if store.IsUp() {
 		return nil
 	}
 
@@ -1446,7 +1446,7 @@ func (c *RaftCluster) checkStores() {
 			}
 		}
 
-		if store.IsPreparing() || store.IsServing() {
+		if store.IsUp() {
 			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 				upStoreCount++
 			}
