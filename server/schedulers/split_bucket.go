@@ -115,7 +115,7 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	rd := render.New(render.Options{IndentJSON: true})
 	oldc, _ := json.Marshal(h.conf)
 	data, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	defer r.Body.Close()
 	if err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -161,14 +161,17 @@ func newSplitBucketScheduler(opController *schedule.OperatorController, conf *sp
 	return ret
 }
 
+// GetName returns the name of the split bucket scheduler.
 func (s *splitBucketScheduler) GetName() string {
 	return SplitBucketName
 }
 
+// GetType returns the type of the split bucket scheduler.
 func (s *splitBucketScheduler) GetType() string {
 	return SplitBucketType
 }
 
+// ServerHTTP implement Http server.
 func (s *splitBucketScheduler) ServerHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
@@ -178,23 +181,37 @@ func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
 	return true
 }
 
+type splitBucketPlan struct {
+	hotBuckets         map[uint64][]*buckets.BucketStat
+	cluster            schedule.Cluster
+	conf               *splitBucketSchedulerConfig
+	hotRegionSplitSize int64
+}
+
 // Schedule return operators if some bucket is too hot.
 func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	conf := s.conf.Clone()
-	hotBuckets := cluster.BucketsStats(conf.Degree)
+	plan := &splitBucketPlan{
+		conf:               conf,
+		cluster:            cluster,
+		hotBuckets:         cluster.BucketsStats(conf.Degree),
+		hotRegionSplitSize: cluster.GetOpts().GetHotRegionSplitSize(),
+	}
+	return s.schedule(plan)
+}
+
+func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Operator {
 	var splitBucket *buckets.BucketStat
-	hotRegionSplitSize := cluster.GetOpts().GetHotRegionSplitSize()
-	for regionID, buckets := range hotBuckets {
-		schedulerCounter.WithLabelValues(s.GetName(), "bucket-len").Add(float64(len(buckets)))
-		region := cluster.GetRegion(regionID)
+	for regionID, buckets := range plan.hotBuckets {
+		region := plan.cluster.GetRegion(regionID)
 		// skip if region is not exist
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 			continue
 		}
 		// region size is less than split region size
-		if region.GetApproximateSize() <= hotRegionSplitSize {
+		if region.GetApproximateSize() <= plan.hotRegionSplitSize {
 			schedulerCounter.WithLabelValues(s.GetName(), "region-too-small").Inc()
 			continue
 		}
@@ -214,7 +231,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		}
 	}
 	if splitBucket != nil {
-		region := cluster.GetRegion(splitBucket.RegionID)
+		region := plan.cluster.GetRegion(splitBucket.RegionID)
 		splitKey := make([][]byte, 0)
 		hexSplitKey := make([]string, 0)
 		if !bytes.Equal(region.GetStartKey(), splitBucket.StartKey) {
@@ -224,7 +241,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		if !bytes.Equal(region.GetEndKey(), splitBucket.EndKey) {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			log.Info("create split operator failed", zap.Error(err))
