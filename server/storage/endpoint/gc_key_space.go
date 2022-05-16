@@ -25,6 +25,12 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
+type KeySpaceGCSafePoint struct {
+	SpaceID   string `json:"space_id"`
+	SafePoint uint64 `json:"safe_point"`
+}
+
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
 type KeySpaceGCSafePointStorage interface {
 	// Service safe point interfaces.
@@ -35,7 +41,7 @@ type KeySpaceGCSafePointStorage interface {
 	// GC safe point interfaces.
 	SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error
 	LoadKeySpaceGCSafePoint(spaceID string) (uint64, error)
-	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]string, []uint64, error)
+	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error)
 }
 
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
@@ -132,34 +138,34 @@ func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID string) (uint64, erro
 	return safePoint, nil
 }
 
-// LoadAllKeySpaceGCSafePoints returns slice of key-spaces and their corresponding gc safe points.
-// If withGCSafePoint set to false, returned safePoints slice will be empty.
-func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]string, []uint64, error) {
+// LoadAllKeySpaceGCSafePoints returns slice of KeySpaceGCSafePoint.
+// If withGCSafePoint set to false, returned safePoints will be 0.
+func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error) {
 	prefix := KeySpaceSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	suffix := KeySpaceGCSafePointSuffix()
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	spaceIDs := make([]string, 0, len(values))
-	safePoints := make([]uint64, 0, len(values))
+	safePoints := make([]*KeySpaceGCSafePoint, 0, len(values))
 	for i := range keys {
-		// skip service safe points
+		// skip non gc safe points
 		if !strings.HasSuffix(keys[i], suffix) {
 			continue
 		}
+		safePoint := &KeySpaceGCSafePoint{}
 		spaceID := strings.TrimPrefix(keys[i], prefix)
 		spaceID = strings.TrimSuffix(spaceID, suffix)
-		spaceIDs = append(spaceIDs, spaceID)
-
+		safePoint.SpaceID = spaceID
 		if withGCSafePoint {
 			value, err := strconv.ParseUint(values[i], 16, 64)
 			if err != nil {
-				return nil, nil, err
+				return nil, err
 			}
-			safePoints = append(safePoints, value)
+			safePoint.SafePoint = value
 		}
+		safePoints = append(safePoints, safePoint)
 	}
-	return spaceIDs, safePoints, nil
+	return safePoints, nil
 }

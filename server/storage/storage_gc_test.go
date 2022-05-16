@@ -166,10 +166,12 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 		err := storage.SaveKeySpaceGCSafePoint(testSpaceIDs[i], testSafePoints[i])
 		c.Assert(err, IsNil)
 	}
-	loadedSpaceIDs, loadedSafePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
+	loadedSafePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
-	c.Assert(loadedSpaceIDs, DeepEquals, testSpaceIDs)
-	c.Assert(loadedSafePoints, DeepEquals, testSafePoints)
+	for i := range loadedSafePoints {
+		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
+		c.Assert(loadedSafePoints[i].SafePoint, Equals, testSafePoints[i])
+	}
 
 	// saving some service safe points.
 	spaceIDs, safePoints := testServiceSafePoints()
@@ -178,15 +180,20 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	}
 
 	// verify that service safe points do not interfere with gc safe points.
-	loadedSpaceIDs, loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(true)
+	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
-	c.Assert(loadedSpaceIDs, DeepEquals, testSpaceIDs)
-	c.Assert(loadedSafePoints, DeepEquals, testSafePoints)
+	for i := range loadedSafePoints {
+		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
+		c.Assert(loadedSafePoints[i].SafePoint, Equals, testSafePoints[i])
+	}
 
-	// verify that when withGCSafePoint set to false, returned safePoints slice is empty.
-	_, loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(false)
+	// verify that when withGCSafePoint set to false, returned safePoints is 0
+	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(false)
 	c.Assert(err, IsNil)
-	c.Assert(loadedSafePoints, HasLen, 0)
+	for i := range loadedSafePoints {
+		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
+		c.Assert(loadedSafePoints[i].SafePoint, Equals, uint64(0))
+	}
 }
 
 func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
@@ -203,8 +210,7 @@ func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	c.Assert(serviceSafePoint, IsNil)
 
 	// loading empty key spaces should return empty slices
-	spaceIDs, safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
+	safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
-	c.Assert(spaceIDs, HasLen, 0)
 	c.Assert(safePoints, HasLen, 0)
 }
