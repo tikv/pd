@@ -18,14 +18,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"strconv"
-	"strings"
-
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -33,7 +30,6 @@ import (
 	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -221,10 +217,17 @@ func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Opera
 		}
 		for _, bucket := range buckets {
 			// the key range of the bucket must less than the region.
-			if bytes.Compare(region.GetStartKey(), bucket.StartKey) > 0 || bytes.Compare(region.GetEndKey(), bucket.EndKey) < 0 {
-				schedulerCounter.WithLabelValues(s.GetName(), "region-not-match").Inc()
+			// like bucket: [001 100] and region: [001 100] will not pass.
+			// like bucket: [003 100] and region: [002 100] will pass.
+			if bytes.Compare(bucket.StartKey, region.GetStartKey()) < 0 || bytes.Compare(bucket.EndKey, region.GetEndKey()) > 0 {
+				schedulerCounter.WithLabelValues(s.GetName(), "key-range-not-match").Inc()
 				continue
 			}
+			if bytes.Equal(bucket.StartKey, region.GetStartKey()) && bytes.Equal(bucket.EndKey, region.GetEndKey()) {
+				schedulerCounter.WithLabelValues(s.GetName(), "key-range-not-match").Inc()
+				continue
+			}
+
 			if splitBucket == nil || bucket.HotDegree > splitBucket.HotDegree {
 				splitBucket = bucket
 			}
@@ -234,24 +237,23 @@ func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Opera
 		region := plan.cluster.GetRegion(splitBucket.RegionID)
 		splitKey := make([][]byte, 0)
 		hexSplitKey := make([]string, 0)
-		if !bytes.Equal(region.GetStartKey(), splitBucket.StartKey) {
+		if bytes.Compare(region.GetStartKey(), splitBucket.StartKey) < 0 {
 			splitKey = append(splitKey, splitBucket.StartKey)
 			hexSplitKey = append(hexSplitKey, core.HexRegionKeyStr(splitBucket.StartKey))
 		}
-		if !bytes.Equal(region.GetEndKey(), splitBucket.EndKey) {
+		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
+			hexSplitKey = append(hexSplitKey, core.HexRegionKeyStr(splitBucket.EndKey))
 		}
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
-			log.Info("create split operator failed", zap.Error(err))
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
 		}
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
 		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
-		op.AdditionalInfos["region-split-key"] = strings.Join(hexSplitKey, ",")
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}
