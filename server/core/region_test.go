@@ -37,6 +37,42 @@ var _ = Suite(&testRegionInfoSuite{})
 
 type testRegionInfoSuite struct{}
 
+func (s *testRegionInfoSuite) TestNeedMerge(c *C) {
+	mererSize, mergeKeys := int64(20), int64(200000)
+	testdata := []struct {
+		size   int64
+		keys   int64
+		expect bool
+	}{{
+		size:   20,
+		keys:   200000,
+		expect: true,
+	}, {
+		size:   20 - 1,
+		keys:   200000 - 1,
+		expect: true,
+	}, {
+		size:   20,
+		keys:   200000 - 1,
+		expect: true,
+	}, {
+		size:   20,
+		keys:   200000 + 1,
+		expect: false,
+	}, {
+		size:   20 + 1,
+		keys:   200000 + 1,
+		expect: false,
+	}}
+	for _, v := range testdata {
+		r := RegionInfo{
+			approximateSize: v.size,
+			approximateKeys: v.keys,
+		}
+		c.Assert(r.NeedMerge(mererSize, mergeKeys), Equals, v.expect)
+	}
+}
+
 func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	testcases := []struct {
 		idsA    []int

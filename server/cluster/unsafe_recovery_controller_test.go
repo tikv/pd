@@ -159,7 +159,7 @@ func advanceUntilFinished(c *C, recoveryController *unsafeRecoveryController, re
 func (s *testUnsafeRecoverySuite) TestFinished(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -235,7 +235,7 @@ func (s *testUnsafeRecoverySuite) TestFinished(c *C) {
 func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -325,7 +325,7 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 func (s *testUnsafeRecoverySuite) TestForceLeaderFail(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -372,7 +372,7 @@ func (s *testUnsafeRecoverySuite) TestForceLeaderFail(c *C) {
 func (s *testUnsafeRecoverySuite) TestForceLeaderForCommitMerge(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -444,7 +444,7 @@ func (s *testUnsafeRecoverySuite) TestForceLeaderForCommitMerge(c *C) {
 func (s *testUnsafeRecoverySuite) TestOneLearner(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -495,7 +495,7 @@ func (s *testUnsafeRecoverySuite) TestOneLearner(c *C) {
 func (s *testUnsafeRecoverySuite) TestUninitializedPeer(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -547,7 +547,7 @@ func (s *testUnsafeRecoverySuite) TestUninitializedPeer(c *C) {
 func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -736,7 +736,7 @@ func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -760,7 +760,7 @@ func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -817,7 +817,7 @@ func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
 func (s *testUnsafeRecoverySuite) TestStep(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -868,7 +868,7 @@ func (s *testUnsafeRecoverySuite) TestStep(c *C) {
 func (s *testUnsafeRecoverySuite) TestOnHealthyRegions(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -940,7 +940,7 @@ func (s *testUnsafeRecoverySuite) TestOnHealthyRegions(c *C) {
 func (s *testUnsafeRecoverySuite) TestCreateEmptyRegion(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -1045,7 +1045,7 @@ func (s *testUnsafeRecoverySuite) TestCreateEmptyRegion(c *C) {
 func (s *testUnsafeRecoverySuite) TestRangeOverlap1(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -1136,7 +1136,7 @@ func (s *testUnsafeRecoverySuite) TestRangeOverlap1(c *C) {
 func (s *testUnsafeRecoverySuite) TestRangeOverlap2(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
@@ -1226,7 +1226,7 @@ func (s *testUnsafeRecoverySuite) TestRangeOverlap2(c *C) {
 func (s *testUnsafeRecoverySuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -1261,7 +1261,7 @@ func (s *testUnsafeRecoverySuite) TestRemoveFailedStores(c *C) {
 func (s *testUnsafeRecoverySuite) TestSplitPaused(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
