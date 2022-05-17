@@ -520,6 +520,11 @@ func (s *testUnsafeRecoverSuite) TestReportCollection(c *C) {
 func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+<<<<<<< HEAD
+=======
+	// Manually fill the coordinator up to allow calling on cluster.PauseOrResumeSchedulers().
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.stage = recovering
 	recoveryController.failedStores = map[uint64]string{
@@ -626,6 +631,11 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+<<<<<<< HEAD
+=======
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {
@@ -647,3 +657,32 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 
 	c.Assert(recoveryController.RemoveFailedStores(failedStores), NotNil)
 }
+<<<<<<< HEAD
+=======
+
+func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	stores := newTestStores(2, "5.3.0")
+	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
+	for _, store := range stores {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	cluster.Lock()
+	cluster.unsafeRecoveryController = recoveryController
+	cluster.Unlock()
+	failedStores := map[uint64]string{
+		1: "",
+	}
+	c.Assert(recoveryController.RemoveFailedStores(failedStores), IsNil)
+	askSplitReq := &pdpb.AskSplitRequest{}
+	_, err := cluster.HandleAskSplit(askSplitReq)
+	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
+	askBatchSplitReq := &pdpb.AskBatchSplitRequest{}
+	_, err = cluster.HandleAskBatchSplit(askBatchSplitReq)
+	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
+}
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
