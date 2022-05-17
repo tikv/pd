@@ -56,6 +56,12 @@ type RegionInfo struct {
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	flowRoundDivisor  uint64
+<<<<<<< HEAD
+=======
+	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
+	buckets       unsafe.Pointer
+	fromHeartbeat bool
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -461,6 +467,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFromHeartbeat returns whether the region info is from the region heartbeat.
+func (r *RegionInfo) IsFromHeartbeat() bool {
+	return r.fromHeartbeat
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -544,6 +555,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+			}
+			if !origin.IsFromHeartbeat() {
+				isNew = true
 			}
 		}
 		return
