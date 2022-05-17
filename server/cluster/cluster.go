@@ -628,6 +628,43 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+<<<<<<< HEAD
+=======
+// processReportBuckets update the bucket information.
+func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
+	region := c.core.GetRegion(buckets.GetRegionId())
+	if region == nil {
+		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
+		return errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	// use CAS to update the bucket information.
+	// the two request(A:3,B:2) get the same region and need to update the buckets.
+	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
+	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
+	for retry := 0; retry < 3; retry++ {
+		old := region.GetBuckets()
+		// region should not update if the version of the buckets is less than the old one.
+		if old != nil && buckets.GetVersion() <= old.GetVersion() {
+			bucketEventCounter.WithLabelValues("version_not_match").Inc()
+			return nil
+		}
+		failpoint.Inject("concurrentBucketHeartbeat", func() {
+			time.Sleep(500 * time.Millisecond)
+		})
+		if ok := region.UpdateBuckets(buckets, old); ok {
+			return nil
+		}
+	}
+	bucketEventCounter.WithLabelValues("update_failed").Inc()
+	return nil
+}
+
+// IsPrepared return true if the prepare checker is ready.
+func (c *RaftCluster) IsPrepared() bool {
+	return c.coordinator.prepareChecker.isPrepared()
+}
+
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -700,8 +737,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
+<<<<<<< HEAD
 	if isNew {
 		c.prepareChecker.collect(region)
+=======
+	if !c.IsPrepared() && isNew {
+		c.coordinator.prepareChecker.collect(region)
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 	}
 
 	if c.regionStats != nil {
@@ -755,6 +797,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
+<<<<<<< HEAD
 //nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
@@ -762,6 +805,8 @@ func (c *RaftCluster) getClusterID() uint64 {
 	return c.meta.GetId()
 }
 
+=======
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 	if c.storage != nil {
 		if err := c.storage.SaveMeta(meta); err != nil {
