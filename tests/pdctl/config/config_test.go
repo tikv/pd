@@ -198,6 +198,11 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(svr.GetScheduleConfig().MaxStorePreparingTime, Equals, typeutil.NewDuration(10*time.Minute))
 
+	args = []string{"-u", pdAddr, "config", "set", "max-store-preparing-time", "0s"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(svr.GetScheduleConfig().MaxStorePreparingTime, Equals, typeutil.NewDuration(0))
+
 	// test config read and write
 	testItems := []testItem{
 		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
