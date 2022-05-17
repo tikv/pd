@@ -252,6 +252,9 @@ func (c *coordinator) drivePushOperator() {
 
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {

@@ -223,5 +223,85 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
+<<<<<<< HEAD
 	c.Assert(len(loadRegions), Equals, regionLen)
+=======
+	c.Assert(loadRegions, HasLen, regionLen)
+}
+
+func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker")
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+	regionLen := 110
+	regions := initRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+
+	// ensure flush to region storage
+	time.Sleep(3 * time.Second)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
+
+	// join new PD
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
+	err = pd2.Run()
+	c.Assert(err, IsNil)
+	// waiting for synchronization to complete
+	time.Sleep(3 * time.Second)
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd2")
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	rc = leaderServer.GetServer().GetRaftCluster()
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+	time.Sleep(time.Second)
+	c.Assert(rc.IsPrepared(), IsTrue)
+}
+
+func initRegions(regionLen int) []*core.RegionInfo {
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+			},
+		}
+		region := core.NewRegionInfo(r, r.Peers[0])
+		if i < regionLen/2 {
+			buckets := &metapb.Buckets{
+				RegionId: r.Id,
+				Keys:     [][]byte{r.StartKey, r.EndKey},
+				Version:  1,
+			}
+			region.UpdateBuckets(buckets, region.GetBuckets())
+		}
+		regions = append(regions, region)
+	}
+	return regions
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 }

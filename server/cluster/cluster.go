@@ -537,6 +537,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+// IsPrepared return true if the prepare checker is ready.
+func (c *RaftCluster) IsPrepared() bool {
+	return c.coordinator.prepareChecker.isPrepared()
+}
+
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -607,8 +612,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
+<<<<<<< HEAD
 	if isNew {
 		c.prepareChecker.collect(region)
+=======
+	if !c.IsPrepared() && isNew {
+		c.coordinator.prepareChecker.collect(region)
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 	}
 
 	if c.regionStats != nil {
@@ -655,6 +665,7 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
+<<<<<<< HEAD
 //nolint:unused
 func (c *RaftCluster) getClusterID() uint64 {
 	c.RLock()
@@ -662,6 +673,8 @@ func (c *RaftCluster) getClusterID() uint64 {
 	return c.meta.GetId()
 }
 
+=======
+>>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 	if c.storage != nil {
 		if err := c.storage.SaveMeta(meta); err != nil {
