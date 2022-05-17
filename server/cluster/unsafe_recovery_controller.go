@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
@@ -106,8 +107,10 @@ type unsafeRecoveryController struct {
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
 
 	// accumulated output for the whole recovery process
-	output []StageOutput
-	err    error
+	output              []StageOutput
+	affectedTableIDs    []int64
+	affectedMetaRegions []uint64
+	err                 error
 }
 
 // StageOutput is the information for one stage of the recovery process.
@@ -135,6 +138,8 @@ func (u *unsafeRecoveryController) reset() {
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	u.output = make([]StageOutput, 0)
+	u.affectedTableIDs = make([]int64, 0)
+	u.affectedMetaRegions = make([]uint64, 0)
 	u.err = nil
 }
 
@@ -456,10 +461,12 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 			u.cluster.DropCacheAllRegion()
 		}
 		output.Info = "Unsafe recovery finished"
+		output.Details = u.getAffectedTableDigest()
 		u.storePlanExpires = make(map[uint64]time.Time)
 		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	case failed:
 		output.Info = fmt.Sprintf("Unsafe recovery failed: %v", u.err)
+		output.Details = u.getAffectedTableDigest()
 		u.storePlanExpires = make(map[uint64]time.Time)
 		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	}
@@ -538,6 +545,34 @@ func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() map[string][
 		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
 	return outputs
+}
+
+func (u *unsafeRecoveryController) getAffectedTableDigest() []string {
+	var details []string
+	if len(u.affectedMetaRegions) != 0 {
+		regions := ""
+		for _, r := range u.affectedMetaRegions {
+			regions += fmt.Sprintf("%d, ", r)
+		}
+		details = append(details, "affected meta regions: "+strings.Trim(regions, ", "))
+	}
+	if len(u.affectedTableIDs) != 0 {
+		tables := ""
+		for _, t := range u.affectedTableIDs {
+			tables += fmt.Sprintf("%d, ", t)
+		}
+		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+	}
+	return details
+}
+
+func (u *unsafeRecoveryController) recordAffectedRegion(region *metapb.Region) {
+	isMeta, tableID := codec.Key(region.StartKey).MetaOrTable()
+	if isMeta {
+		u.affectedMetaRegions = append(u.affectedMetaRegions, region.GetId())
+	} else if tableID != 0 {
+		u.affectedTableIDs = append(u.affectedTableIDs, tableID)
+	}
 }
 
 func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, onlyIncoming bool) bool {
@@ -847,6 +882,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 				}
 			}
 			storeRecoveryPlan.ForceLeader.EnterForceLeaders = append(storeRecoveryPlan.ForceLeader.EnterForceLeaders, region.GetId())
+			u.recordAffectedRegion(leader.Region())
 			hasPlan = true
 		}
 		return true
@@ -893,6 +929,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 					FailedVoters: u.getFailedPeers(leader.Region()),
 				},
 			)
+			u.recordAffectedRegion(leader.Region())
 			hasPlan = true
 		}
 		return true
@@ -901,12 +938,13 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 	// Tombstone the peers of region not presented in the newest region tree
 	for storeID, storeReport := range u.storeReports {
 		for _, peerReport := range storeReport.PeerReports {
-			regionID := peerReport.GetRegionState().Region.Id
-			if !newestRegionTree.contains(regionID) {
-				if !u.canElectLeader(peerReport.GetRegionState().Region, false) {
+			region := peerReport.GetRegionState().Region
+			if !newestRegionTree.contains(region.GetId()) {
+				if !u.canElectLeader(region, false) {
 					// the peer is not in the valid regions, should be deleted directly
 					storeRecoveryPlan := u.getRecoveryPlan(storeID)
-					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, regionID)
+					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
+					u.recordAffectedRegion(region)
 					hasPlan = true
 				}
 			}
@@ -969,6 +1007,7 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 			}
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+			u.recordAffectedRegion(newRegion)
 			hasPlan = true
 		}
 		lastEnd = region.EndKey
@@ -994,6 +1033,7 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		}
 		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
 		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+		u.recordAffectedRegion(newRegion)
 		hasPlan = true
 	}
 	return hasPlan
