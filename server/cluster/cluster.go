@@ -396,7 +396,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer c.wg.Done()
 
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		nodeStateCheckJobInterval = time.Microsecond
+		nodeStateCheckJobInterval = time.Second
 	})
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	defer ticker.Stop()
@@ -1171,7 +1171,8 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), float64(c.core.GetStoreRegionSize(storeID)))
+		regionSize := float64(c.core.GetStoreRegionSize(storeID))
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize)
 		c.resetProgress(storeID, store.GetAddress(), preparingAction)
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
@@ -1451,7 +1452,7 @@ func (c *RaftCluster) checkStores() {
 				remaining := threshold - regionSize
 				// If we add multiple stores, the total will need to be changed.
 				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-				c.updateProgress(storeID, store.GetAddress(), preparingAction, remaining)
+				c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
 			}
 		}
 
@@ -1465,7 +1466,7 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize))
+		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
 		regionCount := c.core.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
 		if regionCount == 0 {
@@ -1620,7 +1621,7 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 	}
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action string, remaining float64) {
+func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
 	storeLabel := strconv.FormatUint(storeID, 10)
 	var progress string
 	switch action {
@@ -1630,16 +1631,17 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress string, action
 		progress = encodePreparingProgressKey(storeID)
 	}
 
-	if exist := c.progressManager.AddProgress(progress, remaining); !exist {
+	if exist := c.progressManager.AddProgress(progress, current, remaining); !exist {
 		return
 	}
-	c.progressManager.UpdateProgressRemaining(progress, remaining)
-	process, ls, _, err := c.progressManager.Status(progress)
+	c.progressManager.UpdateProgress(progress, current, remaining, isInc, nodeStateCheckJobInterval)
+	process, ls, cs, err := c.progressManager.Status(progress)
 	if err != nil {
 		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
+	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(cs)
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
 
@@ -1655,6 +1657,7 @@ func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action 
 
 	if exist := c.progressManager.RemoveProgress(progress); exist {
 		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+		storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
 	}
 }
@@ -1771,6 +1774,7 @@ func (c *RaftCluster) resetHealthStatus() {
 func (c *RaftCluster) resetProgressIndicator() {
 	c.progressManager.Reset()
 	storesProgressGauge.Reset()
+	storesSpeedGauge.Reset()
 	storesETAGauge.Reset()
 }
 

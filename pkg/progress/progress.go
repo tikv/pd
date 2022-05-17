@@ -23,8 +23,8 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
-// speedStatisticalInterval is the speed calculation interval
-var speedStatisticalInterval = 5 * time.Minute
+// speedStatisticalWindow is the speed calculation window
+var speedStatisticalWindow = 10 * time.Minute
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
@@ -43,10 +43,10 @@ func NewManager() *Manager {
 type progressIndicator struct {
 	total     float64
 	remaining float64
-	// we use a fixed interval to calculate the latest average speed.
-	lastTimeRemaining float64
-	lastSpeed         float64
-	lastTime          time.Time
+	// We use a fixed interval's history to calculate the latest average speed.
+	// It is a FIFO struct.
+	history   []float64
+	lastSpeed float64
 }
 
 // Reset resets the progress manager.
@@ -58,23 +58,22 @@ func (m *Manager) Reset() {
 }
 
 // AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, total float64) (exist bool) {
+func (m *Manager) AddProgress(progress string, current, total float64) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
 	if _, exist = m.progesses[progress]; !exist {
 		m.progesses[progress] = &progressIndicator{
-			total:             total,
-			remaining:         total,
-			lastTimeRemaining: total,
-			lastTime:          time.Now(),
+			total:     total,
+			remaining: total,
+			history:   []float64{current},
 		}
 	}
 	return
 }
 
-// UpdateProgressRemaining updates the remaining value of a progress if it exists.
-func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
+// UpdateProgress updates the progress if it exists.
+func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool, updateInterval time.Duration) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -83,18 +82,28 @@ func (m *Manager) UpdateProgressRemaining(progress string, remaining float64) {
 		if p.total < remaining {
 			p.total = remaining
 		}
-		if p.lastTimeRemaining < remaining {
-			p.lastTimeRemaining = remaining
+
+		// We use window size / update interval to get the history length.
+		historyLen := int(speedStatisticalWindow / updateInterval)
+		if len(p.history) > historyLen {
+			p.history = p.history[1:]
 		}
-		// calculate the average speed for every `speedStatisticalInterval`
-		if time.Since(p.lastTime) >= speedStatisticalInterval {
-			if (p.lastTimeRemaining - remaining) <= 0 {
-				p.lastSpeed = 0
-			} else {
-				p.lastSpeed = (p.lastTimeRemaining - remaining) / time.Since(p.lastTime).Seconds()
-			}
-			p.lastTime = time.Now()
-			p.lastTimeRemaining = remaining
+		p.history = append(p.history, current)
+
+		// It means it just init and we haven't update the progress
+		if len(p.history) <= 1 {
+			p.lastSpeed = 0
+		} else if isInc {
+			// the value increases, e.g., [1, 2, 3]
+			p.lastSpeed = (p.history[len(p.history)-1] - p.history[0]) /
+				(float64(len(p.history)-1) * updateInterval.Seconds())
+		} else {
+			// the value decreases, e.g., [3, 2, 1]
+			p.lastSpeed = (p.history[0] - p.history[len(p.history)-1]) /
+				(float64(len(p.history)-1) * updateInterval.Seconds())
+		}
+		if p.lastSpeed < 0 {
+			p.lastSpeed = 0
 		}
 	}
 }
@@ -147,13 +156,12 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
 			return
 		}
-		currentSpeed = 0
-		// when the progress is newly added
-		if p.lastSpeed == 0 && time.Since(p.lastTime) < speedStatisticalInterval {
-			currentSpeed = (p.lastTimeRemaining - p.remaining) / time.Since(p.lastTime).Seconds()
-		} else {
-			currentSpeed = p.lastSpeed
+		currentSpeed = p.lastSpeed
+		// When the progress is newly added, there is no last speed.
+		if p.lastSpeed == 0 && len(p.history) <= 1 {
+			currentSpeed = 0
 		}
+
 		leftSeconds = p.remaining / currentSpeed
 		if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
 			leftSeconds = math.MaxFloat64
