@@ -223,6 +223,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	return region
 }
 
+// NeedMerge returns true if size is less than merge size and keys is less than mergeKeys.
+func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
+	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
+}
+
 // GetTerm returns the current term of the region
 func (r *RegionInfo) GetTerm() uint64 {
 	return r.term
