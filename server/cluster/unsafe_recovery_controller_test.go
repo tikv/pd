@@ -62,6 +62,20 @@ func applyRecoveryPlan(c *C, storeID uint64, storeReports map[uint64]*pdpb.Store
 	reports := storeReports[storeID]
 	reports.Step = plan.GetStep()
 
+	forceLeaders := plan.GetForceLeader()
+	if forceLeaders != nil {
+		for _, forceLeader := range forceLeaders.GetEnterForceLeaders() {
+			for _, report := range reports.PeerReports {
+				region := report.GetRegionState().GetRegion()
+				if region.GetId() == forceLeader {
+					report.IsForceLeader = true
+					break
+				}
+			}
+		}
+		return
+	}
+
 	for _, create := range plan.GetCreates() {
 		reports.PeerReports = append(reports.PeerReports, &pdpb.PeerReport{
 			RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -115,24 +129,8 @@ func applyRecoveryPlan(c *C, storeID uint64, storeReports map[uint64]*pdpb.Store
 		}
 	}
 
-	for _, storeReport := range storeReports {
-		for _, report := range storeReport.PeerReports {
-			report.IsForceLeader = false
-		}
-	}
-
-	forceLeaders := plan.GetForceLeader()
-	if forceLeaders == nil {
-		return
-	}
-	for _, forceLeader := range forceLeaders.GetEnterForceLeaders() {
-		for _, report := range reports.PeerReports {
-			region := report.GetRegionState().GetRegion()
-			if region.GetId() == forceLeader {
-				report.IsForceLeader = true
-				break
-			}
-		}
+	for _, report := range reports.PeerReports {
+		report.IsForceLeader = false
 	}
 }
 
@@ -558,7 +556,7 @@ func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
-	}, 60), IsNil)
+	}, 3600), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{

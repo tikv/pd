@@ -484,7 +484,6 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 func (u *unsafeRecoveryController) getForceLeaderPlanDigest() map[string][]string {
 	outputs := make(map[string][]string)
 	for storeID, plan := range u.storeRecoveryPlans {
-		output := []string{}
 		forceLeaders := plan.GetForceLeader()
 		if forceLeaders != nil {
 			regions := ""
@@ -494,12 +493,8 @@ func (u *unsafeRecoveryController) getForceLeaderPlanDigest() map[string][]strin
 					regions += ", "
 				}
 			}
-			output = append(output, fmt.Sprintf("force leader on regions: %s", regions))
+			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
 		}
-		for _, tombstone := range plan.GetTombstones() {
-			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
-		}
-		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
 	return outputs
 }
@@ -771,6 +766,10 @@ func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64
 				latest = peer
 			}
 		}
+		if !latest.IsInitialized() {
+			// ignore the uninitialized peer
+			continue
+		}
 		newestPeerReports = append(newestPeerReports, latest)
 	}
 
@@ -820,12 +819,6 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 		report := item.(*regionItem).report
 		region := item.(*regionItem).Region()
 		if !u.canElectLeader(region, false) {
-			if !item.(*regionItem).IsInitialized() {
-				storeRecoveryPlan := u.getRecoveryPlan(item.(*regionItem).storeID)
-				storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
-				hasPlan = true
-				return true
-			}
 			if hasForceLeader(region) {
 				// already is a force leader, skip
 				return true
