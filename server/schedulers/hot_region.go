@@ -332,7 +332,10 @@ type solution struct {
 
 	// progressiveRank measures the contribution for balance.
 	// The smaller the rank, the better this solution is.
-	// If rank < 0, this solution makes thing better.
+	// If progressiveRank <= 0, this solution makes thing better.
+	// 0 indicates that this is a solution that cannot be used directly, but can be optimized.
+	// 1 indicates that this is a non-optimizable solution.
+	// See `calcProgressiveRank` for more about progressive rank.
 	progressiveRank int64
 }
 
@@ -777,31 +780,46 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
+// | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
+// |   isBetter                         | -4       | -3            | -1 / 0   |
+// |   isNotWorsened                    | -2       | 1             | 1        |
+// |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
-	bs.cur.progressiveRank = 0
+	bs.cur.progressiveRank = 1
 
 	if toResourceType(bs.rwTy, bs.opTy) == writeLeader {
 		// For write leader, only compare the first priority.
 		if bs.isBetterForWriteLeader() {
 			bs.cur.progressiveRank = -1
 		}
-	} else {
-		switch {
-		case bs.isBetter(bs.firstPriority) && bs.isBetter(bs.secondPriority):
-			// If belong to the case, two dim will be more balanced, the best choice.
-			bs.cur.progressiveRank = -3
-		case bs.isNotWorsened(bs.firstPriority) && bs.isBetter(bs.secondPriority):
-			// If belong to the case, first priority dim will be not worsened, second priority dim will be more balanced.
-			bs.cur.progressiveRank = -2
-		case bs.isBetter(bs.firstPriority):
-			// If belong to the case, first priority dim will be more balanced, ignore the second priority dim.
-			bs.cur.progressiveRank = -1
-		}
+		return
+	}
+
+	isFirstBetter, isSecondBetter := bs.isBetter(bs.firstPriority), bs.isBetter(bs.secondPriority)
+	isFirstNotWorsened := isFirstBetter || bs.isNotWorsened(bs.firstPriority)
+	isSecondNotWorsened := isSecondBetter || bs.isNotWorsened(bs.secondPriority)
+	switch {
+	case isFirstBetter && isSecondBetter:
+		// If belonging to the case, all two dim will be more balanced, the best choice.
+		bs.cur.progressiveRank = -4
+	case isFirstBetter && isSecondNotWorsened:
+		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
+		bs.cur.progressiveRank = -3
+	case isFirstNotWorsened && isSecondBetter:
+		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
+		bs.cur.progressiveRank = -2
+	case isFirstBetter:
+		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
+		bs.cur.progressiveRank = -1
+	case isSecondBetter:
+		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
+		// It's a solution that cannot be used directly, but can be optimized.
+		bs.cur.progressiveRank = 0
 	}
 }
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
-// This will make the hot region scheduling slow even serializely running when each 2 store's pending influence is close.
+// This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
 func (bs *balanceSolver) isTolerance(dim int) bool {
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
 	if srcRate <= dstRate {
@@ -885,37 +903,34 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 	if bs.cur.srcPeerStat != old.srcPeerStat {
 		// compare region
-
 		if toResourceType(bs.rwTy, bs.opTy) == writeLeader {
 			kind := statistics.GetRegionStatKind(statistics.Write, bs.firstPriority)
-			switch {
-			case bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind):
-				return true
-			case bs.cur.srcPeerStat.GetLoad(kind) < old.srcPeerStat.GetLoad(kind):
-				return false
+			return bs.cur.srcPeerStat.GetLoad(kind) > old.srcPeerStat.GetLoad(kind)
+		}
+
+		// We will firstly consider ensuring converge faster, secondly reduce oscillation
+		firstCmp, secondCmp := bs.getRkCmpPriorities(old)
+		switch bs.cur.progressiveRank {
+		case -4: // isBetter(firstPriority) && isBetter(secondPriority)
+			if firstCmp != 0 {
+				return firstCmp > 0
 			}
-		} else {
-			firstCmp, secondCmp := bs.getRkCmpPriorities(old)
-			switch bs.cur.progressiveRank {
-			case -2: // greatDecRatio < firstPriorityDecRatio <= minorDecRatio && secondPriorityDecRatio <= greatDecRatio
-				if secondCmp != 0 {
-					return secondCmp > 0
-				}
-				if firstCmp != 0 {
-					// prefer smaller first priority rate, to reduce oscillation
-					return firstCmp < 0
-				}
-			case -3: // firstPriorityDecRatio <= greatDecRatio && secondPriorityDecRatio <= greatDecRatio
-				if secondCmp != 0 {
-					return secondCmp > 0
-				}
-				fallthrough
-			case -1: // firstPriorityDecRatio <= greatDecRatio
-				if firstCmp != 0 {
-					// prefer region with larger first priority rate, to converge faster
-					return firstCmp > 0
-				}
+			return secondCmp > 0
+		case -3: // isBetter(firstPriority) && isNotWorsened(secondPriority)
+			if firstCmp != 0 {
+				return firstCmp > 0
 			}
+			// prefer smaller second priority rate, to reduce oscillation
+			return secondCmp < 0
+		case -2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+			if secondCmp != 0 {
+				return secondCmp > 0
+			}
+			// prefer smaller first priority rate, to reduce oscillation
+			return firstCmp < 0
+		case -1: // isBetter(firstPriority)
+			return firstCmp > 0
+			// TODO: The smaller the difference between the value and the expectation, the better.
 		}
 	}
 
@@ -1032,12 +1047,14 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator, infl *stati
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := ""
 	switch bs.cur.progressiveRank {
-	case -3:
+	case -4:
 		dim = "all"
+	case -3:
+		dim = dimToString(bs.firstPriority)
 	case -2:
 		dim = dimToString(bs.secondPriority)
 	case -1:
-		dim = dimToString(bs.firstPriority)
+		dim = dimToString(bs.firstPriority) + "-only"
 	}
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
