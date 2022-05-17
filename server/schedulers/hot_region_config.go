@@ -219,7 +219,7 @@ func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
 	return conf.GreatDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinorGreatDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinorDecRatio

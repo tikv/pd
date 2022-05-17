@@ -235,6 +235,6 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 }
 
 // HandleReportBuckets processes buckets reports from client
-func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	return c.processReportBuckets(b)
+func (c *RaftCluster) HandleReportBuckets(buckets *metapb.Buckets) error {
+	return c.processReportBuckets(buckets)
 }
