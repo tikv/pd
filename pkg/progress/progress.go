@@ -15,6 +15,7 @@
 package progress
 
 import (
+	"container/list"
 	"fmt"
 	"math"
 	"time"
@@ -24,7 +25,7 @@ import (
 )
 
 // speedStatisticalWindow is the speed calculation window
-var speedStatisticalWindow = 10 * time.Minute
+const speedStatisticalWindow = 10 * time.Minute
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
@@ -44,9 +45,11 @@ type progressIndicator struct {
 	total     float64
 	remaining float64
 	// We use a fixed interval's history to calculate the latest average speed.
-	// It is a FIFO struct.
-	history   []float64
-	lastSpeed float64
+	history *list.List
+	// We use window size / update interval to get the history length.
+	historyLen     int
+	updateInterval time.Duration
+	lastSpeed      float64
 }
 
 // Reset resets the progress manager.
@@ -58,22 +61,26 @@ func (m *Manager) Reset() {
 }
 
 // AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, current, total float64) (exist bool) {
+func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
+	history := list.New()
+	history.PushBack(current)
 	if _, exist = m.progesses[progress]; !exist {
 		m.progesses[progress] = &progressIndicator{
-			total:     total,
-			remaining: total,
-			history:   []float64{current},
+			total:          total,
+			remaining:      total,
+			history:        history,
+			historyLen:     int(speedStatisticalWindow / updateInterval),
+			updateInterval: updateInterval,
 		}
 	}
 	return
 }
 
 // UpdateProgress updates the progress if it exists.
-func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool, updateInterval time.Duration) {
+func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -83,24 +90,22 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 			p.total = remaining
 		}
 
-		// We use window size / update interval to get the history length.
-		historyLen := int(speedStatisticalWindow / updateInterval)
-		if len(p.history) > historyLen {
-			p.history = p.history[1:]
+		if p.history.Len() > p.historyLen {
+			p.history.Remove(p.history.Front())
 		}
-		p.history = append(p.history, current)
+		p.history.PushBack(current)
 
 		// It means it just init and we haven't update the progress
-		if len(p.history) <= 1 {
+		if p.history.Len() <= 1 {
 			p.lastSpeed = 0
 		} else if isInc {
 			// the value increases, e.g., [1, 2, 3]
-			p.lastSpeed = (p.history[len(p.history)-1] - p.history[0]) /
-				(float64(len(p.history)-1) * updateInterval.Seconds())
+			p.lastSpeed = (p.history.Back().Value.(float64) - p.history.Front().Value.(float64)) /
+				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
 		} else {
 			// the value decreases, e.g., [3, 2, 1]
-			p.lastSpeed = (p.history[0] - p.history[len(p.history)-1]) /
-				(float64(len(p.history)-1) * updateInterval.Seconds())
+			p.lastSpeed = (p.history.Front().Value.(float64) - p.history.Back().Value.(float64)) /
+				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
 		}
 		if p.lastSpeed < 0 {
 			p.lastSpeed = 0
@@ -158,7 +163,7 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 		}
 		currentSpeed = p.lastSpeed
 		// When the progress is newly added, there is no last speed.
-		if p.lastSpeed == 0 && len(p.history) <= 1 {
+		if p.lastSpeed == 0 && p.history.Len() <= 1 {
 			currentSpeed = 0
 		}
 

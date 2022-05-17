@@ -34,16 +34,16 @@ type testProgressSuite struct{}
 func (s *testProgressSuite) Test(c *C) {
 	n := "test"
 	m := NewManager()
-	c.Assert(m.AddProgress(n, 100, 100), IsFalse)
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
 	p, ls, cs, err := m.Status(n)
 	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)
 	c.Assert(ls, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 	time.Sleep(time.Second)
-	c.Assert(m.AddProgress(n, 100, 100), IsTrue)
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsTrue)
 
-	m.UpdateProgress(n, 30, 30, false, 10*time.Second)
+	m.UpdateProgress(n, 30, 30, false)
 	p, ls, cs, err = m.Status(n)
 	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.7)
@@ -52,11 +52,10 @@ func (s *testProgressSuite) Test(c *C) {
 	// 70/1s+ > 70
 	c.Assert(cs, Less, 70.0)
 	// there is no scheduling
-	for i := 0; i < 60; i++ {
-		m.UpdateProgress(n, 30, 30, false, 10*time.Second)
+	for i := 0; i < 100; i++ {
+		m.UpdateProgress(n, 30, 30, false)
 	}
-	m.UpdateProgress(n, 30, 30, false, 10*time.Second)
-	c.Assert(m.progesses[n].history, HasLen, 61)
+	c.Assert(m.progesses[n].history.Len(), Equals, 61)
 	p, ls, cs, err = m.Status(n)
 	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.7)
@@ -79,14 +78,14 @@ func (s *testProgressSuite) Test(c *C) {
 func (s *testProgressSuite) TestAbnormal(c *C) {
 	n := "test"
 	m := NewManager()
-	c.Assert(m.AddProgress(n, 100, 100), IsFalse)
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
 	p, ls, cs, err := m.Status(n)
 	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)
 	c.Assert(ls, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 	// When offline a store, but there are still many write operations
-	m.UpdateProgress(n, 110, 110, false, 10*time.Second)
+	m.UpdateProgress(n, 110, 110, false)
 	p, ls, cs, err = m.Status(n)
 	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)

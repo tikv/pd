@@ -579,7 +579,7 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
 	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "removing")
@@ -587,24 +587,24 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	// store 2: (30-10)/(30+40) ~= 0.28
 	// average progress ~= (0.36+0.28)/2 = 0.32
 	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.32")
-	// store 1: 40/1s+ < 40
-	// store 2: 20/1s+ < 20
-	// average speed = (20+40)/2/1s = 30
-	c.Assert(p.CurrentSpeed, Equals, 30.0)
-	// store 1: (20+50)/40 = 1.75s
-	// store 2: (10+40)/20 = 2.5s
-	// average time = (1.75+2.5)/2 = 2.125s
-	c.Assert(p.LeftSeconds, Equals, 2.125)
+	// store 1: 40/10s = 4
+	// store 2: 20/10s = 2
+	// average speed = (2+4)/2 = 33
+	c.Assert(p.CurrentSpeed, Equals, 3.0)
+	// store 1: (20+50)/4 = 17.5s
+	// store 2: (10+40)/2 = 25s
+	// average time = (17.5+25)/2 = 21.25s
+	c.Assert(p.LeftSeconds, Equals, 21.25)
 
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "removing")
 	// store 2: (30-10)/(30+40) ~= 0.285
 	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.29")
-	// store 2: 20/1s = 20
-	c.Assert(p.CurrentSpeed, Equals, 20.0)
-	// store 2: (10+40)/20 = 2.5s
-	c.Assert(p.LeftSeconds, Equals, 2.5)
+	// store 2: 20/10s = 2
+	c.Assert(p.CurrentSpeed, Equals, 2.0)
+	// store 2: (10+40)/2 = 25s
+	c.Assert(p.LeftSeconds, Equals, 25.0)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
@@ -677,10 +677,10 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	// no store preparing
 	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
 	c.Assert(strings.Contains((string(output)), "no progress found for the action"), IsTrue)
-	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
 
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 	// size is not changed.
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	var p api.Progress
@@ -693,7 +693,7 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	// update size
 	pdctl.MustPutRegion(c, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
 	pdctl.MustPutRegion(c, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "preparing")
@@ -701,21 +701,21 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	// store 5: 40/(210*0.9) ~= 0.21
 	// average progress ~= (0.05+0.21)/2 = 0.13
 	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.13")
-	// store 4: 10/1s = 10
-	// store 5: 40/1s = 40
-	// average speed = (10+40)/2 = 25.0
-	c.Assert(p.CurrentSpeed, Equals, 25.0)
-	// store 4: 179/10 ~= 17.9
-	// store 5: 149/4O ~= 3.725
-	// average time ~= (17.9+3.725)/2 = 10.8125
-	c.Assert(p.LeftSeconds, Equals, 10.8125)
+	// store 4: 10/10s = 1
+	// store 5: 40/10s = 4
+	// average speed = (1+4)/2 = 2.5
+	c.Assert(p.CurrentSpeed, Equals, 2.5)
+	// store 4: 179/1 ~= 179
+	// store 5: 149/4 ~= 37.25
+	// average time ~= (179+37.25)/2 = 108.125
+	c.Assert(p.LeftSeconds, Equals, 108.125)
 
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
 	c.Assert(p.Action, Equals, "preparing")
 	c.Assert(fmt.Sprintf("%.2f", p.Progress), Equals, "0.05")
-	c.Assert(p.CurrentSpeed, Equals, 10.0)
-	c.Assert(p.LeftSeconds, Equals, 17.9)
+	c.Assert(p.CurrentSpeed, Equals, 1.0)
+	c.Assert(p.LeftSeconds, Equals, 179.0)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)

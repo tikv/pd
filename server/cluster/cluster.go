@@ -59,10 +59,6 @@ import (
 )
 
 var (
-	// metricsCollectionJobInterval is the interval to run metrics collection job.
-	metricsCollectionJobInterval = 10 * time.Second
-	// nodeStateCheckJobInterval is the interval to run node state check job.
-	nodeStateCheckJobInterval = 10 * time.Second
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
 )
@@ -71,8 +67,12 @@ var (
 const regionLabelGCInterval = time.Hour
 
 const (
-	clientTimeout              = 3 * time.Second
-	defaultChangedRegionsLimit = 10000
+	// nodeStateCheckJobInterval is the interval to run node state check job.
+	nodeStateCheckJobInterval = 10 * time.Second
+	// metricsCollectionJobInterval is the interval to run metrics collection job.
+	metricsCollectionJobInterval = 10 * time.Second
+	clientTimeout                = 3 * time.Second
+	defaultChangedRegionsLimit   = 10000
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
@@ -372,10 +372,11 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	failpoint.Inject("highFrequencyClusterJobs", func() {
-		metricsCollectionJobInterval = time.Microsecond
-	})
 	ticker := time.NewTicker(metricsCollectionJobInterval)
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker = time.NewTicker(time.Microsecond)
+	})
+
 	defer ticker.Stop()
 
 	for {
@@ -395,10 +396,10 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	failpoint.Inject("highFrequencyClusterJobs", func() {
-		nodeStateCheckJobInterval = time.Second
-	})
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker = time.NewTicker(2 * time.Second)
+	})
 	defer ticker.Stop()
 
 	for {
@@ -1172,8 +1173,8 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	err := c.putStoreLocked(newStore)
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize)
 		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval)
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
@@ -1631,10 +1632,10 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 		progress = encodePreparingProgressKey(storeID)
 	}
 
-	if exist := c.progressManager.AddProgress(progress, current, remaining); !exist {
+	if exist := c.progressManager.AddProgress(progress, current, remaining, nodeStateCheckJobInterval); !exist {
 		return
 	}
-	c.progressManager.UpdateProgress(progress, current, remaining, isInc, nodeStateCheckJobInterval)
+	c.progressManager.UpdateProgress(progress, current, remaining, isInc)
 	process, ls, cs, err := c.progressManager.Status(progress)
 	if err != nil {
 		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
