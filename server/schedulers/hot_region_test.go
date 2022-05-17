@@ -1542,9 +1542,9 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]}
 			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 0) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
-			tc.SetHotRegionCacheHitsThreshold(0)
+			leaderSolver.minHotDegree = 0
 			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 1)
-			tc.SetHotRegionCacheHitsThreshold(threshold)
+			leaderSolver.minHotDegree = threshold
 		}
 
 		// move peer: add peer and remove peer
