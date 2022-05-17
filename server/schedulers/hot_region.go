@@ -380,6 +380,7 @@ type balanceSolver struct {
 	greatDecRatio float64
 	minorDecRatio float64
 	maxPeerNum    int
+	minHotDegree  int
 }
 
 func (bs *balanceSolver) init() {
@@ -418,6 +419,7 @@ func (bs *balanceSolver) init() {
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
+	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -569,34 +571,30 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
 // The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) []*statistics.HotPeerStat {
-	ret := storeLoad.HotPeers
-
-	// filter pending region
-	appendItem := func(items []*statistics.HotPeerStat, item *statistics.HotPeerStat) []*statistics.HotPeerStat {
-		minHotDegree := bs.GetOpts().GetHotRegionCacheHitsThreshold()
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(minHotDegree) {
+func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
+	appendItem := func(item *statistics.HotPeerStat) {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
 			// no in pending operator and no need cool down after transfer leader
-			items = append(items, item)
+			ret = append(ret, item)
 		}
-		return items
 	}
 
+	src := storeLoad.HotPeers
 	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
-	if len(ret) <= bs.maxPeerNum {
-		nret := make([]*statistics.HotPeerStat, 0, len(ret))
-		for _, peer := range ret {
-			nret = appendItem(nret, peer)
+	if len(src) <= bs.maxPeerNum {
+		ret = make([]*statistics.HotPeerStat, 0, len(src))
+		for _, peer := range src {
+			appendItem(peer)
 		}
-		return nret
+	} else {
+		union := bs.sortHotPeers(src)
+		ret = make([]*statistics.HotPeerStat, 0, len(union))
+		for peer := range union {
+			appendItem(peer)
+		}
 	}
 
-	union := bs.sortHotPeers(ret)
-	ret = make([]*statistics.HotPeerStat, 0, len(union))
-	for peer := range union {
-		ret = appendItem(ret, peer)
-	}
-	return ret
+	return
 }
 
 func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
@@ -676,12 +674,16 @@ func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uin
 	case movePeer:
 		srcPeer := region.GetStorePeer(storeID)
 		if srcPeer == nil {
-			log.Debug("region does not have a peer on source store, maybe stat out of date", zap.Uint64("region-id", storeID))
+			log.Debug("region does not have a peer on source store, maybe stat out of date",
+				zap.Uint64("region-id", peerStat.ID()),
+				zap.Uint64("leader-store-id", storeID))
 			return nil
 		}
 	case transferLeader:
 		if region.GetLeader().GetStoreId() != storeID {
-			log.Debug("region leader is not on source store, maybe stat out of date", zap.Uint64("region-id", storeID))
+			log.Debug("region leader is not on source store, maybe stat out of date",
+				zap.Uint64("region-id", peerStat.ID()),
+				zap.Uint64("leader-store-id", storeID))
 			return nil
 		}
 	default:
@@ -838,6 +840,7 @@ func (bs *balanceSolver) isBetter(dim int) bool {
 	return isHot && decRatio <= bs.greatDecRatio && bs.isTolerance(dim)
 }
 
+// isNotWorsened must be true if isBetter is true.
 func (bs *balanceSolver) isNotWorsened(dim int) bool {
 	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
 	return !isHot || decRatio <= bs.minorDecRatio
