@@ -1085,7 +1085,7 @@
           "instant": true
         }
       ],
-      "title": "Left seconds",
+      "title": "Left time",
       "type": "table",
       "fieldConfig": {
         "defaults": {
