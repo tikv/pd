@@ -119,7 +119,7 @@ func (s *hotTestSuite) TestHot(c *C) {
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 
-	hotStoreID := uint64(1)
+	hotStoreID := store1.Id
 	count := 0
 	testHot := func(hotRegionID, hotStoreID uint64, hotType string) {
 		args = []string{"-u", pdAddr, "hot", hotType}
@@ -141,16 +141,32 @@ func (s *hotTestSuite) TestHot(c *C) {
 			regionIDCounter++
 			switch hotType {
 			case "read":
-				pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreID, []byte("b"), []byte("c"), core.SetReadBytes(1000000000), core.SetReportInterval(reportInterval))
+				loads := []float64{
+					statistics.RegionReadBytes:  float64(1000000000 * reportInterval),
+					statistics.RegionReadKeys:   float64(1000000000 * reportInterval),
+					statistics.RegionReadQuery:  float64(1000000000 * reportInterval),
+					statistics.RegionWriteBytes: 0,
+					statistics.RegionWriteKeys:  0,
+					statistics.RegionWriteQuery: 0,
+				}
+				leader := &metapb.Peer{
+					Id:      100 + regionIDCounter,
+					StoreId: hotStoreID,
+				}
+				peerInfo := core.NewPeerInfo(leader, loads, reportInterval)
+				region := core.NewRegionInfo(&metapb.Region{
+					Id: hotRegionID,
+				}, leader)
+				rc.GetHotStat().CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 				time.Sleep(5000 * time.Millisecond)
-				if reportInterval >= statistics.RegionHeartBeatReportInterval {
+				if reportInterval >= statistics.ReadReportInterval {
 					count++
 				}
 				testHot(hotRegionID, hotStoreID, "read")
 			case "write":
-				pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000), core.SetReportInterval(reportInterval))
+				pdctl.MustPutRegion(c, cluster, hotRegionID, hotStoreID, []byte("c"), []byte("d"), core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(reportInterval))
 				time.Sleep(5000 * time.Millisecond)
-				if reportInterval >= statistics.RegionHeartBeatReportInterval {
+				if reportInterval >= statistics.WriteReportInterval {
 					count++
 				}
 				testHot(hotRegionID, hotStoreID, "write")
