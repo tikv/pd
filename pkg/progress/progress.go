@@ -46,10 +46,12 @@ type progressIndicator struct {
 	remaining float64
 	// We use a fixed interval's history to calculate the latest average speed.
 	history *list.List
-	// We use window size / update interval to get the history length.
-	historyLen     int
-	updateInterval time.Duration
-	lastSpeed      float64
+	// We use speedStatisticalWindow / updateInterval to get the windowLengthLimit.
+	// Assume that the windowLengthLimit is 3, the init value is 1. after update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
+	// Then we update it again with 5, the window will become [2, 3, 4, 5].
+	windowLengthLimit int
+	updateInterval    time.Duration
+	lastSpeed         float64
 }
 
 // Reset resets the progress manager.
@@ -69,11 +71,11 @@ func (m *Manager) AddProgress(progress string, current, total float64, updateInt
 	history.PushBack(current)
 	if _, exist = m.progesses[progress]; !exist {
 		m.progesses[progress] = &progressIndicator{
-			total:          total,
-			remaining:      total,
-			history:        history,
-			historyLen:     int(speedStatisticalWindow / updateInterval),
-			updateInterval: updateInterval,
+			total:             total,
+			remaining:         total,
+			history:           history,
+			windowLengthLimit: int(speedStatisticalWindow / updateInterval),
+			updateInterval:    updateInterval,
 		}
 	}
 	return
@@ -90,7 +92,7 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 			p.total = remaining
 		}
 
-		if p.history.Len() > p.historyLen {
+		if p.history.Len() > p.windowLengthLimit {
 			p.history.Remove(p.history.Front())
 		}
 		p.history.PushBack(current)
