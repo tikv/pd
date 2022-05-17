@@ -233,7 +233,7 @@ func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
 
 	// ensure flush to region storage
 	time.Sleep(3 * time.Second)
-	c.Assert(leaderServer.GetRaftCluster().NeedCollect(), IsFalse)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
 
 	// join new PD
 	pd2, err := cluster.Join(s.ctx)
@@ -252,7 +252,7 @@ func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
 		c.Assert(err, IsNil)
 	}
 	time.Sleep(time.Second)
-	c.Assert(rc.NeedCollect(), IsFalse)
+	c.Assert(rc.IsPrepared(), IsTrue)
 }
 
 func initRegions(regionLen int) []*core.RegionInfo {

@@ -40,7 +40,11 @@ func newPrepareChecker() *prepareChecker {
 func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	checker.RLock()
 	defer checker.RUnlock()
-	if checker.prepared || time.Since(checker.start) > collectTimeout {
+	if checker.prepared {
+		return true
+	}
+	if time.Since(checker.start) > collectTimeout {
+		checker.prepared = true
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
@@ -70,8 +74,8 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 	checker.sum++
 }
 
-func (checker *prepareChecker) needCollect() bool {
+func (checker *prepareChecker) isPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
-	return time.Since(checker.start) <= collectTimeout && !checker.prepared
+	return checker.prepared
 }

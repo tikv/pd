@@ -747,9 +747,9 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	return nil
 }
 
-// NeedCollect return true if need to collect regions
-func (c *RaftCluster) NeedCollect() bool {
-	return c.coordinator.prepareChecker.needCollect()
+// IsPrepared return true if the prepare checker is ready.
+func (c *RaftCluster) IsPrepared() bool {
+	return c.coordinator.prepareChecker.isPrepared()
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
@@ -818,7 +818,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
-	if c.NeedCollect() && isNew {
+	if !c.IsPrepared() && isNew {
 		c.coordinator.prepareChecker.collect(region)
 	}
 
