@@ -32,6 +32,7 @@ type Storage interface {
 	// Introducing the kv.Base here is to provide
 	// the basic key-value read/write ability for the Storage.
 	kv.Base
+	endpoint.ServiceMiddlewareStorage
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
 	endpoint.RuleStorage
