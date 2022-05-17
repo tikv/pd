@@ -108,15 +108,19 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 			min = ssp
 		}
 	}
-	// remove expired keys
+	// failpoint for immediate removal
+	failpoint.Inject("removeExpiredKeys", func() {
+		for _, key := range expiredKeys {
+			se.Remove(key)
+		}
+		expiredKeys = []string{}
+	})
+	// remove expired keys asynchronously
 	go func() {
 		for _, key := range expiredKeys {
 			se.Remove(key)
 		}
 	}()
-	failpoint.Inject("customTimeout", func() {
-		time.Sleep(100 * time.Millisecond)
-	})
 	if min.SafePoint == math.MaxUint64 {
 		// no service safe point or all of them are expired.
 		return nil, nil

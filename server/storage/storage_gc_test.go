@@ -87,8 +87,6 @@ func (s *testStorageGCSuite) TestSaveLoadServiceSafePoint(c *C) {
 }
 
 func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
-	// enable a custom timeout to accommodate async deletion delay
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/customTimeout", "return(true)"), IsNil)
 	storage := NewStorageWithMemoryBackend()
 	currentTime := time.Now()
 	expireAt1 := currentTime.Add(100 * time.Second).Unix()
@@ -105,12 +103,13 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 	for _, serviceSafePoint := range serviceSafePoints {
 		c.Assert(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoint), IsNil)
 	}
+	// enabling failpoint to make expired key removal immediately observable
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys", "return(true)"), IsNil)
 	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime)
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint, DeepEquals, serviceSafePoints[0])
 
-	// this should remove safePoint with ServiceID 0 due to expiration
-	// and find the safePoint with ServiceID 1
+	// the safePoint with ServiceID 0 should be removed due to expiration
 	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(150*time.Second))
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint2, DeepEquals, serviceSafePoints[1])
@@ -120,12 +119,11 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
 
-	// this should remove all service safe points
-	// and return nil
+	// all remaining service safePoints should be removed due to expiration
 	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/customTimeout"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys"), IsNil)
 }
 
 func (s *testStorageGCSuite) TestRemoveServiceSafePoint(c *C) {
