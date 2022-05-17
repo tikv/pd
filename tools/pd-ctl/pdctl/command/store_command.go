@@ -25,6 +25,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/server/api"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
@@ -603,7 +605,8 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	state := strings.Title(strings.ToLower(args[0]))
+	caser := cases.Title(language.Und)
+	state := caser.String(strings.ToLower(args[0]))
 	stateValue, ok := metapb.StoreState_value[state]
 	if !ok {
 		cmd.Println("Unknown state: " + state)

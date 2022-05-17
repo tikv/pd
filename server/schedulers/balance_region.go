@@ -62,8 +62,6 @@ const (
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
 	BalanceRegionType = "balance-region"
-	// BalanceEmptyRegionThreshold is a threshold which allow balance the empty region if the region number is less than this threshold.
-	balanceEmptyRegionThreshold = 50
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -265,7 +263,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 
 // isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
 func isEmptyRegionAllowBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
-	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < balanceEmptyRegionThreshold
+	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
 }
 
 // isAllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
