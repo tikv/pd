@@ -1234,13 +1234,8 @@ func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
-<<<<<<< HEAD
 // IsInRateLimitAllowList returns whethis given service label is in block lost
 func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
-=======
-// IsInRateLimitBlockList returns whethis given service label is in block lost
-func (s *Server) IsInRateLimitBlockList(serviceLabel string) bool {
->>>>>>> rata_limit_config_api
 	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
 }
 
