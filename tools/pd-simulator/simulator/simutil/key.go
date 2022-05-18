@@ -17,10 +17,10 @@ package simutil
 import (
 	"bytes"
 	"math/rand"
-	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/codec"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -44,7 +44,7 @@ func GenerateKeys(size int) []string {
 	for k := range m {
 		v = append(v, k)
 	}
-	sort.Strings(v)
+	slices.Sort(v)
 	return v
 }
 

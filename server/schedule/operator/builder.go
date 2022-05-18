@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
+	"golang.org/x/exp/slices"
 )
 
 // ClusterInformer provides the necessary information for building operator.
@@ -1093,7 +1094,7 @@ func (pm peersMap) IDs() []uint64 {
 	for id := range pm {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	return ids
 }
 

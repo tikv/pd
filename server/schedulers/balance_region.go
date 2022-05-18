@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"sort"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -28,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 func init() {
@@ -146,11 +146,11 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	plan := newBalancePlan(kind, cluster, opInfluence)
 
-	sort.Slice(stores, func(i, j int) bool {
-		iOp := plan.GetOpInfluence(stores[i].GetID())
-		jOp := plan.GetOpInfluence(stores[j].GetID())
-		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
-			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
+	slices.SortFunc(stores, func(i, j *core.StoreInfo) bool {
+		iOp := plan.GetOpInfluence(i.GetID())
+		jOp := plan.GetOpInfluence(j.GetID())
+		return i.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
+			j.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 
 	var allowBalanceEmptyRegion func(*core.RegionInfo) bool

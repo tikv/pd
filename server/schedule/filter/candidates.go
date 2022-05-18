@@ -16,10 +16,10 @@ package filter
 
 import (
 	"math/rand"
-	"sort"
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"golang.org/x/exp/slices"
 )
 
 // StoreCandidates wraps store list and provide utilities to select source or
@@ -47,7 +47,7 @@ func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Fi
 
 // Sort sorts store list by given comparer in ascending order.
 func (c *StoreCandidates) Sort(less StoreComparer) *StoreCandidates {
-	sort.Slice(c.Stores, func(i, j int) bool { return less(c.Stores[i], c.Stores[j]) < 0 })
+	slices.SortFunc(c.Stores, func(i, j *core.StoreInfo) bool { return less(i, j) < 0 })
 	return c
 }
 

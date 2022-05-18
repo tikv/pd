@@ -17,7 +17,6 @@ package schedulers
 import (
 	"math/rand"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -301,8 +301,8 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedu
 		infos[index] = info
 		index++
 	}
-	sort.Slice(infos, func(i, j int) bool {
-		return infos[i].LoadPred.Current.Loads[statistics.ByteDim] > infos[j].LoadPred.Current.Loads[statistics.ByteDim]
+	slices.SortFunc(infos, func(i, j *statistics.StoreLoadDetail) bool {
+		return i.LoadPred.Current.Loads[statistics.ByteDim] > j.LoadPred.Current.Loads[statistics.ByteDim]
 	})
 	return s.randomSchedule(cluster, infos)
 }

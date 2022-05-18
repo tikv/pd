@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +30,7 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 )
 
@@ -318,7 +318,7 @@ func (c *baseClient) updateURLs(members []*pdpb.Member) {
 		urls = append(urls, m.GetClientUrls()...)
 	}
 
-	sort.Strings(urls)
+	slices.Sort(urls)
 	oldURLs := c.GetURLs()
 	// the url list is same.
 	if reflect.DeepEqual(oldURLs, urls) {

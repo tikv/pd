@@ -17,6 +17,8 @@ package rangelist
 import (
 	"bytes"
 	"sort"
+
+	"golang.org/x/exp/slices"
 )
 
 type splitPointType int
@@ -88,8 +90,8 @@ func (si *sortedItems) deleteItem(del interface{}) {
 
 // Build creates the key range list.
 func (b *Builder) Build() List {
-	sort.Slice(b.splitPoints, func(i, j int) bool {
-		return bytes.Compare(b.splitPoints[i].key, b.splitPoints[j].key) < 0
+	slices.SortFunc(b.splitPoints, func(i, j splitPoint) bool {
+		return bytes.Compare(i.key, j.key) < 0
 	})
 
 	// determine items for each range.
