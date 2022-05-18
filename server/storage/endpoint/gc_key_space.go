@@ -16,17 +16,11 @@ package endpoint
 
 import (
 	"encoding/json"
+	"github.com/pingcap/errors"
+	"go.etcd.io/etcd/clientv3"
 	"math"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 // KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
@@ -38,9 +32,10 @@ type KeySpaceGCSafePoint struct {
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
 type KeySpaceGCSafePointStorage interface {
 	// Service safe point interfaces.
-	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint) error
+	// NOTE: field ServiceSafePoint.ExpiredAt will be ignored, use etcd's lease to manage lifetime instead.
+	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint, ttl int64) error
 	LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error)
-	LoadMinServiceSafePoint(spaceID string, now time.Time) (*ServiceSafePoint, error)
+	LoadMinServiceSafePoint(spaceID string) (*ServiceSafePoint, error)
 	RemoveServiceSafePoint(spaceID, serviceID string) error
 	// GC safe point interfaces.
 	SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error
@@ -51,7 +46,7 @@ type KeySpaceGCSafePointStorage interface {
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
 
 // SaveServiceSafePoint saves service safe point under given key-space.
-func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint) error {
+func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint, ttl int64) error {
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
@@ -60,11 +55,11 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafe
 	if err != nil {
 		return err
 	}
-	return se.Save(key, string(value))
+	return se.SaveWithTTL(key, string(value), ttl)
 }
 
 // LoadServiceSafePoint reads ServiceSafePoint for the given key-space ID and service name.
-// Return nil if no safepoint exist for given service or just expired.
+// Return nil if no safepoint exist for given service.
 func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error) {
 	key := KeySpaceServiceSafePointPath(spaceID, serviceID)
 	value, err := se.Load(key)
@@ -75,61 +70,29 @@ func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*Ser
 	if err := json.Unmarshal([]byte(value), ssp); err != nil {
 		return nil, err
 	}
-	if ssp.ExpiredAt < time.Now().Unix() {
-		go func() {
-			if err = se.Remove(key); err != nil {
-				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
-			}
-		}()
-		return nil, nil
-	}
 	return ssp, nil
 }
 
 // LoadMinServiceSafePoint returns the minimum safepoint for the given key-space.
 // Note that gc worker safe point are store separately.
 // If no service safe point exist for the given key-space or all the service safe points just expired, return nil.
-func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string) (*ServiceSafePoint, error) {
 	prefix := KeySpaceServiceSafePointPrefix(spaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+	_, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
 	}
 	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
-	expiredKeys := make([]string, 0)
-	for i, key := range keys {
+	for i := range values {
 		ssp := &ServiceSafePoint{}
 		if err = json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
-		}
-
-		// gather expired keys
-		if ssp.ExpiredAt < now.Unix() {
-			expiredKeys = append(expiredKeys, key)
-			continue
 		}
 		if ssp.SafePoint < min.SafePoint {
 			min = ssp
 		}
 	}
-	// failpoint for immediate removal
-	failpoint.Inject("removeExpiredKeys", func() {
-		for _, key := range expiredKeys {
-			if err = se.Remove(key); err != nil {
-				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
-			}
-		}
-		expiredKeys = []string{}
-	})
-	// remove expired keys asynchronously
-	go func() {
-		for _, key := range expiredKeys {
-			if err = se.Remove(key); err != nil {
-				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
-			}
-		}
-	}()
 	if min.SafePoint == math.MaxUint64 {
 		// no service safe point or all of them are expired.
 		return nil, nil
