@@ -15,6 +15,7 @@
 package keyutil
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 )
@@ -22,4 +23,18 @@ import (
 // BuildKeyRangeKey build key for a keyRange
 func BuildKeyRangeKey(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s-%s", hex.EncodeToString(startKey), hex.EncodeToString(endKey))
+}
+
+func MaxKey(a, b []byte) []byte {
+	if bytes.Compare(a, b) > 0 {
+		return a
+	}
+	return b
+}
+
+func MinKey(a, b []byte) []byte {
+	if bytes.Compare(a, b) > 0 {
+		return b
+	}
+	return a
 }

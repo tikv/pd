@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
@@ -130,6 +131,7 @@ type RaftCluster struct {
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
+	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -220,6 +222,7 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
