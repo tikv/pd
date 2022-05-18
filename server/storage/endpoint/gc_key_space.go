@@ -23,7 +23,10 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
@@ -74,7 +77,9 @@ func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*Ser
 	}
 	if ssp.ExpiredAt < time.Now().Unix() {
 		go func() {
-			se.Remove(key)
+			if err = se.Remove(key); err != nil {
+				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
+			}
 		}()
 		return nil, nil
 	}
@@ -111,14 +116,18 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 	// failpoint for immediate removal
 	failpoint.Inject("removeExpiredKeys", func() {
 		for _, key := range expiredKeys {
-			se.Remove(key)
+			if err = se.Remove(key); err != nil {
+				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
+			}
 		}
 		expiredKeys = []string{}
 	})
 	// remove expired keys asynchronously
 	go func() {
 		for _, key := range expiredKeys {
-			se.Remove(key)
+			if err = se.Remove(key); err != nil {
+				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
+			}
 		}
 	}()
 	if min.SafePoint == math.MaxUint64 {
