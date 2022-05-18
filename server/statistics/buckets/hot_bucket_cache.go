@@ -17,12 +17,12 @@ package buckets
 import (
 	"bytes"
 	"context"
-	"github.com/tikv/pd/pkg/keyutil"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/keyutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/rangetree"
-	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +40,8 @@ const (
 	bucketBtreeDegree = 10
 
 	// the range of the hot degree should be [-100, 100]
-	minHotDegree = -100
-	maxHotDegree = 100
+	minHotDegree = -20
+	maxHotDegree = 20
 )
 
 // HotBucketCache is the cache of hot stats.
@@ -52,7 +52,7 @@ type HotBucketCache struct {
 	ctx             context.Context
 }
 
-// bucketDebrisFactory returns the debris.
+// bucketDebrisFactory returns the debris if the key range of the item is bigger than the given key range.
 // like bucket tree item: | 001------------------------200|
 // the split key range:              |050---150|
 // returns debris:       |001-----050|         |150------200|
@@ -94,7 +94,7 @@ func NewBucketsCache(ctx context.Context) *HotBucketCache {
 // putItem puts the item into the cache.
 func (h *HotBucketCache) putItem(item *BucketTreeItem, overlaps []*BucketTreeItem) {
 	// only update origin if the key range is same.
-	if origin := h.bucketsOfRegion[item.regionID]; item.compareKeyRange(origin) {
+	if origin := h.bucketsOfRegion[item.regionID]; item.equals(origin) {
 		*origin = *item
 		return
 	}
@@ -102,8 +102,8 @@ func (h *HotBucketCache) putItem(item *BucketTreeItem, overlaps []*BucketTreeIte
 		if overlap.status == alive {
 			log.Debug("delete buckets from cache",
 				zap.Uint64("region-id", overlap.regionID),
-				zap.String("start-key", core.HexRegionKeyStr(overlap.GetStartKey())),
-				zap.String("end-key", core.HexRegionKeyStr(overlap.GetEndKey())))
+				logutil.ZapRedactByteString("start-key", overlap.GetStartKey()),
+				logutil.ZapRedactByteString("end-key", overlap.GetEndKey()))
 			delete(h.bucketsOfRegion, overlap.regionID)
 		}
 	}
@@ -139,7 +139,7 @@ func (h *HotBucketCache) schedule() {
 func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *BucketTreeItem, overlaps []*BucketTreeItem) {
 	newItem = convertToBucketTreeItem(buckets)
 	// origin is existed and the version is same.
-	if origin := h.bucketsOfRegion[buckets.GetRegionId()]; newItem.compareKeyRange(origin) {
+	if origin := h.bucketsOfRegion[buckets.GetRegionId()]; newItem.equals(origin) {
 		overlaps = []*BucketTreeItem{origin}
 	} else {
 		overlaps = h.getBucketsByKeyRange(newItem.startKey, newItem.endKey)

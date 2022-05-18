@@ -25,6 +25,7 @@ func BuildKeyRangeKey(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s-%s", hex.EncodeToString(startKey), hex.EncodeToString(endKey))
 }
 
+// MaxKey return the bigger key for the given keys.
 func MaxKey(a, b []byte) []byte {
 	if bytes.Compare(a, b) > 0 {
 		return a
@@ -32,6 +33,7 @@ func MaxKey(a, b []byte) []byte {
 	return b
 }
 
+// MinKey returns the smaller key for the given keys.
 func MinKey(a, b []byte) []byte {
 	if bytes.Compare(a, b) > 0 {
 		return b
