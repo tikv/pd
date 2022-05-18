@@ -17,9 +17,9 @@ package buckets
 import (
 	"bytes"
 	"fmt"
-	"github.com/tikv/pd/pkg/keyutil"
 
 	"github.com/tikv/pd/pkg/btree"
+	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
@@ -46,7 +46,7 @@ type BucketStat struct {
 	EndKey    []byte
 	HotDegree int
 	Interval  uint64
-	// see statistics.RegionStatKind
+	// the order should see statistics.RegionStatKind
 	Loads []uint64
 }
 
@@ -100,8 +100,8 @@ func (b *BucketTreeItem) Less(than btree.Item) bool {
 	return bytes.Compare(b.startKey, than.(*BucketTreeItem).startKey) < 0
 }
 
-// compareKeyRange returns whether the key range is overlaps with the item.
-func (b *BucketTreeItem) compareKeyRange(origin *BucketTreeItem) bool {
+// equals returns whether the key range is overlaps with the item.
+func (b *BucketTreeItem) equals(origin *BucketTreeItem) bool {
 	if origin == nil {
 		return false
 	}
@@ -153,20 +153,22 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 	for _, bucketTree := range origins {
 		oldItems = append(oldItems, bucketTree.stats...)
 	}
-	// details: https://leetcode.cn/problems/interval-list-intersections/solution/jiu-pa-ni-bu-dong-shuang-zhi-zhen-by-hyj8/
+	// given two list of closed intervals like newItems and oldItems, where items[i]=[start-key,end-key],
+	// and each item are disjoint and sorted order.
+	// It should calculate the value if some item has intersection.
 	for p1, p2 := 0, 0; p1 < len(newItems) && p2 < len(oldItems); {
 		newItem, oldItem := newItems[p1], oldItems[p2]
-		left := keyutil.MaxKey(newItem.StartKey, oldItems[p2].StartKey)
-		right := keyutil.MinKey(newItem.EndKey, oldItems[p2].EndKey)
+		left := keyutil.MaxKey(newItem.StartKey, oldItem.StartKey)
+		right := keyutil.MinKey(newItem.EndKey, oldItem.EndKey)
 
 		// bucket should inherit the old bucket hot degree if they have some intersection.
 		// skip if the left is equal to the right key, such as [10 20] [20 30].
-		// new bucket:         |10 ---- 20 |
-		// old bucket: | 5 ---------15|
-		// they has one intersection |10-----15|.
+		// new bucket:         					|10 ---- 20 |
+		// old bucket: 					| 5 ---------15|
+		// they has one intersection 			|10--15|.
 		if bytes.Compare(left, right) < 0 {
-			oldDegree := oldItems[p2].HotDegree
-			newDegree := newItems[p1].HotDegree
+			oldDegree := oldItem.HotDegree
+			newDegree := newItem.HotDegree
 			// new bucket should interim old if the hot degree of the new bucket is less than zero.
 			if oldDegree < 0 && newDegree <= 0 && oldDegree < newDegree {
 				newItem.HotDegree = oldDegree
@@ -187,7 +189,8 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 
 func (b *BucketTreeItem) calculateHotDegree() {
 	for _, stat := range b.stats {
-		// todo： qps should be considered, tikv will report this in next sprint
+		// todo: qps should be considered, tikv will report this in next sprint
+		// the order: read [bytes keys qps] and write[bytes keys qps]
 		readLoads := stat.Loads[:2]
 		readHot := slice.AllOf(readLoads, func(i int) bool {
 			return readLoads[i] > minHotThresholds[i]
