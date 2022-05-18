@@ -109,8 +109,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// region is not small enough
-	if region.GetApproximateSize() > int64(m.opts.GetMaxMergeRegionSize()) ||
-		region.GetApproximateKeys() > int64(m.opts.GetMaxMergeRegionKeys()) {
+	if !region.NeedMerge(int64(m.opts.GetMaxMergeRegionSize()), int64(m.opts.GetMaxMergeRegionKeys())) {
 		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
 		return nil
 	}

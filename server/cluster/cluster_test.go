@@ -466,7 +466,6 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 		cluster.DropCacheRegion(region.GetID())
 		i++
 	}
-	time.Sleep(time.Second)
 	cluster.checkStores()
 	p, l, cs, err = cluster.progressManager.Status(process)
 	c.Assert(err, IsNil)
@@ -474,12 +473,10 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	// process = 5 / 20 = 0.25
 	c.Assert(p, Equals, 0.25)
 	// Each region is 100MB, we use more than 1s to move 5 region.
-	// speed = 5 * 100MB / 1s+ ~= 400MB/s+
-	c.Assert(cs, Greater, 400.0)
-	c.Assert(cs, Less, 500.0)
-	// left second = 15 * 100MB / 400MB/s+ ~= 3s+
-	c.Assert(l, Greater, 3.0)
-	c.Assert(l, Less, 4.0)
+	// speed = 5 * 100MB / 20s = 25MB/s
+	c.Assert(cs, Equals, 25.0)
+	// left second = 15 * 100MB / 25s = 60s
+	c.Assert(l, Equals, 60.0)
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {

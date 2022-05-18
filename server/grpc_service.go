@@ -585,20 +585,19 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+		return &pdpb.StoreHeartbeatResponse{
+			Header: s.errorHeader(pberr),
+		}, nil
+	}
+	storeID := request.GetStats().GetStoreId()
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return nil, errors.Errorf("store %v not found", storeID)
+	}
+
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
-		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-			return &pdpb.StoreHeartbeatResponse{
-				Header: s.errorHeader(pberr),
-			}, nil
-		}
-
-		storeID := request.GetStats().GetStoreId()
-		store := rc.GetStore(storeID)
-		if store == nil {
-			return nil, errors.Errorf("store %v not found", storeID)
-		}
-
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
@@ -622,9 +621,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
 	}
-	if rc.GetUnsafeRecoveryController() != nil {
-		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
-	}
+	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 	return resp, nil
 }
 
@@ -877,7 +874,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, flowRoundOption)
+		region := core.RegionFromHeartbeat(request, flowRoundOption, core.SetFromHeartbeat(true))
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1271,6 +1268,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 	if op != nil {
+		op.AttachKind(operator.OpAdmin)
 		rc.GetOperatorController().AddOperator(op)
 	}
 

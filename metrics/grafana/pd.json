@@ -1062,99 +1062,112 @@
       "type": "gauge"
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
       "datasource": "${DS_TEST-CLUSTER}",
-      "fill": 1,
-      "fillGradient": 0,
       "gridPos": {
         "h": 6,
-        "w": 8,
+        "w": 4,
         "x": 8,
-        "y": 13
+        "y": 14
       },
-      "hiddenSeries": false,
-      "id": 1451,
-      "legend": {
-        "alignAsTable": true,
-        "avg": false,
-        "current": true,
-        "hideEmpty": true,
-        "hideZero": true,
-        "max": false,
-        "min": false,
-        "rightSide": true,
-        "show": true,
-        "total": false,
-        "values": true
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
+      "id": 1111,
       "options": {
-        "alertThreshold": true
+        "showHeader": false
       },
-      "percentage": false,
       "pluginVersion": "7.5.11",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
       "targets": [
         {
-          "exemplar": true,
           "expr": "pd_cluster_eta{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+          "legendFormat": "{{action}}-{{store}}",
           "interval": "",
-          "legendFormat": "{{store}}-{{action}}",
+          "exemplar": true,
           "queryType": "randomWalk",
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
-      "thresholds": [],
-      "timeFrom": null,
-      "timeRegions": [],
-      "timeShift": null,
-      "title": "Left seconds",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "format": "s",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+      "title": "Left time",
+      "type": "table",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "filterable": false
+          },
+          "mappings": [
+            {
+              "id": 1,
+              "type": 1,
+              "from": "",
+              "to": "",
+              "text": "N/A",
+              "value": "1.7976931348623157e+308"
+            }
+          ],
+          "unit": "s"
         },
+        "overrides": []
+      },
+      "transformations": [
         {
-          "format": "short",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+          "id": "reduce",
+          "options": {
+            "reducers": [
+              "last"
+            ]
+          }
         }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "timeFrom": null,
+      "timeShift": null
+    },
+    {
+      "type": "table",
+      "title": "Current scaling speed",
+      "datasource": "${DS_TEST-CLUSTER}",
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 4,
+        "h": 6
+      },
+      "id": 1112,
+      "targets": [
+        {
+          "expr": "pd_cluster_speed{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+          "legendFormat": "{{action}}-{{store}}",
+          "interval": "",
+          "exemplar": true,
+          "refId": "A",
+          "queryType": "randomWalk",
+          "instant": true
+        }
+      ],
+      "options": {
+        "showHeader": false
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "filterable": false
+          },
+          "mappings": [],
+          "unit": "MBs"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "reduce",
+          "options": {
+            "reducers": [
+              "last"
+            ]
+          }
+        }
+      ],
+      "timeFrom": null,
+      "timeShift": null
     },
     {
       "collapsed": true,
