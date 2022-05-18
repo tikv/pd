@@ -492,12 +492,7 @@ func newSplitBucketCommand() *cobra.Command {
 		Run:   listSchedulerConfigCommandFunc,
 	}
 
-	// Deprecated: list command will be deprecated in future version, use show command instead.
 	c.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "list the config item (will be deprecated in feature version, use show command instead)",
-		Run:   listSchedulerConfigCommandFunc,
-	}, &cobra.Command{
 		Use:   "show",
 		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc,

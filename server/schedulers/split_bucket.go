@@ -38,7 +38,8 @@ const (
 	// SplitBucketType is the spilt bucket type.
 	SplitBucketType = "split-bucket"
 	// defaultHotDegree is the default hot region threshold.
-	defaultHotDegree = 3
+	defaultHotDegree  = 3
+	defaultSplitLimit = 10
 )
 
 func init() {
@@ -60,14 +61,16 @@ func init() {
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree: defaultHotDegree,
+		Degree:     defaultHotDegree,
+		SplitLimit: defaultSplitLimit,
 	}
 }
 
 type splitBucketSchedulerConfig struct {
-	mu      syncutil.RWMutex
-	storage endpoint.ConfigStorage
-	Degree  int `json:"degree"`
+	mu         syncutil.RWMutex
+	storage    endpoint.ConfigStorage
+	Degree     int    `json:"degree"`
+	SplitLimit uint64 `json:"split-limit"`
 }
 
 func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
@@ -98,8 +101,6 @@ type splitBucketHandler struct {
 }
 
 func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	h.conf.mu.RLock()
-	defer h.conf.mu.RUnlock()
 	conf := h.conf.Clone()
 	_ = h.rd.JSON(w, http.StatusOK, conf)
 }
@@ -166,9 +167,13 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-// IsScheduleAllowed return true.
+// IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
 func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
-	return true
+	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.SplitLimit
+	if !allowed {
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
+	}
+	return allowed
 }
 
 type splitBucketPlan struct {
@@ -188,10 +193,10 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		hotBuckets:         cluster.BucketsStats(conf.Degree),
 		hotRegionSplitSize: cluster.GetOpts().GetHotRegionSplitSize(),
 	}
-	return s.schedule(plan)
+	return s.splitBucket(plan)
 }
 
-func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Operator {
+func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Operator {
 	var splitBucket *buckets.BucketStat
 	for regionID, buckets := range plan.hotBuckets {
 		region := plan.cluster.GetRegion(regionID)
