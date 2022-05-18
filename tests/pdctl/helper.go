@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/check"
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
-	"golang.org/x/exp/slices"
 )
 
 // ExecuteCommand is used for test purpose.
@@ -79,11 +79,11 @@ func CheckRegionInfo(c *check.C, output *api.RegionInfo, expected *core.RegionIn
 func CheckRegionsInfo(c *check.C, output *api.RegionsInfo, expected []*core.RegionInfo) {
 	c.Assert(output.Count, check.Equals, len(expected))
 	got := output.Regions
-	slices.SortFunc(got, func(i, j api.RegionInfo) bool {
-		return i.ID < j.ID
+	sort.Slice(got, func(i, j int) bool {
+		return got[i].ID < got[j].ID
 	})
-	slices.SortFunc(expected, func(i, j *core.RegionInfo) bool {
-		return i.GetID() < j.GetID()
+	sort.Slice(expected, func(i, j int) bool {
+		return expected[i].GetID() < expected[j].GetID()
 	})
 	for i, region := range expected {
 		CheckRegionInfo(c, &got[i], region)

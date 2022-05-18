@@ -555,20 +555,6 @@ type histItem struct {
 	Count int64 `json:"count"`
 }
 
-type histSlice []*histItem
-
-func (hist histSlice) Len() int {
-	return len(hist)
-}
-
-func (hist histSlice) Swap(i, j int) {
-	hist[i], hist[j] = hist[j], hist[i]
-}
-
-func (hist histSlice) Less(i, j int) bool {
-	return hist[i].Start < hist[j].Start
-}
-
 // @Tags region
 // @Summary Get size of histogram.
 // @Param bound query integer false "Size bound of region histogram" minimum(1)
