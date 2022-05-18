@@ -280,7 +280,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	input["concurrency"] = 1
 	jsonBody, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/ratelimit/config", bytes.NewBuffer(jsonBody))
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/rate-limit/config", bytes.NewBuffer(jsonBody))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	_, err = io.ReadAll(resp.Body)
@@ -395,7 +395,7 @@ func (s *testMiddlewareSuite) TestRateLimitMiddleware(c *C) {
 	}
 	data, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
