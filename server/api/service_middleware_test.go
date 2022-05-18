@@ -125,7 +125,7 @@ func (s *testRateLimitConfigSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config", s.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/rate-limit/config", s.svr.GetAddr(), apiPrefix)
 
 	// test empty type
 	input := make(map[string]interface{})
@@ -267,6 +267,6 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "\"This service is in block list.\"\n"))
+		tu.StatusNotOK(c), tu.StringEqual(c, "\"This service is in block list.\"\n"))
 	c.Assert(err, IsNil)
 }
