@@ -305,27 +305,6 @@ func (s *testConfigSuite) TestConfigPDServer(c *C) {
 	c.Assert(sc.FlowRoundByDigit, Equals, int(3))
 	c.Assert(sc.MinResolvedTSPersistenceInterval, Equals, typeutil.NewDuration(0))
 	c.Assert(sc.MaxResetTSGap.Duration, Equals, 24*time.Hour)
-	c.Assert(sc.EnableAudit, Equals, false)
-
-	// test update enable-audit
-	ms = map[string]interface{}{
-		"enable-audit": true,
-	}
-	postData, err = json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(tu.CheckPostJSON(testDialClient, addrPost, postData, tu.StatusOK(c)), IsNil)
-	sc = &config.PDServerConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, true)
-	ms = map[string]interface{}{
-		"enable-audit": false,
-	}
-	postData, err = json.Marshal(ms)
-	c.Assert(err, IsNil)
-	c.Assert(tu.CheckPostJSON(testDialClient, addrPost, postData, tu.StatusOK(c)), IsNil)
-	sc = &config.PDServerConfig{}
-	c.Assert(tu.ReadGetJSON(c, testDialClient, addrGet, sc), IsNil)
-	c.Assert(sc.EnableAudit, Equals, false)
 }
 
 var ttlConfig = map[string]interface{}{

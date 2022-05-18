@@ -1540,11 +1540,11 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 			hb.prepareForBalance(testcase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]}
-			c.Check(leaderSolver.filterHotPeers(), HasLen, 0) // skip schedule
+			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 0) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
-			tc.SetHotRegionCacheHitsThreshold(0)
-			c.Check(leaderSolver.filterHotPeers(), HasLen, 1)
-			tc.SetHotRegionCacheHitsThreshold(threshold)
+			leaderSolver.minHotDegree = 0
+			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 1)
+			leaderSolver.minHotDegree = threshold
 		}
 
 		// move peer: add peer and remove peer
@@ -1628,10 +1628,12 @@ func (s *testHotCacheSuite) TestSortHotPeer(c *C) {
 		},
 	}}
 
-	u := leaderSolver.sortHotPeers(hotPeers, 1)
+	leaderSolver.maxPeerNum = 1
+	u := leaderSolver.sortHotPeers(hotPeers)
 	checkSortResult(c, []uint64{1}, u)
 
-	u = leaderSolver.sortHotPeers(hotPeers, 2)
+	leaderSolver.maxPeerNum = 2
+	u = leaderSolver.sortHotPeers(hotPeers)
 	checkSortResult(c, []uint64{1, 2}, u)
 }
 
