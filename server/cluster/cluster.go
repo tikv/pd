@@ -1441,21 +1441,28 @@ func (c *RaftCluster) checkStores() {
 
 		storeID := store.GetID()
 		if store.IsPreparing() {
-			threshold := c.getThreshold(stores, store)
-			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
-			regionSize := float64(store.GetRegionSize())
-			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || regionSize >= threshold ||
-				c.GetRegionCount() < core.InitClusterRegionThreshold {
+			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetRegionCount() < core.InitClusterRegionThreshold {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
 				}
 			} else {
-				remaining := threshold - regionSize
-				// If we add multiple stores, the total will need to be changed.
-				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-				c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+				threshold := c.getThreshold(stores, store)
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
+				regionSize := float64(store.GetRegionSize())
+				if regionSize >= threshold {
+					if err := c.ReadyToServe(storeID); err != nil {
+						log.Error("change store to serving failed",
+							zap.Stringer("store", store.GetMeta()),
+							errs.ZapError(err))
+					}
+				} else {
+					remaining := threshold - regionSize
+					// If we add multiple stores, the total will need to be changed.
+					c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
+					c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+				}
 			}
 		}
 
