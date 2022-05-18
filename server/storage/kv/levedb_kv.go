@@ -49,6 +49,12 @@ func (kv *LevelDBKV) Load(key string) (string, error) {
 	return string(v), err
 }
 
+// LoadRevision gets a value along with revision. The revision is unavailable for `LevelDBKV`.
+func (kv *LevelDBKV) LoadRevision(key string) (string, int64, error) {
+	value, err := kv.Load(key)
+	return value, RevisionUnavailable, err
+}
+
 // LoadRange gets a range of value for a given key range.
 func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
 	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
