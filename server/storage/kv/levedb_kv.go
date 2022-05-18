@@ -78,6 +78,11 @@ func (kv *LevelDBKV) Save(key, value string) error {
 	return errors.WithStack(kv.Put([]byte(key), []byte(value), nil))
 }
 
+// SaveWithTTL not supported on LevelDBKV
+func (kv *LevelDBKV) SaveWithTTL(key, value string, ttlSeconds int64) error {
+	return errors.New("ttl operation not supported on LevelDBKV")
+}
+
 // Remove deletes a key-value pair for a given key.
 func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))

@@ -24,5 +24,6 @@ type Base interface {
 	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
 	LoadRevision(key string) (string, int64, error)
 	Save(key, value string) error
+	SaveWithTTL(key, value string, ttlSeconds int64) error
 	Remove(key string) error
 }

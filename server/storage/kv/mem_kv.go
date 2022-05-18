@@ -86,6 +86,11 @@ func (kv *memoryKV) Save(key, value string) error {
 	return nil
 }
 
+// SaveWithTTL not supported on memoryKV
+func (kv *memoryKV) SaveWithTTL(key, value string, ttlSeconds int64) error {
+	return errors.New("ttl operation not supported on memoryKV")
+}
+
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
