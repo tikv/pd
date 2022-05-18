@@ -480,11 +480,12 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-	tryUpdateBestSolution := func() {
-		if bs.cur.progressiveRank == -1 && bs.isUniformFirstPriority(bs.cur.srcStore) {
+
+	tryUpdateBestSolution := func(isUniformFirstPriority bool) {
+		if bs.cur.progressiveRank == -1 && isUniformFirstPriority {
 			// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 			// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
-			hotSchedulerResultCounter.WithLabelValues("skip-for-exp", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
 			return
 		}
 		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
@@ -500,7 +501,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-
+		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
+		if isUniformFirstPriority && isUniformSecondPriority {
+			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+			continue
+		}
 		for _, srcPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(srcPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
@@ -510,7 +515,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				tryUpdateBestSolution()
+				tryUpdateBestSolution(isUniformFirstPriority)
 			}
 		}
 	}
@@ -787,7 +792,12 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
-	return store.IsUniform(bs.firstPriority, stddevThreshold)
+	// first priority should be more uniform than second priority
+	return store.IsUniform(bs.firstPriority, stddevThreshold*0.5)
+}
+
+func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDetail) bool {
+	return store.IsUniform(bs.secondPriority, stddevThreshold)
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
