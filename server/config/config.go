@@ -799,8 +799,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
-	// using a large duration means disable it
-	defaultMaxStorePreparingTime = 1000000 * time.Hour
+	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
+	defaultMaxStorePreparingTime = 48 * time.Hour
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
