@@ -267,6 +267,6 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusNotOK(c), tu.StringEqual(c, "\"This service is in block list.\"\n"))
+		tu.StatusNotOK(c), tu.StringEqual(c, "\"This service is in allow list whose config can not be changed.\"\n"))
 	c.Assert(err, IsNil)
 }

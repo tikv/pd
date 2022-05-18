@@ -211,8 +211,8 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
 		return
 	}
-	if h.svr.IsInRateLimitBlockList(serviceLabel) {
-		h.rd.JSON(w, http.StatusBadRequest, "This service is in block list.")
+	if h.svr.IsInRateLimitAllowList(serviceLabel) {
+		h.rd.JSON(w, http.StatusBadRequest, "This service is in allow list whose config can not be changed.")
 		return
 	}
 	cfg := h.svr.GetRateLimitConfig().LimiterConfig[serviceLabel]
