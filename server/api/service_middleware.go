@@ -156,14 +156,24 @@ func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlew
 	return err
 }
 
+func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+	cfg := h.svr.GetServiceMiddlewareConfig()
+	rateLimitCfg := ratelimit.NewLimiterConfig()
+	for label, item := range cfg.LimiterConfig {
+		rateLimitCfg[label] = item
+	}
+	rateLimitCfg[label] = value
+	return h.updateRateLimit(cfg, key, &rateLimitCfg)
+}
+
 // @Tags service_middleware
 // @Summary update ratelimit config
 // @Param body body object string "json params"
 // @Produce json
 // @Success 200 {string} string ""
 // @Failure 400 {string} string ""
-// @Router /service-middleware/config [POST]
-func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
+// @Router /service-middleware/rate-limit/config [POST]
+func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -226,7 +236,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 			}
 		}
 		cfg.QPS = qps
-		cfg.QPSBrust = brust
+		cfg.QPSBurst = brust
 	}
 	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(cfg))
 	switch {
@@ -244,7 +254,7 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
-		err := updateRateLimitConfig(h.svr, "rate-limit-config", serviceLabel, cfg)
+		err := h.updateRateLimitConfig("limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {

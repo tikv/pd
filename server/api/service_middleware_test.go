@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
@@ -126,7 +125,7 @@ func (s *testRateLimitConfigSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/ratelimit/config", s.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config", s.svr.GetAddr(), apiPrefix)
 
 	// test empty type
 	input := make(map[string]interface{})
@@ -134,22 +133,16 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err := json.Marshal(input)
 	c.Assert(err, IsNil)
 
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The type is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"The type is empty.\"\n"))
 	c.Assert(err, IsNil)
 	// test invalid type
 	input = make(map[string]interface{})
 	input["type"] = "url"
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The type is invalid.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"The type is invalid.\"\n"))
 	c.Assert(err, IsNil)
 
 	// test empty label
@@ -158,11 +151,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["label"] = ""
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The label is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"The label is empty.\"\n"))
 	c.Assert(err, IsNil)
 	// test no label matched
 	input = make(map[string]interface{})
@@ -170,11 +160,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["label"] = "TestLabel"
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"There is no label matched.\"\n"))
 	c.Assert(err, IsNil)
 
 	// test empty path
@@ -183,11 +170,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["path"] = ""
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The path is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"The path is empty.\"\n"))
 	c.Assert(err, IsNil)
 
 	// test path but no label matched
@@ -196,11 +180,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["path"] = "/pd/api/v1/test"
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "\"There is no label matched.\"\n"))
 	c.Assert(err, IsNil)
 
 	// no change
@@ -209,11 +190,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["label"] = "GetHealthStatus"
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"No changed.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "\"No changed.\"\n"))
 	c.Assert(err, IsNil)
 
 	// change concurrency
@@ -224,20 +202,14 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "Concurrency limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "Concurrency limiter is changed."))
 	c.Assert(err, IsNil)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "Concurrency limiter is deleted."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "Concurrency limiter is deleted."))
 	c.Assert(err, IsNil)
 
 	// change qps
@@ -248,11 +220,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["qps"] = 100
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is changed."))
 	c.Assert(err, IsNil)
 
 	input = make(map[string]interface{})
@@ -262,22 +231,16 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["qps"] = 0.3
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is changed."))
 	c.Assert(err, IsNil)
-	c.Assert(s.svr.GetConfig().PDServerCfg.RateLimitConfig["GetHealthStatus"].QPSBrust, Equals, 1)
+	c.Assert(s.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].QPSBurst, Equals, 1)
 
 	input["qps"] = -1
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is deleted."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is deleted."))
 	c.Assert(err, IsNil)
 
 	// change both
@@ -288,11 +251,8 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"Concurrency limiter is changed. QPS rate limiter is changed.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "\"Concurrency limiter is changed. QPS rate limiter is changed.\"\n"))
 	c.Assert(err, IsNil)
 
 	limiter := s.svr.GetServiceRateLimiter()
@@ -306,10 +266,7 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"This service is in block list.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(c), tu.StringEqual(c, "\"This service is in block list.\"\n"))
 	c.Assert(err, IsNil)
 }

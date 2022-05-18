@@ -171,16 +171,6 @@ func PostJSON(client *http.Client, url string, data []byte) (*http.Response, err
 	return client.Do(req)
 }
 
-// PostJSONIgnoreRespStatus is used to send the POST request to a specific URL and ignore resp status to test
-func PostJSONIgnoreRespStatus(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int)) error {
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(data))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	return doJSONIgnoreRespStatus(client, req, checkOpts...)
-}
-
 // GetJSON is used to send GET requst to specific url
 func GetJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
