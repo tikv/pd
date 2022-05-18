@@ -46,7 +46,6 @@ type PersistOptions struct {
 	ttl             *cache.TTLString
 	schedule        atomic.Value
 	replication     atomic.Value
-	serviceConfig   atomic.Value
 	pdServerConfig  atomic.Value
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
@@ -58,7 +57,6 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o := &PersistOptions{}
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
-	o.serviceConfig.Store(&cfg.ServiceCfg)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
@@ -85,16 +83,6 @@ func (o *PersistOptions) GetReplicationConfig() *ReplicationConfig {
 // SetReplicationConfig sets the PD replication configuration.
 func (o *PersistOptions) SetReplicationConfig(cfg *ReplicationConfig) {
 	o.replication.Store(cfg)
-}
-
-// GetServiceConfig returns pd server configurations.
-func (o *PersistOptions) GetServiceConfig() *ServiceConfig {
-	return o.serviceConfig.Load().(*ServiceConfig)
-}
-
-// SetServiceConfig sets the PD configuration.
-func (o *PersistOptions) SetServiceConfig(cfg *ServiceConfig) {
-	o.serviceConfig.Store(cfg)
 }
 
 // GetPDServerConfig returns pd server configurations.
@@ -145,6 +133,13 @@ func (o *PersistOptions) CASClusterVersion(old, new *semver.Version) bool {
 // GetLocationLabels returns the location labels for each region.
 func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
+}
+
+// SetLocationLabels sets the location labels.
+func (o *PersistOptions) SetLocationLabels(labels []string) {
+	v := o.GetReplicationConfig().Clone()
+	v.LocationLabels = labels
+	o.SetReplicationConfig(v)
 }
 
 // GetIsolationLevel returns the isolation label for each region.
@@ -331,6 +326,11 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
+// GetMaxStorePreparingTime returns the max preparing time of a store.
+func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
+	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
+}
+
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 	return o.getTTLUintOr(leaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
@@ -454,11 +454,6 @@ func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 // GetLeaderSchedulePolicy is to get leader schedule policy.
 func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
-}
-
-// IsAuditEnabled returns whether audit middleware is enabled
-func (o *PersistOptions) IsAuditEnabled() bool {
-	return o.GetServiceConfig().EnableAudit
 }
 
 // GetKeyType is to get key type.
@@ -610,7 +605,6 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 	cfg := &Config{
 		Schedule:        *o.GetScheduleConfig(),
 		Replication:     *o.GetReplicationConfig(),
-		ServiceCfg:      *o.GetServiceConfig(),
 		PDServerCfg:     *o.GetPDServerConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig(),
 		LabelProperty:   o.GetLabelPropertyConfig(),
@@ -638,7 +632,6 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
-		o.serviceConfig.Store(&cfg.ServiceCfg)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)

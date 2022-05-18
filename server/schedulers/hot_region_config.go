@@ -23,6 +23,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule"
@@ -218,7 +219,7 @@ func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
 	return conf.GreatDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinorGreatDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinorDecRatio
@@ -325,7 +326,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok := findSameField(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
 		rd.Text(w, http.StatusOK, "no changed")
 		return

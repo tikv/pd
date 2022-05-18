@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -39,6 +44,11 @@ unsupported component type %v
 ["PD:autoscaling:ErrUnsupportedMetricsType"]
 error = '''
 unsupported metrics type %v
+'''
+
+["PD:checker:ErrCheckerMergeAgain"]
+error = '''
+region will be merged again, %s
 '''
 
 ["PD:checker:ErrCheckerNotFound"]
@@ -119,6 +129,11 @@ store %v not found
 ["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
+'''
+
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
 '''
 
 ["PD:core:ErrStoreUnhealthy"]
@@ -484,6 +499,16 @@ failed to load plugin
 ["PD:plugin:ErrLookupPluginFunc"]
 error = '''
 failed to lookup plugin function
+'''
+
+["PD:progress:ErrProgressNotFound"]
+error = '''
+no progress found for %s
+'''
+
+["PD:progress:ErrProgressWrongStatus"]
+error = '''
+progress status is wrong
 '''
 
 ["PD:prometheus:ErrPrometheusCreateClient"]

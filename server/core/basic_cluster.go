@@ -338,6 +338,13 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
+// ResetStores resets the store cache.
+func (bc *BasicCluster) ResetStores() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores = NewStoresInfo()
+}
+
 // DeleteStore deletes a store.
 func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Lock()
@@ -358,7 +365,7 @@ func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionIn
 func isRegionRecreated(region *RegionInfo) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
-	// range) from reporting stale info, we execlude regions that covers the entire key range
+	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
@@ -395,6 +402,13 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	bc.Lock()
 	defer bc.Unlock()
 	return bc.Regions.SetRegion(region)
+}
+
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
 }
 
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.

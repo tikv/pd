@@ -215,6 +215,11 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	assertStateIDUpdate()
 	c.Assert(replicator.lastData[1], Equals, fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, stateID))
 
+	c.Assert(rep.GetReplicationStatus().GetDrAutoSync().GetPauseRegionSplit(), IsFalse)
+	conf.DRAutoSync.PauseRegionSplit = true
+	rep.UpdateConfig(conf)
+	c.Assert(rep.GetReplicationStatus().GetDrAutoSync().GetPauseRegionSplit(), IsTrue)
+
 	syncStoreStatus(1, 2, 3, 4)
 	rep.tickDR()
 	assertStateIDUpdate()
@@ -257,6 +262,7 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 	s.setStoreState(cluster, "up", "up", "up", "up", "up", "up")
 	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateSync)
+	c.Assert(rep.GetReplicationStatus().GetDrAutoSync().GetPauseRegionSplit(), IsFalse)
 
 	// async_wait -> async_wait
 	s.setStoreState(cluster, "up", "up", "up", "up", "down", "up")

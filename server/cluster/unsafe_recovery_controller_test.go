@@ -522,7 +522,7 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	// Manually fill the coordinator up to allow calling on cluster.PauseOrResumeSchedulers().
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	recoveryController := newUnsafeRecoveryController(cluster)
 	recoveryController.stage = recovering
 	recoveryController.failedStores = map[uint64]string{
@@ -629,7 +629,7 @@ func (s *testUnsafeRecoverSuite) TestPlanExecution(c *C) {
 func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -661,7 +661,7 @@ func (s *testUnsafeRecoverSuite) TestRemoveFailedStores(c *C) {
 func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.getClusterID(), cluster, true))
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -669,7 +669,9 @@ func (s *testUnsafeRecoverSuite) TestSplitPaused(c *C) {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
+	cluster.Lock()
 	cluster.unsafeRecoveryController = recoveryController
+	cluster.Unlock()
 	failedStores := map[uint64]string{
 		1: "",
 	}

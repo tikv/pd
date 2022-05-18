@@ -15,10 +15,10 @@
 package checker
 
 import (
+	"errors"
 	"math"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -30,6 +30,13 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
+)
+
+var (
+	errNoStoreToAdd       = errors.New("no store to add peer")
+	errNoStoreToReplace   = errors.New("no store to replace peer")
+	errPeerCannotBeLeader = errors.New("peer cannot be leader")
+	errNoNewLeader        = errors.New("no new leader")
 )
 
 // RuleChecker fix/improve region by placement rules.
@@ -158,7 +165,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to add peer")
+		return nil, errNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -176,7 +183,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to replace peer")
+		return nil, errNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
@@ -229,7 +236,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), []uint64{}, 0)
 		}
 		checkerCounter.WithLabelValues("rule_checker", "not-allow-leader")
-		return nil, errors.New("peer cannot be leader")
+		return nil, errPeerCannotBeLeader
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		checkerCounter.WithLabelValues("rule_checker", "fix-follower-role").Inc()
@@ -239,7 +246,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			}
 		}
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
-		return nil, errors.New("no new leader")
+		return nil, errNoNewLeader
 	}
 	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()

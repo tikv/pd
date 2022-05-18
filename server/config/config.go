@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/metricutil"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -107,8 +106,6 @@ type Config struct {
 	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
 
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
-
-	ServiceCfg ServiceConfig `toml:"service" json:"service"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
@@ -235,8 +232,6 @@ const (
 	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
 	defaultMaxResetTSGap                    = 24 * time.Hour
 	defaultMinResolvedTSPersistenceInterval = 0
-	defaultEnableAuditMiddleware            = false
-	defaultEnableRateLimitMiddleware        = false
 	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
@@ -578,10 +573,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		return err
 	}
 
-	if err := c.ServiceCfg.adjust(configMetaData.Child("service")); err != nil {
-		return err
-	}
-
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
@@ -661,6 +652,9 @@ type ScheduleConfig struct {
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
+	// MaxStorePreparingTime is the max duration after which
+	// a store will be considered to be preparing.
+	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
@@ -805,6 +799,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
+	// using a large duration means disable it
+	defaultMaxStorePreparingTime = 1000000 * time.Hour
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -824,6 +820,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
+	adjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
 	if !meta.IsDefined("leader-schedule-limit") {
 		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}
@@ -1092,35 +1089,6 @@ func (c *ReplicationConfig) adjust(meta *configMetaData) error {
 		c.LocationLabels = defaultLocationLabels
 	}
 	return c.Validate()
-}
-
-// ServiceConfig is the configuration for PD service such as HTTP API and gRPC.
-type ServiceConfig struct {
-	// EnableAudit controls the switch of the audit middleware
-	EnableAudit bool `toml:"enable-audit" json:"enable-audit,string"`
-	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `toml:"enable-rate-limit" json:"enable-rate-limit,string"`
-	// RateLimitConfig is the config of rate limit middleware
-	RateLimitConfig ratelimit.LimiterConfig `toml:"rate-limit-config" json:"rate-limit-config"`
-}
-
-// Clone returns a cloned PD server config.
-func (c *ServiceConfig) Clone() *ServiceConfig {
-	cfg := *c
-	return &cfg
-}
-
-func (c *ServiceConfig) adjust(meta *configMetaData) error {
-	if !meta.IsDefined("enable-audit") {
-		c.EnableAudit = defaultEnableAuditMiddleware
-	}
-	if !meta.IsDefined("enable-rate-limit") {
-		c.EnableRateLimit = defaultEnableRateLimitMiddleware
-	}
-	if !meta.IsDefined("rate-limit-config") {
-		c.RateLimitConfig = ratelimit.NewLimiterConfig()
-	}
-	return nil
 }
 
 // PDServerConfig is the configuration for pd server.
@@ -1418,6 +1386,7 @@ type DRAutoSyncReplicationConfig struct {
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
 	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
+	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {

@@ -307,7 +307,14 @@ func (m *RuleManager) GetRulesByKey(key []byte) []*Rule {
 func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getRulesForApplyRegion(region.GetStartKey(), region.GetEndKey())
+	return m.ruleList.getRulesForApplyRange(region.GetStartKey(), region.GetEndKey())
+}
+
+// GetRulesForApplyRange returns the rules list that should be applied to a range.
+func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
+	m.RLock()
+	defer m.RUnlock()
+	return m.ruleList.getRulesForApplyRange(start, end)
 }
 
 // FitRegion fits a region to the rules it matches.
