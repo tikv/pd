@@ -108,8 +108,8 @@ type unsafeRecoveryController struct {
 
 	// accumulated output for the whole recovery process
 	output              []StageOutput
-	affectedTableIDs    []int64
-	affectedMetaRegions []uint64
+	affectedTableIDs    map[int64]struct{}
+	affectedMetaRegions map[uint64]struct{}
 	err                 error
 }
 
@@ -138,8 +138,8 @@ func (u *unsafeRecoveryController) reset() {
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 	u.output = make([]StageOutput, 0)
-	u.affectedTableIDs = make([]int64, 0)
-	u.affectedMetaRegions = make([]uint64, 0)
+	u.affectedTableIDs = make(map[int64]struct{}, 0)
+	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
 	u.err = nil
 }
 
@@ -551,14 +551,14 @@ func (u *unsafeRecoveryController) getAffectedTableDigest() []string {
 	var details []string
 	if len(u.affectedMetaRegions) != 0 {
 		regions := ""
-		for _, r := range u.affectedMetaRegions {
+		for r := range u.affectedMetaRegions {
 			regions += fmt.Sprintf("%d, ", r)
 		}
 		details = append(details, "affected meta regions: "+strings.Trim(regions, ", "))
 	}
 	if len(u.affectedTableIDs) != 0 {
 		tables := ""
-		for _, t := range u.affectedTableIDs {
+		for t := range u.affectedTableIDs {
 			tables += fmt.Sprintf("%d, ", t)
 		}
 		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
@@ -569,9 +569,9 @@ func (u *unsafeRecoveryController) getAffectedTableDigest() []string {
 func (u *unsafeRecoveryController) recordAffectedRegion(region *metapb.Region) {
 	isMeta, tableID := codec.Key(region.StartKey).MetaOrTable()
 	if isMeta {
-		u.affectedMetaRegions = append(u.affectedMetaRegions, region.GetId())
+		u.affectedMetaRegions[region.GetId()] = struct{}{}
 	} else if tableID != 0 {
-		u.affectedTableIDs = append(u.affectedTableIDs, tableID)
+		u.affectedTableIDs[tableID] = struct{}{}
 	}
 }
 
@@ -1040,13 +1040,15 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 }
 
 func (u *unsafeRecoveryController) generateExitForceLeaderPlan() bool {
+	hasPlan := false
 	for storeID, storeReport := range u.storeReports {
 		for _, peerReport := range storeReport.PeerReports {
 			if peerReport.IsForceLeader {
 				_ = u.getRecoveryPlan(storeID)
+				hasPlan = true
 				break
 			}
 		}
 	}
-	return false
+	return hasPlan
 }

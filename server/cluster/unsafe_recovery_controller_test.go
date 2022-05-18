@@ -785,10 +785,27 @@ func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
 					IsForceLeader: true,
 				},
 			},
+			Step: 1,
 		},
 	}
 
-	advanceUntilFinished(c, recoveryController, reports)
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(c, storeID, reports, resp)
+	}
+	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(c, storeID, reports, resp)
+	}
+	c.Assert(recoveryController.GetStage(), Equals, finished)
 
 	expects := map[uint64]*pdpb.StoreReport{
 		1: {
