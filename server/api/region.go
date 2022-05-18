@@ -773,13 +773,13 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	startKey, rawStartKey, err := parseKey("start_key", input)
+	startKey, rawStartKey, err := apiutil.ParseKey("start_key", input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	endKey, rawEndKey, err := parseKey("end_key", input)
+	endKey, rawEndKey, err := apiutil.ParseKey("end_key", input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -856,12 +856,12 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	var failures map[uint64]error
 	var err error
 	if ok1 && ok2 {
-		startKey, _, err := parseKey("start_key", input)
+		startKey, _, err := apiutil.ParseKey("start_key", input)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		endKey, _, err := parseKey("end_key", input)
+		endKey, _, err := apiutil.ParseKey("end_key", input)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
@@ -885,6 +885,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}

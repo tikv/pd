@@ -65,30 +65,30 @@ func (s *testConfigPresistSuite) TearDownSuite(c *C) {
 func (s *testConfigPresistSuite) TestRateLimitConfigReload(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
-	c.Assert(leader.GetServer().GetConfig().PDServerCfg.RateLimitConfig, HasLen, 0)
+	c.Assert(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig, HasLen, 0)
 	limitCfg := ratelimit.NewLimiterConfig()
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
 
 	input := map[string]interface{}{
 		"enable-rate-limit": "true",
-		"rate-limit-config": limitCfg,
+		"limiter-config":    limitCfg,
 	}
 	data, err := json.Marshal(input)
 	c.Assert(err, IsNil)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	c.Assert(err, IsNil)
 	resp.Body.Close()
-	c.Assert(leader.GetServer().GetPersistOptions().IsRateLimitEnabled(), Equals, true)
-	c.Assert(leader.GetServer().GetConfig().PDServerCfg.RateLimitConfig, HasLen, 1)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, HasLen, 1)
 
 	oldLeaderName := leader.GetServer().Name()
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
 	mustWaitLeader(c, s.cluster.GetServers())
 	leader = s.cluster.GetServer(s.cluster.GetLeader())
 
-	c.Assert(leader.GetServer().GetPersistOptions().IsRateLimitEnabled(), Equals, true)
-	c.Assert(leader.GetServer().GetConfig().PDServerCfg.RateLimitConfig, HasLen, 1)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), Equals, true)
+	c.Assert(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, HasLen, 1)
 }
 
 func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {

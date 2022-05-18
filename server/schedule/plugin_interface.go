@@ -17,24 +17,24 @@ package schedule
 import (
 	"path/filepath"
 	"plugin"
-	"sync"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"go.uber.org/zap"
 )
 
 // PluginInterface is used to manage all plugin.
 type PluginInterface struct {
 	pluginMap     map[string]*plugin.Plugin
-	pluginMapLock sync.RWMutex
+	pluginMapLock syncutil.RWMutex
 }
 
 // NewPluginInterface create a plugin interface
 func NewPluginInterface() *PluginInterface {
 	return &PluginInterface{
 		pluginMap:     make(map[string]*plugin.Plugin),
-		pluginMapLock: sync.RWMutex{},
+		pluginMapLock: syncutil.RWMutex{},
 	}
 }
 

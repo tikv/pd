@@ -61,7 +61,8 @@ type RegionInfo struct {
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets unsafe.Pointer
+	buckets       unsafe.Pointer
+	fromHeartbeat bool
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -120,6 +121,8 @@ const (
 	// Only statistics within this interval limit are valid.
 	statsReportMinInterval = 3      // 3s
 	statsReportMaxInterval = 5 * 60 // 5min
+	// InitClusterRegionThreshold is a threshold which represent a new cluster.
+	InitClusterRegionThreshold = 50
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -219,6 +222,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// NeedMerge returns true if size is less than merge size and keys is less than mergeKeys.
+func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
+	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
 }
 
 // GetTerm returns the current term of the region
@@ -538,6 +546,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFromHeartbeat returns whether the region info is from the region heartbeat.
+func (r *RegionInfo) IsFromHeartbeat() bool {
+	return r.fromHeartbeat
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -621,6 +634,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+			}
+			if !origin.IsFromHeartbeat() {
+				isNew = true
 			}
 		}
 		return
@@ -1127,6 +1143,19 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 // until iterator returns false.
 func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {
 	r.tree.scanRange(startKey, iterator)
+}
+
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	var size int64
+	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+			return false
+		}
+		size += region.GetApproximateSize()
+		return true
+	})
+	return size
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region

@@ -22,6 +22,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/syndtr/goleveldb/leveldb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
@@ -52,7 +53,7 @@ func (s *testHotStatusSuite) TearDownSuite(c *C) {
 
 func (s testHotStatusSuite) TestGetHotStore(c *C) {
 	stat := HotStoreStats{}
-	err := readJSON(testDialClient, s.urlPrefix+"/stores", &stat)
+	err := tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/stores", &stat)
 	c.Assert(err, IsNil)
 }
 
@@ -63,11 +64,11 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsBasic(c *C) {
 	}
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest))
-	c.Assert(err, NotNil)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", []byte(errRequest), tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 }
 
 func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
@@ -100,7 +101,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsTimeRange(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 
@@ -183,7 +184,7 @@ func (s testHotStatusSuite) TestGetHistoryHotRegionsIDAndTypes(c *C) {
 	c.Assert(err, IsNil)
 	data, err := json.Marshal(request)
 	c.Assert(err, IsNil)
-	err = getJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, s.urlPrefix+"/regions/history", data, check)
 	c.Assert(err, IsNil)
 }
 

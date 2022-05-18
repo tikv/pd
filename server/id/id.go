@@ -16,11 +16,11 @@ package id
 
 import (
 	"path"
-	"sync"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/storage/kv"
 	"go.etcd.io/etcd/clientv3"
@@ -41,7 +41,7 @@ const allocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
-	mu   sync.Mutex
+	mu   syncutil.Mutex
 	base uint64
 	end  uint64
 

@@ -16,14 +16,12 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -140,6 +138,7 @@ func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Reques
 	cluster.GetReplicationMode().UpdateMemberWaitAsyncTime(memberID)
 	h.rd.JSON(w, http.StatusOK, nil)
 }
+<<<<<<< HEAD
 
 // @Tags admin
 // @Summary switch ratelimit middleware
@@ -237,3 +236,5 @@ func (h *adminHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request
 		}
 	}
 }
+=======
+>>>>>>> rata_limit_config_api

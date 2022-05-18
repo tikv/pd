@@ -42,8 +42,8 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Short: "Remove failed stores unsafely",
 		Run:   removeFailedStoresCommandFunc,
 	}
+	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
-	cmd.AddCommand(NewRemoveFailedStoresHistoryCommand())
 	return cmd
 }
 
@@ -56,50 +56,39 @@ func NewRemoveFailedStoresShowCommand() *cobra.Command {
 	}
 }
 
-// NewRemoveFailedStoresHistoryCommand returns the unsafe remove failed stores history command.
-func NewRemoveFailedStoresHistoryCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "history",
-		Short: "Show the history of failed stores removal",
-		Run:   removeFailedStoresHistoryCommandFunc,
-	}
-}
-
 func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/remove-failed-stores", unsafePrefix)
-	if len(args) != 1 {
+	if len(args) < 1 {
 		cmd.Usage()
 		return
 	}
 	strStores := strings.Split(args[0], ",")
-	stores := make(map[string]interface{})
+	var stores []uint64
 	for _, strStore := range strStores {
-		_, err := strconv.Atoi(strStore)
+		store, err := strconv.ParseUint(strStore, 10, 64)
 		if err != nil {
-			cmd.Usage()
+			cmd.Println(err)
 			return
 		}
-		stores[strStore] = ""
+		stores = append(stores, store)
 	}
-	postJSON(cmd, prefix, stores)
+	postInput := map[string]interface{}{
+		"stores": stores,
+	}
+	timeout, err := cmd.Flags().GetFloat64("timeout")
+	if err != nil {
+		cmd.Println(err)
+		return
+	} else if timeout != 300 {
+		postInput["timeout"] = timeout
+	}
+	postJSON(cmd, prefix, postInput)
 }
 
 func removeFailedStoresShowCommandFunc(cmd *cobra.Command, args []string) {
 	var resp string
 	var err error
 	prefix := fmt.Sprintf("%s/remove-failed-stores/show", unsafePrefix)
-	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Println(resp)
-}
-
-func removeFailedStoresHistoryCommandFunc(cmd *cobra.Command, args []string) {
-	var resp string
-	var err error
-	prefix := fmt.Sprintf("%s/remove-failed-stores/history", unsafePrefix)
 	resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)

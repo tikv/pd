@@ -41,7 +41,6 @@ import (
 	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
@@ -115,6 +114,82 @@ func (s *clusterTestSuite) TestBootstrap(c *C) {
 	c.Assert(respBoot.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_ALREADY_BOOTSTRAPPED)
 }
 
+func (s *clusterTestSuite) TestDamagedRegion(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 1)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(c, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+		},
+	}
+
+	// To put region.
+	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	c.Assert(err, IsNil)
+
+	stores := []*pdpb.PutStoreRequest{
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      1,
+				Address: "mock-1",
+				Version: "2.0.1",
+			},
+		},
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      2,
+				Address: "mock-4",
+				Version: "2.0.1",
+			},
+		},
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      3,
+				Address: "mock-6",
+				Version: "2.0.1",
+			},
+		},
+	}
+
+	// To put stores.
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
+	for _, store := range stores {
+		_, err = svr.PutStore(context.Background(), store)
+		c.Assert(err, IsNil)
+	}
+
+	// To validate remove peer op be added.
+	req1 := &pdpb.StoreHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Stats:  &pdpb.StoreStats{StoreId: 2, DamagedRegionsId: []uint64{10}},
+	}
+	c.Assert(rc.GetOperatorController().OperatorCount(operator.OpAdmin), Equals, uint64(0))
+	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
+	c.Assert(err1, IsNil)
+	c.Assert(rc.GetOperatorController().OperatorCount(operator.OpAdmin), Equals, uint64(1))
+}
+
 func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	tc, err := tests.NewTestCluster(s.ctx, 1)
 	defer tc.Destroy()
@@ -151,30 +226,20 @@ func (s *clusterTestSuite) TestGetPutConfig(c *C) {
 	store.Address = "127.0.0.1:1"
 	testPutStore(c, clusterID, rc, grpcPDClient, store)
 
-	// Trigger handling of damaged regions
-	c.Assert(len(rc.GetSchedulers()), Equals, 0)
-	req1 := &pdpb.StoreHeartbeatRequest{
-		Header: testutil.NewRequestHeader(clusterID),
-		Stats:  &pdpb.StoreStats{StoreId: store.GetId(), DamagedRegionsId: []uint64{1}},
-	}
-	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
-	c.Assert(err1, IsNil)
-	c.Assert(rc.GetSchedulers()[0], Equals, schedulers.EvictLeaderName)
-
 	// Remove store.
 	testRemoveStore(c, clusterID, rc, grpcPDClient, store)
 
 	// Update cluster config.
-	req2 := &pdpb.PutClusterConfigRequest{
+	req := &pdpb.PutClusterConfigRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Cluster: &metapb.Cluster{
 			Id:           clusterID,
 			MaxPeerCount: 5,
 		},
 	}
-	resp2, err2 := grpcPDClient.PutClusterConfig(context.Background(), req2)
-	c.Assert(err2, IsNil)
-	c.Assert(resp2, NotNil)
+	resp, err := grpcPDClient.PutClusterConfig(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp, NotNil)
 	meta := getClusterConfig(c, clusterID, grpcPDClient)
 	c.Assert(meta.GetMaxPeerCount(), Equals, uint32(5))
 }
@@ -684,7 +749,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetStoreConfigManager())
+	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
@@ -725,7 +790,7 @@ func (s *clusterTestSuite) TestLoadClusterInfo(c *C) {
 	}
 	c.Assert(storage.Flush(), IsNil)
 
-	raftCluster = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetStoreConfigManager())
+	raftCluster = cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	c.Assert(err, IsNil)
@@ -798,10 +863,11 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	rep.EnablePlacementRules = false
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, NotNil)
-	err = svr.GetRaftCluster().RemoveStore(11, true)
+	err = svr.GetRaftCluster().BuryStore(11, true)
 	c.Assert(err, IsNil)
 	err = svr.SetReplicationConfig(rep)
-	c.Assert(err, NotNil)
+	c.Assert(err, IsNil)
+	c.Assert(len(svr.GetScheduleConfig().StoreLimit), Equals, 0)
 }
 
 func (s *clusterTestSuite) TestReplicationModeStatus(c *C) {
@@ -1039,7 +1105,7 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	opt := rc.GetOpts()
-	scheduleCfg := opt.GetScheduleConfig()
+	scheduleCfg := opt.GetScheduleConfig().Clone()
 	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
 	c.Assert(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg), IsNil)
 	err = leaderServer.Stop()
@@ -1276,4 +1342,61 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 	s.setMinResolvedTSPersistenceInterval(c, rc, svr, time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	c.Assert(ts, Equals, store5TS)
+}
+
+// See https://github.com/tikv/pd/issues/4941
+func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 2)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	svr := leaderServer.GetServer()
+	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	storage := rc.GetStorage()
+	meta := &metapb.Cluster{Id: 123}
+	c.Assert(storage.SaveMeta(meta), IsNil)
+	n := 4
+	stores := make([]*metapb.Store, 0, n)
+	for i := 1; i <= n; i++ {
+		store := &metapb.Store{Id: uint64(i), State: metapb.StoreState_Up}
+		stores = append(stores, store)
+	}
+
+	for _, store := range stores {
+		c.Assert(storage.SaveStore(store), IsNil)
+	}
+	rc, err = rc.LoadClusterInfo()
+	c.Assert(err, IsNil)
+	c.Assert(rc, NotNil)
+	// offline a store
+	c.Assert(rc.RemoveStore(1, false), IsNil)
+	c.Assert(rc.GetStore(1).GetState(), Equals, metapb.StoreState_Offline)
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr1 := leaderServer.GetServer()
+	rc1 := svr1.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(rc1, NotNil)
+	// tombstone a store, and remove its record
+	c.Assert(rc1.BuryStore(1, false), IsNil)
+	c.Assert(rc1.RemoveTombStoneRecords(), IsNil)
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr = leaderServer.GetServer()
+	rc = svr.GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	// check store count
+	c.Assert(rc.GetMetaCluster(), DeepEquals, meta)
+	c.Assert(rc.GetStoreCount(), Equals, 3)
 }
