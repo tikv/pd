@@ -32,8 +32,12 @@ func NewServiceMiddlewareConfig() *ServiceMiddlewareConfig {
 	audit := AuditConfig{
 		EnableAudit: defaultEnableAuditMiddleware,
 	}
+	ratelimit := RateLimitConfig{
+		EnableRateLimit: defaultEnableRateLimitMiddleware,
+	}
 	cfg := &ServiceMiddlewareConfig{
-		AuditConfig: audit,
+		AuditConfig:     audit,
+		RateLimitConfig: ratelimit,
 	}
 	return cfg
 }

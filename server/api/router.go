@@ -148,7 +148,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/config/default", confHandler.GetDefaultConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/schedule", confHandler.GetScheduleConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/schedule", confHandler.SetScheduleConfig, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/config/service", confHandler.GetServiceConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/pd-server", confHandler.GetPDServerConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/replicate", confHandler.GetReplicationConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/config/replicate", confHandler.SetReplicationConfig, setMethods("POST"), setAuditBackend(localLog))

@@ -152,8 +152,6 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 			return errors.Errorf("cannot update config prefix %s", kp[0])
 		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
-	case "service":
-		return h.updateServiceConfig(cfg, kp[len(kp)-1], value)
 	case "pd-server":
 		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
 	case "log":
@@ -226,27 +224,6 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 
 	if updated {
 		err = h.svr.SetReplicationModeConfig(config.ReplicationMode)
-	}
-	return err
-}
-
-func (h *confHandler) updateServiceConfig(config *config.Config, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.ServiceCfg, data)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetServiceConfig(config.ServiceCfg)
 	}
 	return err
 }
@@ -525,15 +502,6 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
-}
-
-// @Tags config
-// @Summary Get Service config.
-// @Produce json
-// @Success 200 {object} config.ServiceConfig
-// @Router /config/service [get]
-func (h *confHandler) GetServiceConfig(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceConfig())
 }
 
 // @Tags config
