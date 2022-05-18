@@ -516,7 +516,7 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 // GetHotRegionSplitSize returns the hot region split size.
 func (o *PersistOptions) GetHotRegionSplitSize() int64 {
 	size := o.GetScheduleConfig().HotRegionSplitSize
-	if size == 0 {
+	if size <= 0 {
 		size = DefaultHotRegionSplitSize
 	}
 	return size

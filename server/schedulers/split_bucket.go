@@ -37,8 +37,8 @@ const (
 	SplitBucketName = "split-bucket-scheduler"
 	// SplitBucketType is the spilt bucket type.
 	SplitBucketType = "split-bucket"
-	// DefaultHotDegree is the default hot region threshold.
-	DefaultHotDegree = 3
+	// defaultHotDegree is the default hot region threshold.
+	defaultHotDegree = 3
 )
 
 func init() {
@@ -60,7 +60,7 @@ func init() {
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree: DefaultHotDegree,
+		Degree: defaultHotDegree,
 	}
 }
 
@@ -195,7 +195,7 @@ func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Opera
 	var splitBucket *buckets.BucketStat
 	for regionID, buckets := range plan.hotBuckets {
 		region := plan.cluster.GetRegion(regionID)
-		// skip if region is not exist
+		// skip if the region doesn't exist
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 			continue
@@ -218,7 +218,7 @@ func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Opera
 				continue
 			}
 			if bytes.Equal(bucket.StartKey, region.GetStartKey()) && bytes.Equal(bucket.EndKey, region.GetEndKey()) {
-				schedulerCounter.WithLabelValues(s.GetName(), "key-range-not-match").Inc()
+				schedulerCounter.WithLabelValues(s.GetName(), "no-split-keys").Inc()
 				continue
 			}
 
