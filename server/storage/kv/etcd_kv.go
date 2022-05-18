@@ -134,7 +134,6 @@ func (kv *etcdKVBase) GrantLease(ttlSeconds int64) (leaseID clientv3.LeaseID, er
 }
 
 func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
-
 	leaseID, err := kv.GrantLease(ttlSeconds)
 	if err != nil {
 		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()

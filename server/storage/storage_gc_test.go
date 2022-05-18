@@ -15,17 +15,47 @@
 package storage
 
 import (
+	"fmt"
 	"math"
+	"net/url"
+	"os"
+	"path"
+	"strconv"
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
 )
 
 var _ = Suite(&testStorageGCSuite{})
 
 type testStorageGCSuite struct {
+	cfg     *embed.Config
+	etcd    *embed.Etcd
+	storage Storage
+}
+
+func (s *testStorageGCSuite) SetUpTest(c *C) {
+	s.cfg = newTestSingleConfig()
+	s.etcd = mustNewEmbedEtcd(c, s.cfg)
+
+	ep := s.cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	c.Assert(err, IsNil)
+	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+	s.storage = NewStorageWithEtcdBackend(client, rootPath)
+}
+
+func (s *testStorageGCSuite) TearDownTest(c *C) {
+	if s.etcd != nil {
+		s.etcd.Close()
+	}
+	c.Assert(cleanConfig(s.cfg), IsNil)
 }
 
 func testGCSafePoints() ([]string, []uint64) {
@@ -46,7 +76,7 @@ func testGCSafePoints() ([]string, []uint64) {
 	return spaceIDs, safePoints
 }
 
-func testServiceSafePoints() ([]string, []*endpoint.ServiceSafePoint) {
+func testServiceSafePoints() ([]string, []*endpoint.ServiceSafePoint, []int64) {
 	spaceIDs := []string{
 		"keySpace1",
 		"keySpace1",
@@ -58,26 +88,29 @@ func testServiceSafePoints() ([]string, []*endpoint.ServiceSafePoint) {
 		"keySpace3",
 		"keySpace3",
 	}
-	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*endpoint.ServiceSafePoint{
-		{ServiceID: "service1", ExpiredAt: expireAt, SafePoint: 1},
-		{ServiceID: "service2", ExpiredAt: expireAt, SafePoint: 2},
-		{ServiceID: "service3", ExpiredAt: expireAt, SafePoint: 3},
-		{ServiceID: "service1", ExpiredAt: expireAt, SafePoint: 1},
-		{ServiceID: "service2", ExpiredAt: expireAt, SafePoint: 2},
-		{ServiceID: "service3", ExpiredAt: expireAt, SafePoint: 3},
-		{ServiceID: "service1", ExpiredAt: expireAt, SafePoint: 1},
-		{ServiceID: "service2", ExpiredAt: expireAt, SafePoint: 2},
-		{ServiceID: "service3", ExpiredAt: expireAt, SafePoint: 3},
+		{ServiceID: "service1", SafePoint: 1},
+		{ServiceID: "service2", SafePoint: 2},
+		{ServiceID: "service3", SafePoint: 3},
+		{ServiceID: "service1", SafePoint: 1},
+		{ServiceID: "service2", SafePoint: 2},
+		{ServiceID: "service3", SafePoint: 3},
+		{ServiceID: "service1", SafePoint: 1},
+		{ServiceID: "service2", SafePoint: 2},
+		{ServiceID: "service3", SafePoint: 3},
 	}
-	return spaceIDs, serviceSafePoints
+	testTTls := make([]int64, 9)
+	for i := range testTTls {
+		testTTls[i] = 10
+	}
+	return spaceIDs, serviceSafePoints, testTTls
 }
 
 func (s *testStorageGCSuite) TestSaveLoadServiceSafePoint(c *C) {
-	storage := NewStorageWithMemoryBackend()
-	testSpaceID, testSafePoints := testServiceSafePoints()
+	storage := s.storage
+	testSpaceID, testSafePoints, testTTLs := testServiceSafePoints()
 	for i := range testSpaceID {
-		c.Assert(storage.SaveServiceSafePoint(testSpaceID[i], testSafePoints[i]), IsNil)
+		c.Assert(storage.SaveServiceSafePoint(testSpaceID[i], testSafePoints[i], testTTLs[i]), IsNil)
 	}
 	for i := range testSpaceID {
 		loadedSafePoint, err := storage.LoadServiceSafePoint(testSpaceID[i], testSafePoints[i].ServiceID)
@@ -87,30 +120,25 @@ func (s *testStorageGCSuite) TestSaveLoadServiceSafePoint(c *C) {
 }
 
 func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
-	storage := NewStorageWithMemoryBackend()
-	currentTime := time.Now()
-	expireAt1 := currentTime.Add(100 * time.Second).Unix()
-	expireAt2 := currentTime.Add(200 * time.Second).Unix()
-	expireAt3 := currentTime.Add(300 * time.Second).Unix()
-
+	storage := s.storage
+	testTTLs := []int64{2, 6}
 	serviceSafePoints := []*endpoint.ServiceSafePoint{
-		{ServiceID: "0", ExpiredAt: expireAt1, SafePoint: 100},
-		{ServiceID: "1", ExpiredAt: expireAt2, SafePoint: 200},
-		{ServiceID: "2", ExpiredAt: expireAt3, SafePoint: 300},
+		{ServiceID: "0", SafePoint: 100},
+		{ServiceID: "1", SafePoint: 200},
+	}
+	testKeySpace := "test"
+	for i := range serviceSafePoints {
+		c.Assert(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoints[i], testTTLs[i]), IsNil)
 	}
 
-	testKeySpace := "test"
-	for _, serviceSafePoint := range serviceSafePoints {
-		c.Assert(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoint), IsNil)
-	}
-	// enabling failpoint to make expired key removal immediately observable
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys", "return(true)"), IsNil)
-	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime)
+	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace)
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint, DeepEquals, serviceSafePoints[0])
 
+	time.Sleep(4 * time.Second)
 	// the safePoint with ServiceID 0 should be removed due to expiration
-	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(150*time.Second))
+	// now min should be safePoint with ServiceID 1
+	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeySpace)
 	c.Assert(err, IsNil)
 	c.Assert(minSafePoint2, DeepEquals, serviceSafePoints[1])
 
@@ -119,19 +147,19 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
 
+	time.Sleep(4 * time.Second)
 	// all remaining service safePoints should be removed due to expiration
-	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
+	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace)
 	c.Assert(err, IsNil)
 	c.Assert(ssp, IsNil)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys"), IsNil)
 }
 
 func (s *testStorageGCSuite) TestRemoveServiceSafePoint(c *C) {
-	storage := NewStorageWithMemoryBackend()
-	testSpaceID, testSafePoints := testServiceSafePoints()
+	storage := s.storage
+	testSpaceID, testSafePoints, testTTLs := testServiceSafePoints()
 	// save service safe points
 	for i := range testSpaceID {
-		c.Assert(storage.SaveServiceSafePoint(testSpaceID[i], testSafePoints[i]), IsNil)
+		c.Assert(storage.SaveServiceSafePoint(testSpaceID[i], testSafePoints[i], testTTLs[i]), IsNil)
 	}
 	// remove saved service safe points
 	for i := range testSpaceID {
@@ -146,7 +174,7 @@ func (s *testStorageGCSuite) TestRemoveServiceSafePoint(c *C) {
 }
 
 func (s *testStorageGCSuite) TestSaveLoadGCSafePoint(c *C) {
-	storage := NewStorageWithMemoryBackend()
+	storage := s.storage
 	testSpaceIDs, testSafePoints := testGCSafePoints()
 	for i := range testSpaceIDs {
 		testSpaceID := testSpaceIDs[i]
@@ -160,7 +188,7 @@ func (s *testStorageGCSuite) TestSaveLoadGCSafePoint(c *C) {
 }
 
 func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
-	storage := NewStorageWithMemoryBackend()
+	storage := s.storage
 	testSpaceIDs, testSafePoints := testGCSafePoints()
 	for i := range testSpaceIDs {
 		err := storage.SaveKeySpaceGCSafePoint(testSpaceIDs[i], testSafePoints[i])
@@ -174,9 +202,9 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	}
 
 	// saving some service safe points.
-	spaceIDs, safePoints := testServiceSafePoints()
+	spaceIDs, safePoints, TTLs := testServiceSafePoints()
 	for i := range spaceIDs {
-		c.Assert(storage.SaveServiceSafePoint(spaceIDs[i], safePoints[i]), IsNil)
+		c.Assert(storage.SaveServiceSafePoint(spaceIDs[i], safePoints[i], TTLs[i]), IsNil)
 	}
 
 	// verify that service safe points do not interfere with gc safe points.
@@ -197,7 +225,7 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 }
 
 func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
-	storage := NewStorageWithMemoryBackend()
+	storage := s.storage
 
 	// loading non-existing GC safepoint should return 0
 	gcSafePoint, err := storage.LoadKeySpaceGCSafePoint("testKeySpace")
@@ -213,4 +241,36 @@ func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
 	c.Assert(safePoints, HasLen, 0)
+}
+
+func newTestSingleConfig() *embed.Config {
+	cfg := embed.NewConfig()
+	cfg.Name = "test_etcd"
+	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
+	cfg.WalDir = ""
+	cfg.Logger = "zap"
+	cfg.LogOutputs = []string{"stdout"}
+
+	pu, _ := url.Parse(tempurl.Alloc())
+	cfg.LPUrls = []url.URL{*pu}
+	cfg.APUrls = cfg.LPUrls
+	cu, _ := url.Parse(tempurl.Alloc())
+	cfg.LCUrls = []url.URL{*cu}
+	cfg.ACUrls = cfg.LCUrls
+
+	cfg.StrictReconfigCheck = false
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.ClusterState = embed.ClusterStateFlagNew
+	return cfg
+}
+
+func cleanConfig(cfg *embed.Config) error {
+	// Clean data directory
+	return os.RemoveAll(cfg.Dir)
+}
+
+func mustNewEmbedEtcd(c *C, cfg *embed.Config) *embed.Etcd {
+	etcd, err := embed.StartEtcd(cfg)
+	c.Assert(err, IsNil)
+	return etcd
 }
