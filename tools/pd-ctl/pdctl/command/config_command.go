@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -394,7 +395,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
 	} else if len(args) == 3 {
-		t := findFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
+		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
 			// convert to number for numberic fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)
@@ -409,25 +410,6 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	} else {
 		cmd.Println(cmd.UsageString())
 	}
-}
-
-func findFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
-	if len(tags) == 0 {
-		return t
-	}
-	if t.Kind() != reflect.Struct {
-		return nil
-	}
-	for i := 0; i < t.NumField(); i++ {
-		jsonTag := t.Field(i).Tag.Get("json")
-		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
-			jsonTag = jsonTag[:i]
-		}
-		if jsonTag == tags[0] {
-			return findFieldByJSONTag(t.Field(i).Type, tags[1:])
-		}
-	}
-	return nil
 }
 
 // NewPlacementRulesCommand placement rules subcommand

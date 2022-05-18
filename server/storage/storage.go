@@ -16,10 +16,10 @@ package storage
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -32,6 +32,7 @@ type Storage interface {
 	// Introducing the kv.Base here is to provide
 	// the basic key-value read/write ability for the Storage.
 	kv.Base
+	endpoint.ServiceMiddlewareStorage
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
 	endpoint.RuleStorage
@@ -67,7 +68,7 @@ type coreStorage struct {
 
 	useRegionStorage int32
 	regionLoaded     bool
-	mu               sync.Mutex
+	mu               syncutil.Mutex
 }
 
 // NewCoreStorage creates a new core storage with the given default and region storage.

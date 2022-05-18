@@ -32,7 +32,7 @@ func NewLimiterConfig() LimiterConfig {
 type DimensionConfig struct {
 	// qps conifg
 	QPS      float64
-	QPSBrust int
+	QPSBurst int
 	// concurrency config
 	ConcurrencyLimit uint64
 }

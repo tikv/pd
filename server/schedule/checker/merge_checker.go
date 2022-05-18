@@ -109,8 +109,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// region is not small enough
-	if region.GetApproximateSize() > int64(m.opts.GetMaxMergeRegionSize()) ||
-		region.GetApproximateKeys() > int64(m.opts.GetMaxMergeRegionKeys()) {
+	if !region.NeedMerge(int64(m.opts.GetMaxMergeRegionSize()), int64(m.opts.GetMaxMergeRegionKeys())) {
 		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
 		return nil
 	}
@@ -156,6 +155,17 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 	if target.GetApproximateSize() > maxTargetRegionSizeThreshold {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
+		return nil
+	}
+	if err := m.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
+		m.opts.GetMaxMergeRegionSize()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-size-after-merge").Inc()
+		return nil
+	}
+
+	if err := m.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
+		m.opts.GetMaxMergeRegionKeys()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-keys-after-merge").Inc()
 		return nil
 	}
 

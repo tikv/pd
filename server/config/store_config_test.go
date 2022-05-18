@@ -15,8 +15,9 @@
 package config
 
 import (
+	"crypto/tls"
 	"encoding/json"
-	"fmt"
+	"net/http"
 
 	. "github.com/pingcap/check"
 )
@@ -40,7 +41,6 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
     	}}`
 		var config StoreConfig
 		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
 
 		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(144000000))
 		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(96000000))
@@ -52,7 +52,6 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 		body := `{}`
 		var config StoreConfig
 		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
 
 		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(1440000))
 		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(960000))
@@ -62,21 +61,66 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 }
 
 func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
-	manager := NewStoreConfigManager(nil)
-	c.Assert(manager.schema, Equals, "http")
-	var tlsConfig *SecurityConfig
-	manager = NewStoreConfigManager(tlsConfig)
-	c.Assert(manager.schema, Equals, "http")
-	config := &StoreConfig{
-		Coprocessor{
-			RegionMaxSize: "15GiB",
+	manager := NewTestStoreConfigManager([]string{"tidb.com"})
+	manager.ObserveConfig("tikv.com")
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	manager.ObserveConfig("tidb.com")
+	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   &tls.Config{},
 		},
 	}
-	manager.UpdateConfig(nil)
-	c.Assert(manager.GetStoreConfig(), IsNil)
-	manager.UpdateConfig(config)
-	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
-	var m StoreConfigManager
-	m.UpdateConfig(nil)
-	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	manager = NewStoreConfigManager(client)
+	c.Assert(manager.source.(*TiKVConfigSource).schema, Equals, "http")
+}
+
+func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
+	testdata := []struct {
+		size      uint64
+		mergeSize uint64
+		keys      uint64
+		mergeKeys uint64
+		pass      bool
+	}{{
+		// case 1: the merged region size is smaller than the max region size
+		size:      96 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 2: the smallest region is 68MiB，it can't be merged again.
+		size:      144 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 3: the smallest region is 50MiB，it can be merged again.
+		size:      144 + 2,
+		mergeSize: 50,
+		keys:      1440000 + 20000,
+		mergeKeys: 500000,
+		pass:      false,
+	}, {
+		// case4: the smallest region is 51MiB，it can't be merged again.
+		size:      144 + 3,
+		mergeSize: 50,
+		keys:      1440000 + 30000,
+		mergeKeys: 500000,
+		pass:      true,
+	}}
+	config := &StoreConfig{}
+	for _, v := range testdata {
+		if v.pass {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), IsNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), IsNil)
+		} else {
+			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
+			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), NotNil)
+		}
+	}
 }

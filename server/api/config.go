@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
@@ -98,19 +99,14 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ttls int
 	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		var err error
-		ttls, err = strconv.Atoi(ttlSec)
+		ttls, err := strconv.Atoi(ttlSec)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-
-	// if ttlSecond defined, we will apply if to temp configuration.
-	if ttls > 0 {
-		err := h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		// if ttlSecond defined, we will apply if to temp configuration.
+		err = h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
@@ -127,7 +123,7 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		key := findTag(reflect.TypeOf(config.Config{}), k)
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.Config{}), k)
 		if key == "" {
 			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
@@ -165,29 +161,6 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	case "label-property": // TODO: support changing label-property
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
-}
-
-// If we have both "a.c" and "b.c" config items, for a given c, it's hard for us to decide which config item it represents.
-// We'd better to naming a config item without duplication.
-func findTag(t reflect.Type, tag string) string {
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-
-		column := field.Tag.Get("json")
-		c := strings.Split(column, ",")
-		if c[0] == tag {
-			return c[0]
-		}
-
-		if field.Type.Kind() == reflect.Struct {
-			path := findTag(field.Type, tag)
-			if path == "" {
-				continue
-			}
-			return field.Tag.Get("json") + "." + path
-		}
-	}
-	return ""
 }
 
 func (h *confHandler) updateSchedule(config *config.Config, key string, value interface{}) error {
@@ -326,17 +299,8 @@ func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err erro
 	if err := json.Unmarshal(data, &m); err != nil {
 		return false, false, err
 	}
-	t := reflect.TypeOf(v).Elem()
-	for i := 0; i < t.NumField(); i++ {
-		jsonTag := t.Field(i).Tag.Get("json")
-		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
-			jsonTag = jsonTag[:i]
-		}
-		if _, ok := m[jsonTag]; ok {
-			return false, true, nil
-		}
-	}
-	return false, false, nil
+	found = reflectutil.FindSameFieldByJSON(v, m)
+	return false, found, nil
 }
 
 // @Tags config

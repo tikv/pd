@@ -15,9 +15,9 @@
 package ratelimit
 
 import (
-	"sync"
 	"time"
 
+	"github.com/tikv/pd/pkg/syncutil"
 	"golang.org/x/time/rate"
 )
 
@@ -25,7 +25,7 @@ import (
 // It implements `Available` function which is not included in `golang.org/x/time/rate`.
 // Note: AvailableN will increase the wait time of WaitN.
 type RateLimiter struct {
-	mu sync.Mutex
+	mu syncutil.Mutex
 	*rate.Limiter
 }
 

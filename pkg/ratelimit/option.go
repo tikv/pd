@@ -77,11 +77,11 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 	defer l.configMux.Unlock()
 
 	cfg := l.labelConfig[label]
-	if cfg.QPS == limit && cfg.QPSBrust == burst {
+	if cfg.QPS == limit && cfg.QPSBurst == burst {
 		return QPSNoChange
 	}
 	cfg.QPS = limit
-	cfg.QPSBrust = burst
+	cfg.QPSBurst = burst
 	l.labelConfig[label] = cfg
 	if limit <= 0 || burst < 1 {
 		l.deleteQPSLimiter(label)
@@ -120,7 +120,7 @@ func UpdateDimensionConfig(cfg DimensionConfig) Option {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		status := updateQPSConfig(l, label, cfg.QPS, cfg.QPSBrust)
+		status := updateQPSConfig(l, label, cfg.QPS, cfg.QPSBurst)
 		status |= updateConcurrencyConfig(l, label, cfg.ConcurrencyLimit)
 		return status
 	}

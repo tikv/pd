@@ -135,6 +135,13 @@ func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
+// SetLocationLabels sets the location labels.
+func (o *PersistOptions) SetLocationLabels(labels []string) {
+	v := o.GetReplicationConfig().Clone()
+	v.LocationLabels = labels
+	o.SetReplicationConfig(v)
+}
+
 // GetIsolationLevel returns the isolation label for each region.
 func (o *PersistOptions) GetIsolationLevel() string {
 	return o.GetReplicationConfig().IsolationLevel
@@ -319,6 +326,11 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
+// GetMaxStorePreparingTime returns the max preparing time of a store.
+func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
+	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
+}
+
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 	return o.getTTLUintOr(leaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
@@ -442,16 +454,6 @@ func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 // GetLeaderSchedulePolicy is to get leader schedule policy.
 func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
-}
-
-// IsAuditEnabled returns whether audit middleware is enabled
-func (o *PersistOptions) IsAuditEnabled() bool {
-	return o.GetPDServerConfig().EnableAudit
-}
-
-// IsRateLimitEnabled returns whether rate limit middleware is enabled
-func (o *PersistOptions) IsRateLimitEnabled() bool {
-	return o.GetPDServerConfig().EnableRateLimit
 }
 
 // GetKeyType is to get key type.

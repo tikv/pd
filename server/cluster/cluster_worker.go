@@ -36,19 +36,23 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	c.RLock()
-	co := c.coordinator
-	c.RUnlock()
-	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	reqRegion := request.GetRegion()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
+	}
+
+	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
+		return nil, errors.New("region split is paused by replication mode")
 	}
 
 	newRegionID, err := c.id.Alloc()
@@ -97,11 +101,17 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
+	}
+	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
+		return nil, errors.New("region split is paused by replication mode")
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
