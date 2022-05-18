@@ -166,7 +166,7 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-//IsScheduleAllowed return true.
+// IsScheduleAllowed return true.
 func (s *splitBucketScheduler) IsScheduleAllowed(_ schedule.Cluster) bool {
 	return true
 }
@@ -230,14 +230,11 @@ func (s *splitBucketScheduler) schedule(plan *splitBucketPlan) []*operator.Opera
 	if splitBucket != nil {
 		region := plan.cluster.GetRegion(splitBucket.RegionID)
 		splitKey := make([][]byte, 0)
-		hexSplitKey := make([]string, 0)
 		if bytes.Compare(region.GetStartKey(), splitBucket.StartKey) < 0 {
 			splitKey = append(splitKey, splitBucket.StartKey)
-			hexSplitKey = append(hexSplitKey, core.HexRegionKeyStr(splitBucket.StartKey))
 		}
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
-			hexSplitKey = append(hexSplitKey, core.HexRegionKeyStr(splitBucket.EndKey))
 		}
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
