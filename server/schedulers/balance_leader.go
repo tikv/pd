@@ -21,12 +21,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/reflectutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -84,7 +85,7 @@ func init() {
 }
 
 type balanceLeaderSchedulerConfig struct {
-	mu      sync.RWMutex
+	mu      syncutil.RWMutex
 	storage endpoint.ConfigStorage
 	Ranges  []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
@@ -113,7 +114,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	ok := findSameField(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
 		return http.StatusOK, "no changed"
 	}

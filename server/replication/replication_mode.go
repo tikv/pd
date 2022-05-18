@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -67,7 +68,7 @@ const persistFileTimeout = time.Second * 10
 type ModeManager struct {
 	initTime time.Time
 
-	sync.RWMutex
+	syncutil.RWMutex
 	config            config.ReplicationModeConfig
 	storage           endpoint.ReplicationStatusStorage
 	cluster           schedule.Cluster
@@ -154,9 +155,19 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 			StateId:             m.drAutoSync.StateID,
 			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
 			AvailableStores:     m.drAutoSync.AvailableStores,
+			PauseRegionSplit:    m.config.DRAutoSync.PauseRegionSplit && m.drAutoSync.State != drStateSync,
 		}
 	}
 	return p
+}
+
+// IsRegionSplitPaused returns true if region split need be paused.
+func (m *ModeManager) IsRegionSplitPaused() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.config.ReplicationMode == modeDRAutoSync &&
+		m.config.DRAutoSync.PauseRegionSplit &&
+		m.drAutoSync.State != drStateSync
 }
 
 // HTTPReplicationStatus is for query status from HTTP API.

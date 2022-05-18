@@ -18,11 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/rangelist"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -32,7 +32,7 @@ import (
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
 	storage endpoint.RuleStorage
-	sync.RWMutex
+	syncutil.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
 	ctx        context.Context
@@ -193,7 +193,7 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 		return rule
 	}
 	if len(rule.Labels) == 0 {
-		l.storage.DeleteRule(id)
+		l.storage.DeleteRegionRule(id)
 		delete(l.labelRules, id)
 		return nil
 	}

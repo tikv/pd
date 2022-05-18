@@ -18,12 +18,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/ratelimit"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -92,10 +91,10 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 
 func (s *testAdminSuite) TestPersistFile(c *C) {
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data)
-	c.Assert(err, NotNil)
+	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 	data = []byte(`{"foo":"bar"}`)
-	err = postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 }
 
@@ -133,252 +132,41 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"Reset ts successfully.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
-
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.StatusOK(c),
+		tu.StringEqual(c, "\"Reset ts successfully.\"\n"))
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "too large"))
+	c.Assert(err, IsNil)
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "small"))
+	c.Assert(err, IsNil)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
-	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
+	c.Assert(err, IsNil)
 
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
-	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
-}
-
-var _ = Suite(&testServiceSuite{})
-
-type testServiceSuite struct {
-	svr     *server.Server
-	cleanup cleanUpFunc
-}
-
-func (s *testServiceSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (s *testServiceSuite) TearDownSuite(c *C) {
-	s.cleanup()
-}
-
-func (s *testServiceSuite) TestUpdateRateLimitConfig(c *C) {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/admin/ratelimit/config", s.svr.GetAddr(), apiPrefix)
-
-	// test empty type
-	input := make(map[string]interface{})
-	input["type"] = 123
-	jsonBody, err := json.Marshal(input)
-	c.Assert(err, IsNil)
-
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The type is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-	// test invalid type
-	input = make(map[string]interface{})
-	input["type"] = "url"
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The type is invalid.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-
-	// test empty label
-	input = make(map[string]interface{})
-	input["type"] = "label"
-	input["label"] = ""
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The label is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-	// test no label matched
-	input = make(map[string]interface{})
-	input["type"] = "label"
-	input["label"] = "TestLabel"
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-
-	// test empty path
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = ""
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"The path is empty.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-
-	// test path but no label matched
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = "/pd/api/v1/test"
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"There is no label matched.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
-	c.Assert(err, IsNil)
-
-	// no change
-	input = make(map[string]interface{})
-	input["type"] = "label"
-	input["label"] = "GetHealthStatus"
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"No changed.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-
-	// change concurrency
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = "/pd/api/v1/health"
-	input["method"] = "GET"
-	input["concurrency"] = 100
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "Concurrency limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-	input["concurrency"] = 0
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "Concurrency limiter is deleted."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-
-	// change qps
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = "/pd/api/v1/health"
-	input["method"] = "GET"
-	input["qps"] = 100
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = "/pd/api/v1/health"
-	input["method"] = "GET"
-	input["qps"] = 0.3
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is changed."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-	c.Assert(s.svr.GetConfig().PDServerCfg.RateLimitConfig["GetHealthStatus"].QPSBrust, Equals, 1)
-
-	input["qps"] = -1
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(strings.Contains(string(res), "QPS rate limiter is deleted."), Equals, true)
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-
-	// change both
-	input = make(map[string]interface{})
-	input["type"] = "path"
-	input["path"] = "/pd/api/v1/debug/pprof/profile"
-	input["qps"] = 100
-	input["concurrency"] = 100
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"Concurrency limiter is changed. QPS rate limiter is changed.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
-	c.Assert(err, IsNil)
-
-	limiter := s.svr.GetServiceRateLimiter()
-	limiter.Update("SetRatelimitConfig", ratelimit.AddLabelAllowList())
-
-	// Allow list
-	input = make(map[string]interface{})
-	input["type"] = "label"
-	input["label"] = "SetRatelimitConfig"
-	input["qps"] = 100
-	input["concurrency"] = 100
-	jsonBody, err = json.Marshal(input)
-	c.Assert(err, IsNil)
-	err = postJSONIgnoreRespStatus(testDialClient, urlPrefix, jsonBody,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"This service is in block list.\"\n")
-			c.Assert(code, Equals, http.StatusBadRequest)
-		})
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 }

@@ -72,6 +72,17 @@ func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
 	return EvictSlowStoreName
 }
 
+func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
+	return conf.EvictedStores
+}
+
+func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+	if conf.evictStore() != id {
+		return nil
+	}
+	return []core.KeyRange{core.NewKeyRange("", "")}
+}
+
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 	if len(conf.EvictedStores) == 0 {
 		return 0
@@ -144,10 +155,7 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster schedule.Cluster) []*operator.Operator {
-	storeMap := map[uint64][]core.KeyRange{
-		s.conf.evictStore(): {core.NewKeyRange("", "")},
-	}
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, storeMap, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {

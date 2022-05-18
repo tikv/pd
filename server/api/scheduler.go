@@ -142,17 +142,17 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		collector := func(v string) {
 			args = append(args, v)
 		}
-		if err := collectEscapeStringOption("start_key", input, collector); err != nil {
+		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		if err := collectEscapeStringOption("end_key", input, collector); err != nil {
+		if err := apiutil.CollectEscapeStringOption("end_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		if err := collectStringOption("range_name", input, collector); err != nil {
+		if err := apiutil.CollectStringOption("range_name", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -268,7 +268,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	statusCode, err := doDelete(h.svr.GetHTTPClient(), url)
+	statusCode, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		h.r.JSON(w, statusCode, err.Error())
 		return
@@ -320,10 +320,10 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 
 func (h *schedulerConfigHandler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	sh := handler.GetSchedulerConfigHandler()
-	if sh != nil {
+	sh, err := handler.GetSchedulerConfigHandler()
+	if err == nil && sh != nil {
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement.Error())
+	h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
 }
