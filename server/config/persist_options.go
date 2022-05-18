@@ -456,11 +456,6 @@ func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
 }
 
-// IsAuditEnabled returns whether audit middleware is enabled
-func (o *PersistOptions) IsAuditEnabled() bool {
-	return o.GetPDServerConfig().EnableAudit
-}
-
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
