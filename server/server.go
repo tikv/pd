@@ -817,7 +817,8 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 // GetServiceMiddlewareConfig gets the service middleware config information.
 func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg := s.serviceMiddlewareCfg.Clone()
-	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
+	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
 	return cfg
 }
 
@@ -986,6 +987,27 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 		return err
 	}
 	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetRateLimitConfig gets the rate limit config information.
+func (s *Server) GetRateLimitConfig() *config.RateLimitConfig {
+	return s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
+}
+
+// SetRateLimitConfig sets the rate limit config.
+func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetRateLimitConfig()
+	s.serviceMiddlewarePersistOptions.SetRateLimitConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetRateLimitConfig(old)
+		log.Error("failed to update Rate Limit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Rate Limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1485,7 +1507,7 @@ func (s *Server) reloadConfigFromKV() error {
 }
 
 func (s *Server) loadRateLimitConfig() {
-	cfg := s.serviceMiddlewarePersistOptions.GetRateLimitConfig().RateLimitConfig
+	cfg := s.serviceMiddlewarePersistOptions.GetRateLimitConfig().LimiterConfig
 	for key, value := range cfg {
 		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
 	}

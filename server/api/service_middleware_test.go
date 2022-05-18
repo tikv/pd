@@ -51,7 +51,8 @@ func (s *testServiceMiddlewareSuite) TearDownSuite(c *C) {
 func (s *testServiceMiddlewareSuite) TestConfigAudit(c *C) {
 	addr := fmt.Sprintf("%s/service-middleware/config", s.urlPrefix)
 	ms := map[string]interface{}{
-		"enable-audit": "true",
+		"enable-audit":      "true",
+		"enable-rate-limit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -59,8 +60,10 @@ func (s *testServiceMiddlewareSuite) TestConfigAudit(c *C) {
 	sc := &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, true)
+	c.Assert(sc.EnableRateLimit, Equals, true)
 	ms = map[string]interface{}{
 		"audit.enable-audit": "false",
+		"enable-rate-limit":  "false",
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
@@ -68,6 +71,7 @@ func (s *testServiceMiddlewareSuite) TestConfigAudit(c *C) {
 	sc = &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, false)
+	c.Assert(sc.EnableRateLimit, Equals, false)
 
 	// test empty
 	ms = map[string]interface{}{}

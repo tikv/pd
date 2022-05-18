@@ -65,7 +65,7 @@ type RateLimitConfig struct {
 	// EnableRateLimit controls the switch of the rate limit middleware
 	EnableRateLimit bool `json:"enable-rate-limit,string"`
 	// RateLimitConfig is the config of rate limit middleware
-	RateLimitConfig ratelimit.LimiterConfig `json:"rate-limit-config"`
+	LimiterConfig ratelimit.LimiterConfig `json:"limiter-config"`
 }
 
 // Clone returns a cloned rate limit config.

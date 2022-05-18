@@ -52,14 +52,17 @@ func (o *ServiceMiddlewarePersistOptions) IsAuditEnabled() bool {
 	return o.GetAuditConfig().EnableAudit
 }
 
+// GetRateLimitConfig returns pd service middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetRateLimitConfig() *RateLimitConfig {
 	return o.rateLimit.Load().(*RateLimitConfig)
 }
 
+// SetRateLimitConfig sets the PD service middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetRateLimitConfig(cfg *RateLimitConfig) {
 	o.rateLimit.Store(cfg)
 }
 
+// IsRateLimitEnabled returns whether rate limit middleware is enabled
 func (o *ServiceMiddlewarePersistOptions) IsRateLimitEnabled() bool {
 	return o.GetRateLimitConfig().EnableRateLimit
 }
