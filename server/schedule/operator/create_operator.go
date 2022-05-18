@@ -16,6 +16,7 @@ package operator
 
 import (
 	"fmt"
+	"github.com/tikv/pd/pkg/logutil"
 	"math/rand"
 
 	"github.com/pingcap/errors"
@@ -128,13 +129,13 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	if len(keys) > 0 {
 		hexKeys := make([]string, len(keys))
 		for i := range keys {
-			hexKeys[i] = core.HexRegionKeyStr(keys[i])
+			hexKeys[i] = core.HexRegionKeyStr(logutil.RedactBytes(keys[i]))
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
 	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
-	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
+	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey()))
+	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey()))
 	return op, nil
 }
 
