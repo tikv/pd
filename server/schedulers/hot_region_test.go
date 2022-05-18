@@ -2044,3 +2044,76 @@ func checkPriority(c *C, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]i
 	c.Assert(writePeerSolver.firstPriority, Equals, dims[2][0])
 	c.Assert(writePeerSolver.secondPriority, Equals, dims[2][1])
 }
+
+func (s *testHotWriteRegionSchedulerSuite) TestWithTiFlashMPP(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetHotRegionCacheHitsThreshold(0)
+	c.Assert(tc.RuleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:        "pd",
+			ID:             "default",
+			Role:           placement.Voter,
+			Count:          1,
+			LocationLabels: []string{"zone", "host"},
+		},
+		{
+			GroupID:        "tiflash",
+			ID:             "tiflash",
+			Role:           placement.Learner,
+			Count:          1,
+			LocationLabels: []string{"zone", "host"},
+			LabelConstraints: []placement.LabelConstraint{
+				{
+					Key:    core.EngineKey,
+					Op:     placement.In,
+					Values: []string{core.EngineTiFlash},
+				},
+			},
+		},
+	}), IsNil)
+	schedulePeerPr = 2.0
+	sche, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	c.Assert(err, IsNil)
+	hb := sche.(*hotScheduler)
+
+	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z2", "host": "h2", "engine": "tiflash"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z3", "host": "h3", "engine": "tiflash_mpp"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z3", "host": "h4", "engine": "tiflash_mpp"})
+	tc.AddLabelsStore(5, 1, map[string]string{"zone": "z1", "host": "h5"})
+
+	// region 1, 2, 3 are hot.
+	testRegions := []testRegionInfo{
+		{1, []uint64{1, 2}, 512 * KB, 5 * KB, 3000},
+		{2, []uint64{1, 2}, 512 * KB, 5 * KB, 3000},
+		{3, []uint64{1, 2}, 512 * KB, 5 * KB, 3000},
+		{5, []uint64{5, 2}, 512 * KB, 5 * KB, 3000},
+	}
+	addRegionInfo(tc, statistics.Write, testRegions)
+	tc.ObserveRegionsStats()
+
+	// Cannot schedule region, because cannot schedule region on tiflash to tiflash_mpp.
+	for i := 0; i < 20; i++ {
+		clearPendingInfluence(hb)
+		ops := hb.Schedule(tc)
+		c.Assert(len(ops), Equals, 0)
+	}
+
+	// Add a new tiflash node.
+	tc.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6", "engine": "tiflash"})
+	tc.ObserveRegionsStats()
+
+	// Now we can schedule from tiflash-2 to tiflash-6.
+	for i := 0; i < 20; i++ {
+		clearPendingInfluence(hb)
+		ops := hb.Schedule(tc)
+		c.Assert(len(ops), Equals, 1)
+		c.Assert(ops[0].Len(), Equals, 2)
+		testutil.CheckTransferLearner(c, ops[0], operator.OpHotRegion, 2, 6)
+	}
+}

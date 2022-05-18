@@ -112,9 +112,9 @@ func GetRegionStatKind(rwTy RWType, dim int) RegionStatKind {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
-	isTiFlashMPP  bool
-	PendingSum *Influence
+	isTiFlash    bool
+	isTiFlashMPP bool
+	PendingSum   *Influence
 }
 
 // Influence records operator influence.
@@ -128,10 +128,10 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
-			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
-			isTiFlashMPP:  store.IsTiFlashMPP(),
-			PendingSum: nil,
+			StoreInfo:    store,
+			isTiFlash:    store.IsTiFlash(),
+			isTiFlashMPP: store.IsTiFlashMPP(),
+			PendingSum:   nil,
 		}
 		infos[store.GetID()] = info
 	}

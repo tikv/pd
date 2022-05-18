@@ -915,7 +915,11 @@ func (s *testClusterInfoSuite) TestRegionLabelIsolationLevel(c *C) {
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
 		if i == 4 {
-			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+			// Label level stats will ignore tiflash/tiflash_mpp.
+			labels = []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+		} else if i == 3 {
+			// Label level stats will ignore tiflash/tiflash_mpp.
+			labels = []*metapb.StoreLabel{{Key: "rack", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash_mpp"}}
 		} else {
 			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", i)}}
 		}
@@ -934,7 +938,7 @@ func (s *testClusterInfoSuite) TestRegionLabelIsolationLevel(c *C) {
 			Id: i + 4,
 		}
 		peer.StoreId = i
-		if i == 8 {
+		if i == 4 || i == 3 {
 			peer.Role = metapb.PeerRole_Learner
 		}
 		peers = append(peers, peer)
@@ -951,6 +955,8 @@ func (s *testClusterInfoSuite) TestRegionLabelIsolationLevel(c *C) {
 	cluster.updateRegionsLabelLevelStats([]*core.RegionInfo{r})
 	counter := cluster.labelLevelStats.GetLabelCounter()
 	c.Assert(counter["none"], Equals, 0)
+	c.Assert(counter["rack"], Equals, 0)
+	c.Assert(counter["host"], Equals, 0)
 	c.Assert(counter["zone"], Equals, 1)
 }
 
@@ -1212,6 +1218,38 @@ func (s *testClusterInfoSuite) TestTopologyWeight(c *C) {
 	}
 
 	c.Assert(getStoreTopoWeight(testStore, stores, labels), Equals, 1.0/3/3/4)
+}
+
+func (s *testClusterInfoSuite) TestEngineLabel(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cfg := opt.GetReplicationConfig()
+	cfg.EnablePlacementRules = true
+	opt.SetReplicationConfig(cfg)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	labels := []*metapb.StoreLabel{
+		{
+			Key:   core.EngineKey,
+			Value: core.EngineTiFlash,
+		},
+		{
+			Key:   core.EngineKey,
+			Value: core.EngineTiFlashMPP,
+		},
+	}
+	st := newTestStores(1, "6.0.0")[0]
+	st = st.Clone(core.SetStoreLabels(labels))
+	c.Assert(cluster.PutStore(st.GetMeta()), NotNil)
+
+	labels = []*metapb.StoreLabel{
+		{
+			Key:   core.EngineKey,
+			Value: core.EngineTiFlash,
+		},
+	}
+	st = st.Clone(core.SetStoreLabels(labels))
+	c.Assert(cluster.PutStore(st.GetMeta()), IsNil)
 }
 
 func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {

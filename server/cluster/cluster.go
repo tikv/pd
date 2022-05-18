@@ -1112,6 +1112,7 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 			}
 		}
 	}
+	var hasEngineKey bool
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
 		if _, ok := keysSet[key]; !ok {
@@ -1120,6 +1121,13 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 				zap.String("label-key", key))
 			if c.opt.GetStrictlyMatchLabel() {
 				return errors.Errorf("key matching the label was not found in the PD, store label key: %s ", key)
+			}
+		}
+		if key == core.EngineKey {
+			if !hasEngineKey {
+				hasEngineKey = true
+			} else {
+				return errors.Errorf("engine label can only be set once")
 			}
 		}
 	}

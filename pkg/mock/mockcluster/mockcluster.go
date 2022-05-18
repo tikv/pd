@@ -651,7 +651,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && store.IsTiFlash() {
+		if store := mc.GetStore(storeID); store != nil && store.IsTiFlashRelatedStore() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
 		} else {
 			followerStoreIDs = append(followerStoreIDs, storeID)
