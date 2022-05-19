@@ -53,13 +53,19 @@ type HotBucketCache struct {
 }
 
 // bucketDebrisFactory returns the debris if the key range of the item is bigger than the given key range.
-// like bucket tree item: | 001------------------------200|
+// start and end key:    | 001------------------------200|
 // the split key range:              |050---150|
 // returns debris:       |001-----050|         |150------200|
 func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []rangetree.RangeItem {
 	var res []rangetree.RangeItem
 	left := keyutil.MaxKey(startKey, item.GetStartKey())
 	right := keyutil.MinKey(endKey, item.GetEndKey())
+	if len(endKey) == 0 {
+		right = item.GetEndKey()
+	}
+	if len(item.GetEndKey()) == 0 {
+		right = endKey
+	}
 	// they have no intersection.
 	// key range:   |001--------------100|
 	// bucket tree:                      |100-----------200|
@@ -73,7 +79,7 @@ func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []ra
 		res = append(res, cloneBucketItemByRange(bt, item.GetStartKey(), left))
 	}
 	// there will be no debris if the right is equal to the end key.
-	if !bytes.Equal(item.GetEndKey(), right) {
+	if !bytes.Equal(item.GetEndKey(), right) || len(right) == 0 {
 		if len(right) == 0 {
 			res = append(res, cloneBucketItemByRange(bt, item.GetEndKey(), right))
 		} else {

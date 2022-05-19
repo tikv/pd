@@ -16,7 +16,6 @@ package buckets
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -46,9 +45,9 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		treeLen:     1,
 	}, {
 		// case1: region split
-		// origin:  |""---""|
-		// new: 	|10 20 30|
-		// tree:    |""--10| |10--30| |30 ""|
+		// origin:  |""-----------------------""|
+		// new: 	      |10--20--30|
+		// tree:    |""----10--20--30--------""|
 		regionID:    1,
 		keys:        [][]byte{[]byte("10"), []byte("20"), []byte("30")},
 		regionCount: 1,
@@ -56,8 +55,8 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		treeLen:     3,
 	}, {
 		// case2: region split
-		// origin:  |""--10-------30---""|
-		// new:            |15 20|
+		// origin:  |""--10-----------30---""|
+		// new:              |15 20|
 		// tree:    |""--10--15--20--30--""|
 		regionID:    2,
 		keys:        [][]byte{[]byte("15"), []byte("20")},
@@ -74,7 +73,7 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		regionCount: 2,
 		treeLen:     4,
 	}, {
-		// case 3: region split
+		// case 4: region split
 		// tree: |""--10--15--20------ ""|
 		// new:  |""----------20|
 		// tree: |""----------20--------""|
@@ -83,7 +82,7 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		regionCount: 2,
 		treeLen:     2,
 	}, {
-		// region 1,2,3 will be merged.
+		// // case 5: region 1,2,3 will be merged.
 		regionID:    4,
 		keys:        [][]byte{[]byte(""), []byte("")},
 		regionCount: 1,
@@ -168,8 +167,7 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 		expect:  []int{10},
 	}}
 
-	for i, v := range testdata {
-		fmt.Println("case:", i)
+	for _, v := range testdata {
 		buckets := convertToBucketTreeItem(v.buckets)
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
 		c.Assert(buckets.stats, HasLen, len(v.expect))

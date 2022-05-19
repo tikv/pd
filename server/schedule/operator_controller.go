@@ -574,7 +574,8 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		log.Info("replace old operator",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op),
+			zap.String("additional-info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "replace").Inc()
 	case operator.EXPIRED:
 		log.Info("operator expired",
@@ -586,13 +587,15 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		log.Info("operator timeout",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
-			zap.Reflect("operator", op))
+			zap.Reflect("operator", op),
+			zap.String("additional-info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case operator.CANCELED:
 		fields := []zap.Field{
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
+			zap.String("additional-info", op.GetAdditionalInfo()),
 		}
 		fields = append(fields, extraFields...)
 		log.Info("operator canceled",
