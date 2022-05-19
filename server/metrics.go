@@ -106,7 +106,7 @@ var (
 			Subsystem: "server",
 			Name:      "bucket_report_interval_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled bucket report requests.",
-			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 23), // 0.1ms ~ 14m
+			Buckets:   prometheus.LinearBuckets(0, 30, 20), // 1s ~ 17m
 		}, []string{"address", "store"})
 
 	regionHeartbeatHandleDuration = prometheus.NewHistogramVec(
