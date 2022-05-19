@@ -20,9 +20,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// LimiterConfig is the config of Limiter
-type LimiterConfig map[string]DimensionConfig
-
 // DimensionConfig is the limit dimension config of one label
 type DimensionConfig struct {
 	// qps conifg
@@ -35,7 +32,7 @@ type DimensionConfig struct {
 // Limiter is a controller for the request rate.
 type Limiter struct {
 	configMux          sync.Mutex
-	labelConfig        LimiterConfig
+	labelConfig        map[string]DimensionConfig
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 	// the label which is in labelAllowList won't be limited
