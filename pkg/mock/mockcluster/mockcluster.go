@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -128,6 +129,11 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.Read, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (mc *Cluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	return nil
 }
 
 // RegionWriteStats returns hot region's write stats.

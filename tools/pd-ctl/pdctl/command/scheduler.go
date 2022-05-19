@@ -144,6 +144,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewLabelSchedulerCommand())
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
+	c.AddCommand(NewSplitBucketSchedulerCommand())
 	return c
 }
 
@@ -325,6 +326,16 @@ func NewLabelSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewSplitBucketSchedulerCommand returns a command to add a split-bucket-scheduler.
+func NewSplitBucketSchedulerCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "split-bucket-scheduler",
+		Short: "add a scheduler to split bucket",
+		Run:   addSchedulerForSplitBucketCommandFunc,
+	}
+	return cmd
+}
+
 // NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
@@ -333,6 +344,12 @@ func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
 	}
 	return c
+}
+
+func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, args []string) {
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	postJSON(cmd, schedulersPrefix, input)
 }
 
 func addSchedulerForGrantHotRegionCommandFunc(cmd *cobra.Command, args []string) {
@@ -443,6 +460,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigShuffleRegionCommand(),
 		newConfigGrantHotRegionCommand(),
 		newConfigBalanceLeaderCommand(),
+		newSplitBucketCommand(),
 	)
 	return c
 }
@@ -457,6 +475,26 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 	c.AddCommand(&cobra.Command{
 		Use:   "show",
 		Short: "show the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+
+	return c
+}
+
+func newSplitBucketCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "split-bucket-scheduler",
+		Short: "split-bucket-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
 		Run:   listSchedulerConfigCommandFunc,
 	}, &cobra.Command{
 		Use:   "set <key> <value>",
