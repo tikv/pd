@@ -25,7 +25,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "buckets_hot_degree_hist",
 			Help:      "Bucketed histogram of bucket hot degree",
-			Buckets:   prometheus.LinearBuckets(-100, 10, 20),
+			Buckets:   prometheus.LinearBuckets(-20, 2, 20), // [-20 20]
 		})
 
 	bucketsTaskDuration = prometheus.NewHistogramVec(
