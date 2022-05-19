@@ -35,8 +35,6 @@ const (
 	ConcurrencyDeleted
 	// InAllowList shows that limiter's config isn't changed because it is in in allow list.
 	InAllowList
-	// Ignore shows that the status can be ignored when initiated
-	Ignore
 )
 
 // Option is used to create a limiter with the optional settings.
@@ -48,7 +46,7 @@ type Option func(string, *Limiter) UpdateStatus
 func AddLabelAllowList() Option {
 	return func(label string, l *Limiter) UpdateStatus {
 		l.labelAllowList[label] = struct{}{}
-		return Ignore
+		return 0
 	}
 }
 

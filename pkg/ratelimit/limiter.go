@@ -23,11 +23,6 @@ import (
 // LimiterConfig is the config of Limiter
 type LimiterConfig map[string]DimensionConfig
 
-// NewLimiterConfig returns a new LimiterConfig
-func NewLimiterConfig() LimiterConfig {
-	return make(map[string]DimensionConfig)
-}
-
 // DimensionConfig is the limit dimension config of one label
 type DimensionConfig struct {
 	// qps conifg
@@ -51,7 +46,7 @@ type Limiter struct {
 func NewLimiter() *Limiter {
 	return &Limiter{
 		labelAllowList: make(map[string]struct{}),
-		labelConfig:    NewLimiterConfig(),
+		labelConfig:    make(map[string]DimensionConfig),
 	}
 }
 
