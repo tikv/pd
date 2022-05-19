@@ -34,7 +34,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "bucket_task_duration",
 			Help:      "Bucketed histogram of processing time (s) of bucket task.",
-			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 23), // 0.1ms ~ 14m
 		}, []string{"type"})
 )
 
