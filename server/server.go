@@ -100,10 +100,12 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg            *config.Config
-	etcdCfg        *embed.Config
-	persistOptions *config.PersistOptions
-	handler        *Handler
+	cfg                             *config.Config
+	serviceMiddlewareCfg            *config.ServiceMiddlewareConfig
+	etcdCfg                         *embed.Config
+	serviceMiddlewarePersistOptions *config.ServiceMiddlewarePersistOptions
+	persistOptions                  *config.PersistOptions
+	handler                         *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -237,14 +239,17 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
+	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
-		cfg:               cfg,
-		persistOptions:    config.NewPersistOptions(cfg),
-		member:            &member.Member{},
-		ctx:               ctx,
-		startTimestamp:    time.Now().Unix(),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                             cfg,
+		persistOptions:                  config.NewPersistOptions(cfg),
+		serviceMiddlewareCfg:            serviceMiddlewareCfg,
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
+		member:                          &member.Member{},
+		ctx:                             ctx,
+		startTimestamp:                  time.Now().Unix(),
+		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
 	s.handler = newHandler(s)
 
@@ -762,6 +767,11 @@ func (s *Server) GetPersistOptions() *config.PersistOptions {
 	return s.persistOptions
 }
 
+// GetServiceMiddlewarePersistOptions returns the service middleware persist option.
+func (s *Server) GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions {
+	return s.serviceMiddlewarePersistOptions
+}
+
 // GetHBStreams returns the heartbeat streams.
 func (s *Server) GetHBStreams() *hbstream.HeartbeatStreams {
 	return s.hbStreams
@@ -799,6 +809,13 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	return members, err
+}
+
+// GetServiceMiddlewareConfig gets the service middleware config information.
+func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
+	cfg := s.serviceMiddlewareCfg.Clone()
+	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	return cfg
 }
 
 // GetConfig gets the config information.
@@ -886,7 +903,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsRemoved() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+				if !s.IsRemoved() && s.IsTiFlash() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -945,6 +962,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetAuditConfig gets the audit config information.
+func (s *Server) GetAuditConfig() *config.AuditConfig {
+	return s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
+}
+
+// SetAuditConfig sets the audit config.
+func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	s.serviceMiddlewarePersistOptions.SetAuditConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetAuditConfig(old)
+		log.Error("failed to update Audit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1413,6 +1451,10 @@ func (s *Server) etcdLeaderLoop() {
 
 func (s *Server) reloadConfigFromKV() error {
 	err := s.persistOptions.Reload(s.storage)
+	if err != nil {
+		return err
+	}
+	err = s.serviceMiddlewarePersistOptions.Reload(s.storage)
 	if err != nil {
 		return err
 	}

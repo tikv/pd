@@ -34,31 +34,31 @@ type testProgressSuite struct{}
 func (s *testProgressSuite) Test(c *C) {
 	n := "test"
 	m := NewManager()
-	c.Assert(m.AddProgress(n, 100), IsFalse)
-	p, ls, cs := m.Status(n)
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
+	p, ls, cs, err := m.Status(n)
+	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)
 	c.Assert(ls, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 	time.Sleep(time.Second)
-	c.Assert(m.AddProgress(n, 100), IsTrue)
-	speedStatisticalInterval = time.Millisecond
-	defer func() {
-		speedStatisticalInterval = 5 * time.Minute
-	}()
-	time.Sleep(time.Millisecond)
-	m.UpdateProgressRemaining(n, 30)
-	p, ls, cs = m.Status(n)
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsTrue)
+
+	m.UpdateProgress(n, 30, 30, false)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.7)
 	// 30/(70/1s+) > 30/70
 	c.Assert(ls, Greater, 30.0/70.0)
 	// 70/1s+ > 70
 	c.Assert(cs, Less, 70.0)
 	// there is no scheduling
-	time.Sleep(time.Millisecond)
-	m.UpdateProgressRemaining(n, 30)
-	p, ls, cs = m.Status(n)
+	for i := 0; i < 100; i++ {
+		m.UpdateProgress(n, 30, 30, false)
+	}
+	c.Assert(m.progesses[n].history.Len(), Equals, 61)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.7)
-	// the speed in previous `speedStatisticalInterval` is zero
 	c.Assert(ls, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
 
@@ -73,4 +73,29 @@ func (s *testProgressSuite) Test(c *C) {
 	c.Assert(ps, HasLen, 0)
 	c.Assert(m.RemoveProgress(n), IsTrue)
 	c.Assert(m.RemoveProgress(n), IsFalse)
+}
+
+func (s *testProgressSuite) TestAbnormal(c *C) {
+	n := "test"
+	m := NewManager()
+	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
+	p, ls, cs, err := m.Status(n)
+	c.Assert(err, IsNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+	// When offline a store, but there are still many write operations
+	m.UpdateProgress(n, 110, 110, false)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, IsNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, math.MaxFloat64)
+	c.Assert(cs, Equals, 0.0)
+	// It usually won't happens
+	m.UpdateProgressTotal(n, 10)
+	p, ls, cs, err = m.Status(n)
+	c.Assert(err, NotNil)
+	c.Assert(p, Equals, 0.0)
+	c.Assert(ls, Equals, 0.0)
+	c.Assert(cs, Equals, 0.0)
 }

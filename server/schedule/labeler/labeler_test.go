@@ -24,6 +24,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -273,7 +274,7 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 		{
 			ID: "rule2",
 			Labels: []RegionLabel{
-				{Key: "k2", Value: "v2", TTL: "5ms"}, // would expired first.},
+				{Key: "k2", Value: "v2", TTL: "1s"}, // would expire first.
 			},
 			RuleType: "key-range",
 
@@ -297,20 +298,36 @@ func (s *testLabelerSuite) TestLabelerRuleTTL(c *C) {
 		err := s.labeler.SetLabelRule(r)
 		c.Assert(err, IsNil)
 	}
+	// get rule with "rule2".
+	c.Assert(s.labeler.GetLabelRule("rule2"), NotNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"), IsNil)
 
-	// get rule with "rule2" and wait until it expired.
-	for s.labeler.GetLabelRule("rule2") != nil {
-		labels := s.labeler.GetRegionLabels(region)
-		if len(labels) == 2 {
-			break
-		}
-		time.Sleep(time.Millisecond * 5)
-	}
-	c.Assert(s.labeler.GetRegionLabel(region, "k2"), Equals, "")
-	// rule2 should be timeout first.
+	// rule2 should expire and only 2 labels left.
+	labels := s.labeler.GetRegionLabels(region)
+	c.Assert(labels, HasLen, 2)
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/labeler/regionLabelExpireSub1Minute"), IsNil)
+	// rule2 should be exist since `GetRegionLabels` won't clear it physically.
+	s.checkRuleInMemoryAndStoage(c, "rule2", true)
 	c.Assert(s.labeler.GetLabelRule("rule2"), IsNil)
+	// rule2 should be physically clear.
+	s.checkRuleInMemoryAndStoage(c, "rule2", false)
+
+	c.Assert(s.labeler.GetRegionLabel(region, "k2"), Equals, "")
+
 	c.Assert(s.labeler.GetLabelRule("rule3"), NotNil)
 	c.Assert(s.labeler.GetLabelRule("rule1"), NotNil)
+}
+
+func (s *testLabelerSuite) checkRuleInMemoryAndStoage(c *C, ruleID string, exist bool) {
+	c.Assert(s.labeler.labelRules[ruleID] != nil, Equals, exist)
+	existInStorage := false
+	s.labeler.storage.LoadRegionRules(func(k, v string) {
+		if k == ruleID {
+			existInStorage = true
+		}
+	})
+	c.Assert(existInStorage, Equals, exist)
 }
 
 func (s *testLabelerSuite) TestGC(c *C) {
