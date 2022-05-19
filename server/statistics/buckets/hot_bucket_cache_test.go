@@ -140,7 +140,6 @@ func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
 }
 
 func (t *testHotBucketCache) TestInherit(c *C) {
-	// init: key range |10 20|20-50|50-60|(3 2 10)
 	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("50"), []byte("")}, 0))
 	originBucketItem.stats[0].HotDegree = 3
 	originBucketItem.stats[1].HotDegree = 2
@@ -165,8 +164,12 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 		// case4: newItem starKey is greater than old.
 		buckets: newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("")}, 0),
 		expect:  []int{10},
+	}, {
+		buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("")}, 0),
+		expect:  []int{10},
 	}}
 
+	// init: key range |10--20---50---60|(3 2 10)
 	for _, v := range testdata {
 		buckets := convertToBucketTreeItem(v.buckets)
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
@@ -217,7 +220,7 @@ func (t *testHotBucketCache) TestBucketTreeItemClone(c *C) {
 		strict:   false,
 	}}
 	for _, v := range testdata {
-		copy := cloneBucketItemByRange(origin, v.startKey, v.endKey)
+		copy := origin.cloneBucketItemByRange(v.startKey, v.endKey)
 		c.Assert(copy.startKey, BytesEquals, v.startKey)
 		c.Assert(copy.endKey, BytesEquals, v.endKey)
 		c.Assert(copy.stats, HasLen, v.count)

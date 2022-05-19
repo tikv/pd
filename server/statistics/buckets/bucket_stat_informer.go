@@ -52,11 +52,11 @@ type BucketStat struct {
 
 func (b *BucketStat) clone() *BucketStat {
 	c := &BucketStat{
-		StartKey:  b.StartKey,
-		EndKey:    b.EndKey,
 		RegionID:  b.RegionID,
 		HotDegree: b.HotDegree,
 		Interval:  b.Interval,
+		StartKey:  b.StartKey,
+		EndKey:    b.EndKey,
 		Loads:     make([]uint64, len(b.Loads)),
 	}
 	copy(c.Loads, b.Loads)
@@ -105,16 +105,12 @@ func (b *BucketTreeItem) equals(origin *BucketTreeItem) bool {
 	if origin == nil {
 		return false
 	}
-	// key range must be same if the version is same.
-	if b.version == origin.version {
-		return true
-	}
 	return bytes.Equal(b.startKey, origin.startKey) && bytes.Equal(b.endKey, origin.endKey)
 }
 
 // cloneBucketItemByRange returns a new item with the same key range.
 // item must have some debris for the given key range
-func cloneBucketItemByRange(b *BucketTreeItem, startKey, endKey []byte) *BucketTreeItem {
+func (b *BucketTreeItem) cloneBucketItemByRange(startKey, endKey []byte) *BucketTreeItem {
 	item := &BucketTreeItem{
 		regionID: b.regionID,
 		startKey: startKey,
