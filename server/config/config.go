@@ -252,6 +252,8 @@ const (
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
 	defaultLogFormat = "text"
+
+	defaultMaxMovableHotPeerSize = int64(512)
 )
 
 // Special keys for Labels
@@ -752,6 +754,10 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
+	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.

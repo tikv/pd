@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
@@ -1918,6 +1919,11 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
 		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
 	return c.hotStat.RegionStats(statistics.Read, threshold)
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	return nil
 }
 
 // RegionWriteStats returns hot region's write stats.
