@@ -35,6 +35,12 @@ func MaxKey(a, b []byte) []byte {
 
 // MinKey returns the smaller key for the given keys.
 func MinKey(a, b []byte) []byte {
+	if len(b) == 0 {
+		return a
+	}
+	if len(a) == 0 {
+		return b
+	}
 	if bytes.Compare(a, b) > 0 {
 		return b
 	}
