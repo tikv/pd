@@ -72,13 +72,6 @@ func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []ra
 	if !bytes.Equal(item.GetStartKey(), left) {
 		res = append(res, cloneBucketItemByRange(bt, item.GetStartKey(), left))
 	}
-	log.Info("debris factory",
-		zap.ByteString("start-key", item.GetStartKey()),
-		zap.ByteString("end-key", item.GetEndKey()),
-		zap.ByteString("new-start-key", startKey),
-		zap.ByteString("new-end-key", endKey),
-		zap.Int("len", len(res)),
-	)
 	// there will be no debris if the right is equal to the end key.
 	if !bytes.Equal(item.GetEndKey(), right) {
 		if len(right) == 0 {
@@ -87,13 +80,6 @@ func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []ra
 			res = append(res, cloneBucketItemByRange(bt, right, item.GetEndKey()))
 		}
 	}
-	log.Info("debris factory",
-		zap.ByteString("start-key", item.GetStartKey()),
-		zap.ByteString("end-key", item.GetEndKey()),
-		zap.ByteString("new-start-key", startKey),
-		zap.ByteString("new-end-key", endKey),
-		zap.Int("len", len(res)),
-	)
 	return res
 }
 

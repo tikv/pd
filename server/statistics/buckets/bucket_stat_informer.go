@@ -17,8 +17,6 @@ package buckets
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/keyutil"
@@ -134,10 +132,6 @@ func cloneBucketItemByRange(b *BucketTreeItem, startKey, endKey []byte) *BucketT
 		if len(endKey) == 0 {
 			right = stat.EndKey
 		}
-		log.Info("cloneBucketItemByRange",
-			zap.ByteString("start-key", left),
-			zap.ByteString("end-key", right),
-		)
 		if bytes.Compare(left, right) < 0 {
 			copy := stat.clone()
 			copy.StartKey = left

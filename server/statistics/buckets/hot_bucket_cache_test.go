@@ -56,26 +56,36 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		treeLen:     3,
 	}, {
 		// case2: region split
-		//
+		// origin:  |""--10-------30---""|
+		// new:            |15 20|
+		// tree:    |""--10--15--20--30--""|
 		regionID:    2,
 		keys:        [][]byte{[]byte("15"), []byte("20")},
 		regionCount: 1,
-		treeLen:     3,
+		treeLen:     5,
 	}, {
+		// case 3: region split
+		// origin:  |""--10--15--20--30--""|
+		// new:                 |20 ---- ""|
+		// tree:   |""--10--15--20------ ""|
 		regionID:    1,
-		keys:        [][]byte{[]byte("20"), []byte("30")},
+		keys:        [][]byte{[]byte("20"), []byte("")},
 		version:     3,
 		regionCount: 2,
-		treeLen:     3,
+		treeLen:     4,
 	}, {
+		// case 3: region split
+		// tree: |""--10--15--20------ ""|
+		// new:  |""----------20|
+		// tree: |""----------20--------""|
 		regionID:    3,
-		keys:        [][]byte{[]byte("10"), []byte("15")},
-		regionCount: 3,
-		treeLen:     3,
+		keys:        [][]byte{[]byte(""), []byte("20")},
+		regionCount: 2,
+		treeLen:     2,
 	}, {
 		// region 1,2,3 will be merged.
 		regionID:    4,
-		keys:        [][]byte{[]byte("10"), []byte("30")},
+		keys:        [][]byte{[]byte(""), []byte("")},
 		regionCount: 1,
 		treeLen:     1,
 	}}
