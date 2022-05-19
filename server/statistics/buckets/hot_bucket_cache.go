@@ -17,6 +17,7 @@ package buckets
 import (
 	"bytes"
 	"context"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -50,6 +51,23 @@ type HotBucketCache struct {
 	bucketsOfRegion map[uint64]*BucketTreeItem // regionId -> BucketTreeItem
 	taskQueue       chan flowBucketsItemTask
 	ctx             context.Context
+}
+
+// GetHotBucketStats returns the hot stats of the regions that great than degree.
+func (h *HotBucketCache) GetHotBucketStats(degree int) map[uint64][]*BucketStat {
+	rst := make(map[uint64][]*BucketStat)
+	for _, item := range h.bucketsOfRegion {
+		stats := make([]*BucketStat, 0)
+		for _, b := range item.stats {
+			if b.HotDegree >= degree {
+				stats = append(stats, b)
+			}
+		}
+		if len(stats) > 0 {
+			rst[item.regionID] = stats
+		}
+	}
+	return rst
 }
 
 // bucketDebrisFactory returns the debris if the key range of the item is bigger than the given key range.
@@ -137,7 +155,9 @@ func (h *HotBucketCache) schedule() {
 		case <-h.ctx.Done():
 			return
 		case task := <-h.taskQueue:
+			start := time.Now()
 			task.runTask(h)
+			bucketsTaskDuration.WithLabelValues(task.taskType().String()).Observe(time.Since(start).Seconds())
 		}
 	}
 }
@@ -156,6 +176,7 @@ func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *Buc
 	}
 	newItem.inherit(overlaps)
 	newItem.calculateHotDegree()
+	newItem.collectBucketsMetrics()
 	return newItem, overlaps
 }
 

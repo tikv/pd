@@ -15,6 +15,8 @@
 package buckets
 
 import (
+	"context"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
@@ -22,11 +24,15 @@ type flowItemTaskKind uint32
 
 const (
 	checkBucketsTaskType flowItemTaskKind = iota
+	collectBucketStatsTaskType
 )
 
 func (kind flowItemTaskKind) String() string {
-	if kind == checkBucketsTaskType {
+	switch kind {
+	case checkBucketsTaskType:
 		return "check_buckets"
+	case collectBucketStatsTaskType:
+		return "collect_bucket_stats"
 	}
 	return "unknown"
 }
@@ -56,4 +62,35 @@ func (t *checkBucketsTask) taskType() flowItemTaskKind {
 func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
 	newItems, overlaps := cache.checkBucketsFlow(t.Buckets)
 	cache.putItem(newItems, overlaps)
+}
+
+type collectBucketStatsTask struct {
+	minDegree int
+	ret       chan map[uint64][]*BucketStat // RegionID ==>Buckets
+}
+
+// NewCollectBucketStatsTask creates task to collect bucket stats.
+func NewCollectBucketStatsTask(minDegree int) *collectBucketStatsTask {
+	return &collectBucketStatsTask{
+		minDegree: minDegree,
+		ret:       make(chan map[uint64][]*BucketStat, 1),
+	}
+}
+
+func (t *collectBucketStatsTask) taskType() flowItemTaskKind {
+	return collectBucketStatsTaskType
+}
+
+func (t *collectBucketStatsTask) runTask(cache *HotBucketCache) {
+	t.ret <- cache.GetHotBucketStats(t.minDegree)
+}
+
+// WaitRet returns the result of the task.
+func (t *collectBucketStatsTask) WaitRet(ctx context.Context) map[uint64][]*BucketStat {
+	select {
+	case <-ctx.Done():
+		return nil
+	case ret := <-t.ret:
+		return ret
+	}
 }

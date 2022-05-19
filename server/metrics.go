@@ -100,6 +100,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
+	bucketReportInterval = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "bucket_report_interval_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled bucket report requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
+		}, []string{"address", "store"})
+
 	regionHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -151,4 +160,5 @@ func init() {
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
+	prometheus.MustRegister(bucketReportInterval)
 }

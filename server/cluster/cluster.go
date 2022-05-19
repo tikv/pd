@@ -1925,7 +1925,11 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 
 // BucketsStats returns hot region's buckets stats.
 func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
-	return nil
+	task := buckets.NewCollectBucketStatsTask(degree)
+	if !c.hotBuckets.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(c.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.

@@ -779,6 +779,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue
 		}
+		bucketReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
 		bucketReportLatency.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
