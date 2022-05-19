@@ -191,7 +191,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		conf:               conf,
 		cluster:            cluster,
 		hotBuckets:         cluster.BucketsStats(conf.Degree),
-		hotRegionSplitSize: cluster.GetOpts().GetHotRegionSplitSize(),
+		hotRegionSplitSize: cluster.GetOpts().GetMaxMovableHotPeerSize(),
 	}
 	return s.splitBucket(plan)
 }

@@ -508,8 +508,8 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
-// GetHotRegionSplitSize returns the hot region split size.
-func (o *PersistOptions) GetHotRegionSplitSize() int64 {
+// GetMaxMovableHotPeerSize returns the max movable hot peer size.
+func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
 	size := o.GetScheduleConfig().MaxMovableHotPeerSize
 	if size <= 0 {
 		size = defaultMaxMovableHotPeerSize
