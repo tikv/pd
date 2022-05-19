@@ -16,6 +16,7 @@ package buckets
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	. "github.com/pingcap/check"
@@ -31,10 +32,6 @@ var _ = Suite(&testHotBucketCache{})
 type testHotBucketCache struct{}
 
 func (t *testHotBucketCache) TestPutItem(c *C) {
-	// case1: region split
-	// origin:  |10|20|30|
-	// new: 	|10|15|20|30|
-	// when report bucket[15:20], the origin should be truncate into two region
 	cache := NewBucketsCache(context.Background())
 	testdata := []struct {
 		regionID    uint64
@@ -44,29 +41,51 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 		version     uint64
 	}{{
 		regionID:    1,
-		keys:        [][]byte{[]byte("10"), []byte("20"), []byte("30")},
+		keys:        [][]byte{[]byte(""), []byte("")},
 		regionCount: 1,
 		treeLen:     1,
 	}, {
+		// case1: region split
+		// origin:  |""---""|
+		// new: 	|10 20 30|
+		// tree:    |""--10| |10--30| |30 ""|
+		regionID:    1,
+		keys:        [][]byte{[]byte("10"), []byte("20"), []byte("30")},
+		regionCount: 1,
+		version:     2,
+		treeLen:     3,
+	}, {
+		// case2: region split
+		// origin:  |""--10-------30---""|
+		// new:            |15 20|
+		// tree:    |""--10--15--20--30--""|
 		regionID:    2,
 		keys:        [][]byte{[]byte("15"), []byte("20")},
 		regionCount: 1,
-		treeLen:     3,
+		treeLen:     5,
 	}, {
+		// case 3: region split
+		// origin:  |""--10--15--20--30--""|
+		// new:                 |20 ---- ""|
+		// tree:   |""--10--15--20------ ""|
 		regionID:    1,
-		keys:        [][]byte{[]byte("20"), []byte("30")},
-		version:     2,
+		keys:        [][]byte{[]byte("20"), []byte("")},
+		version:     3,
 		regionCount: 2,
-		treeLen:     3,
+		treeLen:     4,
 	}, {
+		// case 3: region split
+		// tree: |""--10--15--20------ ""|
+		// new:  |""----------20|
+		// tree: |""----------20--------""|
 		regionID:    3,
-		keys:        [][]byte{[]byte("10"), []byte("15")},
-		regionCount: 3,
-		treeLen:     3,
+		keys:        [][]byte{[]byte(""), []byte("20")},
+		regionCount: 2,
+		treeLen:     2,
 	}, {
 		// region 1,2,3 will be merged.
 		regionID:    4,
-		keys:        [][]byte{[]byte("10"), []byte("30")},
+		keys:        [][]byte{[]byte(""), []byte("")},
 		regionCount: 1,
 		treeLen:     1,
 	}}
@@ -107,23 +126,23 @@ func (t *testHotBucketCache) TestConvertToBucketTreeStat(c *C) {
 
 func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
 	cache := NewBucketsCache(context.Background())
-	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte("010"), []byte("015")}, 0)
+	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0)
 	bucket2 := newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0)
-	bucket3 := newTestBuckets(3, 1, [][]byte{[]byte("020"), []byte("030")}, 0)
+	bucket3 := newTestBuckets(3, 1, [][]byte{[]byte("020"), []byte("")}, 0)
 	cache.putItem(cache.checkBucketsFlow(bucket1))
 	cache.putItem(cache.checkBucketsFlow(bucket2))
 	cache.putItem(cache.checkBucketsFlow(bucket3))
-	c.Assert(cache.getBucketsByKeyRange([]byte("010"), []byte("100")), NotNil)
-	c.Assert(cache.getBucketsByKeyRange([]byte("030"), []byte("100")), IsNil)
+	c.Assert(cache.getBucketsByKeyRange([]byte(""), []byte("100")), HasLen, 3)
+	c.Assert(cache.getBucketsByKeyRange([]byte("030"), []byte("100")), HasLen, 1)
 	c.Assert(cache.getBucketsByKeyRange([]byte("010"), []byte("030")), HasLen, 3)
-	c.Assert(cache.getBucketsByKeyRange([]byte("010"), []byte("020")), HasLen, 2)
-	c.Assert(cache.getBucketsByKeyRange([]byte("001"), []byte("010")), HasLen, 0)
+	c.Assert(cache.getBucketsByKeyRange([]byte("015"), []byte("020")), HasLen, 1)
+	c.Assert(cache.getBucketsByKeyRange([]byte("001"), []byte("")), HasLen, 3)
 	c.Assert(cache.bucketsOfRegion, HasLen, 3)
 }
 
 func (t *testHotBucketCache) TestInherit(c *C) {
 	// init: key range |10 20|20-50|50-60|(3 2 10)
-	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("50"), []byte("60")}, 0))
+	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("50"), []byte("")}, 0))
 	originBucketItem.stats[0].HotDegree = 3
 	originBucketItem.stats[1].HotDegree = 2
 	originBucketItem.stats[2].HotDegree = 10
@@ -133,7 +152,7 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 		expect  []int
 	}{{
 		// case1: one bucket can be inherited by many buckets.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("30"), []byte("40"), []byte("50")}, 0),
+		buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("30"), []byte("40"), []byte("50")}, 0),
 		expect:  []int{3, 2, 2, 2},
 	}, {
 		// case2: the first start key is less than the end key of old item.
@@ -142,14 +161,15 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 	}, {
 		// case3: the first start key is less than the end key of old item.
 		buckets: newTestBuckets(1, 1, [][]byte{[]byte("00"), []byte("05")}, 0),
-		expect:  []int{0},
+		expect:  []int{3},
 	}, {
 		// case4: newItem starKey is greater than old.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("90")}, 0),
-		expect:  []int{0},
+		buckets: newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("")}, 0),
+		expect:  []int{10},
 	}}
 
-	for _, v := range testdata {
+	for i, v := range testdata {
+		fmt.Println("case:", i)
 		buckets := convertToBucketTreeItem(v.buckets)
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
 		c.Assert(buckets.stats, HasLen, len(v.expect))

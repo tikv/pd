@@ -63,18 +63,22 @@ func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []ra
 	// they have no intersection.
 	// key range:   |001--------------100|
 	// bucket tree:                      |100-----------200|
-	if bytes.Compare(left, right) > 0 {
+	if bytes.Compare(left, right) > 0 && len(right) != 0 {
 		return nil
 	}
+
 	bt := item.(*BucketTreeItem)
 	// there will be no debris if the left is equal to the start key.
 	if !bytes.Equal(item.GetStartKey(), left) {
 		res = append(res, cloneBucketItemByRange(bt, item.GetStartKey(), left))
 	}
-
 	// there will be no debris if the right is equal to the end key.
 	if !bytes.Equal(item.GetEndKey(), right) {
-		res = append(res, cloneBucketItemByRange(bt, right, item.GetEndKey()))
+		if len(right) == 0 {
+			res = append(res, cloneBucketItemByRange(bt, item.GetEndKey(), right))
+		} else {
+			res = append(res, cloneBucketItemByRange(bt, right, item.GetEndKey()))
+		}
 	}
 	return res
 }

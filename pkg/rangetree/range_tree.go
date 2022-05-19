@@ -17,7 +17,9 @@ package rangetree
 import (
 	"bytes"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
+	"go.uber.org/zap"
 )
 
 // RangeItem is one key range tree item.
@@ -51,7 +53,11 @@ func (r *RangeTree) Update(item RangeItem) []RangeItem {
 		r.tree.Delete(old)
 		children := r.factory(item.GetStartKey(), item.GetEndKey(), old)
 		for _, child := range children {
-			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
+			log.Info("Update range tree",
+				zap.ByteString("start-key", child.GetStartKey()),
+				zap.ByteString("end-key", child.GetEndKey()),
+			)
+			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 || len(child.GetEndKey()) == 0 {
 				r.tree.ReplaceOrInsert(child)
 			}
 		}
@@ -82,6 +88,7 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 		overlaps = append(overlaps, over)
 		return true
 	})
+	log.Info("get over laps", zap.Int("len", len(overlaps)))
 	return overlaps
 }
 
