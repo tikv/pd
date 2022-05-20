@@ -24,6 +24,6 @@ jobs:
             ${{ runner.os }}-golang
       - name: Make Check
         run: |
-          make check
           make build
           make tools
+          make check
