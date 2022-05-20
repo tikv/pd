@@ -26,7 +26,7 @@ type prepareChecker struct {
 	reactiveRegions map[uint64]int
 	start           time.Time
 	sum             int
-	isPrepared      bool
+	prepared        bool
 }
 
 func newPrepareChecker() *prepareChecker {
@@ -38,9 +38,13 @@ func newPrepareChecker() *prepareChecker {
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
 func (checker *prepareChecker) check(c *core.BasicCluster) bool {
-	checker.RLock()
-	defer checker.RUnlock()
-	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
+	checker.Lock()
+	defer checker.Unlock()
+	if checker.prepared {
+		return true
+	}
+	if time.Since(checker.start) > collectTimeout {
+		checker.prepared = true
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
@@ -57,7 +61,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 			return false
 		}
 	}
-	checker.isPrepared = true
+	checker.prepared = true
 	return true
 }
 
@@ -68,4 +72,10 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 		checker.reactiveRegions[p.GetStoreId()]++
 	}
 	checker.sum++
+}
+
+func (checker *prepareChecker) isPrepared() bool {
+	checker.RLock()
+	defer checker.RUnlock()
+	return checker.prepared
 }

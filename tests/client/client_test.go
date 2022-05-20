@@ -774,9 +774,18 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	breq := &pdpb.ReportBucketsRequest{
 		Header: newHeader(s.srv),
 		Buckets: &metapb.Buckets{
-			RegionId: regionID,
-			Version:  1,
-			Keys:     [][]byte{[]byte("a"), []byte("z")},
+			RegionId:   regionID,
+			Version:    1,
+			Keys:       [][]byte{[]byte("a"), []byte("z")},
+			PeriodInMs: 2000,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{1},
+				ReadKeys:   []uint64{1},
+				ReadQps:    []uint64{1},
+				WriteBytes: []uint64{1},
+				WriteKeys:  []uint64{1},
+				WriteQps:   []uint64{1},
+			},
 		},
 	}
 	c.Assert(s.reportBucket.Send(breq), IsNil)
@@ -1292,7 +1301,8 @@ func (s *testConfigTTLSuite) TestConfigTTLAfterTransferLeader(c *C) {
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(ttlConfig)
 	c.Assert(err, IsNil)
-	_, err = leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
+	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
+	resp.Body.Close()
 	c.Assert(err, IsNil)
 	time.Sleep(2 * time.Second)
 	_ = leader.Destroy()

@@ -348,6 +348,11 @@ func (h *Handler) AddEvictSlowStoreScheduler() error {
 	return h.AddScheduler(schedulers.EvictSlowStoreType)
 }
 
+// AddSplitBucketScheduler adds a split-bucket-scheduler.
+func (h *Handler) AddSplitBucketScheduler() error {
+	return h.AddScheduler(schedulers.SplitBucketType)
+}
+
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
@@ -938,12 +943,12 @@ func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scen
 }
 
 // GetProgressByID returns the progress details for a given store ID.
-func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64) {
+func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64, err error) {
 	return h.s.GetRaftCluster().GetProgressByID(storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
-func (h *Handler) GetProgressByAction(action string) (p, ls, cs float64) {
+func (h *Handler) GetProgressByAction(action string) (p, ls, cs float64, err error) {
 	return h.s.GetRaftCluster().GetProgressByAction(action)
 }
 
