@@ -348,6 +348,11 @@ func (h *Handler) AddEvictSlowStoreScheduler() error {
 	return h.AddScheduler(schedulers.EvictSlowStoreType)
 }
 
+// AddSplitBucketScheduler adds a split-bucket-scheduler.
+func (h *Handler) AddSplitBucketScheduler() error {
+	return h.AddScheduler(schedulers.SplitBucketType)
+}
+
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
