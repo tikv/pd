@@ -305,15 +305,10 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	oc.Lock()
 	defer oc.Unlock()
-
-<<<<<<< HEAD
-	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
-=======
 	// note: checkAddOperator uses false param for `isPromoting`.
 	// This is used to keep check logic before fixing issue #4946,
 	// but maybe user want to add operator when waiting queue is busy
-	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(false, ops...) {
->>>>>>> 056ca9dc6 (schedule: If it is promoting operator, don't check waiting queue count (#4988))
+	if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(false, ops...) {
 		for _, op := range ops {
 			operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 			_ = op.Cancel()
@@ -342,11 +337,7 @@ func (oc *OperatorController) PromoteWaitingOperator() {
 		}
 		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
 
-<<<<<<< HEAD
-		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(ops...) {
-=======
-		if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(true, ops...) {
->>>>>>> 056ca9dc6 (schedule: If it is promoting operator, don't check waiting queue count (#4988))
+		if oc.exceedStoreLimit(ops...) || !oc.checkAddOperator(true, ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote_canceled").Inc()
 				_ = op.Cancel()
@@ -409,15 +400,9 @@ func (oc *OperatorController) checkAddOperator(isPromoting bool, ops ...*operato
 			operatorWaitCounter.WithLabelValues(op.Desc(), "add_canceled").Inc()
 			return false
 		}
-<<<<<<< HEAD
-		if oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed_max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetSchedulerMaxWaitingOperator()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed_max").Inc()
-=======
-		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
+		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetSchedulerMaxWaitingOperator() {
+			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
->>>>>>> 056ca9dc6 (schedule: If it is promoting operator, don't check waiting queue count (#4988))
 			return false
 		}
 	}
