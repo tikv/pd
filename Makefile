@@ -44,7 +44,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -94,7 +94,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 PD_SERVER_DEP += dashboard-ui
@@ -142,9 +142,53 @@ pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
 
+<<<<<<< HEAD
 test: install-go-tools
 	# testing...
 	@$(DEADLOCK_ENABLE)
+=======
+#### Static checks ####
+
+check: install-tools static tidy check-plugin errdoc check-testing-t
+
+static: install-tools
+	@ echo "gofmt ..."
+	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
+	@ echo "golangci-lint ..."
+	@ golangci-lint run $(PACKAGE_DIRECTORIES)
+	@ echo "revive ..."
+	@ revive -formatter friendly -config revive.toml $(PACKAGES)
+
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd - > /dev/null; done
+
+tidy:
+	@ go mod tidy
+	git diff go.mod go.sum | cat
+	git diff --quiet go.mod go.sum
+	
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
+
+check-plugin:
+	@echo "checking plugin"
+	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
+
+errdoc: install-tools
+	@echo "generator errors.toml"
+	./scripts/check-errdoc.sh
+
+check-testing-t:
+	./scripts/check-testing-t.sh
+
+.PHONY: check static tidy check-plugin errdoc docker-build-test check-testing-t
+
+#### Test utils ####
+
+FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
+FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
+
+failpoint-enable: install-tools
+	# Converting failpoints...
+>>>>>>> 2cced16d4 (Makefile: disable swagger server (#4934))
 	@$(FAILPOINT_ENABLE)
 	CGO_ENABLED=1 GO111MODULE=on go test -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
