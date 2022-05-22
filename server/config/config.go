@@ -232,7 +232,6 @@ const (
 	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
 	defaultMaxResetTSGap                    = 24 * time.Hour
 	defaultMinResolvedTSPersistenceInterval = 0
-	defaultEnableAuditMiddleware            = false
 	defaultKeyType                          = "table"
 
 	defaultStrictlyMatchLabel   = false
@@ -253,6 +252,8 @@ const (
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
 	defaultLogFormat = "text"
+
+	defaultMaxMovableHotPeerSize = int64(512)
 )
 
 // Special keys for Labels
@@ -753,6 +754,10 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
+	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -800,8 +805,8 @@ const (
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
-	// using a large duration means disable it
-	defaultMaxStorePreparingTime = 1000000 * time.Hour
+	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
+	defaultMaxStorePreparingTime = 48 * time.Hour
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -1116,8 +1121,6 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
-	// EnableAudit controls the switch of the audit middleware
-	EnableAudit bool `toml:"enable-audit" json:"enable-audit"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1142,9 +1145,6 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
-	}
-	if !meta.IsDefined("enable-audit") {
-		c.EnableAudit = defaultEnableAuditMiddleware
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

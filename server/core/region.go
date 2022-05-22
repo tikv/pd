@@ -61,7 +61,8 @@ type RegionInfo struct {
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets unsafe.Pointer
+	buckets       unsafe.Pointer
+	fromHeartbeat bool
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -221,6 +222,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// NeedMerge returns true if size is less than merge size and keys is less than mergeKeys.
+func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
+	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
 }
 
 // GetTerm returns the current term of the region
@@ -540,6 +546,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFromHeartbeat returns whether the region info is from the region heartbeat.
+func (r *RegionInfo) IsFromHeartbeat() bool {
+	return r.fromHeartbeat
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -623,6 +634,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+			}
+			if !origin.IsFromHeartbeat() {
+				isNew = true
 			}
 		}
 		return
