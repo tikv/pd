@@ -205,8 +205,8 @@ const (
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
 
-	// The max bytes for grpc message
-	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500KB at most,
+	// The default max bytes for grpc message
+	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
 	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
 	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
 
