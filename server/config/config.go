@@ -204,7 +204,7 @@ const (
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
-	defaultMaxRequestBytes         = uint(1.5 * 1024 * 1024)                   // 1.5MB
+	defaultMaxRequestBytes         = uint(150 * 1024 * 1024)                   // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
