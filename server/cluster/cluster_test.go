@@ -598,14 +598,33 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	// case3: the bucket version is same.
 	c.Assert(cluster.processReportBuckets(buckets), IsNil)
 	// case4: the bucket version is changed.
-	buckets.Version = 3
-	c.Assert(cluster.processReportBuckets(buckets), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+	newBuckets := &metapb.Buckets{
+		RegionId: 0,
+		Version:  3,
+		Keys:     [][]byte{{'1'}, {'2'}},
+	}
+	c.Assert(cluster.processReportBuckets(newBuckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, newBuckets)
 
 	//case5: region update should inherit buckets.
-	newRegion := regions[0].Clone(core.WithIncConfVer())
+	newBuckets2 := &metapb.Buckets{
+		RegionId: 0,
+		Version:  1,
+		Keys:     [][]byte{},
+	}
+
+	newRegion := regions[0].Clone(core.WithIncConfVer(), core.SetBuckets(newBuckets2))
+	cluster.storeConfigManager = config.NewTestStoreConfigManager(nil)
+	config := cluster.storeConfigManager.GetStoreConfig()
+	config.Coprocessor.EnableRegionBucket = true
 	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), NotNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets().GetKeys(), HasLen, 2)
+
+	// case 6: disable region bucket in
+	config.Coprocessor.EnableRegionBucket = false
+	newRegion2 := regions[0].Clone(core.WithIncConfVer(), core.SetBuckets(newBuckets2))
+	c.Assert(cluster.processRegionHeartbeat(newRegion2), IsNil)
+	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets().GetKeys(), HasLen, 0)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {

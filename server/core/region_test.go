@@ -216,7 +216,7 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(t.size)
-		r.Inherit(origin)
+		r.Inherit(origin, false)
 		c.Assert(r.approximateSize, Equals, int64(t.expect))
 	}
 
@@ -239,9 +239,15 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.UpdateBuckets(d.buckets, r.GetBuckets())
-		r.Inherit(origin)
+		r.Inherit(origin, true)
 		if d.same {
 			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
+			// region will not inherit bucket keys.
+			if origin.GetBuckets() != nil {
+				newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+				newRegion.Inherit(origin, false)
+				c.Assert(newRegion.GetBuckets(), Not(DeepEquals), d.originBuckets)
+			}
 		} else {
 			c.Assert(r.GetBuckets(), Not(DeepEquals), d.originBuckets)
 		}
