@@ -16,17 +16,19 @@ package cluster
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
-	"github.com/google/btree"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/btree"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
@@ -36,47 +38,109 @@ import (
 type unsafeRecoveryStage int
 
 const (
-	storeReportRequestInterval = time.Second * 60
-	storePlanRequestInterval   = time.Second * 60
+	storeRequestInterval = time.Second * 40
 )
 
+// Stage transition graph: for more details, please check `unsafeRecoveryController.HandleStoreHeartbeat()`
+//  +-----------+
+//  |           |
+//  |   idle    |
+//  |           |
+//  +-----------+
+//  	  |
+//  	  |
+//  	  |
+//  	  v              +-----------+
+//  +-----------+        |           |          +-----------+           +-----------+
+//  |           |------->|   force   |--------->|           |           |           |           +-----------+
+//  |  collect  |        | LeaderFor |          |  force    |           | exitForce |           |           |
+//  |  Report   |        |CommitMerge|----+-----|  Leader   |-----+---->|  Leader   |---------->|  failed   |
+//  |           |        |           |    |     |           |     |     |           |           |           |
+//  +-----------+        +-----------+    |     +-----------+     |     +-----------+           +-----------+
+//  	  |  							  |        |     ^        |
+//  	  | 							  |        |     |        |
+//  	  |   							  |        |     |        |
+//  	  |   							  |        v     |        |
+//  	  |   							  |     +-----------+     |
+//  	  |   							  |     |           |     |
+//  	  |   							  |     |  demote   |     |
+//  	  |   							  +-----|  Voter    |-----+
+//  	  |   							  |     |           |     |
+//  	  |   							  |     +-----------+     |
+//  	  |   							  |        |     ^        |
+//  	  |   							  |        |     |        |
+//  	  |   							  |        |     |        |
+//  	  v   			+-----------+     |     +-----------+     |
+//  +-----------+       |           |     |     |           |     |
+//  |           |       | exitForce |     v     |  create   |     |
+//  | finished  |<------|  Leader   |<----------|  Region   |-----+
+//  |           |       |           |           |           |
+//  +-----------+       +-----------+           +-----------+
+//
 const (
-	ready unsafeRecoveryStage = iota
-	collectingClusterInfo
-	recovering
+	idle unsafeRecoveryStage = iota
+	collectReport
+	forceLeaderForCommitMerge
+	forceLeader
+	demoteFailedVoter
+	createEmptyRegion
+	exitForceLeader
 	finished
+	failed
 )
 
 type unsafeRecoveryController struct {
 	syncutil.RWMutex
 
-	cluster               *RaftCluster
-	stage                 unsafeRecoveryStage
-	failedStores          map[uint64]string
-	storeReportExpires    map[uint64]time.Time
-	storeReports          map[uint64]*pdpb.StoreReport // Store info proto
-	numStoresReported     int
-	storePlanExpires      map[uint64]time.Time
-	storeRecoveryPlans    map[uint64]*pdpb.RecoveryPlan // StoreRecoveryPlan proto
-	executionResults      map[uint64]bool               // Execution reports for tracking purpose
-	executionReports      map[uint64]*pdpb.StoreReport  // Execution reports for tracking purpose
-	numStoresPlanExecuted int
+	cluster *RaftCluster
+	stage   unsafeRecoveryStage
+	// the round of recovery, which is an increasing number to identify the reports of each round
+	step         uint64
+	failedStores map[uint64]struct{}
+	timeout      time.Time
+
+	// collected reports from store, if not reported yet, it would be nil
+	storeReports      map[uint64]*pdpb.StoreReport
+	numStoresReported int
+
+	storePlanExpires   map[uint64]time.Time
+	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
+
+	// accumulated output for the whole recovery process
+	output              []StageOutput
+	affectedTableIDs    map[int64]struct{}
+	affectedMetaRegions map[uint64]struct{}
+	err                 error
+}
+
+// StageOutput is the information for one stage of the recovery process.
+type StageOutput struct {
+	Info    string              `json:"info,omitempty"`
+	Time    string              `json:"time,omitempty"`
+	Actions map[string][]string `json:"actions,omitempty"`
+	Details []string            `json:"details,omitempty"`
 }
 
 func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController {
-	return &unsafeRecoveryController{
-		cluster:               cluster,
-		stage:                 ready,
-		failedStores:          make(map[uint64]string),
-		storeReportExpires:    make(map[uint64]time.Time),
-		storeReports:          make(map[uint64]*pdpb.StoreReport),
-		numStoresReported:     0,
-		storePlanExpires:      make(map[uint64]time.Time),
-		storeRecoveryPlans:    make(map[uint64]*pdpb.RecoveryPlan),
-		executionResults:      make(map[uint64]bool),
-		executionReports:      make(map[uint64]*pdpb.StoreReport),
-		numStoresPlanExecuted: 0,
+	u := &unsafeRecoveryController{
+		cluster: cluster,
 	}
+	u.reset()
+	return u
+}
+
+func (u *unsafeRecoveryController) reset() {
+	u.stage = idle
+	u.step = 0
+	u.failedStores = make(map[uint64]struct{})
+	u.storeReports = make(map[uint64]*pdpb.StoreReport)
+	u.numStoresReported = 0
+	u.storePlanExpires = make(map[uint64]time.Time)
+	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+	u.output = make([]StageOutput, 0)
+	u.affectedTableIDs = make(map[int64]struct{}, 0)
+	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
+	u.err = nil
 }
 
 // IsRunning returns whether there is ongoing unsafe recovery process. If yes, further unsafe
@@ -84,23 +148,27 @@ func newUnsafeRecoveryController(cluster *RaftCluster) *unsafeRecoveryController
 func (u *unsafeRecoveryController) IsRunning() bool {
 	u.RLock()
 	defer u.RUnlock()
-	return u.stage != ready && u.stage != finished
+	return u.stage != idle && u.stage != finished && u.stage != failed
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
-func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]string) error {
+func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]struct{}, timeout uint64) error {
 	if u.IsRunning() {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 	u.Lock()
 	defer u.Unlock()
+
 	if len(failedStores) == 0 {
 		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
 	}
-	u.reset()
+
+	// validate the stores and mark the store as tombstone forcibly
 	for failedStore := range failedStores {
 		store := u.cluster.GetStore(failedStore)
-		if store != nil && (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
+		if store == nil {
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v doesn't exist", failedStore))
+		} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
 			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
 		}
 	}
@@ -110,8 +178,10 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 			return err
 		}
 	}
-	u.failedStores = failedStores
+
+	u.reset()
 	for _, s := range u.cluster.GetStores() {
+		// Tiflash isn't supportted yet, so just do not collect store reports of Tiflash
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() || s.IsTiFlash() {
 			continue
 		}
@@ -120,462 +190,865 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 		}
 		u.storeReports[s.GetID()] = nil
 	}
-	u.stage = collectingClusterInfo
+
+	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
+	u.failedStores = failedStores
+	u.changeStage(collectReport)
 	return nil
+}
+
+// Show returns the current status of ongoing unsafe recover operation.
+func (u *unsafeRecoveryController) Show() []StageOutput {
+	u.Lock()
+	defer u.Unlock()
+
+	if u.stage == idle {
+		return []StageOutput{{Info: "No on-going recovery."}}
+	}
+	u.checkTimeout()
+	status := u.output
+	if u.stage != finished && u.stage != failed {
+		status = append(status, u.getReportStatus())
+	}
+	return status
+}
+
+func (u *unsafeRecoveryController) getReportStatus() StageOutput {
+	var status StageOutput
+	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
+	if u.numStoresReported != len(u.storeReports) {
+		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d)", u.numStoresReported, len(u.storeReports))
+		var reported, unreported, undispatched string
+		for storeID, report := range u.storeReports {
+			str := strconv.FormatUint(storeID, 10) + ", "
+			if report == nil {
+				if _, requested := u.storePlanExpires[storeID]; !requested {
+					undispatched += str
+				} else {
+					unreported += str
+				}
+			} else {
+				reported += str
+			}
+		}
+		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Trim(undispatched, ", "))
+		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Trim(reported, ", "))
+		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Trim(unreported, ", "))
+	} else {
+		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
+	}
+	return status
+}
+
+func (u *unsafeRecoveryController) checkTimeout() bool {
+	if u.stage == finished || u.stage == failed {
+		return false
+	}
+
+	if time.Now().After(u.timeout) {
+		u.err = errors.Errorf("Exceeds timeout %v", u.timeout)
+		return u.handleErr()
+	}
+	return false
 }
 
 // HandleStoreHeartbeat handles the store heartbeat requests and checks whether the stores need to
 // send detailed report back.
 func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
-	u.Lock()
-	defer u.Unlock()
-	if len(u.failedStores) == 0 {
+	if !u.IsRunning() {
+		// no recovery in progress, do nothing
 		return
 	}
-	switch u.stage {
-	case collectingClusterInfo:
-		if heartbeat.StoreReport == nil {
-			if _, isFailedStore := u.failedStores[heartbeat.Stats.StoreId]; isFailedStore {
-				// This should be unreachable.
+	u.Lock()
+	defer u.Unlock()
+
+	if u.checkTimeout() {
+		return
+	}
+
+	allCollected, err := u.collectReport(heartbeat)
+	if err != nil {
+		u.err = err
+		if u.handleErr() {
+			return
+		}
+	}
+
+	if allCollected {
+		newestRegionTree, peersMap, err := u.buildUpFromReports()
+		if err != nil {
+			u.err = err
+			if u.handleErr() {
 				return
 			}
+		}
 
-			expire, requested := u.storeReportExpires[heartbeat.Stats.StoreId]
-			now := time.Now()
-			if !requested || expire.Before(now) {
-				// Inform the store to send detailed report in the next heartbeat.
-				resp.RequireDetailedReport = true
-				u.storeReportExpires[heartbeat.Stats.StoreId] = now.Add(storeReportRequestInterval)
+		// clean up previous plan
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+
+		stage := u.stage
+		reCheck := false
+		for {
+			switch stage {
+			case collectReport:
+				fallthrough
+			case forceLeaderForCommitMerge:
+				if u.generateForceLeaderPlan(newestRegionTree, peersMap, true) {
+					u.changeStage(forceLeaderForCommitMerge)
+					break
+				}
+				fallthrough
+			case forceLeader:
+				if u.generateForceLeaderPlan(newestRegionTree, peersMap, false) {
+					u.changeStage(forceLeader)
+					break
+				}
+				fallthrough
+			case demoteFailedVoter:
+				if u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap) {
+					u.changeStage(demoteFailedVoter)
+					break
+				} else if !reCheck {
+					reCheck = true
+					stage = forceLeaderForCommitMerge
+					continue
+				}
+				fallthrough
+			case createEmptyRegion:
+				if u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap) {
+					u.changeStage(createEmptyRegion)
+					break
+				}
+				fallthrough
+			case exitForceLeader:
+				// no need to generate plan, empty recovery plan triggers exit force leader on TiKV side
+				if u.generateExitForceLeaderPlan() {
+					u.changeStage(exitForceLeader)
+				}
+			default:
+				panic("unreachable")
 			}
-		} else if report, exist := u.storeReports[heartbeat.Stats.StoreId]; exist && report == nil {
-			u.storeReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
+
+			hasPlan := len(u.storeRecoveryPlans) != 0
+			if u.err != nil {
+				if u.handleErr() {
+					return
+				}
+			} else if !hasPlan {
+				u.changeStage(finished)
+				return
+			}
+			break
+		}
+	}
+
+	u.dispatchPlan(heartbeat, resp)
+}
+
+func (u *unsafeRecoveryController) handleErr() bool {
+	if u.err != nil {
+		if u.stage == exitForceLeader {
+			u.changeStage(failed)
+			return true
+		}
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+		u.timeout = time.Now().Add(storeRequestInterval)
+		u.changeStage(exitForceLeader)
+	}
+	return false
+}
+
+/// It dispatches recovery plan if any.
+func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
+	storeID := heartbeat.Stats.StoreId
+	now := time.Now()
+
+	if reported, exist := u.storeReports[storeID]; reported != nil || !exist {
+		// the plan has been executed, no need to dispatch again
+		// or no need to displan plan to this store(e.g. Tiflash)
+		return
+	}
+
+	if expire, dispatched := u.storePlanExpires[storeID]; !dispatched || expire.Before(now) {
+		if dispatched {
+			log.Info("Unsafe recovery store recovery plan execution timeout, retry", zap.Uint64("store-id", storeID))
+		}
+		// Dispatch the recovery plan to the store, and the plan may be empty.
+		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
+		resp.RecoveryPlan.Step = u.step
+		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
+	}
+}
+
+// It collects and checks if store reports have been fully collected.
+func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest) (bool, error) {
+	storeID := heartbeat.Stats.StoreId
+	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
+		return false, errors.Errorf("Receive heartbeat from failed store %d", storeID)
+	}
+
+	if heartbeat.StoreReport == nil {
+		return false, nil
+	}
+
+	if heartbeat.StoreReport.GetStep() != u.step {
+		log.Info("Unsafe recovery receives invalid store report",
+			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtained-step", heartbeat.StoreReport.GetStep()))
+		// invalid store report, ignore
+		return false, nil
+	}
+
+	if report, exists := u.storeReports[storeID]; exists {
+		// if receive duplicated report from the same TiKV, use the latest one
+		u.storeReports[storeID] = heartbeat.StoreReport
+		if report == nil {
 			u.numStoresReported++
 			if u.numStoresReported == len(u.storeReports) {
-				log.Info("Reports have been fully collected, generating plan...")
-				go u.generateRecoveryPlan()
-			}
-		}
-	case recovering:
-		if plan, tasked := u.storeRecoveryPlans[heartbeat.Stats.StoreId]; tasked {
-			if heartbeat.StoreReport == nil {
-				expire, requested := u.storePlanExpires[heartbeat.Stats.StoreId]
-				now := time.Now()
-				if !requested || expire.Before(now) {
-					// Sends the recovering plan to the store for execution.
-					resp.Plan = plan
-					u.storePlanExpires[heartbeat.Stats.StoreId] = now.Add(storePlanRequestInterval)
-				}
-			} else if !u.isPlanExecuted(heartbeat.Stats.StoreId, heartbeat.StoreReport) {
-				resp.Plan = plan
-				u.executionReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
-			} else {
-				u.executionResults[heartbeat.Stats.StoreId] = true
-				u.executionReports[heartbeat.Stats.StoreId] = heartbeat.StoreReport
-				u.numStoresPlanExecuted++
-				if u.numStoresPlanExecuted == len(u.storeRecoveryPlans) {
-					u.cluster.PauseOrResumeScheduler("all", 0)
-					log.Info("Recover finished.")
-					go func() {
-						for _, history := range u.History() {
-							log.Info(history)
-						}
-					}()
-					u.stage = finished
-				}
+				return true, nil
 			}
 		}
 	}
+	return false, nil
 }
 
-func (u *unsafeRecoveryController) reset() {
-	u.stage = ready
-	u.failedStores = make(map[uint64]string)
-	u.storeReportExpires = make(map[uint64]time.Time)
-	u.storeReports = make(map[uint64]*pdpb.StoreReport)
+// Gets the stage of the current unsafe recovery.
+func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
+	u.RLock()
+	defer u.RUnlock()
+	return u.stage
+}
+
+func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
+	u.stage = stage
+
+	var output StageOutput
+	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
+	switch u.stage {
+	case idle:
+	case collectReport:
+		stores := ""
+		count := 0
+		for store := range u.failedStores {
+			count += 1
+			stores += fmt.Sprintf("%d", store)
+			if count != len(u.failedStores) {
+				stores += ", "
+			}
+		}
+		output.Info = fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores)
+	case forceLeaderForCommitMerge:
+		output.Info = "Unsafe recovery enters force leader for commit merge stage"
+		output.Actions = u.getForceLeaderPlanDigest()
+	case forceLeader:
+		output.Info = "Unsafe recovery enters force leader stage"
+		output.Actions = u.getForceLeaderPlanDigest()
+	case demoteFailedVoter:
+		output.Info = "Unsafe recovery enters demote failed voter stage"
+		output.Actions = u.getDemoteFailedVoterPlanDigest()
+	case createEmptyRegion:
+		output.Info = "Unsafe recovery enters create empty region stage"
+		output.Actions = u.getCreateEmptyRegionPlanDigest()
+	case exitForceLeader:
+		output.Info = "Unsafe recovery enters exit force leader stage"
+		if u.err != nil {
+			output.Details = append(output.Details, u.err.Error())
+		}
+	case finished:
+		if u.step > 1 {
+			// == 1 means no operation has done, no need to invalid cache
+			u.cluster.DropCacheAllRegion()
+		}
+		output.Info = "Unsafe recovery finished"
+		output.Details = u.getAffectedTableDigest()
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+	case failed:
+		output.Info = fmt.Sprintf("Unsafe recovery failed: %v", u.err)
+		output.Details = u.getAffectedTableDigest()
+		u.storePlanExpires = make(map[uint64]time.Time)
+		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+	}
+
+	u.output = append(u.output, output)
+	data, err := json.Marshal(output)
+	if err != nil {
+		u.err = err
+		return
+	}
+	log.Info(string(data))
+
+	// reset store reports to nil instead of delete, because it relays on the item
+	// to decide which store it needs to collect the report from.
+	for k := range u.storeReports {
+		u.storeReports[k] = nil
+	}
 	u.numStoresReported = 0
-	u.storePlanExpires = make(map[uint64]time.Time)
-	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-	u.executionResults = make(map[uint64]bool)
-	u.executionReports = make(map[uint64]*pdpb.StoreReport)
-	u.numStoresPlanExecuted = 0
+	u.step += 1
 }
 
-func (u *unsafeRecoveryController) isPlanExecuted(storeID uint64, report *pdpb.StoreReport) bool {
-	targetRegions := make(map[uint64]*metapb.Region)
-	toBeRemovedRegions := make(map[uint64]bool)
-	for _, create := range u.storeRecoveryPlans[storeID].Creates {
-		targetRegions[create.Id] = create
-	}
-	for _, update := range u.storeRecoveryPlans[storeID].Updates {
-		targetRegions[update.Id] = update
-	}
-	for _, del := range u.storeRecoveryPlans[storeID].Deletes {
-		toBeRemovedRegions[del] = true
-	}
-	numFinished := 0
-	for _, peerReport := range report.PeerReports {
-		region := peerReport.RegionState.Region
-		if _, ok := toBeRemovedRegions[region.Id]; ok {
-			return false
-		} else if target, ok := targetRegions[region.Id]; ok {
-			if bytes.Equal(target.StartKey, region.StartKey) && bytes.Equal(target.EndKey, region.EndKey) && !u.containsFailedPeers(region) {
-				numFinished += 1
-			} else {
-				return false
+func (u *unsafeRecoveryController) getForceLeaderPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
+	for storeID, plan := range u.storeRecoveryPlans {
+		forceLeaders := plan.GetForceLeader()
+		if forceLeaders != nil {
+			regions := ""
+			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
+				regions += fmt.Sprintf("%d", regionID)
+				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
+					regions += ", "
+				}
 			}
+			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
 		}
 	}
-	return numFinished == len(targetRegions)
+	return outputs
 }
 
-type regionItem struct {
-	region *metapb.Region
+func (u *unsafeRecoveryController) getDemoteFailedVoterPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
+	for storeID, plan := range u.storeRecoveryPlans {
+		if len(plan.GetDemotes()) == 0 && len(plan.GetTombstones()) == 0 {
+			continue
+		}
+		output := []string{}
+		for _, demote := range plan.GetDemotes() {
+			peers := ""
+			for _, peer := range demote.GetFailedVoters() {
+				peers += fmt.Sprintf("{ %v}, ", peer) // the extra space is intentional
+			}
+			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Trim(peers, ", ")))
+		}
+		for _, tombstone := range plan.GetTombstones() {
+			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
+		}
+		outputs[fmt.Sprintf("store %d", storeID)] = output
+	}
+	return outputs
 }
 
-func (r regionItem) Less(other btree.Item) bool {
-	return bytes.Compare(r.region.StartKey, other.(regionItem).region.StartKey) < 0
+func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() map[string][]string {
+	outputs := make(map[string][]string)
+	for storeID, plan := range u.storeRecoveryPlans {
+		if plan.GetCreates() == nil {
+			continue
+		}
+		output := []string{}
+		for _, region := range plan.GetCreates() {
+			info := core.RegionToHexMeta(region).String()
+			// avoid json escape character to make the output readable
+			info = strings.ReplaceAll(info, "<", "{ ") // the extra space is intentional
+			info = strings.ReplaceAll(info, ">", "}")
+			output = append(output, fmt.Sprintf("create region %v", info))
+		}
+		outputs[fmt.Sprintf("store %d", storeID)] = output
+	}
+	return outputs
 }
 
-func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region) bool {
-	numFailedVoters := 0
-	numLiveVoters := 0
+func (u *unsafeRecoveryController) getAffectedTableDigest() []string {
+	var details []string
+	if len(u.affectedMetaRegions) != 0 {
+		regions := ""
+		for r := range u.affectedMetaRegions {
+			regions += fmt.Sprintf("%d, ", r)
+		}
+		details = append(details, "affected meta regions: "+strings.Trim(regions, ", "))
+	}
+	if len(u.affectedTableIDs) != 0 {
+		tables := ""
+		for t := range u.affectedTableIDs {
+			tables += fmt.Sprintf("%d, ", t)
+		}
+		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+	}
+	return details
+}
+
+func (u *unsafeRecoveryController) recordAffectedRegion(region *metapb.Region) {
+	isMeta, tableID := codec.Key(region.StartKey).MetaOrTable()
+	if isMeta {
+		u.affectedMetaRegions[region.GetId()] = struct{}{}
+	} else if tableID != 0 {
+		u.affectedTableIDs[tableID] = struct{}{}
+	}
+}
+
+func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, onlyIncoming bool) bool {
+	hasQuorum := func(voters []*metapb.Peer) bool {
+		numFailedVoters := 0
+		numLiveVoters := 0
+
+		for _, voter := range voters {
+			if _, ok := u.failedStores[voter.StoreId]; ok {
+				numFailedVoters += 1
+			} else {
+				numLiveVoters += 1
+			}
+		}
+		return numFailedVoters < numLiveVoters
+	}
+
+	// consider joint consensus
+	var incomingVoters []*metapb.Peer
+	var outgoingVoters []*metapb.Peer
+
 	for _, peer := range region.Peers {
-		if peer.Role != metapb.PeerRole_Voter && peer.Role != metapb.PeerRole_IncomingVoter {
+		if peer.Role == metapb.PeerRole_Voter || peer.Role == metapb.PeerRole_IncomingVoter {
+			incomingVoters = append(incomingVoters, peer)
+		}
+		if peer.Role == metapb.PeerRole_Voter || peer.Role == metapb.PeerRole_DemotingVoter {
+			outgoingVoters = append(outgoingVoters, peer)
+		}
+	}
+
+	return hasQuorum(incomingVoters) && (onlyIncoming || hasQuorum(outgoingVoters))
+}
+
+func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*metapb.Peer {
+	// if it can form a quorum after exiting the joint state, then no need to demotes any peer
+	if u.canElectLeader(region, true) {
+		return nil
+	}
+
+	var failedPeers []*metapb.Peer
+	for _, peer := range region.Peers {
+		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
 			continue
 		}
 		if _, ok := u.failedStores[peer.StoreId]; ok {
-			numFailedVoters += 1
-		} else {
-			numLiveVoters += 1
+			failedPeers = append(failedPeers, peer)
 		}
 	}
-	return numFailedVoters < numLiveVoters
+	return failedPeers
 }
 
-func (u *unsafeRecoveryController) containsFailedPeers(region *metapb.Region) bool {
-	for _, peer := range region.Peers {
-		if _, ok := u.failedStores[peer.StoreId]; ok {
+var _ btree.Item = &regionItem{}
+
+type regionItem struct {
+	report  *pdpb.PeerReport
+	storeID uint64
+}
+
+// Less returns true if the region start key is less than the other.
+func (r *regionItem) Less(other btree.Item) bool {
+	left := r.Region().GetStartKey()
+	right := other.(*regionItem).Region().GetStartKey()
+	return bytes.Compare(left, right) < 0
+}
+
+func (r *regionItem) Contains(key []byte) bool {
+	start, end := r.Region().GetStartKey(), r.Region().GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+}
+
+func (r *regionItem) Region() *metapb.Region {
+	return r.report.GetRegionState().GetRegion()
+}
+
+func (r *regionItem) IsInitialized() bool {
+	return len(r.Region().Peers) != 0
+}
+
+func (r *regionItem) IsEpochStale(other *regionItem) bool {
+	re := r.Region().GetRegionEpoch()
+	oe := other.Region().GetRegionEpoch()
+	return re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()
+}
+
+func (r *regionItem) IsRaftStale(origin *regionItem) bool {
+	rs := r.report.GetRaftState()
+	os := origin.report.GetRaftState()
+	if rs.GetHardState().GetTerm() < os.GetHardState().GetTerm() {
+		return true
+	} else if rs.GetHardState().GetTerm() == os.GetHardState().GetTerm() {
+		if rs.GetLastIndex() < os.GetLastIndex() {
 			return true
+		} else if rs.GetLastIndex() == os.GetLastIndex() {
+			if rs.GetHardState().GetCommit() < os.GetHardState().GetCommit() {
+				return true
+			} else if rs.GetHardState().GetCommit() == os.GetHardState().GetCommit() {
+				// better use voter rather than learner
+				for _, peer := range r.Region().GetPeers() {
+					if peer.StoreId == r.storeID {
+						if peer.Role == metapb.PeerRole_DemotingVoter || peer.Role == metapb.PeerRole_Learner {
+							return true
+						}
+					}
+				}
+			}
 		}
 	}
 	return false
 }
 
-func keepOneReplica(storeID uint64, region *metapb.Region) {
-	var newPeerList []*metapb.Peer
-	for _, peer := range region.Peers {
-		if peer.StoreId == storeID {
-			if peer.Role != metapb.PeerRole_Voter {
-				peer.Role = metapb.PeerRole_Voter
-			}
-			newPeerList = append(newPeerList, peer)
-		}
+const (
+	defaultBTreeDegree = 64
+)
+
+type regionTree struct {
+	regions map[uint64]*regionItem
+	tree    *btree.BTree
+}
+
+func newRegionTree() *regionTree {
+	return &regionTree{
+		regions: make(map[uint64]*regionItem),
+		tree:    btree.New(defaultBTreeDegree),
 	}
-	region.Peers = newPeerList
 }
 
-type peerStorePair struct {
-	peer    *pdpb.PeerReport
-	storeID uint64
+func (t *regionTree) size() int {
+	return t.tree.Len()
 }
 
-func getOverlapRanges(tree *btree.BTree, region *metapb.Region) []*metapb.Region {
-	var overlapRanges []*metapb.Region
-	tree.DescendLessOrEqual(regionItem{region}, func(item btree.Item) bool {
-		if bytes.Compare(item.(regionItem).region.StartKey, region.StartKey) < 0 && bytes.Compare(item.(regionItem).region.EndKey, region.StartKey) > 0 {
-			overlapRanges = append(overlapRanges, item.(regionItem).region)
+func (t *regionTree) contains(regionID uint64) bool {
+	_, ok := t.regions[regionID]
+	return ok
+}
+
+// getOverlaps gets the regions which are overlapped with the specified region range.
+func (t *regionTree) getOverlaps(item *regionItem) []*regionItem {
+	// note that find() gets the last item that is less or equal than the region.
+	// in the case: |_______a_______|_____b_____|___c___|
+	// new region is     |______d______|
+	// find() will return regionItem of region_a
+	// and both startKey of region_a and region_b are less than endKey of region_d,
+	// thus they are regarded as overlapped regions.
+	result := t.find(item)
+	if result == nil {
+		result = item
+	}
+
+	end := item.Region().GetEndKey()
+	var overlaps []*regionItem
+	t.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
+		over := i.(*regionItem)
+		if len(end) > 0 && bytes.Compare(end, over.Region().GetStartKey()) <= 0 {
+			return false
 		}
+		overlaps = append(overlaps, over)
+		return true
+	})
+	return overlaps
+}
+
+// find is a helper function to find an item that contains the regions start key.
+func (t *regionTree) find(item *regionItem) *regionItem {
+	var result *regionItem
+	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
+		result = i.(*regionItem)
 		return false
 	})
 
-	tree.AscendGreaterOrEqual(regionItem{region}, func(item btree.Item) bool {
-		if len(region.EndKey) != 0 && bytes.Compare(item.(regionItem).region.StartKey, region.EndKey) > 0 {
-			return false
-		}
-		overlapRanges = append(overlapRanges, item.(regionItem).region)
-		return true
-	})
-	return overlapRanges
-}
+	if result == nil || !result.Contains(item.Region().GetStartKey()) {
+		return nil
+	}
 
-func (u *unsafeRecoveryController) generateRecoveryPlan() {
-	u.Lock()
-	defer u.Unlock()
-	newestRegionReports := make(map[uint64]*pdpb.PeerReport)
-	var allPeerReports []*peerStorePair
-	for storeID, storeReport := range u.storeReports {
-		for _, peerReport := range storeReport.PeerReports {
-			allPeerReports = append(allPeerReports, &peerStorePair{peerReport, storeID})
-			regionID := peerReport.RegionState.Region.Id
-			if existing, ok := newestRegionReports[regionID]; ok {
-				if existing.RegionState.Region.RegionEpoch.Version >= peerReport.RegionState.Region.RegionEpoch.Version &&
-					existing.RegionState.Region.RegionEpoch.ConfVer >= peerReport.RegionState.Region.RegionEpoch.Version &&
-					existing.RaftState.LastIndex >= peerReport.RaftState.LastIndex {
-					continue
-				}
-			}
-			newestRegionReports[regionID] = peerReport
-		}
-	}
-	recoveredRanges := btree.New(2)
-	healthyRegions := make(map[uint64]*pdpb.PeerReport)
-	inUseRegions := make(map[uint64]bool)
-	for _, report := range newestRegionReports {
-		region := report.RegionState.Region
-		// TODO(v01dstar): Whether the group can elect a leader should not merely rely on failed stores / peers, since it is possible that all reported peers are stale.
-		if u.canElectLeader(report.RegionState.Region) {
-			healthyRegions[region.Id] = report
-			inUseRegions[region.Id] = true
-			recoveredRanges.ReplaceOrInsert(regionItem{report.RegionState.Region})
-		}
-	}
-	sort.SliceStable(allPeerReports, func(i, j int) bool {
-		return allPeerReports[i].peer.RegionState.Region.RegionEpoch.Version > allPeerReports[j].peer.RegionState.Region.RegionEpoch.Version
-	})
-	for _, peerStorePair := range allPeerReports {
-		region := peerStorePair.peer.RegionState.Region
-		storeID := peerStorePair.storeID
-		lastEnd := region.StartKey
-		reachedTheEnd := false
-		var creates []*metapb.Region
-		var update *metapb.Region
-		for _, overlapRegion := range getOverlapRanges(recoveredRanges, region) {
-			if bytes.Compare(lastEnd, overlapRegion.StartKey) < 0 {
-				newRegion := proto.Clone(region).(*metapb.Region)
-				keepOneReplica(storeID, newRegion)
-				newRegion.StartKey = lastEnd
-				newRegion.EndKey = overlapRegion.StartKey
-				if _, inUse := inUseRegions[region.Id]; inUse {
-					newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
-					creates = append(creates, newRegion)
-				} else {
-					inUseRegions[region.Id] = true
-					update = newRegion
-				}
-				recoveredRanges.ReplaceOrInsert(regionItem{newRegion})
-				if len(overlapRegion.EndKey) == 0 {
-					reachedTheEnd = true
-					break
-				}
-				lastEnd = overlapRegion.EndKey
-			} else if len(overlapRegion.EndKey) == 0 {
-				reachedTheEnd = true
-				break
-			} else if bytes.Compare(overlapRegion.EndKey, lastEnd) > 0 {
-				lastEnd = overlapRegion.EndKey
-			}
-		}
-		if !reachedTheEnd && (bytes.Compare(lastEnd, region.EndKey) < 0 || len(region.EndKey) == 0) {
-			newRegion := proto.Clone(region).(*metapb.Region)
-			keepOneReplica(storeID, newRegion)
-			newRegion.StartKey = lastEnd
-			newRegion.EndKey = region.EndKey
-			if _, inUse := inUseRegions[region.Id]; inUse {
-				newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
-				creates = append(creates, newRegion)
-			} else {
-				inUseRegions[region.Id] = true
-				update = newRegion
-			}
-			recoveredRanges.ReplaceOrInsert(regionItem{newRegion})
-		}
-		if len(creates) != 0 || update != nil {
-			storeRecoveryPlan, exists := u.storeRecoveryPlans[storeID]
-			if !exists {
-				u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
-				storeRecoveryPlan = u.storeRecoveryPlans[storeID]
-			}
-			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, creates...)
-			if update != nil {
-				storeRecoveryPlan.Updates = append(storeRecoveryPlan.Updates, update)
-			}
-		} else if _, healthy := healthyRegions[region.Id]; !healthy {
-			// If this peer contributes nothing to the recovered ranges, and it does not belong to a healthy region, delete it.
-			storeRecoveryPlan, exists := u.storeRecoveryPlans[storeID]
-			if !exists {
-				u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
-				storeRecoveryPlan = u.storeRecoveryPlans[storeID]
-			}
-			storeRecoveryPlan.Deletes = append(storeRecoveryPlan.Deletes, region.Id)
-		}
-	}
-	// There may be ranges that are covered by no one. Find these empty ranges, create new regions that cover them and evenly distribute newly created regions among all stores.
-	lastEnd := []byte("")
-	var creates []*metapb.Region
-	recoveredRanges.Ascend(func(item btree.Item) bool {
-		region := item.(regionItem).region
-		if !bytes.Equal(region.StartKey, lastEnd) {
-			newRegion := &metapb.Region{}
-			newRegion.StartKey = lastEnd
-			newRegion.EndKey = region.StartKey
-			newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
-			newRegion.RegionEpoch = &metapb.RegionEpoch{ConfVer: 1, Version: 1}
-			creates = append(creates, newRegion)
-		}
-		lastEnd = region.EndKey
-		return true
-	})
-	if !bytes.Equal(lastEnd, []byte("")) {
-		newRegion := &metapb.Region{}
-		newRegion.StartKey = lastEnd
-		newRegion.Id, _ = u.cluster.GetAllocator().Alloc()
-		creates = append(creates, newRegion)
-	}
-	var allStores []uint64
-	for storeID := range u.storeReports {
-		allStores = append(allStores, storeID)
-	}
-	for idx, create := range creates {
-		storeID := allStores[idx%len(allStores)]
-		peerID, _ := u.cluster.GetAllocator().Alloc()
-		create.Peers = []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}}
-		storeRecoveryPlan, exists := u.storeRecoveryPlans[storeID]
-		if !exists {
-			u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
-			storeRecoveryPlan = u.storeRecoveryPlans[storeID]
-		}
-		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, create)
-	}
-	log.Info("Plan generated")
-	if len(u.storeRecoveryPlans) == 0 {
-		log.Info("Nothing to do")
-		u.stage = finished
-		return
-	}
-	for store, plan := range u.storeRecoveryPlans {
-		log.Info("Store plan", zap.String("store", strconv.FormatUint(store, 10)), zap.String("plan", proto.MarshalTextString(plan)))
-	}
-	u.stage = recovering
-}
-
-func getPeerDigest(peer *metapb.Peer) string {
-	return strconv.FormatUint(peer.Id, 10) + ", " + strconv.FormatUint(peer.StoreId, 10) + ", " + peer.Role.String()
-}
-
-func getRegionDigest(region *metapb.Region) string {
-	if region == nil {
-		return "nil"
-	}
-	regionID := strconv.FormatUint(region.Id, 10)
-	regionStartKey := core.HexRegionKeyStr(region.StartKey)
-	regionEndKey := core.HexRegionKeyStr(region.EndKey)
-	var peers string
-	for _, peer := range region.Peers {
-		peers += "(" + getPeerDigest(peer) + "), "
-	}
-	return fmt.Sprintf("region %s [%s, %s) {%s}", regionID, regionStartKey, regionEndKey, peers)
-}
-
-func getStoreDigest(storeReport *pdpb.StoreReport) string {
-	if storeReport == nil {
-		return "nil"
-	}
-	var result string
-	for _, peerReport := range storeReport.PeerReports {
-		result += getRegionDigest(peerReport.RegionState.Region) + ", "
-	}
 	return result
 }
 
-// Show returns the current status of ongoing unsafe recover operation.
-func (u *unsafeRecoveryController) Show() []string {
-	u.RLock()
-	defer u.RUnlock()
-	switch u.stage {
-	case ready:
-		return []string{"No on-going operation."}
-	case collectingClusterInfo:
-		var status []string
-		status = append(status, fmt.Sprintf("Collecting cluster info from all alive stores, %d/%d.", u.numStoresReported, len(u.storeReports)))
-		var reported, unreported string
-		for storeID, report := range u.storeReports {
-			if report == nil {
-				unreported += strconv.FormatUint(storeID, 10) + ","
-			} else {
-				reported += strconv.FormatUint(storeID, 10) + ","
-			}
-		}
-		status = append(status, "Stores that have reported to PD: "+reported)
-		status = append(status, "Stores that have not reported to PD: "+unreported)
-		return status
-	case recovering:
-		var status []string
-		status = append(status, fmt.Sprintf("Waiting for recover commands being applied, %d/%d", u.numStoresPlanExecuted, len(u.storeRecoveryPlans)))
-		status = append(status, "Recovery plan:")
-		for storeID, plan := range u.storeRecoveryPlans {
-			planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
-			for _, create := range plan.Creates {
-				planDigest += getRegionDigest(create) + ", "
-			}
-			planDigest += "; updates: "
-			for _, update := range plan.Updates {
-				planDigest += getRegionDigest(update) + ", "
-			}
-			planDigest += "; deletes: "
-			for _, deletion := range plan.Deletes {
-				planDigest += strconv.FormatUint(deletion, 10) + ", "
-			}
-			status = append(status, planDigest)
-		}
-		status = append(status, "Execution progess:")
-		for storeID, applied := range u.executionResults {
-			if !applied {
-				status = append(status, strconv.FormatUint(storeID, 10)+"not yet applied, last report: "+getStoreDigest(u.executionReports[storeID]))
-			}
-		}
-		return status
-	case finished:
-		return []string{"Last recovery has finished."}
+// Insert the peer report of one region int the tree.
+// It finds and deletes all the overlapped regions first, and then
+// insert the new region.
+func (t *regionTree) insert(item *regionItem) (bool, error) {
+	overlaps := t.getOverlaps(item)
+
+	if t.contains(item.Region().GetId()) {
+		// it's ensured by the `buildUpFromReports` that only insert the latest peer of one region.
+		return false, errors.Errorf("region %v shouldn't be updated twice", item.Region().GetId())
 	}
-	return []string{"Undefined status"}
+
+	for _, old := range overlaps {
+		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
+		if old.IsEpochStale(item) {
+			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, old)
+		}
+	}
+	if len(overlaps) != 0 {
+		return false, nil
+	}
+
+	t.regions[item.Region().GetId()] = item
+	t.tree.ReplaceOrInsert(item)
+	return true, nil
 }
 
-// History returns the history logs of the current unsafe recover operation.
-func (u *unsafeRecoveryController) History() []string {
-	u.RLock()
-	defer u.RUnlock()
-	if u.stage <= ready {
-		return []string{"No unasfe recover has been triggered since PD restarted."}
+func (u *unsafeRecoveryController) getRecoveryPlan(storeID uint64) *pdpb.RecoveryPlan {
+	if _, exists := u.storeRecoveryPlans[storeID]; !exists {
+		u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
 	}
-	var history []string
-	if u.stage >= collectingClusterInfo {
-		history = append(history, "Store reports collection:")
-		for storeID, report := range u.storeReports {
-			if report == nil {
-				history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": waiting for report.")
-			} else {
-				history = append(history, "Store "+strconv.FormatUint(storeID, 10)+": "+getStoreDigest(report))
+	return u.storeRecoveryPlans[storeID]
+}
+
+func (u *unsafeRecoveryController) buildUpFromReports() (*regionTree, map[uint64][]*regionItem, error) {
+	peersMap := make(map[uint64][]*regionItem)
+	// Go through all the peer reports to build up the newest region tree
+	for storeID, storeReport := range u.storeReports {
+		for _, peerReport := range storeReport.PeerReports {
+			item := &regionItem{report: peerReport, storeID: storeID}
+			peersMap[item.Region().GetId()] = append(peersMap[item.Region().GetId()], item)
+		}
+	}
+
+	// find the report of the leader
+	newestPeerReports := make([]*regionItem, 0, len(peersMap))
+	for _, peers := range peersMap {
+		var latest *regionItem
+		for _, peer := range peers {
+			if latest == nil || latest.IsEpochStale(peer) {
+				latest = peer
+			}
+		}
+		if !latest.IsInitialized() {
+			// ignore the uninitialized peer
+			continue
+		}
+		newestPeerReports = append(newestPeerReports, latest)
+	}
+
+	// sort in descending order of epoch
+	sort.SliceStable(newestPeerReports, func(i, j int) bool {
+		return newestPeerReports[j].IsEpochStale(newestPeerReports[i])
+	})
+
+	newestRegionTree := newRegionTree()
+	for _, peer := range newestPeerReports {
+		_, err := newestRegionTree.insert(peer)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return newestRegionTree, peersMap, nil
+}
+
+func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem, forCommitMerge bool) bool {
+	if u.err != nil {
+		return false
+	}
+	hasPlan := false
+
+	selectLeader := func(region *metapb.Region) *regionItem {
+		var leader *regionItem
+		for _, peer := range peersMap[region.GetId()] {
+			if leader == nil || leader.IsRaftStale(peer) {
+				leader = peer
+			}
+		}
+		return leader
+	}
+
+	hasForceLeader := func(region *metapb.Region) bool {
+		for _, peer := range peersMap[region.GetId()] {
+			if peer.report.IsForceLeader {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Check the regions in newest Region Tree to see if it can still elect leader
+	// considering the failed stores
+	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
+		report := item.(*regionItem).report
+		region := item.(*regionItem).Region()
+		if !u.canElectLeader(region, false) {
+			if hasForceLeader(region) {
+				// already is a force leader, skip
+				return true
+			}
+			if forCommitMerge && !report.HasCommitMerge {
+				// check force leader only for ones has commit merge to avoid the case that
+				// target region can't catch up log for the source region due to force leader
+				// propose an empty raft log on being leader
+				return true
+			} else if !forCommitMerge && report.HasCommitMerge {
+				u.err = errors.Errorf("unexpected commit merge state for report %v", report)
+				return false
+			}
+			// the peer with largest log index/term may have lower commit/apply index, namely, lower epoch version
+			// so find which peer should to be the leader instead of using peer info in the region tree.
+			leader := selectLeader(region)
+			if leader == nil {
+				u.err = errors.Errorf("can't select leader for region %v", region)
+				return false
+			}
+			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
+			if storeRecoveryPlan.ForceLeader == nil {
+				storeRecoveryPlan.ForceLeader = &pdpb.ForceLeader{}
+				for store := range u.failedStores {
+					storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, store)
+				}
+			}
+			storeRecoveryPlan.ForceLeader.EnterForceLeaders = append(storeRecoveryPlan.ForceLeader.EnterForceLeaders, region.GetId())
+			u.recordAffectedRegion(leader.Region())
+			hasPlan = true
+		}
+		return true
+	})
+
+	// TODO: need to resolve the case 2
+	// it's hard to distinguish it with unfinished split region
+	// and it's rare, so won't do it now
+
+	return hasPlan
+}
+
+func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
+	if u.err != nil {
+		return false
+	}
+	hasPlan := false
+
+	findForceLeader := func(peersMap map[uint64][]*regionItem, region *metapb.Region) *regionItem {
+		var leader *regionItem
+		for _, peer := range peersMap[region.GetId()] {
+			if peer.report.IsForceLeader {
+				leader = peer
+				break
+			}
+		}
+		return leader
+	}
+
+	// Check the regions in newest Region Tree to see if it can still elect leader
+	// considering the failed stores
+	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
+		region := item.(*regionItem).Region()
+		if !u.canElectLeader(region, false) {
+			leader := findForceLeader(peersMap, region)
+			if leader == nil {
+				// can't find the force leader, maybe a newly split region, skip
+				return true
+			}
+			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
+			storeRecoveryPlan.Demotes = append(storeRecoveryPlan.Demotes,
+				&pdpb.DemoteFailedVoters{
+					RegionId:     region.GetId(),
+					FailedVoters: u.getFailedPeers(leader.Region()),
+				},
+			)
+			u.recordAffectedRegion(leader.Region())
+			hasPlan = true
+		}
+		return true
+	})
+
+	// Tombstone the peers of region not presented in the newest region tree
+	for storeID, storeReport := range u.storeReports {
+		for _, peerReport := range storeReport.PeerReports {
+			region := peerReport.GetRegionState().Region
+			if !newestRegionTree.contains(region.GetId()) {
+				if !u.canElectLeader(region, false) {
+					// the peer is not in the valid regions, should be deleted directly
+					storeRecoveryPlan := u.getRecoveryPlan(storeID)
+					storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
+					u.recordAffectedRegion(region)
+					hasPlan = true
+				}
 			}
 		}
 	}
-	if u.stage >= recovering {
-		history = append(history, "Recovery plan:")
-		for storeID, plan := range u.storeRecoveryPlans {
-			planDigest := "Store " + strconv.FormatUint(storeID, 10) + ", creates: "
-			for _, create := range plan.Creates {
-				planDigest += getRegionDigest(create) + ", "
-			}
-			planDigest += "; updates: "
-			for _, update := range plan.Updates {
-				planDigest += getRegionDigest(update) + ", "
-			}
-			planDigest += "; deletes: "
-			for _, deletion := range plan.Deletes {
-				planDigest += strconv.FormatUint(deletion, 10) + ", "
-			}
-			history = append(history, planDigest)
+	return hasPlan
+}
+
+func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) bool {
+	if u.err != nil {
+		return false
+	}
+	hasPlan := false
+
+	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
+		regionID, err := u.cluster.GetAllocator().Alloc()
+		if err != nil {
+			return nil, err
 		}
-		history = append(history, "Execution progress:")
-		for storeID, applied := range u.executionResults {
-			executionDigest := "Store " + strconv.FormatUint(storeID, 10)
-			if !applied {
-				executionDigest += "not yet finished, "
-			} else {
-				executionDigest += "finished, "
+		peerID, err := u.cluster.GetAllocator().Alloc()
+		if err != nil {
+			return nil, err
+		}
+		return &metapb.Region{
+			Id:          regionID,
+			StartKey:    startKey,
+			EndKey:      endKey,
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			Peers:       []*metapb.Peer{{Id: peerID, StoreId: storeID, Role: metapb.PeerRole_Voter}},
+		}, nil
+	}
+
+	// There may be ranges that are covered by no one. Find these empty ranges, create new
+	// regions that cover them and evenly distribute newly created regions among all stores.
+	lastEnd := []byte("")
+	var lastStoreID uint64
+	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
+		region := item.(*regionItem).Region()
+		storeID := item.(*regionItem).storeID
+		if !bytes.Equal(region.StartKey, lastEnd) {
+			newRegion, err := createRegion(lastEnd, region.StartKey, storeID)
+			if err != nil {
+				u.err = err
+				return false
 			}
-			executionDigest += getStoreDigest(u.executionReports[storeID])
-			history = append(history, executionDigest)
+			// paranoid check: shouldn't overlap with any of the peers
+			for _, peers := range peersMap {
+				for _, peer := range peers {
+					if !peer.IsInitialized() {
+						continue
+					}
+					if (bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 &&
+						(len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0)) ||
+						((len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) &&
+							(len(newRegion.EndKey) == 0 || (len(peer.Region().EndKey) != 0 && bytes.Compare(peer.Region().EndKey, newRegion.EndKey) <= 0))) {
+						u.err = errors.Errorf("Find overlap peer %v with newly created empty region %v", core.RegionToHexMeta(peer.Region()), core.RegionToHexMeta(newRegion))
+						return false
+					}
+				}
+			}
+			storeRecoveryPlan := u.getRecoveryPlan(storeID)
+			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+			u.recordAffectedRegion(newRegion)
+			hasPlan = true
+		}
+		lastEnd = region.EndKey
+		lastStoreID = storeID
+		return true
+	})
+	if u.err != nil {
+		return false
+	}
+
+	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
+		if lastStoreID == 0 {
+			// the last store id is invalid, so choose a random one
+			for storeID := range u.storeReports {
+				lastStoreID = storeID
+				break
+			}
+		}
+		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
+		if err != nil {
+			u.err = err
+			return false
+		}
+		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
+		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
+		u.recordAffectedRegion(newRegion)
+		hasPlan = true
+	}
+	return hasPlan
+}
+
+func (u *unsafeRecoveryController) generateExitForceLeaderPlan() bool {
+	hasPlan := false
+	for storeID, storeReport := range u.storeReports {
+		for _, peerReport := range storeReport.PeerReports {
+			if peerReport.IsForceLeader {
+				_ = u.getRecoveryPlan(storeID)
+				hasPlan = true
+				break
+			}
 		}
 	}
-	return history
+	return hasPlan
 }
