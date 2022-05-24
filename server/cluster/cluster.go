@@ -1834,6 +1834,8 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
+	c.RLock()
+	defer c.RUnlock()
 	c.onStoreVersionChangeLocked()
 }
 
