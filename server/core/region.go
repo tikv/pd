@@ -184,7 +184,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	if origin != nil && bucketEnable {
+	if bucketEnable && origin != nil {
 		r.buckets = origin.buckets
 	}
 }

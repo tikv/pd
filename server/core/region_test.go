@@ -227,9 +227,9 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		same          bool
 	}{
 		{nil, nil, true},
-		{nil, &metapb.Buckets{RegionId: 1, Version: 2}, false},
-		{&metapb.Buckets{RegionId: 1, Version: 2}, &metapb.Buckets{RegionId: 1, Version: 3}, false},
-		{&metapb.Buckets{RegionId: 1, Version: 2}, nil, true},
+		{nil, &metapb.Buckets{RegionId: 100, Version: 2}, false},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, &metapb.Buckets{RegionId: 100, Version: 3}, true},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, nil, true},
 	}
 	for _, d := range data {
 		var origin *RegionInfo
