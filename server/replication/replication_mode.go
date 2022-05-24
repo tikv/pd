@@ -177,6 +177,7 @@ type HTTPReplicationStatus struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
 		StateID         uint64  `json:"state_id,omitempty"`
+		ACIDConsistent  bool    `json:"acid_consistent"`
 		TotalRegions    int     `json:"total_regions,omitempty"`
 		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
@@ -195,6 +196,7 @@ func (m *ModeManager) GetReplicationStatusHTTP() *HTTPReplicationStatus {
 		status.DrAutoSync.LabelKey = m.config.DRAutoSync.LabelKey
 		status.DrAutoSync.State = m.drAutoSync.State
 		status.DrAutoSync.StateID = m.drAutoSync.StateID
+		status.DrAutoSync.ACIDConsistent = m.drAutoSync.State != drStateSyncRecover
 		status.DrAutoSync.RecoverProgress = m.drAutoSync.RecoverProgress
 		status.DrAutoSync.TotalRegions = m.drAutoSync.TotalRegions
 		status.DrAutoSync.SyncedRegions = m.drAutoSync.SyncedRegions
