@@ -764,7 +764,7 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 // @Produce json
 // @Success 200 {object} RegionsInfo
 // @Failure 400 {string} string "The input is invalid."
-// @Router /regions/topkeys [get]
+// @Router /regions/keys [get]
 func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateKeys() < b.GetApproximateKeys()

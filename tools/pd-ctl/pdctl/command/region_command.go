@@ -40,7 +40,7 @@ var (
 	regionsConfVerPrefix    = "pd/api/v1/regions/confver"
 	regionsVersionPrefix    = "pd/api/v1/regions/version"
 	regionsSizePrefix       = "pd/api/v1/regions/size"
-	regionTopKeysPrefix     = "pd/api/v1/regions/topkeys"
+	regionTopKeysPrefix     = "pd/api/v1/regions/keys"
 	regionsKeyPrefix        = "pd/api/v1/regions/key"
 	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
 	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
