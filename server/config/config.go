@@ -204,7 +204,11 @@ const (
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
-	defaultMaxRequestBytes         = uint(1.5 * 1024 * 1024)                   // 1.5MB
+
+	// The default max bytes for grpc message
+	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
+	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
