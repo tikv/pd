@@ -17,7 +17,6 @@ package region_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +140,7 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 			return a.GetApproximateSize() < b.GetApproximateSize()
 		}, 2)},
-		// region topkeys []limit command
+		// region topkeys [limit] command
 		{[]string{"region", "topkeys", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 			return a.GetApproximateKeys() < b.GetApproximateKeys()
 		}, 2)},
@@ -178,7 +177,6 @@ func (s *regionTestSuite) TestRegion(c *C) {
 	}
 
 	for _, testCase := range testRegionsCases {
-		fmt.Println("case:", testCase.args)
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, e := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(e, IsNil)
