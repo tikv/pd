@@ -156,9 +156,9 @@ func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlew
 	return err
 }
 
-func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value *ratelimit.DimensionConfig) error {
+func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := h.svr.GetServiceMiddlewareConfig()
-	rateLimitCfg := make(map[string]*ratelimit.DimensionConfig)
+	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
 	for label, item := range cfg.LimiterConfig {
 		rateLimitCfg[label] = item
 	}
@@ -238,7 +238,7 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		cfg.QPS = qps
 		cfg.QPSBurst = brust
 	}
-	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(cfg))
+	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
 	switch {
 	case status&ratelimit.QPSChanged != 0:
 		qpsRateUpdatedFlag = "QPS rate limiter is changed."
