@@ -262,7 +262,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
