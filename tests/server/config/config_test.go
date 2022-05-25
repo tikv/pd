@@ -66,7 +66,7 @@ func (s *testConfigPresistSuite) TestRateLimitConfigReload(c *C) {
 	leader := s.cluster.GetServer(s.cluster.GetLeader())
 
 	c.Assert(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig, HasLen, 0)
-	limitCfg := ratelimit.NewLimiterConfig()
+	limitCfg := make(map[string]ratelimit.DimensionConfig)
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
 
 	input := map[string]interface{}{
