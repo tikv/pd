@@ -503,7 +503,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		srcStoreID := srcStore.GetID()
 		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 		if isUniformFirstPriority && isUniformSecondPriority {
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.srcStore.GetID(), 10)).Inc()
 			continue
 		}
 		for _, srcPeerStat := range bs.filterHotPeers(srcStore) {
