@@ -51,7 +51,9 @@ func (r *RangeTree) Update(item RangeItem) []RangeItem {
 		r.tree.Delete(old)
 		children := r.factory(item.GetStartKey(), item.GetEndKey(), old)
 		for _, child := range children {
-			if bytes.Compare(child.GetStartKey(), child.GetEndKey()) < 0 {
+			if c := bytes.Compare(child.GetStartKey(), child.GetEndKey()); c < 0 {
+				r.tree.ReplaceOrInsert(child)
+			} else if c > 0 && len(child.GetEndKey()) == 0 {
 				r.tree.ReplaceOrInsert(child)
 			}
 		}

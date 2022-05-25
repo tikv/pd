@@ -23,7 +23,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -60,7 +60,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
@@ -158,6 +158,7 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
+	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 	
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
