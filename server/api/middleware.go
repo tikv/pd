@@ -121,8 +121,10 @@ func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next
 		return
 	}
 
-	// There is no need to check whether requestInfo is available like getting RaftCluster
-	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		requestInfo = requestutil.GetRequestInfo(r)
+	}
 
 	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
 	if labels == nil {
@@ -168,8 +170,10 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 		next(w, r)
 		return
 	}
-	// There is no need to check whether requestInfo is available like getting RaftCluster
-	requestInfo, _ := requestutil.RequestInfoFrom(r.Context())
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		requestInfo = requestutil.GetRequestInfo(r)
+	}
 
 	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
 	rateLimiter := s.svr.GetServiceRateLimiter()
