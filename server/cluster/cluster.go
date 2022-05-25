@@ -1687,10 +1687,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	c.Lock()
 	defer c.Unlock()
 
+	var failedStores []uint64
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
 			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
+				failedStores = append(failedStores, store.GetID())
 				continue
 			}
 			// the store has already been tombstone
@@ -1705,6 +1707,16 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
+	}
+	var stores string
+	if len(failedStores) != 0 {
+		for i, storeID := range failedStores {
+			stores += fmt.Sprintf("%d", storeID)
+			if i != len(failedStores)-1 {
+				stores += ", "
+			}
+		}
+		return errors.Errorf("failed stores: %v", stores)
 	}
 	return nil
 }
@@ -1834,6 +1846,8 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
+	c.RLock()
+	defer c.RUnlock()
 	c.onStoreVersionChangeLocked()
 }
 
