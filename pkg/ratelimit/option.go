@@ -54,7 +54,11 @@ func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatu
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
 
-	cfg := l.labelConfig[label]
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{}
+		l.labelConfig[label] = cfg
+	}
 	if cfg.ConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
@@ -74,7 +78,11 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
 
-	cfg := l.labelConfig[label]
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{}
+		l.labelConfig[label] = cfg
+	}
 	if cfg.QPS == limit && cfg.QPSBurst == burst {
 		return QPSNoChange
 	}
