@@ -1449,7 +1449,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
 				}
-			} else {
+			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
