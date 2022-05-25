@@ -41,7 +41,7 @@ type minResolvedTS struct {
 	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
 }
 
-// @Tags minresolvedts
+// @Tags min_resolved_ts
 // @Summary Get cluster-level min resolved ts.
 // @Produce json
 // @Success 200 {array} minResolvedTS

@@ -117,7 +117,7 @@ func (c *coordinator) patrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.cluster.GetUnsafeRecoveryController() != nil && c.cluster.GetUnsafeRecoveryController().IsRunning() {
+		if c.cluster.GetUnsafeRecoveryController().IsRunning() {
 			// Skip patrolling regions during unsafe recovery.
 			continue
 		}
@@ -311,6 +311,9 @@ func (c *coordinator) runUntilStop() {
 
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {
@@ -525,7 +528,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() {
+		if !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning() {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
@@ -901,7 +904,7 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused() && !(s.cluster.GetUnsafeRecoveryController() != nil && s.cluster.GetUnsafeRecoveryController().IsRunning())
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning()
 }
 
 // isPaused returns if a scheduler is paused.

@@ -315,3 +315,10 @@ func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 		region.interval = interval
 	}
 }
+
+// SetFromHeartbeat sets if the region info comes from the region heartbeat.
+func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.fromHeartbeat = fromHeartbeat
+	}
+}

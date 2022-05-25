@@ -91,6 +91,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	}
 	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
 	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
+	c.Assert(newOpt.GetMaxMovableHotPeerSize(), Equals, int64(512))
 }
 
 func (s *testConfigSuite) TestReloadUpgrade(c *C) {

@@ -456,11 +456,6 @@ func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
 }
 
-// IsAuditEnabled returns whether audit middleware is enabled
-func (o *PersistOptions) IsAuditEnabled() bool {
-	return o.GetPDServerConfig().EnableAudit
-}
-
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
@@ -511,6 +506,15 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().EnableLocationReplacement
+}
+
+// GetMaxMovableHotPeerSize returns the max movable hot peer size.
+func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
+	size := o.GetScheduleConfig().MaxMovableHotPeerSize
+	if size <= 0 {
+		size = defaultMaxMovableHotPeerSize
+	}
+	return size
 }
 
 // IsDebugMetricsEnabled returns if debug metrics is enabled.
