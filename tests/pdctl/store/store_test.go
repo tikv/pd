@@ -25,7 +25,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -60,6 +62,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 				Store: &metapb.Store{
 					Id:            1,
 					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
 					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
@@ -70,6 +73,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 				Store: &metapb.Store{
 					Id:            3,
 					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
 					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
@@ -269,6 +273,7 @@ func (s *storeTestSuite) TestStore(c *C) {
 		store2 := &metapb.Store{
 			Id:            uint64(id),
 			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
 		pdctl.MustPutStore(c, leaderServer.GetServer(), store2)
@@ -352,15 +357,21 @@ func (s *storeTestSuite) TestStore(c *C) {
 	c.Assert(limit, Equals, 25.0)
 
 	// store remove-tombstone
-	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	args = []string{"-u", pdAddr, "store"}
+	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	storesInfo = new(api.StoresInfo)
 	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
-	c.Assert([]*api.StoreInfo{storeInfo}, HasLen, 1)
+	c.Assert(storesInfo.Count, Equals, 1)
+	args = []string{"-u", pdAddr, "store", "remove-tombstone"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	storesInfo = new(api.StoresInfo)
+	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
+	c.Assert(storesInfo.Count, Equals, 0)
 
 	// It should be called after stores remove-tombstone.
 	args = []string{"-u", pdAddr, "stores", "show", "limit"}
@@ -421,4 +432,69 @@ func (s *storeTestSuite) TestStore(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "rate should less than"), IsTrue)
+}
+
+// https://github.com/tikv/pd/issues/5024
+func (s *storeTestSuite) TestTombstoneStore(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := cmd.GetRootCmd()
+
+	stores := []*api.StoreInfo{
+		{
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            2,
+					State:         metapb.StoreState_Tombstone,
+					NodeState:     metapb.NodeState_Removed,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Tombstone.String(),
+			},
+		},
+		{
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            3,
+					State:         metapb.StoreState_Tombstone,
+					NodeState:     metapb.NodeState_Removed,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Tombstone.String(),
+			},
+		},
+		{
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            4,
+					State:         metapb.StoreState_Tombstone,
+					NodeState:     metapb.NodeState_Removed,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Tombstone.String(),
+			},
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store.Store.Store)
+	}
+	defer cluster.Destroy()
+	pdctl.MustPutRegion(c, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(c, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	// store remove-tombstone
+	args := []string{"-u", pdAddr, "store", "remove-tombstone"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	c.Assert(err, IsNil)
+	message := string(output)
+	c.Assert(strings.Contains(message, "2") && strings.Contains(message, "3"), IsTrue)
 }
