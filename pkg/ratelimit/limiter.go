@@ -20,14 +20,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// LimiterConfig is the config of Limiter
-type LimiterConfig map[string]DimensionConfig
-
-// NewLimiterConfig returns a new LimiterConfig
-func NewLimiterConfig() LimiterConfig {
-	return make(map[string]DimensionConfig)
-}
-
 // DimensionConfig is the limit dimension config of one label
 type DimensionConfig struct {
 	// qps conifg
@@ -40,7 +32,7 @@ type DimensionConfig struct {
 // Limiter is a controller for the request rate.
 type Limiter struct {
 	configMux          sync.Mutex
-	labelConfig        LimiterConfig
+	labelConfig        map[string]*DimensionConfig
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 	// the label which is in labelAllowList won't be limited
@@ -51,7 +43,7 @@ type Limiter struct {
 func NewLimiter() *Limiter {
 	return &Limiter{
 		labelAllowList: make(map[string]struct{}),
-		labelConfig:    NewLimiterConfig(),
+		labelConfig:    make(map[string]*DimensionConfig),
 	}
 }
 
@@ -104,7 +96,7 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 	return 0, 0
 }
 
-// deleteQPSLimiter deletes QPS limiter of a given label
+// deleteQPSLimiter deletes QPS limiter of the given label
 func (l *Limiter) deleteQPSLimiter(label string) {
 	l.qpsLimiter.Delete(label)
 }
@@ -118,7 +110,7 @@ func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, curre
 	return 0, 0
 }
 
-// deleteConcurrencyLimiter deletes concurrency limiter of a given label
+// deleteConcurrencyLimiter deletes concurrency limiter of the given label
 func (l *Limiter) deleteConcurrencyLimiter(label string) {
 	l.concurrencyLimiter.Delete(label)
 }

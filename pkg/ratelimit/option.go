@@ -35,8 +35,6 @@ const (
 	ConcurrencyDeleted
 	// InAllowList shows that limiter's config isn't changed because it is in in allow list.
 	InAllowList
-	// Ignore shows that the status can be ignored when initiated
-	Ignore
 )
 
 // Option is used to create a limiter with the optional settings.
@@ -48,7 +46,7 @@ type Option func(string, *Limiter) UpdateStatus
 func AddLabelAllowList() Option {
 	return func(label string, l *Limiter) UpdateStatus {
 		l.labelAllowList[label] = struct{}{}
-		return Ignore
+		return 0
 	}
 }
 
@@ -56,7 +54,11 @@ func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatu
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
 
-	cfg := l.labelConfig[label]
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{}
+		l.labelConfig[label] = cfg
+	}
 	if cfg.ConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
@@ -76,7 +78,11 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 	l.configMux.Lock()
 	defer l.configMux.Unlock()
 
-	cfg := l.labelConfig[label]
+	cfg, ok := l.labelConfig[label]
+	if !ok {
+		cfg = &DimensionConfig{}
+		l.labelConfig[label] = cfg
+	}
 	if cfg.QPS == limit && cfg.QPSBurst == burst {
 		return QPSNoChange
 	}
