@@ -156,9 +156,9 @@ func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlew
 	return err
 }
 
-func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value *ratelimit.DimensionConfig) error {
 	cfg := h.svr.GetServiceMiddlewareConfig()
-	rateLimitCfg := ratelimit.NewLimiterConfig()
+	rateLimitCfg := make(map[string]*ratelimit.DimensionConfig)
 	for label, item := range cfg.LimiterConfig {
 		rateLimitCfg[label] = item
 	}
