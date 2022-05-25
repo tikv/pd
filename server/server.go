@@ -1508,8 +1508,9 @@ func (s *Server) reloadConfigFromKV() error {
 
 func (s *Server) loadRateLimitConfig() {
 	cfg := s.serviceMiddlewarePersistOptions.GetRateLimitConfig().LimiterConfig
-	for key, value := range cfg {
-		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(value))
+	for key := range cfg {
+		value := cfg[key]
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
 	}
 }
 
