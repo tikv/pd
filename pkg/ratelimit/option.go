@@ -121,7 +121,7 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 }
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
-func UpdateDimensionConfig(cfg DimensionConfig) Option {
+func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 	return func(label string, l *Limiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
