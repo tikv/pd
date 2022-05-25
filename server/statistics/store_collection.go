@@ -193,8 +193,8 @@ func (s *storeStatistics) Collect() {
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
 	configs["region-max-size"] = float64(s.storeConfig.GetRegionMaxSize())
 	configs["region-split-size"] = float64(s.storeConfig.GetRegionSplitSize())
-	configs["region-max-keys"] = float64(s.storeConfig.GetRegionSplitKeys())
-	configs["region-split-keys"] = float64(s.storeConfig.GetRegionMaxKeys())
+	configs["region-split-keys"] = float64(s.storeConfig.GetRegionSplitKeys())
+	configs["region-max-keys"] = float64(s.storeConfig.GetRegionMaxKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
