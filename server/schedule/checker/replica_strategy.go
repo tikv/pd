@@ -76,10 +76,10 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		Sort(filter.RegionScoreComparer(s.cluster.GetOpts()))     // less region score is better
 	candidateLen := targetCandidate.Len()
 	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), strictStateFilter).PickFirst() // the filter does not ignore temp states
+	if candidateLen == 0 {
+		return 0, false
+	}
 	if target == nil {
-		if candidateLen == 0 {
-			return 0, false
-		}
 		return 0, true // filter by temporary states
 	}
 	return target.GetID(), false
