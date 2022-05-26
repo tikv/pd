@@ -759,6 +759,19 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 }
 
 // @Tags region
+// @Summary List regions with the largest keys.
+// @Param limit query integer false "Limit count" default(16)
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/keys [get]
+func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetApproximateKeys() < b.GetApproximateKeys()
+	})
+}
+
+// @Tags region
 // @Summary Accelerate regions scheduling a in given range, only receive hex format for keys
 // @Accept json
 // @Param body body object true "json params"
