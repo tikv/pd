@@ -15,6 +15,7 @@
 package ratelimit
 
 import (
+	"context"
 	"time"
 
 	"github.com/tikv/pd/pkg/syncutil"
@@ -81,4 +82,12 @@ func (l *RateLimiter) Limit() rate.Limit {
 // A zero Burst allows no events, unless limit == Inf.
 func (l *RateLimiter) Burst() int {
 	return l.limiter.Burst()
+}
+
+// WaitN blocks until lim permits n events to happen.
+// It returns an error if n exceeds the Limiter's burst size, the Context is
+// canceled, or the expected wait time exceeds the Context's Deadline.
+// The burst limit is ignored if the rate limit is Inf.
+func (l *RateLimiter) WaitN(ctx context.Context, n int) error {
+	return l.limiter.WaitN(ctx, n)
 }
