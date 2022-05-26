@@ -48,14 +48,21 @@ const (
 //  |   idle    |
 //  |           |
 //  +-----------+
-//  	  |
-//  	  |
-//  	  |
-//  	  v              +-----------+
-//  +-----------+        |           |          +-----------+           +-----------+
-//  |           |------->|   force   |--------->|           |           |           |           +-----------+
-//  |  collect  |        | LeaderFor |          |  force    |           | exitForce |           |           |
-//  |  Report   |        |CommitMerge|----+-----|  Leader   |-----+---->|  Leader   |---------->|  failed   |
+//        |
+//        v
+//  +-----------+
+//  |           |
+//  |  collect  |
+//  |  Report   |
+//  |           |
+//  +-----------+
+//        |
+//        v
+//  +-----------+        +-----------+
+//  |           |        |           |          +-----------+           +-----------+
+//  | tombstone |------->|   force   |--------->|           |           |           |           +-----------+
+//  |  tiflash  |        | LeaderFor |          |  force    |           | exitForce |           |           |
+//  |  learner  |        |CommitMerge|----+-----|  Leader   |-----+---->|  Leader   |---------->|  failed   |
 //  |           |        |           |    |     |           |     |     |           |           |           |
 //  +-----------+        +-----------+    |     +-----------+     |     +-----------+           +-----------+
 //  	  |  							  |        |     ^        |
@@ -318,7 +325,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 					break
 				} else if !reCheck {
 					reCheck = true
-					stage = forceLeaderForCommitMerge
+					stage = tombstoneTiFlashLearner
 					continue
 				}
 				fallthrough
