@@ -238,22 +238,22 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		cfg.QPS = qps
 		cfg.QPSBurst = brust
 	}
-	status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
-	switch {
-	case status&ratelimit.QPSChanged != 0:
-		qpsRateUpdatedFlag = "QPS rate limiter is changed."
-	case status&ratelimit.QPSDeleted != 0:
-		qpsRateUpdatedFlag = "QPS rate limiter is deleted."
-	}
-	switch {
-	case status&ratelimit.ConcurrencyChanged != 0:
-		concurrencyUpdatedFlag = "Concurrency limiter is changed."
-	case status&ratelimit.ConcurrencyDeleted != 0:
-		concurrencyUpdatedFlag = "Concurrency limiter is deleted."
-	}
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
+		status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
+		switch {
+		case status&ratelimit.QPSChanged != 0:
+			qpsRateUpdatedFlag = "QPS rate limiter is changed."
+		case status&ratelimit.QPSDeleted != 0:
+			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
+		}
+		switch {
+		case status&ratelimit.ConcurrencyChanged != 0:
+			concurrencyUpdatedFlag = "Concurrency limiter is changed."
+		case status&ratelimit.ConcurrencyDeleted != 0:
+			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
+		}
 		err := h.updateRateLimitConfig("limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
