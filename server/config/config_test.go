@@ -83,7 +83,7 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(newOpt.Reload(storage), IsNil)
 	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, 4)
+	c.Assert(schedulers, HasLen, len(DefaultSchedulers))
 	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
 	for i, s := range schedulers {
 		c.Assert(s.Type, Equals, DefaultSchedulers[i].Type)
