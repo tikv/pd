@@ -97,3 +97,8 @@ func (c *StoreCandidates) RandomPick() *core.StoreInfo {
 func (c *StoreCandidates) PickAll() []*core.StoreInfo {
 	return c.Stores
 }
+
+// Len returns a length of candidate list.
+func (c *StoreCandidates) Len() int {
+	return len(c.Stores)
+}
