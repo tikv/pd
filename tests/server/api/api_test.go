@@ -503,7 +503,6 @@ var _ = Suite(&testProgressSuite{})
 type testProgressSuite struct{}
 
 func (s *testProgressSuite) TestRemovingProgress(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -527,6 +526,7 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	}
 	_, err = grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
+	leader.GetRaftCluster().SetPrepared()
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -606,12 +606,10 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	// store 2: (10+40)/2 = 25s
 	c.Assert(p.LeftSeconds, Equals, 25.0)
 
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 
 func (s *testProgressSuite) TestPreparingProgress(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -685,8 +683,16 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
 
+	// is not prepared
 	time.Sleep(2 * time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the action"), IsTrue)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
+
 	// size is not changed.
+	leader.GetRaftCluster().SetPrepared()
+	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	var p api.Progress
 	c.Assert(json.Unmarshal(output, &p), IsNil)
@@ -722,7 +728,6 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	c.Assert(p.CurrentSpeed, Equals, 1.0)
 	c.Assert(p.LeftSeconds, Equals, 179.0)
 
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 
