@@ -25,14 +25,14 @@ import (
 // It implements `Available` function which is not included in `golang.org/x/time/rate`.
 // Note: AvailableN will increase the wait time of WaitN.
 type RateLimiter struct {
-	mu syncutil.Mutex
-	*rate.Limiter
+	mu      syncutil.Mutex
+	limiter *rate.Limiter
 }
 
 // NewRateLimiter returns a new Limiter that allows events up to rate r (it means limiter refill r token per second)
 // and permits bursts of at most b tokens.
 func NewRateLimiter(r float64, b int) *RateLimiter {
-	return &RateLimiter{Limiter: rate.NewLimiter(rate.Limit(r), b)}
+	return &RateLimiter{limiter: rate.NewLimiter(rate.Limit(r), b)}
 }
 
 // Available returns whether limiter has enough tokens.
@@ -41,7 +41,7 @@ func (l *RateLimiter) Available(n int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	r := l.Limiter.ReserveN(now, n)
+	r := l.limiter.ReserveN(now, n)
 	delay := r.DelayFrom(now)
 	r.CancelAt(now)
 	return delay == 0
@@ -57,5 +57,5 @@ func (l *RateLimiter) AllowN(n int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	return l.Limiter.AllowN(now, n)
+	return l.limiter.AllowN(now, n)
 }
