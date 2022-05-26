@@ -96,8 +96,8 @@ func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int
 	return 0, 0
 }
 
-// deleteQPSLimiter deletes QPS limiter of the given label
-func (l *Limiter) deleteQPSLimiter(label string) {
+// QPSUnlimit deletes QPS limiter of the given label
+func (l *Limiter) QPSUnlimit(label string) {
 	l.qpsLimiter.Delete(label)
 }
 
@@ -110,8 +110,8 @@ func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, curre
 	return 0, 0
 }
 
-// deleteConcurrencyLimiter deletes concurrency limiter of the given label
-func (l *Limiter) deleteConcurrencyLimiter(label string) {
+// ConcurrencyUnlimit deletes concurrency limiter of the given label
+func (l *Limiter) ConcurrencyUnlimit(label string) {
 	l.concurrencyLimiter.Delete(label)
 }
 
