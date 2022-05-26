@@ -89,6 +89,7 @@ func (l *RateLimiter) Burst() int {
 // canceled, or the expected wait time exceeds the Context's Deadline.
 // The burst limit is ignored if the rate limit is Inf.
 func (l *RateLimiter) WaitN(ctx context.Context, n int) error {
-	// Currently there is no need to add lock because WaitN and Available will not be used together
+	// Currently there is no need to add lock
+	// because WaitN and Available will not be used together.
 	return l.limiter.WaitN(ctx, n)
 }
