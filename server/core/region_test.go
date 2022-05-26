@@ -232,13 +232,8 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil, true},
 	}
 	for _, d := range data {
-		var origin *RegionInfo
-		if d.originBuckets != nil {
-			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.UpdateBuckets(d.originBuckets, origin.GetBuckets())
-		}
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.UpdateBuckets(d.buckets, r.GetBuckets())
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.buckets))
 		r.Inherit(origin, true)
 		if d.same {
 			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)

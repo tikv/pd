@@ -423,8 +423,8 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 
 // UpdateBuckets sets the buckets of the region.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
-	// the bucket can't be nil except in the test cases.
 	if buckets == nil {
+		atomic.StorePointer(&r.buckets, nil)
 		return true
 	}
 	// only need to update bucket keys, versions.

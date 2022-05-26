@@ -576,7 +576,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 
 	// case1: region is not exist
 	buckets := &metapb.Buckets{
-		RegionId: 0,
+		RegionId: 1,
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
@@ -584,16 +584,16 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
-	n, np := uint64(1), uint64(1)
+	n, np := uint64(2), uint64(2)
 	regions := newTestRegions(n, n, np)
 	for _, store := range stores {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 	}
 
 	c.Assert(cluster.processRegionHeartbeat(regions[0]), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), IsNil)
 	c.Assert(cluster.processReportBuckets(buckets), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), DeepEquals, buckets)
 
 	// case3: the bucket version is same.
 	c.Assert(cluster.processReportBuckets(buckets), IsNil)
@@ -604,11 +604,11 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
 	c.Assert(cluster.processReportBuckets(newBuckets), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, newBuckets)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), DeepEquals, newBuckets)
 
-	//case5: region update should inherit buckets.
+	// case5: region update should inherit buckets.
 	newBuckets2 := &metapb.Buckets{
-		RegionId: 0,
+		RegionId: 1,
 		Version:  1,
 		Keys:     [][]byte{},
 	}
@@ -618,13 +618,14 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	config := cluster.storeConfigManager.GetStoreConfig()
 	config.Coprocessor.EnableRegionBucket = true
 	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets().GetKeys(), HasLen, 2)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), HasLen, 2)
 
 	// case 6: disable region bucket in
 	config.Coprocessor.EnableRegionBucket = false
-	newRegion2 := regions[0].Clone(core.WithIncConfVer(), core.SetBuckets(newBuckets2))
+	newRegion2 := regions[0].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	c.Assert(cluster.processRegionHeartbeat(newRegion2), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets().GetKeys(), HasLen, 0)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), HasLen, 0)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
