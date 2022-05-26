@@ -59,3 +59,26 @@ func (l *RateLimiter) AllowN(n int) bool {
 	now := time.Now()
 	return l.limiter.AllowN(now, n)
 }
+
+// SetBurst is shorthand for SetBurstAt(time.Now(), newBurst).
+func (l *RateLimiter) SetBurst(burst int) {
+	l.limiter.SetBurst(burst)
+}
+
+// SetLimit is shorthand for SetLimitAt(time.Now(), newLimit).
+func (l *RateLimiter) SetLimit(limit rate.Limit) {
+	l.limiter.SetLimit(limit)
+}
+
+// Limit returns the maximum overall event rate.
+func (l *RateLimiter) Limit() rate.Limit {
+	return l.limiter.Limit()
+}
+
+// Burst returns the maximum burst size. Burst is the maximum number of tokens
+// that can be consumed in a single call to Allow, Reserve, or Wait, so higher
+// Burst values allow more events to happen at once.
+// A zero Burst allows no events, unless limit == Inf.
+func (l *RateLimiter) Burst() int {
+	return l.limiter.Burst()
+}
