@@ -576,7 +576,7 @@ func (u *unsafeRecoveryController) getCreateEmptyRegionPlanDigest() map[string][
 			// avoid json escape character to make the output readable
 			info = strings.ReplaceAll(info, "<", "{ ") // the extra space is intentional
 			info = strings.ReplaceAll(info, ">", "}")
-			output = append(output, fmt.Sprintf("create region %v", info))
+			output = append(output, fmt.Sprintf("create region %d: %v", region.GetId(), info))
 		}
 		outputs[fmt.Sprintf("store %d", storeID)] = output
 	}
