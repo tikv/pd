@@ -496,6 +496,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *RaftCluster) SetPrepared() {
+	c.coordinator.prepareChecker.Lock()
+	defer c.coordinator.prepareChecker.Unlock()
+	c.coordinator.prepareChecker.prepared = true
+}
+
 // GetRegionScatter returns the region scatter.
 func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	return c.coordinator.regionScatterer
@@ -1449,7 +1456,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
 				}
-			} else {
+			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
