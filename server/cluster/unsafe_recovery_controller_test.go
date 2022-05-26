@@ -530,6 +530,177 @@ func (s *testUnsafeRecoverySuite) TestOneLearner(c *C) {
 	}
 }
 
+func (s *testUnsafeRecoverySuite) TestTiflashLearnerPeer(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(5, "6.0.0") {
+		if store.GetID() == 3 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		4: {},
+		5: {},
+	}, 60), IsNil)
+
+	reports := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1},
+							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 13, StoreId: 5},
+						}}}},
+		}},
+		2: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("x"),
+						EndKey:      []byte("z"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 6},
+						Peers: []*metapb.Peer{
+							{Id: 21, StoreId: 2, Role: metapb.PeerRole_Learner},
+							{Id: 22, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 23, StoreId: 4},
+						}}}},
+		}},
+		3: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 11, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1},
+							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 13, StoreId: 5},
+						}}}},
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("x"),
+						EndKey:      []byte("z"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 6},
+						Peers: []*metapb.Peer{
+							{Id: 21, StoreId: 2, Role: metapb.PeerRole_Learner},
+							{Id: 22, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 23, StoreId: 4},
+						}}}},
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1003,
+						StartKey:    []byte("z"),
+						EndKey:      []byte(""),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 31, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 32, StoreId: 4},
+							{Id: 33, StoreId: 5},
+						}}}},
+		}},
+	}
+
+	advanceUntilFinished(c, recoveryController, reports)
+
+	expects := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1},
+							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 13, StoreId: 5, Role: metapb.PeerRole_Learner},
+						}}}},
+		}},
+		2: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("x"),
+						EndKey:      []byte("z"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
+						Peers: []*metapb.Peer{
+							{Id: 21, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 22, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 23, StoreId: 4, Role: metapb.PeerRole_Learner},
+						}}}},
+		}},
+		3: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("x"),
+						EndKey:      []byte("z"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
+						Peers: []*metapb.Peer{
+							{Id: 21, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 22, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 23, StoreId: 4, Role: metapb.PeerRole_Learner},
+						}}}},
+		}},
+	}
+
+	for storeID, report := range reports {
+		for i, p := range report.PeerReports {
+			// As the store of newly created region is not fixed, check it separately
+			if p.RegionState.Region.GetId() == 1 {
+				c.Assert(p, DeepEquals, &pdpb.PeerReport{
+					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+					RegionState: &raft_serverpb.RegionLocalState{
+						Region: &metapb.Region{
+							Id:          1,
+							StartKey:    []byte("z"),
+							EndKey:      []byte(""),
+							RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+							Peers: []*metapb.Peer{
+								{Id: 2, StoreId: storeID},
+							},
+						},
+					},
+				})
+				report.PeerReports = append(report.PeerReports[:i], report.PeerReports[i+1:]...)
+				break
+			}
+		}
+		if result, ok := expects[storeID]; ok {
+			c.Assert(report.PeerReports, DeepEquals, result.PeerReports)
+		} else {
+			c.Assert(len(report.PeerReports), Equals, 0)
+		}
+	}
+}
+
 func (s *testUnsafeRecoverySuite) TestUninitializedPeer(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
