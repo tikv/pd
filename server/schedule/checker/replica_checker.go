@@ -161,7 +161,7 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
-		if filterByTempState && r.regionWaitingList.Len() <= DefaultCacheSize {
+		if filterByTempState {
 			r.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil
@@ -247,7 +247,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
-		if filterByTempState && r.regionWaitingList.Len() <= DefaultCacheSize {
+		if filterByTempState {
 			r.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil
