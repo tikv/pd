@@ -21,6 +21,7 @@ type UpdateStatus uint32
 
 // Flags for limiter.
 const (
+	eps float64 = 1e-8
 	// QPSNoChange shows that limiter's config isn't changed.
 	QPSNoChange UpdateStatus = 1 << iota
 	// QPSChanged shows that limiter's config is changed and not deleted.
@@ -63,9 +64,8 @@ func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatu
 		return ConcurrencyNoChange
 	}
 	cfg.ConcurrencyLimit = limit
-	l.labelConfig[label] = cfg
 	if limit < 1 {
-		l.deleteConcurrencyLimiter(label)
+		l.ConcurrencyUnlimit(label)
 		return ConcurrencyDeleted
 	}
 	if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(limit)); exist {
@@ -83,14 +83,13 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 		cfg = &DimensionConfig{}
 		l.labelConfig[label] = cfg
 	}
-	if cfg.QPS == limit && cfg.QPSBurst == burst {
+	if (cfg.QPS-limit < eps && cfg.QPS-limit > -eps) && cfg.QPSBurst == burst {
 		return QPSNoChange
 	}
 	cfg.QPS = limit
 	cfg.QPSBurst = burst
-	l.labelConfig[label] = cfg
 	if limit <= 0 || burst < 1 {
-		l.deleteQPSLimiter(label)
+		l.QPSUnlimit(label)
 		return QPSDeleted
 	}
 	if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
