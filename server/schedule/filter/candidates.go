@@ -91,3 +91,16 @@ func (c *StoreCandidates) RandomPick() *core.StoreInfo {
 	}
 	return c.Stores[rand.Intn(len(c.Stores))]
 }
+<<<<<<< HEAD
+=======
+
+// PickAll return all stores in candidate list.
+func (c *StoreCandidates) PickAll() []*core.StoreInfo {
+	return c.Stores
+}
+
+// Len returns a length of candidate list.
+func (c *StoreCandidates) Len() int {
+	return len(c.Stores)
+}
+>>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
