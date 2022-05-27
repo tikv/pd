@@ -102,8 +102,8 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
-// EnableRegionBucket return ture if the region bucket is enabled.
-func (c *StoreConfig) EnableRegionBucket() bool {
+// IsEnableRegionBucket return ture if the region bucket is enabled.
+func (c *StoreConfig) IsEnableRegionBucket() bool {
 	if c == nil {
 		return false
 	}
