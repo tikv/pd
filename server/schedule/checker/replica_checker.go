@@ -157,11 +157,13 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	}
 	log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 	regionStores := r.cluster.GetRegionStores(region)
-	target := r.strategy(region).SelectStoreToAdd(regionStores)
+	target, filterByTempState := r.strategy(region).SelectStoreToAdd(regionStores)
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "no-target-store").Inc()
-		r.regionWaitingList.Put(region.GetID(), nil)
+		if filterByTempState {
+			r.regionWaitingList.Put(region.GetID(), nil)
+		}
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
@@ -210,7 +212,7 @@ func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 		checkerCounter.WithLabelValues("replica_checker", "all-right").Inc()
 		return nil
 	}
-	newStore := strategy.SelectStoreToImprove(regionStores, oldStore)
+	newStore, _ := strategy.SelectStoreToImprove(regionStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no better peer", zap.Uint64("region-id", region.GetID()))
 		checkerCounter.WithLabelValues("replica_checker", "not-better").Inc()
@@ -240,12 +242,14 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	}
 
 	regionStores := r.cluster.GetRegionStores(region)
-	target := r.strategy(region).SelectStoreToFix(regionStores, storeID)
+	target, filterByTempState := r.strategy(region).SelectStoreToFix(regionStores, storeID)
 	if target == 0 {
 		reason := fmt.Sprintf("no-store-%s", status)
 		checkerCounter.WithLabelValues("replica_checker", reason).Inc()
-		r.regionWaitingList.Put(region.GetID(), nil)
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
+		if filterByTempState {
+			r.regionWaitingList.Put(region.GetID(), nil)
+		}
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
