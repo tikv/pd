@@ -166,9 +166,9 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	for storeID := uint64(0); storeID <= 4; storeID++ {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsUp() {
-			c.Assert(cluster.buryStore(storeID), NotNil)
+			c.Assert(cluster.BuryStore(storeID), NotNil)
 		} else {
-			c.Assert(cluster.buryStore(storeID), IsNil)
+			c.Assert(cluster.BuryStore(storeID), IsNil)
 		}
 	}
 }
@@ -188,7 +188,7 @@ func (s *testClusterInfoSuite) TestReuseAddress(c *C) {
 	c.Assert(cluster.RemoveStore(3, true), IsNil)
 	// store 4: tombstone
 	c.Assert(cluster.RemoveStore(4, true), IsNil)
-	c.Assert(cluster.buryStore(4), IsNil)
+	c.Assert(cluster.BuryStore(4), IsNil)
 
 	for id := uint64(1); id <= 4; id++ {
 		storeInfo := cluster.GetStore(id)

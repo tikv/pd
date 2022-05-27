@@ -1108,7 +1108,7 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(s.ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
@@ -1139,7 +1139,7 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(rc1, NotNil)
 	// tombstone a store, and remove its record
-	c.Assert(rc1.BuryStore(1, false), IsNil)
+	c.Assert(rc1.BuryStore(1), IsNil)
 	c.Assert(rc1.RemoveTombStoneRecords(), IsNil)
 
 	// transfer PD leader back to the previous PD
@@ -1151,6 +1151,6 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	c.Assert(rc, NotNil)
 
 	// check store count
-	c.Assert(rc.GetMetaCluster(), DeepEquals, meta)
+	c.Assert(rc.GetConfig(), DeepEquals, meta)
 	c.Assert(rc.GetStoreCount(), Equals, 3)
 }
