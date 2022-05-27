@@ -169,7 +169,7 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
 func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	if !cluster.GetStoreConfig().EnableRegionBucket() {
+	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
 		schedulerCounter.WithLabelValues(s.GetName(), "bucket-disable").Inc()
 		return false
 	}
