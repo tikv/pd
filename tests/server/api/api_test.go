@@ -526,7 +526,6 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	}
 	_, err = grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
-	leader.GetRaftCluster().SetPrepared()
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -579,6 +578,16 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
 	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
+	// is not prepared
+	time.Sleep(2 * time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
+
+	leader.GetRaftCluster().SetPrepared()
 	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
