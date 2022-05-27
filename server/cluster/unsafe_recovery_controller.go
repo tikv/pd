@@ -473,7 +473,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	case exitForceLeader:
 		output.Info = "Unsafe recovery enters exit force leader stage"
 		if u.err != nil {
-			output.Details = append(output.Details, u.err.Error())
+			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
 		}
 	case finished:
 		if u.step > 1 {
@@ -1052,6 +1052,15 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		}, nil
 	}
 
+	getRandomStoreID := func() uint64 {
+		for storeID := range u.storeReports {
+			if !u.cluster.GetStore(storeID).IsTiFlash() {
+				return storeID
+			}
+		}
+		return 0
+	}
+
 	// There may be ranges that are covered by no one. Find these empty ranges, create new
 	// regions that cover them and evenly distribute newly created regions among all stores.
 	lastEnd := []byte("")
@@ -1061,8 +1070,12 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 		storeID := item.(*regionItem).storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
 			if u.cluster.GetStore(storeID).IsTiFlash() {
-				u.err = errors.New("can't create new region on tiflash store")
-				return false
+				storeID = getRandomStoreID()
+				// can't create new region on tiflash store, choose a random one
+				if storeID == 0 {
+					u.err = errors.New("can't find available store(exclude tiflash) to create new region")
+					return false
+				}
 			}
 			newRegion, err := createRegion(lastEnd, region.StartKey, storeID)
 			if err != nil {
@@ -1104,9 +1117,10 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
 		if lastStoreID == 0 {
 			// the last store id is invalid, so choose a random one
-			for storeID := range u.storeReports {
-				lastStoreID = storeID
-				break
+			lastStoreID = getRandomStoreID()
+			if lastStoreID == 0 {
+				u.err = errors.New("can't find available store(exclude tiflash) to create new region")
+				return false
 			}
 		}
 		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
