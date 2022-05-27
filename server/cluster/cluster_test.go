@@ -617,7 +617,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
 	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), HasLen, 2)
 
-	// case 6: disable region bucket in
+	// case6: disable region bucket in
 	config.Coprocessor.EnableRegionBucket = false
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	c.Assert(cluster.processRegionHeartbeat(newRegion2), IsNil)
