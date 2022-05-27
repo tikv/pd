@@ -1485,7 +1485,9 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		if c.IsPrepared() {
+			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		}
 		regionCount := c.core.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
 		if regionCount == 0 {
