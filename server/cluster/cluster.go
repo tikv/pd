@@ -1037,10 +1037,10 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	return err
 }
 
-// buryStore marks a store as tombstone in cluster.
+// BuryStore marks a store as tombstone in cluster.
 // The store should be empty before calling this func
 // State transition: Offline -> Tombstone.
-func (c *RaftCluster) buryStore(storeID uint64) error {
+func (c *RaftCluster) BuryStore(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1184,7 +1184,7 @@ func (c *RaftCluster) checkStores() {
 		// If the store is empty, it can be buried.
 		regionCount := c.core.GetStoreRegionCount(offlineStore.GetId())
 		if regionCount == 0 {
-			if err := c.buryStore(offlineStore.GetId()); err != nil {
+			if err := c.BuryStore(offlineStore.GetId()); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))
