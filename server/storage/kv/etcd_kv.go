@@ -91,6 +91,35 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	return keys, values, nil
 }
 
+func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
+	key = path.Join(kv.rootPath, key)
+	
+	ctx, cancel := context.WithTimeout(kv.client.Ctx(), requestTimeout)
+	start := time.Now()
+	resp, err := etcdutil.EtcdKVPutWithTTL(ctx, kv.client, key, value, ttlSeconds)
+	cancel()
+
+	cost := time.Since(start)
+	if cost > slowRequestTime {
+		log.Warn("save to etcd with lease runs too slow",
+			zap.Reflect("response", resp),
+			zap.Duration("cost", cost),
+			errs.ZapError(err))
+	}
+
+	if err != nil {
+		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
+		log.Error("save to etcd with lease meet error",
+			zap.String("key", key),
+			zap.String("value", value),
+			zap.Int64("ttl-seconds", ttlSeconds),
+			errs.ZapError(e),
+		)
+		return e
+	}
+	return nil
+}
+
 func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
@@ -101,55 +130,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	if err != nil {
 		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
 		log.Error("save to etcd meet error", zap.String("key", key), zap.String("value", value), errs.ZapError(e))
-		return e
-	}
-	if !resp.Succeeded {
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
-}
-
-func (kv *etcdKVBase) GrantLease(ttlSeconds int64) (leaseID clientv3.LeaseID, err error) {
-	start := time.Now()
-	ctx, cancel := context.WithTimeout(kv.client.Ctx(), requestTimeout)
-	grantResp, err := kv.client.Grant(ctx, ttlSeconds)
-	cancel()
-	if err != nil {
-		e := errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
-		log.Error("grant lease meet error",
-			zap.Int64("ttl", ttlSeconds),
-			errs.ZapError(e))
-		return 0, e
-	}
-	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow",
-			zap.Reflect("response", grantResp),
-			zap.Duration("cost", cost),
-			errs.ZapError(err))
-	}
-	log.Info("lease granted",
-		zap.Int64("lease-id", int64(grantResp.ID)),
-		zap.Int64("lease-timeout", ttlSeconds))
-	return grantResp.ID, nil
-}
-
-func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
-	leaseID, err := kv.GrantLease(ttlSeconds)
-	if err != nil {
-		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
-	}
-
-	key = path.Join(kv.rootPath, key)
-	txn := NewSlowLogTxn(kv.client)
-	resp, err := txn.Then(clientv3.OpPut(key, value, clientv3.WithLease(leaseID))).Commit()
-	if err != nil {
-		e := errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
-		log.Error("save to etcd with lease meet error",
-			zap.String("key", key),
-			zap.String("value", value),
-			zap.Int64("lease-id", int64(leaseID)),
-			errs.ZapError(e),
-		)
 		return e
 	}
 	if !resp.Succeeded {
