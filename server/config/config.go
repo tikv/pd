@@ -204,7 +204,11 @@ const (
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
-	defaultMaxRequestBytes         = uint(1.5 * 1024 * 1024)                   // 1.5MB
+
+	// The default max bytes for grpc message
+	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
+	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -252,6 +256,8 @@ const (
 	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
 
 	defaultLogFormat = "text"
+
+	defaultMaxMovableHotPeerSize = int64(512)
 )
 
 // Special keys for Labels
@@ -752,6 +758,10 @@ type ScheduleConfig struct {
 
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
+	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -1007,6 +1017,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
+	{Type: "split-bucket"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.

@@ -431,6 +431,8 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.SetPrepared()
 
 	// Put 5 stores.
 	stores := newTestStores(5, "5.0.0")

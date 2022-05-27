@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
@@ -130,6 +131,7 @@ type RaftCluster struct {
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
+	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -220,6 +222,7 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
@@ -491,6 +494,13 @@ func (c *RaftCluster) GetCoordinator() *coordinator {
 // GetOperatorController returns the operator controller.
 func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
+}
+
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *RaftCluster) SetPrepared() {
+	c.coordinator.prepareChecker.Lock()
+	defer c.coordinator.prepareChecker.Unlock()
+	c.coordinator.prepareChecker.prepared = true
 }
 
 // GetRegionScatter returns the region scatter.
@@ -1446,7 +1456,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
 				}
-			} else {
+			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
@@ -1475,7 +1485,9 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		if c.IsPrepared() {
+			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		}
 		regionCount := c.core.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
 		if regionCount == 0 {
@@ -1684,10 +1696,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	c.Lock()
 	defer c.Unlock()
 
+	var failedStores []uint64
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
 			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
+				failedStores = append(failedStores, store.GetID())
 				continue
 			}
 			// the store has already been tombstone
@@ -1702,6 +1716,16 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
+	}
+	var stores string
+	if len(failedStores) != 0 {
+		for i, storeID := range failedStores {
+			stores += fmt.Sprintf("%d", storeID)
+			if i != len(failedStores)-1 {
+				stores += ", "
+			}
+		}
+		return errors.Errorf("failed stores: %v", stores)
 	}
 	return nil
 }
@@ -1831,6 +1855,8 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
+	c.RLock()
+	defer c.RUnlock()
 	c.onStoreVersionChangeLocked()
 }
 
@@ -1918,6 +1944,15 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
 		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
 	return c.hotStat.RegionStats(statistics.Read, threshold)
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree)
+	if !c.hotBuckets.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(c.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.
