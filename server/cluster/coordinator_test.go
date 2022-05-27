@@ -633,7 +633,8 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 		{5, false},
 		{6, false},
 		{7, false},
-		{8, true},
+		{8, false},
+		{9, true},
 	}
 
 	for _, t := range tbl {
@@ -642,13 +643,12 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
-	nr := &metapb.Region{Id: 8, Peers: []*metapb.Peer{}}
+	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.prepareChecker.sum, Equals, 8)
+	c.Assert(co.prepareChecker.sum, Equals, 9)
 
 	// Now, after server is prepared, there exist some regions with no leader.
-	c.Assert(tc.GetRegion(9).GetLeader().GetStoreId(), Equals, uint64(0))
 	c.Assert(tc.GetRegion(10).GetLeader().GetStoreId(), Equals, uint64(0))
 }
 
