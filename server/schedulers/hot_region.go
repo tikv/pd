@@ -1058,11 +1058,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		sourceLabel = strconv.FormatUint(srcStoreID, 10)
 		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
 
-<<<<<<< HEAD
-		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
-=======
-		if bs.rwTy == statistics.Read && bs.cur.region.GetLeader().GetStoreId() == srcStoreID { // move read leader
->>>>>>> 273fe3d70 (scheduler: fix the hot scheduler panic due to region with no leader (#5004))
+		if bs.rwTy == read && bs.cur.region.GetLeader().GetStoreId() == srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
 				bs.cluster,
