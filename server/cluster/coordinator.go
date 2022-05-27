@@ -39,20 +39,11 @@ import (
 )
 
 const (
-<<<<<<< HEAD
 	runSchedulerCheckInterval = 3 * time.Second
-	collectFactor             = 0.8
+	collectFactor             = 0.9
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
-=======
-	runSchedulerCheckInterval  = 3 * time.Second
-	checkSuspectRangesInterval = 100 * time.Millisecond
-	collectFactor              = 0.9
-	collectTimeout             = 5 * time.Minute
-	maxScheduleRetries         = 10
-	maxLoadConfigRetries       = 10
->>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
 
 	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
