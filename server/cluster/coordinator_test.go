@@ -615,11 +615,7 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-<<<<<<< HEAD
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 8)
-=======
-	c.Assert(co.prepareChecker.sum, Equals, 9)
->>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
+	c.Assert(co.cluster.prepareChecker.sum, Equals, 9)
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	c.Assert(tc.GetRegion(10).GetLeader().GetStoreId(), Equals, uint64(0))
