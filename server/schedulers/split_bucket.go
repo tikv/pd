@@ -171,9 +171,11 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	if !cluster.GetStoreConfig().EnableRegionBucket() {
 		schedulerCounter.WithLabelValues(s.GetName(), "bucket-disable").Inc()
+		return false
 	}
 	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.SplitLimit
 	if !allowed {
+		schedulerCounter.WithLabelValues(s.GetName(), "split-limit").Inc()
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
 	}
 	return allowed
