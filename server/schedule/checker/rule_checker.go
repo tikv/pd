@@ -128,11 +128,18 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
+<<<<<<< HEAD
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to add peer")
+=======
+		if filterByTempState {
+			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+		return nil, errNoStoreToAdd
+>>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -145,11 +152,18 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 
 func (c *RuleChecker) replaceRulePeer(region *core.RegionInfo, rf *placement.RuleFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
+<<<<<<< HEAD
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to replace peer")
+=======
+		if filterByTempState {
+			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+		return nil, errNoStoreToReplace
+>>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
@@ -218,7 +232,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	newStore, _ := strategy.SelectStoreToImprove(ruleStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		return nil, nil
