@@ -512,6 +512,27 @@ func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	c.Assert(cluster.GetClusterVersion(), Equals, "5.0.0")
 }
 
+func (s *testClusterInfoSuite) TestStoreClusterVersion(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	stores := newTestStores(3, "5.0.0")
+	s1, s2, s3 := stores[0].GetMeta(), stores[1].GetMeta(), stores[2].GetMeta()
+	s1.Version = "5.0.1"
+	s2.Version = "5.0.3"
+	s3.Version = "5.0.5"
+	c.Assert(cluster.PutStore(s2), IsNil)
+	c.Assert(cluster.GetClusterVersion(), Equals, s2.Version)
+
+	c.Assert(cluster.PutStore(s1), IsNil)
+	// the cluster version should be 5.0.1(the min one)
+	c.Assert(cluster.GetClusterVersion(), Equals, s1.Version)
+
+	c.Assert(cluster.PutStore(s3), IsNil)
+	// the cluster version should be 5.0.1(the min one)
+	c.Assert(cluster.GetClusterVersion(), Equals, s1.Version)
+}
+
 func (s *testClusterInfoSuite) TestRegionHeartbeatHotStat(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
