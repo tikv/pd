@@ -51,6 +51,7 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/versioninfo"
@@ -130,6 +131,7 @@ type RaftCluster struct {
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
+	hotBuckets               *buckets.HotBucketCache
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -220,9 +222,11 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
+	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
 }
 
 // Start starts a cluster.
@@ -265,7 +269,6 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
 	c.wg.Add(8)
 	go c.runCoordinator()
@@ -493,6 +496,13 @@ func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
 	return c.coordinator.opController
 }
 
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *RaftCluster) SetPrepared() {
+	c.coordinator.prepareChecker.Lock()
+	defer c.coordinator.prepareChecker.Unlock()
+	c.coordinator.prepareChecker.prepared = true
+}
+
 // GetRegionScatter returns the region scatter.
 func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
 	return c.coordinator.regionScatterer
@@ -630,8 +640,6 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
 func (c *RaftCluster) GetUnsafeRecoveryController() *unsafeRecoveryController {
-	c.RLock()
-	defer c.RUnlock()
 	return c.unsafeRecoveryController
 }
 
@@ -991,6 +999,11 @@ func (c *RaftCluster) DropCacheRegion(id uint64) {
 	c.core.RemoveRegionIfExist(id)
 }
 
+// DropCacheAllRegion removes all regions from the cache.
+func (c *RaftCluster) DropCacheAllRegion() {
+	c.core.ResetRegionCache()
+}
+
 // GetMetaStores gets stores from cluster.
 func (c *RaftCluster) GetMetaStores() []*metapb.Store {
 	return c.core.GetMetaStores()
@@ -1172,7 +1185,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	err := c.putStoreLocked(newStore)
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
-		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		c.resetProgress(storeID, store.GetAddress())
 		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval)
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
@@ -1285,8 +1298,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetProgress(storeID, store.GetAddress(), removingAction)
-		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		c.resetProgress(storeID, store.GetAddress())
 		c.hotStat.RemoveRollingStoreStats(storeID)
 	}
 	return err
@@ -1357,7 +1369,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
 			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
 		}
-		c.resetProgress(storeID, store.GetAddress(), removingAction)
+		c.resetProgress(storeID, store.GetAddress())
 	}
 	return err
 }
@@ -1390,7 +1402,7 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.putStoreLocked(newStore)
 	if err == nil {
-		c.resetProgress(storeID, store.GetAddress(), preparingAction)
+		c.resetProgress(storeID, store.GetAddress())
 	}
 	return err
 }
@@ -1438,21 +1450,28 @@ func (c *RaftCluster) checkStores() {
 
 		storeID := store.GetID()
 		if store.IsPreparing() {
-			threshold := c.getThreshold(stores, store)
-			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
-			regionSize := float64(store.GetRegionSize())
-			if store.GetUptime() > c.opt.GetMaxStorePreparingTime() || regionSize >= threshold ||
-				c.GetRegionCount() < core.InitClusterRegionThreshold {
+			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetRegionCount() < core.InitClusterRegionThreshold {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
 						errs.ZapError(err))
 				}
-			} else {
-				remaining := threshold - regionSize
-				// If we add multiple stores, the total will need to be changed.
-				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-				c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+			} else if c.IsPrepared() {
+				threshold := c.getThreshold(stores, store)
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
+				regionSize := float64(store.GetRegionSize())
+				if regionSize >= threshold {
+					if err := c.ReadyToServe(storeID); err != nil {
+						log.Error("change store to serving failed",
+							zap.Stringer("store", store.GetMeta()),
+							errs.ZapError(err))
+					}
+				} else {
+					remaining := threshold - regionSize
+					// If we add multiple stores, the total will need to be changed.
+					c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
+					c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+				}
 			}
 		}
 
@@ -1466,7 +1485,9 @@ func (c *RaftCluster) checkStores() {
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
 		regionSize := c.core.GetStoreRegionSize(id)
-		c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		if c.IsPrepared() {
+			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+		}
 		regionCount := c.core.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
 		if regionCount == 0 {
@@ -1645,20 +1666,20 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
 }
 
-func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string, action string) {
+func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
 	storeLabel := strconv.FormatUint(storeID, 10)
-	var progress string
-	switch action {
-	case removingAction:
-		progress = encodeRemovingProgressKey(storeID)
-	case preparingAction:
-		progress = encodePreparingProgressKey(storeID)
-	}
 
+	progress := encodePreparingProgressKey(storeID)
 	if exist := c.progressManager.RemoveProgress(progress); exist {
-		storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
-		storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
-		storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(0)
+		storesProgressGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
+		storesSpeedGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
+		storesETAGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
+	}
+	progress = encodeRemovingProgressKey(storeID)
+	if exist := c.progressManager.RemoveProgress(progress); exist {
+		storesProgressGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
+		storesSpeedGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
+		storesETAGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
 	}
 }
 
@@ -1675,10 +1696,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	c.Lock()
 	defer c.Unlock()
 
+	var failedStores []uint64
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
 			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
+				failedStores = append(failedStores, store.GetID())
 				continue
 			}
 			// the store has already been tombstone
@@ -1693,6 +1716,16 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
+	}
+	var stores string
+	if len(failedStores) != 0 {
+		for i, storeID := range failedStores {
+			stores += fmt.Sprintf("%d", storeID)
+			if i != len(failedStores)-1 {
+				stores += ", "
+			}
+		}
+		return errors.Errorf("failed stores: %v", stores)
 	}
 	return nil
 }
@@ -1822,6 +1855,8 @@ func (c *RaftCluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, 
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
+	c.RLock()
+	defer c.RUnlock()
 	c.onStoreVersionChangeLocked()
 }
 
@@ -1909,6 +1944,15 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
 		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
 	return c.hotStat.RegionStats(statistics.Read, threshold)
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree)
+	if !c.hotBuckets.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(c.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.

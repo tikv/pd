@@ -203,36 +203,36 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	{
 		// finished op
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
+		c.Assert(oc.checkAddOperator(false, op), IsTrue)
 		op.Start()
-		c.Assert(oc.checkAddOperator(op), IsFalse) // started
+		c.Assert(oc.checkAddOperator(false, op), IsFalse) // started
 		c.Assert(op.Check(region1), IsNil)
 		c.Assert(op.Status(), Equals, operator.SUCCESS)
-		c.Assert(oc.checkAddOperator(op), IsFalse) // success
+		c.Assert(oc.checkAddOperator(false, op), IsFalse) // success
 	}
 	{
 		// finished op canceled
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
+		c.Assert(oc.checkAddOperator(false, op), IsTrue)
 		c.Assert(op.Cancel(), IsTrue)
-		c.Assert(oc.checkAddOperator(op), IsFalse)
+		c.Assert(oc.checkAddOperator(false, op), IsFalse)
 	}
 	{
 		// finished op replaced
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		c.Assert(oc.checkAddOperator(op), IsTrue)
+		c.Assert(oc.checkAddOperator(false, op), IsTrue)
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Replace(), IsTrue)
-		c.Assert(oc.checkAddOperator(op), IsFalse)
+		c.Assert(oc.checkAddOperator(false, op), IsFalse)
 	}
 	{
 		// finished op expired
 		op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 		op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 1})
-		c.Assert(oc.checkAddOperator(op1, op2), IsTrue)
+		c.Assert(oc.checkAddOperator(false, op1, op2), IsTrue)
 		operator.SetOperatorStatusReachTime(op1, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
 		operator.SetOperatorStatusReachTime(op2, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
-		c.Assert(oc.checkAddOperator(op1, op2), IsFalse)
+		c.Assert(oc.checkAddOperator(false, op1, op2), IsFalse)
 		c.Assert(op1.Status(), Equals, operator.EXPIRED)
 		c.Assert(op2.Status(), Equals, operator.EXPIRED)
 	}
@@ -241,11 +241,11 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 	{
 		// unfinished op timeout
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-		c.Assert(oc.checkAddOperator(op), IsTrue)
+		c.Assert(oc.checkAddOperator(false, op), IsTrue)
 		op.Start()
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowOperatorWaitTime))
 		c.Assert(op.CheckTimeout(), IsTrue)
-		c.Assert(oc.checkAddOperator(op), IsFalse)
+		c.Assert(oc.checkAddOperator(false, op), IsFalse)
 	}
 }
 
@@ -616,7 +616,8 @@ func checkRemoveOperatorSuccess(c *C, oc *OperatorController, op *operator.Opera
 }
 
 func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
-	cluster := mockcluster.NewCluster(t.ctx, config.NewTestOptions())
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(t.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
@@ -638,21 +639,29 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 
 	// a batch of operators should be added atomically
 	var batch []*operator.Operator
-	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator()-1; i++ {
+	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator(); i++ {
 		batch = append(batch, addPeerOp(i))
 	}
 	added := controller.AddWaitingOperator(batch...)
-	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()-1))
+	c.Assert(added, Equals, int(cluster.GetSchedulerMaxWaitingOperator()))
 
 	// test adding a batch of operators when some operators will get false in check
 	// and remain operators can be added normally
-	batch = append(batch, addPeerOp(cluster.GetSchedulerMaxWaitingOperator()-1))
+	batch = append(batch, addPeerOp(cluster.GetSchedulerMaxWaitingOperator()))
 	added = controller.AddWaitingOperator(batch...)
 	c.Assert(added, Equals, 1)
 
-	source := newRegionInfo(5, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	scheduleCfg := opts.GetScheduleConfig().Clone()
+	scheduleCfg.SchedulerMaxWaitingOperator = 1
+	opts.SetScheduleConfig(scheduleCfg)
+	batch = append(batch, addPeerOp(100))
+	added = controller.AddWaitingOperator(batch...)
+	c.Assert(added, Equals, 1)
+	c.Assert(controller.operators[uint64(100)], NotNil)
+
+	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
-	target := newRegionInfo(6, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
 
 	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)

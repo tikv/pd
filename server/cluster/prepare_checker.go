@@ -38,8 +38,8 @@ func newPrepareChecker() *prepareChecker {
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
 func (checker *prepareChecker) check(c *core.BasicCluster) bool {
-	checker.RLock()
-	defer checker.RUnlock()
+	checker.Lock()
+	defer checker.Unlock()
 	if checker.prepared {
 		return true
 	}

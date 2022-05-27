@@ -54,9 +54,10 @@ type Coprocessor struct {
 	// split by RegionSplitSize.
 	RegionMaxSize string `json:"region-max-size"`
 	// RegionSplitSize is the split size of a region, region will according to this value to split.
-	RegionSplitSize string `json:"region-split-size"`
-	RegionMaxKeys   int    `json:"region-max-keys"`
-	RegionSplitKeys int    `json:"region-split-keys"`
+	RegionSplitSize    string `json:"region-split-size"`
+	RegionMaxKeys      int    `json:"region-max-keys"`
+	RegionSplitKeys    int    `json:"region-split-keys"`
+	EnableRegionBucket bool   `json:"enable-region-bucket"`
 }
 
 // String implements fmt.Stringer interface.
@@ -66,6 +67,14 @@ func (c *StoreConfig) String() string {
 		return "<nil>"
 	}
 	return string(data)
+}
+
+// EnableRegionBucket return ture if the region bucket is enabled.
+func (c *StoreConfig) EnableRegionBucket() bool {
+	if c == nil {
+		return false
+	}
+	return c.Coprocessor.EnableRegionBucket
 }
 
 // GetRegionMaxSize returns the max region size in MB

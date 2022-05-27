@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
@@ -42,7 +43,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 	reqRegion := request.GetRegion()
@@ -101,7 +102,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if c.GetUnsafeRecoveryController() != nil && c.GetUnsafeRecoveryController().IsRunning() {
+	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 	reqRegion := request.GetRegion()
@@ -235,6 +236,10 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 }
 
 // HandleReportBuckets processes buckets reports from client
-func (c *RaftCluster) HandleReportBuckets(buckets *metapb.Buckets) error {
-	return c.processReportBuckets(buckets)
+func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
+	if err := c.processReportBuckets(b); err != nil {
+		return err
+	}
+	c.hotBuckets.CheckAsync(buckets.NewCheckPeerTask(b))
+	return nil
 }

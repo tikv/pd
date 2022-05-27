@@ -195,6 +195,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.SplitBucketName:
+		if err := h.AddSplitBucketScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case schedulers.GrantHotRegionName:
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
