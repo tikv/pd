@@ -224,27 +224,22 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 	data := []struct {
 		originBuckets *metapb.Buckets
 		buckets       *metapb.Buckets
-		same          bool
 	}{
-		{nil, nil, true},
-		{nil, &metapb.Buckets{RegionId: 100, Version: 2}, false},
-		{&metapb.Buckets{RegionId: 100, Version: 2}, &metapb.Buckets{RegionId: 100, Version: 3}, true},
-		{&metapb.Buckets{RegionId: 100, Version: 2}, nil, true},
+		{nil, nil},
+		{nil, &metapb.Buckets{RegionId: 100, Version: 2}},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, &metapb.Buckets{RegionId: 100, Version: 3}},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
 		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.buckets))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
-		if d.same {
-			c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
-			// region will not inherit bucket keys.
-			if origin.GetBuckets() != nil {
-				newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-				newRegion.Inherit(origin, false)
-				c.Assert(newRegion.GetBuckets(), Not(DeepEquals), d.originBuckets)
-			}
-		} else {
-			c.Assert(r.GetBuckets(), Not(DeepEquals), d.originBuckets)
+		c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
+		// region will not inherit bucket keys.
+		if origin.GetBuckets() != nil {
+			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			newRegion.Inherit(origin, false)
+			c.Assert(newRegion.GetBuckets(), Not(DeepEquals), d.originBuckets)
 		}
 	}
 }
