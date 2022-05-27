@@ -164,7 +164,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
-		if filterByTempState && c.regionWaitingList.Len() <= DefaultCacheSize {
+		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil, errNoStoreToAdd
@@ -184,7 +184,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
-		if filterByTempState && c.regionWaitingList.Len() <= DefaultCacheSize {
+		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil, errNoStoreToReplace
