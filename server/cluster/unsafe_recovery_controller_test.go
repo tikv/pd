@@ -1302,8 +1302,10 @@ func (s *testUnsafeRecoverySuite) TestRemoveFailedStores(c *C) {
 	c.Assert(cluster.GetStore(uint64(1)).IsRemoved(), IsTrue)
 	for _, s := range cluster.GetSchedulers() {
 		paused, err := cluster.IsSchedulerAllowed(s)
-		c.Assert(err, IsNil)
-		c.Assert(paused, IsTrue)
+		if s != "split-bucket-scheduler" {
+			c.Assert(err, IsNil)
+			c.Assert(paused, IsTrue)
+		}
 	}
 
 	// Store 2's last heartbeat is recent, and is not allowed to be removed.
