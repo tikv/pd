@@ -892,7 +892,7 @@ func (u *unsafeRecoveryController) generateTombstoneTiFlashLearnerPlan(newestReg
 		if !u.canElectLeader(region, false) {
 			leader := u.selectLeader(peersMap, region)
 			if leader == nil {
-				u.err = errors.Errorf("can't select leader for region %v", region)
+				u.err = errors.Errorf("can't select leader for region %d: %v", region.GetId(), logutil.RedactStringer(core.RegionToHexMeta(region)))
 				return false
 			}
 			storeID := leader.storeID
@@ -947,7 +947,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 			// so find which peer should to be the leader instead of using peer info in the region tree.
 			leader := u.selectLeader(peersMap, region)
 			if leader == nil {
-				u.err = errors.Errorf("can't select leader for region %v", region)
+				u.err = errors.Errorf("can't select leader for region %d: %v", region.GetId(), logutil.RedactStringer(core.RegionToHexMeta(region)))
 				return false
 			}
 			storeRecoveryPlan := u.getRecoveryPlan(leader.storeID)
