@@ -142,15 +142,10 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
-<<<<<<< HEAD
-		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to add peer")
-=======
 		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
-		return nil, errNoStoreToAdd
->>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
+		return nil, errors.New("no store to add peer")
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -167,15 +162,10 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
-<<<<<<< HEAD
-		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to replace peer")
-=======
 		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}
-		return nil, errNoStoreToReplace
->>>>>>> 68d17598b (checker: only temp state should be added in waiting list (#5010))
+		return nil, errors.New("no store to replace peer")
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
