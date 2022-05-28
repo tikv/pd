@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -342,6 +343,27 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
 		scatterCounter.WithLabelValues("fail", "").Inc()
+
+		if strings.Contains(err.Error(), "cannot build operator for region with nil peer") {
+			scatterCounter.WithLabelValues("fail", "nil-peer").Inc()
+		} else if strings.Contains(err.Error(), "cannot build operator for region with no leader") {
+			scatterCounter.WithLabelValues("fail", "no-leader").Inc()
+		} else if strings.Contains(err.Error(), "cannot build operator for region match no placement rule") {
+			scatterCounter.WithLabelValues("fail", "no-placement-rule").Inc()
+		} else if strings.Contains(err.Error(), "cannot build operator for region which is in joint state") {
+			scatterCounter.WithLabelValues("fail", "in-joint-state").Inc()
+		} else if strings.Contains(err.Error(), "setPeers with mismatch peers") {
+			scatterCounter.WithLabelValues("fail", "mismatch-peers").Inc()
+		} else if strings.Contains(err.Error(), "cannot create operator") {
+			scatterCounter.WithLabelValues("fail", "prepareBuild").Inc()
+		} else if strings.Contains(err.Error(), "no valid leader") {
+			scatterCounter.WithLabelValues("fail", "build-with-JC").Inc()
+		} else if strings.Contains(err.Error(), "fail to build operator: plan is empty, maybe no valid leader") || strings.Contains(err.Error(), "no operator step is built") {
+			scatterCounter.WithLabelValues("fail", "build-without-JC").Inc()
+		} else {
+			scatterCounter.WithLabelValues("fail", "unknown").Inc()
+		}
+
 		for _, peer := range region.GetPeers() {
 			targetPeers[peer.GetStoreId()] = peer
 		}
