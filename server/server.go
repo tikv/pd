@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	gc_server "github.com/tikv/pd/cmd/gc/server"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
@@ -130,6 +131,8 @@ type Server struct {
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
 	storage storage.Storage
+	// safepoint manager
+	gcSafePointManager *gc_server.SafePointManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -410,6 +413,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.gcSafePointManager = gc_server.NewSafepointManager(s.storage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
