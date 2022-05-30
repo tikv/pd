@@ -1493,13 +1493,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 	return c.componentManager
 }
 
-// isPrepared if the cluster information is collected
-func (c *RaftCluster) isPrepared() bool {
-	c.RLock()
-	defer c.RUnlock()
-	return c.prepareChecker.check(c)
-}
-
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	c.RLock()

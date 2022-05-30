@@ -620,7 +620,7 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
-	return c.cluster.isPrepared()
+	return c.cluster.prepareChecker.check(c.cluster)
 }
 
 func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
