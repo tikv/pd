@@ -718,10 +718,12 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	}
 	var err error
 	for _, sc := range s {
-		var delayUntil int64
+		var delayAt, delayUntil int64
 		if t > 0 {
-			delayUntil = time.Now().Unix() + t
+			delayAt = time.Now().Unix()
+			delayUntil = delayAt + t
 		}
+		atomic.StoreInt64(&sc.delayAt, delayAt)
 		atomic.StoreInt64(&sc.delayUntil, delayUntil)
 	}
 	return err
@@ -851,6 +853,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
+	delayAt      int64
 	delayUntil   int64
 }
 
@@ -908,4 +911,46 @@ func (s *scheduleController) AllowSchedule() bool {
 func (s *scheduleController) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil
+}
+
+// GetPausedSchedulerDelayAt returns if a scheduler is paused.
+func (s *scheduleController) GetDelayAt() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayAt)
+	}
+	return 0
+}
+
+// GetPausedSchedulerDelayUntil returns if a scheduler is paused.
+func (s *scheduleController) GetDelayUntil() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayUntil)
+	}
+	return 0
+}
+
+func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayAt(), nil
+}
+
+func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayUntil(), nil
 }
