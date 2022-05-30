@@ -19,37 +19,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&calculationTestSuite{})
-
-type calculationTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *calculationTestSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *calculationTestSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
+func TestGetScaledTiKVGroups(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// case1 indicates the tikv cluster with not any group existed
-	case1 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	case1 := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	case1.AddLabelsStore(1, 1, map[string]string{})
 	case1.AddLabelsStore(2, 1, map[string]string{
 		"foo": "bar",
@@ -59,7 +43,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case2 indicates the tikv cluster with 1 auto-scaling group existed
-	case2 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	case2 := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
@@ -71,7 +55,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 	})
 
 	// case3 indicates the tikv cluster with other group existed
-	case3 := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	case3 := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	case3.AddLabelsStore(1, 1, map[string]string{})
 	case3.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey: "foo",
@@ -80,12 +64,12 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 		groupLabelKey: "foo",
 	})
 
-	testcases := []struct {
+	testCases := []struct {
 		name             string
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
-		errChecker       Checker
+		noError          bool
 	}{
 		{
 			name:     "no scaled tikv group",
@@ -105,7 +89,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
-			errChecker:   IsNil,
+			noError:      true,
 		},
 		{
 			name:     "exist 1 scaled tikv group",
@@ -135,7 +119,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					},
 				},
 			},
-			errChecker: IsNil,
+			noError: true,
 		},
 		{
 			name:     "exist 1 tikv scaled group with inconsistency healthy instances",
@@ -155,7 +139,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
-			errChecker:   NotNil,
+			noError:      false,
 		},
 		{
 			name:     "exist 1 tikv scaled group with less healthy instances",
@@ -181,7 +165,7 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 					},
 				},
 			},
-			errChecker: IsNil,
+			noError: true,
 		},
 		{
 			name:     "existed other tikv group",
@@ -201,18 +185,18 @@ func (s *calculationTestSuite) TestGetScaledTiKVGroups(c *C) {
 				},
 			},
 			expectedPlan: nil,
-			errChecker:   IsNil,
+			noError:      true,
 		},
 	}
 
-	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		plans, err := getScaledTiKVGroups(testcase.informer, testcase.healthyInstances)
-		if testcase.expectedPlan == nil {
-			c.Assert(plans, HasLen, 0)
-			c.Assert(err, testcase.errChecker)
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		plans, err := getScaledTiKVGroups(testCase.informer, testCase.healthyInstances)
+		if testCase.expectedPlan == nil {
+			require.Len(t, plans, 0)
+			require.Equal(t, testCase.noError, err == nil)
 		} else {
-			c.Assert(plans, DeepEquals, testcase.expectedPlan)
+			require.True(t, reflect.DeepEqual(testCase.expectedPlan, plans))
 		}
 	}
 }
@@ -228,7 +212,7 @@ func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 	return result, nil
 }
 
-func (s *calculationTestSuite) TestGetTotalCPUUseTime(c *C) {
+func TestGetTotalCPUUseTime(t *testing.T) {
 	querier := &mockQuerier{}
 	instances := []instance{
 		{
@@ -246,10 +230,10 @@ func (s *calculationTestSuite) TestGetTotalCPUUseTime(c *C) {
 	}
 	totalCPUUseTime, _ := getTotalCPUUseTime(querier, TiDB, instances, time.Now(), 0)
 	expected := mockResultValue * float64(len(instances))
-	c.Assert(math.Abs(expected-totalCPUUseTime) < 1e-6, IsTrue)
+	require.True(t, math.Abs(expected-totalCPUUseTime) < 1e-6)
 }
 
-func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
+func TestGetTotalCPUQuota(t *testing.T) {
 	querier := &mockQuerier{}
 	instances := []instance{
 		{
@@ -267,10 +251,10 @@ func (s *calculationTestSuite) TestGetTotalCPUQuota(c *C) {
 	}
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
 	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
-	c.Assert(totalCPUQuota, Equals, expected)
+	require.Equal(t, expected, totalCPUQuota)
 }
 
-func (s *calculationTestSuite) TestScaleOutGroupLabel(c *C) {
+func TestScaleOutGroupLabel(t *testing.T) {
 	var jsonStr = []byte(`
 {
     "rules":[
@@ -304,14 +288,14 @@ func (s *calculationTestSuite) TestScaleOutGroupLabel(c *C) {
 }`)
 	strategy := &Strategy{}
 	err := json.Unmarshal(jsonStr, strategy)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	plan := findBestGroupToScaleOut(strategy, nil, TiKV)
-	c.Assert(plan.Labels["specialUse"], Equals, "hotRegion")
+	require.Equal(t, "hotRegion", plan.Labels["specialUse"])
 	plan = findBestGroupToScaleOut(strategy, nil, TiDB)
-	c.Assert(plan.Labels["specialUse"], Equals, "")
+	require.Equal(t, "", plan.Labels["specialUse"])
 }
 
-func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
+func TestStrategyChangeCount(t *testing.T) {
 	var count uint64 = 2
 	strategy := &Strategy{
 		Rules: []*Rule{
@@ -336,7 +320,9 @@ func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
 	}
 
 	// tikv cluster with 1 auto-scaling group existed
-	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	cluster.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
@@ -357,21 +343,21 @@ func (s *calculationTestSuite) TestStrategyChangeCount(c *C) {
 
 	// exist two scaled TiKVs and plan does not change due to the limit of resource count
 	groups, err := getScaledTiKVGroups(cluster, instances)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	plans := calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	c.Assert(plans[0].Count, Equals, uint64(2))
+	require.Equal(t, uint64(2), plans[0].Count)
 
 	// change the resource count to 3 and plan increates one more tikv
 	groups, err = getScaledTiKVGroups(cluster, instances)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	*strategy.Resources[0].Count = 3
 	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	c.Assert(plans[0].Count, Equals, uint64(3))
+	require.Equal(t, uint64(3), plans[0].Count)
 
 	// change the resource count to 1 and plan decreases to 1 tikv due to the limit of resource count
 	groups, err = getScaledTiKVGroups(cluster, instances)
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	*strategy.Resources[0].Count = 1
 	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	c.Assert(plans[0].Count, Equals, uint64(1))
+	require.Equal(t, uint64(1), plans[0].Count)
 }
