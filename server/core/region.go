@@ -57,12 +57,7 @@ type RegionInfo struct {
 	replicationStatus *replication_modepb.RegionReplicationStatus
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
-<<<<<<< HEAD
-=======
-	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets       unsafe.Pointer
-	fromHeartbeat bool
->>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
+	fromHeartbeat     bool
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
