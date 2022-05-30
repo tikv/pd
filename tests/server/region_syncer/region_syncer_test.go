@@ -19,6 +19,7 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
@@ -223,13 +224,10 @@ func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-<<<<<<< HEAD
-	c.Assert(len(loadRegions), Equals, regionLen)
-=======
 	c.Assert(loadRegions, HasLen, regionLen)
 }
 
-func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
+func (s *serverTestSuite) TestPrepareChecker(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`), IsNil)
 	defer failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker")
 	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
@@ -291,17 +289,7 @@ func initRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(0)},
 			},
 		}
-		region := core.NewRegionInfo(r, r.Peers[0])
-		if i < regionLen/2 {
-			buckets := &metapb.Buckets{
-				RegionId: r.Id,
-				Keys:     [][]byte{r.StartKey, r.EndKey},
-				Version:  1,
-			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
-		}
-		regions = append(regions, region)
+		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
 	return regions
->>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
 }

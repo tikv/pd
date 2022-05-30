@@ -586,11 +586,7 @@ func (s *Server) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
 			lastBind = time.Now()
 		}
 
-<<<<<<< HEAD
-		region := core.RegionFromHeartbeat(request)
-=======
-		region := core.RegionFromHeartbeat(request, flowRoundOption, core.SetFromHeartbeat(true))
->>>>>>> 429b49283 (*: fix scheduling can not immediately start after transfer leader (#4875))
+		region := core.RegionFromHeartbeat(request, core.SetFromHeartbeat(true))
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
