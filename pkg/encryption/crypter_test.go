@@ -56,21 +56,21 @@ func TestNewIv(t *testing.T) {
 	require.Len(t, []byte(ivGcm), ivLengthGCM)
 }
 
-func testNewDataKey(t *testing.T, method encryptionpb.EncryptionMethod) {
-	_, key, err := NewDataKey(method, uint64(123))
-	require.NoError(t, err)
-	length, err := KeyLength(method)
-	require.NoError(t, err)
-	require.Len(t, key.Key, length)
-	require.Equal(t, method, key.Method)
-	require.False(t, key.WasExposed)
-	require.Equal(t, uint64(123), key.CreationTime)
-}
-
 func TestNewDataKey(t *testing.T) {
-	testNewDataKey(t, encryptionpb.EncryptionMethod_AES128_CTR)
-	testNewDataKey(t, encryptionpb.EncryptionMethod_AES192_CTR)
-	testNewDataKey(t, encryptionpb.EncryptionMethod_AES256_CTR)
+	for _, method := range []encryptionpb.EncryptionMethod{
+		encryptionpb.EncryptionMethod_AES128_CTR,
+		encryptionpb.EncryptionMethod_AES192_CTR,
+		encryptionpb.EncryptionMethod_AES256_CTR,
+	} {
+		_, key, err := NewDataKey(method, uint64(123))
+		require.NoError(t, err)
+		length, err := KeyLength(method)
+		require.NoError(t, err)
+		require.Len(t, key.Key, length)
+		require.Equal(t, method, key.Method)
+		require.False(t, key.WasExposed)
+		require.Equal(t, uint64(123), key.CreationTime)
+	}
 }
 
 func TestAesGcmCrypter(t *testing.T) {
