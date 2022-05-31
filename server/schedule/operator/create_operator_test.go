@@ -162,6 +162,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 	type testCase struct {
 		sourcePeers   []*metapb.Peer // first is leader
 		targetPeers   []*metapb.Peer // first is leader
+		finalPeers    map[uint64]*metapb.Peer
 		kind          OpKind
 		expectedError bool
 		prepareSteps  []OpStep
@@ -176,6 +177,10 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
+			map[uint64]*metapb.Peer{
+				1: {StoreId: 1, Role: metapb.PeerRole_Voter},
+				2: {StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
 			OpMerge,
 			false,
 			[]OpStep{},
@@ -188,6 +193,10 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 			[]*metapb.Peer{
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			map[uint64]*metapb.Peer{
+				3: {StoreId: 3, Role: metapb.PeerRole_Voter},
+				2: {StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
 			OpMerge | OpLeader | OpRegion,
 			false,
@@ -214,6 +223,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
+			nil,
 			0,
 			true,
 			nil,
@@ -227,6 +237,7 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_IncomingVoter},
 			},
+			nil,
 			0,
 			true,
 			nil,
@@ -247,9 +258,9 @@ func (s *testCreateOperatorSuite) TestCreateMergeRegionOperator(c *C) {
 		c.Assert(ops[0].Len(), Equals, len(tc.prepareSteps)+1)
 		c.Assert(ops[1].kind, Equals, tc.kind)
 		c.Assert(ops[1].Len(), Equals, 1)
-		c.Assert(ops[1].Step(0).(MergeRegion), DeepEquals, MergeRegion{source.GetMeta(), target.GetMeta(), true})
+		c.Assert(ops[1].Step(0).(MergeRegion), DeepEquals, MergeRegion{source.GetMeta(), target.GetMeta(), tc.finalPeers, true})
 
-		expectedSteps := append(tc.prepareSteps, MergeRegion{source.GetMeta(), target.GetMeta(), false})
+		expectedSteps := append(tc.prepareSteps, MergeRegion{source.GetMeta(), target.GetMeta(), tc.finalPeers, false})
 		for i := 0; i < ops[0].Len(); i++ {
 			switch step := ops[0].Step(i).(type) {
 			case TransferLeader:

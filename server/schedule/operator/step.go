@@ -340,6 +340,7 @@ func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
 type MergeRegion struct {
 	FromRegion *metapb.Region
 	ToRegion   *metapb.Region
+	Peers      map[uint64]*metapb.Peer
 	// there are two regions involved in merge process,
 	// so to keep them from other scheduler,
 	// both of them should add MerRegion operatorStep.
@@ -360,7 +361,7 @@ func (mr MergeRegion) String() string {
 
 // IsFinish checks if current step is finished.
 func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
-	if mr.IsPassive {
+	if !mr.IsPassive {
 		return !bytes.Equal(region.GetStartKey(), mr.ToRegion.StartKey) || !bytes.Equal(region.GetEndKey(), mr.ToRegion.EndKey)
 	}
 	return false
@@ -374,7 +375,7 @@ func (mr MergeRegion) CheckInProgress(_ ClusterInformer, _ *core.RegionInfo) err
 // Influence calculates the store difference that current step makes.
 func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if mr.IsPassive {
-		for _, peer := range region.GetPeers() {
+		for _, peer := range mr.Peers {
 			o := opInfluence.GetStoreInfluence(peer.GetStoreId())
 			o.RegionCount--
 			if region.GetLeader().GetId() == peer.GetId() {
