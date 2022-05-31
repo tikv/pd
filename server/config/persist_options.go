@@ -508,6 +508,15 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
+// GetMaxMovableHotPeerSize returns the max movable hot peer size.
+func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
+	size := o.GetScheduleConfig().MaxMovableHotPeerSize
+	if size <= 0 {
+		size = defaultMaxMovableHotPeerSize
+	}
+	return size
+}
+
 // IsDebugMetricsEnabled returns if debug metrics is enabled.
 func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.GetScheduleConfig().EnableDebugMetrics

@@ -237,6 +237,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/confver", regionsHandler.GetTopConfVerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/version", regionsHandler.GetTopVersionRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/size", regionsHandler.GetTopSizeRegions, setMethods("GET"))
+	registerFunc(clusterRouter, "/regions/keys", regionsHandler.GetTopKeysRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/miss-peer", regionsHandler.GetMissPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/extra-peer", regionsHandler.GetExtraPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/pending-peer", regionsHandler.GetPendingPeerRegions, setMethods("GET"))
@@ -335,8 +336,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		unsafeOperationHandler.RemoveFailedStores, setMethods("POST"))
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods("GET"))
-	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/history",
-		unsafeOperationHandler.GetFailedStoresRemovalHistory, setMethods("GET"))
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {

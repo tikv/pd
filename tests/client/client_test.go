@@ -656,6 +656,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 			},
 		})
 	}
+	config := cluster.GetStoreConfig()
+	config.EnableRegionBucket = true
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
@@ -774,9 +776,18 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 	breq := &pdpb.ReportBucketsRequest{
 		Header: newHeader(s.srv),
 		Buckets: &metapb.Buckets{
-			RegionId: regionID,
-			Version:  1,
-			Keys:     [][]byte{[]byte("a"), []byte("z")},
+			RegionId:   regionID,
+			Version:    1,
+			Keys:       [][]byte{[]byte("a"), []byte("z")},
+			PeriodInMs: 2000,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{1},
+				ReadKeys:   []uint64{1},
+				ReadQps:    []uint64{1},
+				WriteBytes: []uint64{1},
+				WriteKeys:  []uint64{1},
+				WriteQps:   []uint64{1},
+			},
 		},
 	}
 	c.Assert(s.reportBucket.Send(breq), IsNil)
@@ -788,6 +799,17 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		}
 		return c.Check(r.Buckets, NotNil)
 	})
+	config := s.srv.GetRaftCluster().GetStoreConfig()
+	config.EnableRegionBucket = false
+	testutil.WaitUntil(c, func() bool {
+		r, err := s.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		c.Assert(err, IsNil)
+		if r == nil {
+			return false
+		}
+		return c.Check(r.Buckets, IsNil)
+	})
+	config.EnableRegionBucket = true
 	c.Succeed()
 }
 

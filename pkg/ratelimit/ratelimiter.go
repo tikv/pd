@@ -42,16 +42,14 @@ func (l *RateLimiter) Available(n int) bool {
 	defer l.mu.Unlock()
 	now := time.Now()
 	r := l.Limiter.ReserveN(now, n)
-	delay := r.Delay()
+	delay := r.DelayFrom(now)
 	r.CancelAt(now)
 	return delay == 0
 }
 
 // Allow is same as `rate.Limiter.Allow`.
 func (l *RateLimiter) Allow() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.Limiter.Allow()
+	return l.AllowN(1)
 }
 
 // AllowN is same as `rate.Limiter.AllowN`.
