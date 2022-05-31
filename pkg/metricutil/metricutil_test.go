@@ -23,6 +23,7 @@ import (
 )
 
 func TestCamelCaseToSnakeCase(t *testing.T) {
+	re := require.New(t)
 	inputs := []struct {
 		name    string
 		newName string
@@ -50,7 +51,7 @@ func TestCamelCaseToSnakeCase(t *testing.T) {
 	}
 
 	for _, input := range inputs {
-		require.Equal(t, input.newName, camelCaseToSnakeCase(input.name))
+		re.Equal(input.newName, camelCaseToSnakeCase(input.name))
 	}
 }
 
