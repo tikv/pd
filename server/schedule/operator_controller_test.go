@@ -674,10 +674,10 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
-		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
+		Data:     []interface{}{map[string]interface{}{"start_key": "0a", "end_key": "0b"}},
 	})
 
-	c.Assert(labelerManager.ScheduleDisabled(source), IsTrue)
+	c.Assert(labelerManager.ScheduleDisabled(target), IsTrue)
 	// add operator should be failed since it is labeled with `schedule=deny`.
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
 

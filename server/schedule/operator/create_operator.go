@@ -158,97 +158,99 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 	}
 
 	var sourceSteps, targetSteps []OpStep
-	sourceOriginPeers := make([]*metapb.Peer, 0, len(source.GetPeers())-len(peers))
-	for _, peer := range source.GetPeers() {
-		if _, ok := peers[peer.GetStoreId()]; !ok {
-			sourceOriginPeers = append(sourceOriginPeers, peer)
-		}
-	}
-	sort.Slice(sourceOriginPeers, func(i, j int) bool {
-		if sourceOriginPeers[i].GetRole() == sourceOriginPeers[j].GetRole() {
-			return sourceOriginPeers[i].GetStoreId() < sourceOriginPeers[j].GetStoreId()
-		}
-		return sourceOriginPeers[i].GetRole() < sourceOriginPeers[j].GetRole()
-	})
-	targetOriginPeers := make([]*metapb.Peer, 0, len(target.GetPeers())-len(peers))
-	for _, peer := range target.GetPeers() {
-		if _, ok := peers[peer.GetStoreId()]; !ok {
-			targetOriginPeers = append(targetOriginPeers, peer)
-		}
-	}
-	sort.Slice(targetOriginPeers, func(i, j int) bool {
-		if targetOriginPeers[i].GetRole() == targetOriginPeers[j].GetRole() {
-			return targetOriginPeers[i].GetStoreId() < targetOriginPeers[j].GetStoreId()
-		}
-		return targetOriginPeers[i].GetRole() < targetOriginPeers[j].GetRole()
-	})
-	if len(targetOriginPeers) != len(sourceOriginPeers) {
-		return nil, errors.Errorf("the amount of peers is not matched")
-	}
-	index := 0
-	for index < len(targetOriginPeers) {
-		stores := make([]*core.StoreInfo, 0)
-		isTargetStore := make(map[uint64]struct{})
-		for {
-			if targetOriginPeers[index].GetRole() != sourceOriginPeers[index].GetRole() {
-				return nil, errors.Errorf("the peer's role is not matched")
-			}
-			if targetOriginPeers[index].GetStoreId() == sourceOriginPeers[index].GetStoreId() {
-				peers[targetOriginPeers[index].GetStoreId()] = targetOriginPeers[index]
-			}
-			store1 := ci.GetBasicCluster().GetStore(targetOriginPeers[index].GetStoreId()).Clone()
-			stores = append(stores, store1)
-			isTargetStore[store1.GetID()] = struct{}{}
-			store2 := ci.GetBasicCluster().GetStore(sourceOriginPeers[index].GetStoreId()).Clone()
-			stores = append(stores, store2)
-			if index+1 < len(targetOriginPeers) && targetOriginPeers[index+1].GetRole() == targetOriginPeers[index].GetRole() {
-				index++
-			} else {
-				break
+	sourceKind := kind
+	targetKind := kind
+	if !isRegionMatch(source, target) {
+		sourceOriginPeers := make([]*metapb.Peer, 0, len(source.GetPeers())-len(peers))
+		for _, peer := range source.GetPeers() {
+			if _, ok := peers[peer.GetStoreId()]; !ok {
+				sourceOriginPeers = append(sourceOriginPeers, peer)
 			}
 		}
-		sort.Slice(stores, func(i, j int) bool {
-			iOp := int64(0)
-			iDelta := 0.
-			if _, ok := isTargetStore[stores[i].GetID()]; ok {
-				iOp, iDelta = source.GetApproximateSize(), 0.1
+		sort.Slice(sourceOriginPeers, func(i, j int) bool {
+			if sourceOriginPeers[i].GetRole() == sourceOriginPeers[j].GetRole() {
+				return sourceOriginPeers[i].GetStoreId() < sourceOriginPeers[j].GetStoreId()
 			}
-			jOp := int64(0)
-			jDelta := 0.
-			if _, ok := isTargetStore[stores[j].GetID()]; ok {
-				jOp, jDelta = source.GetApproximateSize(), 0.1
-			}
-			return stores[i].RegionScore(ci.GetOpts().GetRegionScoreFormulaVersion(), ci.GetOpts().GetHighSpaceRatio(), ci.GetOpts().GetLowSpaceRatio(), iOp)-iDelta <
-				stores[j].RegionScore(ci.GetOpts().GetRegionScoreFormulaVersion(), ci.GetOpts().GetHighSpaceRatio(), ci.GetOpts().GetLowSpaceRatio(), jOp)-jDelta
+			return sourceOriginPeers[i].GetRole() < sourceOriginPeers[j].GetRole()
 		})
-		storesIndex := 0
-		for len(peers) < index {
-			peers[stores[storesIndex].GetID()] = &metapb.Peer{
-				StoreId: stores[storesIndex].GetID(),
-				Role:    targetOriginPeers[index].GetRole(),
+		targetOriginPeers := make([]*metapb.Peer, 0, len(target.GetPeers())-len(peers))
+		for _, peer := range target.GetPeers() {
+			if _, ok := peers[peer.GetStoreId()]; !ok {
+				targetOriginPeers = append(targetOriginPeers, peer)
 			}
-			storesIndex++
 		}
-
-		index++
+		sort.Slice(targetOriginPeers, func(i, j int) bool {
+			if targetOriginPeers[i].GetRole() == targetOriginPeers[j].GetRole() {
+				return targetOriginPeers[i].GetStoreId() < targetOriginPeers[j].GetStoreId()
+			}
+			return targetOriginPeers[i].GetRole() < targetOriginPeers[j].GetRole()
+		})
+		if len(targetOriginPeers) != len(sourceOriginPeers) {
+			return nil, errors.Errorf("the amount of peers is not matched")
+		}
+		index := 0
+		for index < len(targetOriginPeers) {
+			stores := make([]*core.StoreInfo, 0)
+			isTargetStore := make(map[uint64]struct{})
+			for {
+				if targetOriginPeers[index].GetRole() != sourceOriginPeers[index].GetRole() {
+					return nil, errors.Errorf("the peer's role is not matched")
+				}
+				if targetOriginPeers[index].GetStoreId() == sourceOriginPeers[index].GetStoreId() {
+					peers[targetOriginPeers[index].GetStoreId()] = targetOriginPeers[index]
+				}
+				store1 := ci.GetBasicCluster().GetStore(targetOriginPeers[index].GetStoreId()).Clone()
+				stores = append(stores, store1)
+				isTargetStore[store1.GetID()] = struct{}{}
+				store2 := ci.GetBasicCluster().GetStore(sourceOriginPeers[index].GetStoreId()).Clone()
+				stores = append(stores, store2)
+				if index+1 < len(targetOriginPeers) && targetOriginPeers[index+1].GetRole() == targetOriginPeers[index].GetRole() {
+					index++
+				} else {
+					break
+				}
+			}
+			sort.Slice(stores, func(i, j int) bool {
+				iOp := int64(0)
+				iDelta := 0.
+				if _, ok := isTargetStore[stores[i].GetID()]; ok {
+					iOp, iDelta = source.GetApproximateSize(), 0.1
+				}
+				jOp := int64(0)
+				jDelta := 0.
+				if _, ok := isTargetStore[stores[j].GetID()]; ok {
+					jOp, jDelta = source.GetApproximateSize(), 0.1
+				}
+				return stores[i].RegionScore(ci.GetOpts().GetRegionScoreFormulaVersion(), ci.GetOpts().GetHighSpaceRatio(), ci.GetOpts().GetLowSpaceRatio(), iOp)-iDelta <
+					stores[j].RegionScore(ci.GetOpts().GetRegionScoreFormulaVersion(), ci.GetOpts().GetHighSpaceRatio(), ci.GetOpts().GetLowSpaceRatio(), jOp)-jDelta
+			})
+			storesIndex := 0
+			for len(peers) < index {
+				peers[stores[storesIndex].GetID()] = &metapb.Peer{
+					StoreId: stores[storesIndex].GetID(),
+					Role:    targetOriginPeers[index].GetRole(),
+				}
+				storesIndex++
+			}
+			index++
+		}
+		sourceMatchOp, err := NewBuilder("", ci, source).
+			SetPeers(peers).
+			Build(kind)
+		if err != nil {
+			return nil, err
+		}
+		sourceSteps = append(sourceSteps, sourceMatchOp.steps...)
+		sourceKind = sourceMatchOp.Kind()
+		targetMatchOp, err := NewBuilder("", ci, target).
+			SetPeers(peers).
+			Build(kind)
+		if err != nil {
+			return nil, err
+		}
+		targetSteps = append(targetSteps, targetMatchOp.steps...)
+		targetKind = targetMatchOp.Kind()
 	}
-	sourceMatchOp, err := NewBuilder("", ci, source).
-		SetPeers(peers).
-		Build(kind)
-	if err != nil {
-		return nil, err
-	}
-	sourceSteps = append(sourceSteps, sourceMatchOp.steps...)
-	sourceKind := sourceMatchOp.Kind()
-
-	targetMatchOp, err := NewBuilder("", ci, target).
-		SetPeers(peers).
-		Build(kind)
-	if err != nil {
-		return nil, err
-	}
-	targetSteps = append(targetSteps, targetMatchOp.steps...)
-	targetKind := targetMatchOp.Kind()
 
 	sourceSteps = append(sourceSteps, MergeRegion{
 		FromRegion: source.GetMeta(),
@@ -267,6 +269,19 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 	opTarget := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), targetKind|OpMerge, target.GetApproximateSize(), targetSteps...)
 
 	return []*Operator{opTarget, opSource}, nil
+}
+
+func isRegionMatch(a, b *core.RegionInfo) bool {
+	if len(a.GetPeers()) != len(b.GetPeers()) {
+		return false
+	}
+	for _, pa := range a.GetPeers() {
+		pb := b.GetStorePeer(pa.GetStoreId())
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
+			return false
+		}
+	}
+	return true
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
