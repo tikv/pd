@@ -16,38 +16,27 @@ package pd
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/client/testutil"
-	"go.uber.org/goleak"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
+func TestTsLessEqual(t *testing.T) {
+	re := require.New(t)
+	re.True(tsLessEqual(9, 9, 9, 9))
+	re.True(tsLessEqual(8, 9, 9, 8))
+	re.False(tsLessEqual(9, 8, 8, 9))
+	re.False(tsLessEqual(9, 8, 9, 6))
+	re.True(tsLessEqual(9, 6, 9, 8))
 }
 
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-var _ = Suite(&testClientSuite{})
-
-type testClientSuite struct{}
-
-func (s *testClientSuite) TestTsLessEqual(c *C) {
-	c.Assert(tsLessEqual(9, 9, 9, 9), IsTrue)
-	c.Assert(tsLessEqual(8, 9, 9, 8), IsTrue)
-	c.Assert(tsLessEqual(9, 8, 8, 9), IsFalse)
-	c.Assert(tsLessEqual(9, 8, 9, 6), IsFalse)
-	c.Assert(tsLessEqual(9, 6, 9, 8), IsTrue)
-}
-
-func (s *testClientSuite) TestUpdateURLs(c *C) {
+func TestUpdateURLs(t *testing.T) {
+	re := require.New(t)
 	members := []*pdpb.Member{
 		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
 		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
@@ -63,40 +52,35 @@ func (s *testClientSuite) TestUpdateURLs(c *C) {
 	cli := &baseClient{option: newOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
-	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs()))
 	cli.updateURLs(members[1:])
-	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
+	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs()))
 	cli.updateURLs(members)
-	c.Assert(cli.GetURLs(), DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
+	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetURLs()))
 }
 
 const testClientURL = "tmp://test.url:5255"
 
-var _ = Suite(&testClientCtxSuite{})
-
-type testClientCtxSuite struct{}
-
-func (s *testClientCtxSuite) TestClientCtx(c *C) {
+func TestClientCtx(t *testing.T) {
+	re := require.New(t)
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
 	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
-	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*5)
+	re.Error(err)
+	re.Less(time.Since(start), time.Second*5)
 }
 
-func (s *testClientCtxSuite) TestClientWithRetry(c *C) {
+func TestClientWithRetry(t *testing.T) {
+	re := require.New(t)
 	start := time.Now()
 	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
-	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Less, time.Second*10)
+	re.Error(err)
+	re.Less(time.Since(start), time.Second*10)
 }
 
-var _ = Suite(&testClientDialOptionSuite{})
-
-type testClientDialOptionSuite struct{}
-
-func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
+func TestGRPCDialOption(t *testing.T) {
+	re := require.New(t)
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
@@ -111,15 +95,12 @@ func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	cli.urls.Store([]string{testClientURL})
 	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
 	err := cli.updateMember()
-	c.Assert(err, NotNil)
-	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
+	re.Error(err)
+	re.Greater(time.Since(start), 500*time.Millisecond)
 }
 
-var _ = Suite(&testTsoRequestSuite{})
-
-type testTsoRequestSuite struct{}
-
-func (s *testTsoRequestSuite) TestTsoRequestWait(c *C) {
+func TestTsoRequestWait(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	req := &tsoRequest{
 		done:       make(chan error, 1),
@@ -130,7 +111,7 @@ func (s *testTsoRequestSuite) TestTsoRequestWait(c *C) {
 	}
 	cancel()
 	_, _, err := req.Wait()
-	c.Assert(errors.Cause(err), Equals, context.Canceled)
+	re.ErrorIs(errors.Cause(err), context.Canceled)
 
 	ctx, cancel = context.WithCancel(context.Background())
 	req = &tsoRequest{
@@ -142,5 +123,5 @@ func (s *testTsoRequestSuite) TestTsoRequestWait(c *C) {
 	}
 	cancel()
 	_, _, err = req.Wait()
-	c.Assert(errors.Cause(err), Equals, context.Canceled)
+	re.ErrorIs(errors.Cause(err), context.Canceled)
 }

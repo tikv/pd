@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -613,6 +614,26 @@ func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]stri
 		wg.Add(1)
 		go func(dc string) {
 			testutil.WaitUntil(testC, func() bool {
+				leaderName := c.WaitAllocatorLeader(dc)
+				return leaderName != ""
+			})
+			wg.Done()
+		}(dcLocation)
+	}
+	wg.Wait()
+}
+
+// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
+// NOTICE: this is a temporary function that we will be used to replace `WaitAllLeaders` later.
+func (c *TestCluster) WaitAllLeadersWithTestingT(t *testing.T, dcLocations map[string]string) {
+	c.WaitLeader()
+	c.CheckClusterDCLocation()
+	// Wait for each DC's Local TSO Allocator leader
+	wg := sync.WaitGroup{}
+	for _, dcLocation := range dcLocations {
+		wg.Add(1)
+		go func(dc string) {
+			testutil.WaitUntilWithTestingT(t, func() bool {
 				leaderName := c.WaitAllocatorLeader(dc)
 				return leaderName != ""
 			})
