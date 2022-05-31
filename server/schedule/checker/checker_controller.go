@@ -206,7 +206,8 @@ func (c *Controller) ClearSuspectKeyRanges() {
 
 // IsPendingRegion returns true if the given region is in the pending list.
 func (c *Controller) IsPendingRegion(regionID uint64) bool {
-	return c.ruleChecker.pendingList.ifExist(regionID)
+	_, exist := c.ruleChecker.pendingList.Get(regionID)
+	return exist
 }
 
 // GetPauseController returns pause controller of the checker
