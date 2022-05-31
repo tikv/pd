@@ -17,7 +17,6 @@ package checker
 import (
 	"errors"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -40,6 +39,8 @@ var (
 	errNoNewLeader        = errors.New("no new leader")
 )
 
+const maxPendingListLen = 100000
+
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
@@ -47,8 +48,8 @@ type RuleChecker struct {
 	ruleManager       *placement.RuleManager
 	name              string
 	regionWaitingList cache.Cache
+	pendingList       cache.Cache
 	record            *recorder
-	pendingList       *pendingList
 }
 
 // NewRuleChecker creates a checker instance.
@@ -58,8 +59,8 @@ func NewRuleChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager
 		ruleManager:       ruleManager,
 		name:              "rule-checker",
 		regionWaitingList: regionWaitingList,
+		pendingList:       cache.NewDefaultCache(maxPendingListLen),
 		record:            newRecord(),
-		pendingList:       newPendingList(),
 	}
 }
 
@@ -110,7 +111,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if err != nil {
 		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	} else if op != nil {
-		c.pendingList.remove(region.GetID())
+		c.pendingList.Remove(region.GetID())
 		return op
 	}
 	for _, rf := range fit.RuleFits {
@@ -120,7 +121,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			continue
 		}
 		if op != nil {
-			c.pendingList.remove(region.GetID())
+			c.pendingList.Remove(region.GetID())
 			return op
 		}
 	}
@@ -171,9 +172,9 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
-			c.pendingList.remove(region.GetID())
+			c.pendingList.Remove(region.GetID())
 		} else {
-			c.pendingList.add(region.GetID())
+			c.pendingList.Put(region.GetID(), nil)
 		}
 		return nil, errNoStoreToAdd
 	}
@@ -194,9 +195,9 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
-			c.pendingList.remove(region.GetID())
+			c.pendingList.Remove(region.GetID())
 		} else {
-			c.pendingList.add(region.GetID())
+			c.pendingList.Put(region.GetID(), nil)
 		}
 		return nil, errNoStoreToReplace
 	}
@@ -307,9 +308,9 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
 			c.regionWaitingList.Put(region.GetID(), nil)
-			c.pendingList.remove(region.GetID())
+			c.pendingList.Remove(region.GetID())
 		} else {
-			c.pendingList.add(region.GetID())
+			c.pendingList.Put(region.GetID(), nil)
 		}
 		return nil, nil
 	}
@@ -397,36 +398,6 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 		}
 	}
 	return stores
-}
-
-type pendingList struct {
-	sync.RWMutex
-	pendingRegions map[uint64]struct{}
-}
-
-func newPendingList() *pendingList {
-	return &pendingList{
-		pendingRegions: make(map[uint64]struct{}),
-	}
-}
-
-func (pl *pendingList) add(regionID uint64) {
-	pl.Lock()
-	defer pl.Unlock()
-	pl.pendingRegions[regionID] = struct{}{}
-}
-
-func (pl *pendingList) remove(regionID uint64) {
-	pl.Lock()
-	defer pl.Unlock()
-	delete(pl.pendingRegions, regionID)
-}
-
-func (pl *pendingList) ifExist(regionID uint64) bool {
-	pl.RLock()
-	defer pl.RUnlock()
-	_, exist := pl.pendingRegions[regionID]
-	return exist
 }
 
 type recorder struct {

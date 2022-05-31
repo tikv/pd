@@ -827,7 +827,8 @@ func (s *testRuleCheckerSuite) TestPendingList(c *C) {
 	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
 	op := s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, IsNil)
-	c.Assert(s.rc.pendingList.ifExist(1), IsTrue)
+	_, exist := s.rc.pendingList.Get(1)
+	c.Assert(exist, IsTrue)
 
 	// add more stores
 	s.cluster.AddLeaderStore(2, 1)
@@ -837,5 +838,6 @@ func (s *testRuleCheckerSuite) TestPendingList(c *C) {
 	c.Assert(op.Desc(), Equals, "add-rule-peer")
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
-	c.Assert(s.rc.pendingList.ifExist(1), IsFalse)
+	_, exist = s.rc.pendingList.Get(1)
+	c.Assert(exist, IsFalse)
 }
