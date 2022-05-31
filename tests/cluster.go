@@ -623,7 +623,7 @@ func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]stri
 	wg.Wait()
 }
 
-// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
+// WaitAllLeadersWithTestingT will block and wait for the election of PD leader and all Local TSO Allocator leaders.
 // NOTICE: this is a temporary function that we will be used to replace `WaitAllLeaders` later.
 func (c *TestCluster) WaitAllLeadersWithTestingT(t *testing.T, dcLocations map[string]string) {
 	c.WaitLeader()

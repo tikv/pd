@@ -1001,9 +1001,10 @@ func TestGetStore(t *testing.T) {
 	re.NoError(err)
 	re.True(reflect.DeepEqual(store, n))
 
-	stores, err := tc.client.GetAllStores(context.Background())
+	actualStores, err := tc.client.GetAllStores(context.Background())
 	re.NoError(err)
-	re.True(reflect.DeepEqual(stores, stores))
+	re.Len(actualStores, len(stores))
+	stores = actualStores
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
