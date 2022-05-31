@@ -72,7 +72,7 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
 		return QPSNoChange
 	}
-	if limit <= 0 || burst < 1 {
+	if limit <= eps || burst < 1 {
 		l.QPSUnlimit(label)
 		return QPSDeleted
 	}
