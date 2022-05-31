@@ -14,5 +14,5 @@
 package main
 
 func main() {
-	println("Hello,gc")
+	// TODO start a server for GC.
 }
