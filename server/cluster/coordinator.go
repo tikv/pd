@@ -44,7 +44,7 @@ import (
 const (
 	runSchedulerCheckInterval  = 3 * time.Second
 	checkSuspectRangesInterval = 100 * time.Millisecond
-	collectFactor              = 0.8
+	collectFactor              = 0.9
 	collectTimeout             = 5 * time.Minute
 	maxScheduleRetries         = 10
 	maxLoadConfigRetries       = 10
@@ -618,9 +618,6 @@ func (c *coordinator) resetHotSpotMetrics() {
 }
 
 func (c *coordinator) shouldRun() bool {
-	failpoint.Inject("hasPrepared", func() {
-		failpoint.Return(true)
-	})
 	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 

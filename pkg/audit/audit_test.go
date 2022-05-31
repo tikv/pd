@@ -24,32 +24,24 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/requestutil"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testAuditSuite{})
-
-type testAuditSuite struct {
-}
-
-func (s *testAuditSuite) TestLabelMatcher(c *C) {
+func TestLabelMatcher(t *testing.T) {
+	re := require.New(t)
 	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
-	c.Assert(matcher.Match(labels1), Equals, true)
-
+	re.True(matcher.Match(labels1))
 	labels2 := &BackendLabels{Labels: []string{"testFail"}}
-	c.Assert(matcher.Match(labels2), Equals, false)
+	re.False(matcher.Match(labels2))
 }
 
-func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
+func TestPrometheusHistogramBackend(t *testing.T) {
+	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -70,44 +62,48 @@ func (s *testAuditSuite) TestPrometheusHistogramBackend(c *C) {
 	info.ServiceLabel = "test"
 	info.Component = "user1"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
+	re.False(backend.ProcessHTTPRequest(req))
 
 	endTime := time.Now().Unix() + 20
 	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
 
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	re.True(backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
 
 	info.Component = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
 	time.Sleep(1 * time.Second)
 	req, _ = http.NewRequest("GET", ts.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2"), Equals, true)
-	c.Assert(strings.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1"), Equals, true)
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1")
 }
 
-func (s *testAuditSuite) TestLocalLogBackendUsingFile(c *C) {
+func TestLocalLogBackendUsingFile(t *testing.T) {
+	re := require.New(t)
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
 	defer os.Remove(fname)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, false)
+	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	c.Assert(backend.ProcessHTTPRequest(req), Equals, true)
+	re.True(backend.ProcessHTTPRequest(req))
 	b, _ := os.ReadFile(fname)
 	output := strings.SplitN(string(b), "]", 4)
-	c.Assert(output[3], Equals, fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
-		"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
-		time.Unix(info.StartTimeStamp, 0).String()))
+	re.Equal(
+		fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
+			time.Unix(info.StartTimeStamp, 0).String()),
+		output[3],
+	)
 }
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {

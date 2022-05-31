@@ -656,6 +656,8 @@ func (s *testClientSuite) SetUpSuite(c *C) {
 			},
 		})
 	}
+	config := cluster.GetStoreConfig()
+	config.EnableRegionBucket = true
 }
 
 func (s *testClientSuite) TearDownSuite(c *C) {
@@ -797,6 +799,17 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		}
 		return c.Check(r.Buckets, NotNil)
 	})
+	config := s.srv.GetRaftCluster().GetStoreConfig()
+	config.EnableRegionBucket = false
+	testutil.WaitUntil(c, func() bool {
+		r, err := s.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		c.Assert(err, IsNil)
+		if r == nil {
+			return false
+		}
+		return c.Check(r.Buckets, IsNil)
+	})
+	config.EnableRegionBucket = true
 	c.Succeed()
 }
 

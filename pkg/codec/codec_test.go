@@ -17,39 +17,33 @@ package codec
 import (
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-func TestTable(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testCodecSuite{})
-
-type testCodecSuite struct{}
-
-func (s *testCodecSuite) TestDecodeBytes(c *C) {
+func TestDecodeBytes(t *testing.T) {
+	re := require.New(t)
 	key := "abcdefghijklmnopqrstuvwxyz"
 	for i := 0; i < len(key); i++ {
 		_, k, err := DecodeBytes(EncodeBytes([]byte(key[:i])))
-		c.Assert(err, IsNil)
-		c.Assert(string(k), Equals, key[:i])
+		re.NoError(err)
+		re.Equal(key[:i], string(k))
 	}
 }
 
-func (s *testCodecSuite) TestTableID(c *C) {
+func TestTableID(t *testing.T) {
+	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	c.Assert(key.TableID(), Equals, int64(0xff))
+	re.Equal(int64(0xff), key.TableID())
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	c.Assert(key.TableID(), Equals, int64(0xff))
+	re.Equal(int64(0xff), key.TableID())
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	c.Assert(key.TableID(), Equals, int64(0))
+	re.Equal(int64(0), key.TableID())
 
 	key = EncodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	c.Assert(key.TableID(), Equals, int64(0))
+	re.Equal(int64(0), key.TableID())
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	c.Assert(key.TableID(), Equals, int64(0))
+	re.Equal(int64(0), key.TableID())
 }
