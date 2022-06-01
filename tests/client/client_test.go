@@ -1055,7 +1055,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	suite.NoError(err)
 	suite.True(reflect.DeepEqual(offlineStore, n))
 
-	// Should return offline storetc.
+	// Should return offline stores.
 	contains := false
 	stores, err = suite.client.GetAllStores(context.Background())
 	suite.NoError(err)
@@ -1080,7 +1080,7 @@ func (suite *clientTestSuite) TestGetStore() {
 		suite.Equal(metapb.NodeState_Removing, n.GetNodeState())
 		suite.True(n.PhysicallyDestroyed)
 	}
-	// Should return tombstone storetc.
+	// Should return tombstone stores.
 	contains = false
 	stores, err = suite.client.GetAllStores(context.Background())
 	suite.NoError(err)
@@ -1093,7 +1093,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	}
 	suite.True(contains)
 
-	// Should not return tombstone storetc.
+	// Should not return tombstone stores.
 	stores, err = suite.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
 	suite.NoError(err)
 	for _, store := range stores {
