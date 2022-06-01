@@ -592,7 +592,7 @@ func (i *idAllocator) alloc() uint64 {
 var (
 	regionIDAllocator = &idAllocator{allocator: &mockid.IDAllocator{}}
 	// Note: IDs below are entirely arbitrary. They are only for checking
-	// whether GetRegion/GetStore worktc.
+	// whether GetRegion/GetStore works.
 	// If we alloc ID in client in the future, these IDs must be updated.
 	stores = []*metapb.Store{
 		{Id: 1,
@@ -911,7 +911,7 @@ func TestScanRegions(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// Wait for region heartbeattc.
+	// Wait for region heartbeats.
 	testutil.WaitUntilWithTestingT(t, func() bool {
 		scanRegions, err := tc.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
@@ -1202,7 +1202,7 @@ func TestUpdateServiceGCSafePoint(t *testing.T) {
 		"", 1000, 15)
 	re.Error(err)
 
-	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepointtc.
+	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
 	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 11)
 	re.NoError(err)
@@ -1356,8 +1356,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	resp.Body.Close()
 	re.NoError(err)
 	time.Sleep(2 * time.Second)
-	_ = leader.Destroy()
+	re.NoError(leader.Destroy())
 	time.Sleep(2 * time.Second)
 	leader = cluster.GetServer(cluster.WaitLeader())
+	re.NotNil(leader)
 	assertTTLConfig(re, leader.GetPersistOptions())
 }
