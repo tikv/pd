@@ -328,14 +328,14 @@ func (s *testUnsafeRecoverySuite) TestForceLeaderFail(c *C) {
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
-	for _, store := range newTestStores(3, "6.0.0") {
+	for _, store := range newTestStores(4, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
 	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
-		2: {},
 		3: {},
-	}, 1), IsNil)
+		4: {},
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {
@@ -345,28 +345,57 @@ func (s *testUnsafeRecoverySuite) TestForceLeaderFail(c *C) {
 					RegionState: &raft_serverpb.RegionLocalState{
 						Region: &metapb.Region{
 							Id:          1001,
+							StartKey:    []byte(""),
+							EndKey:      []byte("x"),
 							RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 							Peers: []*metapb.Peer{
-								{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
+								{Id: 11, StoreId: 1}, {Id: 21, StoreId: 3}, {Id: 31, StoreId: 4}}}}},
+			},
+		},
+		2: {
+			PeerReports: []*pdpb.PeerReport{
+				{
+					RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+					RegionState: &raft_serverpb.RegionLocalState{
+						Region: &metapb.Region{
+							Id:          1002,
+							StartKey:    []byte("x"),
+							EndKey:      []byte(""),
+							RegionEpoch: &metapb.RegionEpoch{ConfVer: 10, Version: 1},
+							Peers: []*metapb.Peer{
+								{Id: 12, StoreId: 2}, {Id: 22, StoreId: 3}, {Id: 32, StoreId: 4}}}}},
 			},
 		},
 	}
 
-	req := newStoreHeartbeat(1, reports[1])
-	resp := &pdpb.StoreHeartbeatResponse{}
-	req.StoreReport.Step = 1
-	recoveryController.HandleStoreHeartbeat(req, resp)
+	req1 := newStoreHeartbeat(1, reports[1])
+	resp1 := &pdpb.StoreHeartbeatResponse{}
+	req1.StoreReport.Step = 1
+	recoveryController.HandleStoreHeartbeat(req1, resp1)
+	req2 := newStoreHeartbeat(2, reports[2])
+	resp2 := &pdpb.StoreHeartbeatResponse{}
+	req2.StoreReport.Step = 1
+	recoveryController.HandleStoreHeartbeat(req2, resp2)
 	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
+	recoveryController.HandleStoreHeartbeat(req1, resp1)
 
-	applyRecoveryPlan(c, 1, reports, resp)
-	// force leader doesn't succeed
-	reports[1].PeerReports[0].IsForceLeader = false
-	recoveryController.HandleStoreHeartbeat(req, resp)
+	// force leader on store 1 succeed
+	applyRecoveryPlan(c, 1, reports, resp1)
+	applyRecoveryPlan(c, 2, reports, resp2)
+	// force leader on store 2 doesn't succeed
+	reports[2].PeerReports[0].IsForceLeader = false
+
+	// force leader should retry on store 2
+	recoveryController.HandleStoreHeartbeat(req1, resp1)
+	recoveryController.HandleStoreHeartbeat(req2, resp2)
 	c.Assert(recoveryController.GetStage(), Equals, forceLeader)
+	recoveryController.HandleStoreHeartbeat(req1, resp1)
 
 	// force leader succeed this time
-	applyRecoveryPlan(c, 1, reports, resp)
-	recoveryController.HandleStoreHeartbeat(req, resp)
+	applyRecoveryPlan(c, 1, reports, resp1)
+	applyRecoveryPlan(c, 2, reports, resp2)
+	recoveryController.HandleStoreHeartbeat(req1, resp1)
+	recoveryController.HandleStoreHeartbeat(req2, resp2)
 	c.Assert(recoveryController.GetStage(), Equals, demoteFailedVoter)
 }
 
