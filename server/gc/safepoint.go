@@ -33,7 +33,7 @@ func NewSafepointManager(store endpoint.GCSafePointStorage) *SafePointManager {
 }
 
 type gcSafePointManager struct {
-	syncutil.RWMutex
+	syncutil.Mutex
 	store endpoint.GCSafePointStorage
 }
 
