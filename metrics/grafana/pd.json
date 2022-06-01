@@ -11459,20 +11459,7 @@
               "custom": {
                 "align": null
               },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
+              "mappings": []
             },
             "overrides": []
           },
@@ -11520,20 +11507,7 @@
               "custom": {
                 "align": null
               },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
+              "mappings": []
             },
             "overrides": []
           },
