@@ -23,8 +23,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/testutil"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestTsLessEqual(t *testing.T) {
 	re := require.New(t)

@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authortc.
+// Copyright 2018 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,12 +43,17 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/goleak"
 )
 
 const (
 	tsoRequestConcurrencyNumber = 5
 	tsoRequestRound             = 30
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type client interface {
 	GetLeaderAddr() string
