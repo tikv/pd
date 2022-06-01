@@ -1344,7 +1344,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	if newSafePoint > oldSafePoint {
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
-	} else {
+	} else if newSafePoint < oldSafePoint {
 		log.Warn("trying to update gc safe point",
 			zap.Uint64("old-safe-point", oldSafePoint),
 			zap.Uint64("new-safe-point", newSafePoint))
