@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -566,6 +567,53 @@ func waitLeader(t *testing.T, cli client, leader string) {
 	})
 }
 
+func TestConfigTTLAfterTransferLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leader := cluster.GetServer(cluster.WaitLeader())
+	re.NoError(leader.BootstrapCluster())
+	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
+	postData, err := json.Marshal(map[string]interface{}{
+		"schedule.max-snapshot-count":             999,
+		"schedule.enable-location-replacement":    false,
+		"schedule.max-merge-region-size":          999,
+		"schedule.max-merge-region-keys":          999,
+		"schedule.scheduler-max-waiting-operator": 999,
+		"schedule.leader-schedule-limit":          999,
+		"schedule.region-schedule-limit":          999,
+		"schedule.hot-region-schedule-limit":      999,
+		"schedule.replica-schedule-limit":         999,
+		"schedule.merge-schedule-limit":           999,
+	})
+	re.NoError(err)
+	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
+	resp.Body.Close()
+	re.NoError(err)
+	time.Sleep(2 * time.Second)
+	re.NoError(leader.Destroy())
+	time.Sleep(2 * time.Second)
+	leader = cluster.GetServer(cluster.WaitLeader())
+	re.NotNil(leader)
+	options := leader.GetPersistOptions()
+	re.NotNil(options)
+	re.Equal(uint64(999), options.GetMaxSnapshotCount())
+	re.False(options.IsLocationReplacementEnabled())
+	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
+	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
+	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
+	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
+	re.Equal(uint64(999), options.GetRegionScheduleLimit())
+	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
+	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
+	re.Equal(uint64(999), options.GetMergeScheduleLimit())
+}
+
 func TestCloseClient(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -622,7 +670,8 @@ var (
 	}
 )
 
-type testClient struct {
+type clientTestSuite struct {
+	suite.Suite
 	cleanup         server.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
@@ -634,41 +683,34 @@ type testClient struct {
 	reportBucket    pdpb.PD_ReportBucketsClient
 }
 
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
-		re.FailNow("should be nil")
-	})
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
+func TestClientTestSuite(t *testing.T) {
+	suite.Run(t, new(clientTestSuite))
 }
 
-func newTestClient(re *require.Assertions) *testClient {
-	tc := &testClient{}
+func (suite *clientTestSuite) SetupSuite() {
 	var err error
-	tc.srv, tc.cleanup, err = server.NewTestServer(checkerWithNilAssert(re))
-	re.NoError(err)
-	tc.grpcPDClient = testutil.MustNewGrpcClientWithTestify(re, tc.srv.GetAddr())
-	tc.grpcSvr = &server.GrpcServer{Server: tc.srv}
+	re := suite.Require()
+	suite.srv, suite.cleanup, err = server.NewTestServer(suite.checkerWithNilAssert())
+	suite.NoError(err)
+	suite.grpcPDClient = testutil.MustNewGrpcClientWithTestify(re, suite.srv.GetAddr())
+	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	mustWaitLeader(re, map[string]*server.Server{tc.srv.GetAddr(): tc.srv})
-	bootstrapServer(re, newHeader(tc.srv), tc.grpcPDClient)
+	suite.mustWaitLeader(map[string]*server.Server{suite.srv.GetAddr(): suite.srv})
+	suite.bootstrapServer(newHeader(suite.srv), suite.grpcPDClient)
 
-	tc.ctx, tc.clean = context.WithCancel(context.Background())
-	tc.client = setupCli(re, tc.ctx, tc.srv.GetEndpoints())
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+	suite.client = setupCli(re, suite.ctx, suite.srv.GetEndpoints())
 
-	re.NoError(err)
-	tc.regionHeartbeat, err = tc.grpcPDClient.RegionHeartbeat(tc.ctx)
-	re.NoError(err)
-	tc.reportBucket, err = tc.grpcPDClient.ReportBuckets(tc.ctx)
-	re.NoError(err)
-	cluster := tc.srv.GetRaftCluster()
-	re.NotNil(cluster)
+	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
+	suite.NoError(err)
+	suite.reportBucket, err = suite.grpcPDClient.ReportBuckets(suite.ctx)
+	suite.NoError(err)
+	cluster := suite.srv.GetRaftCluster()
+	suite.NotNil(cluster)
 	now := time.Now().UnixNano()
 	for _, store := range stores {
-		tc.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: newHeader(tc.srv),
+		suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+			Header: newHeader(suite.srv),
 			Store: &metapb.Store{
 				Id:            store.Id,
 				Address:       store.Address,
@@ -678,16 +720,25 @@ func newTestClient(re *require.Assertions) *testClient {
 	}
 	config := cluster.GetStoreConfig()
 	config.EnableRegionBucket = true
-	return tc
 }
 
-func (tc *testClient) close() {
-	tc.client.Close()
-	tc.clean()
-	tc.cleanup()
+func (suite *clientTestSuite) TearDownSuite() {
+	suite.client.Close()
+	suite.clean()
+	suite.cleanup()
 }
 
-func mustWaitLeader(re *require.Assertions, svrs map[string]*server.Server) *server.Server {
+func (suite *clientTestSuite) checkerWithNilAssert() *assertutil.Checker {
+	checker := assertutil.NewChecker(func() {
+		suite.FailNow("should be nil")
+	})
+	checker.IsNil = func(obtained interface{}) {
+		suite.Nil(obtained)
+	}
+	return checker
+}
+
+func (suite *clientTestSuite) mustWaitLeader(svrs map[string]*server.Server) *server.Server {
 	for i := 0; i < 500; i++ {
 		for _, s := range svrs {
 			if !s.IsClosed() && s.GetMember().IsLeader() {
@@ -696,7 +747,7 @@ func mustWaitLeader(re *require.Assertions, svrs map[string]*server.Server) *ser
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	re.FailNow("no leader")
+	suite.FailNow("no leader")
 	return nil
 }
 
@@ -706,7 +757,7 @@ func newHeader(srv *server.Server) *pdpb.RequestHeader {
 	}
 }
 
-func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client pdpb.PDClient) {
+func (suite *clientTestSuite) bootstrapServer(header *pdpb.RequestHeader, client pdpb.PDClient) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -722,13 +773,10 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 		Region: region,
 	}
 	_, err := client.Bootstrap(context.Background(), req)
-	re.NoError(err)
+	suite.NoError(err)
 }
 
-func TestNormalTSO(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestNormalTSO() {
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -736,10 +784,10 @@ func TestNormalTSO(t *testing.T) {
 			defer wg.Done()
 			var lastTS uint64
 			for i := 0; i < tsoRequestRound; i++ {
-				physical, logical, err := tc.client.GetTS(context.Background())
-				re.NoError(err)
+				physical, logical, err := suite.client.GetTS(context.Background())
+				suite.NoError(err)
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
+				suite.Less(lastTS, ts)
 				lastTS = ts
 			}
 		}()
@@ -747,10 +795,7 @@ func TestNormalTSO(t *testing.T) {
 	wg.Wait()
 }
 
-func TestGetTSAsync(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestGetTSAsync() {
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -758,14 +803,14 @@ func TestGetTSAsync(t *testing.T) {
 			defer wg.Done()
 			tsFutures := make([]pd.TSFuture, tsoRequestRound)
 			for i := range tsFutures {
-				tsFutures[i] = tc.client.GetTSAsync(context.Background())
+				tsFutures[i] = suite.client.GetTSAsync(context.Background())
 			}
 			var lastTS uint64 = math.MaxUint64
 			for i := len(tsFutures) - 1; i >= 0; i-- {
 				physical, logical, err := tsFutures[i].Wait()
-				re.NoError(err)
+				suite.NoError(err)
 				ts := tsoutil.ComposeTS(physical, logical)
-				re.Greater(lastTS, ts)
+				suite.Greater(lastTS, ts)
 				lastTS = ts
 			}
 		}()
@@ -773,10 +818,7 @@ func TestGetTSAsync(t *testing.T) {
 	wg.Wait()
 }
 
-func TestGetRegion(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestGetRegion() {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -787,15 +829,16 @@ func TestGetRegion(t *testing.T) {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(tc.srv),
+		Header: newHeader(suite.srv),
 		Region: region,
 		Leader: peers[0],
 	}
-	err := tc.regionHeartbeat.Send(req)
-	re.NoError(err)
+	err := suite.regionHeartbeat.Send(req)
+	suite.NoError(err)
+	t := suite.T()
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		r, err := tc.client.GetRegion(context.Background(), []byte("a"))
-		re.NoError(err)
+		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
+		suite.NoError(err)
 		if r == nil {
 			return false
 		}
@@ -804,7 +847,7 @@ func TestGetRegion(t *testing.T) {
 			r.Buckets == nil
 	})
 	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(tc.srv),
+		Header: newHeader(suite.srv),
 		Buckets: &metapb.Buckets{
 			RegionId:   regionID,
 			Version:    1,
@@ -820,20 +863,20 @@ func TestGetRegion(t *testing.T) {
 			},
 		},
 	}
-	re.NoError(tc.reportBucket.Send(breq))
+	suite.NoError(suite.reportBucket.Send(breq))
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		r, err := tc.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
-		re.NoError(err)
+		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		suite.NoError(err)
 		if r == nil {
 			return false
 		}
 		return r.Buckets != nil
 	})
-	config := tc.srv.GetRaftCluster().GetStoreConfig()
+	config := suite.srv.GetRaftCluster().GetStoreConfig()
 	config.EnableRegionBucket = false
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		r, err := tc.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
-		re.NoError(err)
+		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		suite.NoError(err)
 		if r == nil {
 			return false
 		}
@@ -842,10 +885,7 @@ func TestGetRegion(t *testing.T) {
 	config.EnableRegionBucket = true
 }
 
-func TestGetPrevRegion(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestGetPrevRegion() {
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
@@ -862,18 +902,18 @@ func TestGetPrevRegion(t *testing.T) {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(tc.srv),
+			Header: newHeader(suite.srv),
 			Region: r,
 			Leader: peers[0],
 		}
-		err := tc.regionHeartbeat.Send(req)
-		re.NoError(err)
+		err := suite.regionHeartbeat.Send(req)
+		suite.NoError(err)
 	}
 	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
-		testutil.WaitUntilWithTestingT(t, func() bool {
-			r, err := tc.client.GetPrevRegion(context.Background(), []byte{byte(i)})
-			re.NoError(err)
+		testutil.WaitUntilWithTestingT(suite.T(), func() bool {
+			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
+			suite.NoError(err)
 			if i > 0 && i < regionLen {
 				return reflect.DeepEqual(peers[0], r.Leader) &&
 					reflect.DeepEqual(regions[i-1], r.Meta)
@@ -883,10 +923,7 @@ func TestGetPrevRegion(t *testing.T) {
 	}
 }
 
-func TestScanRegions(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestScanRegions() {
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
@@ -903,53 +940,54 @@ func TestScanRegions(t *testing.T) {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(tc.srv),
+			Header: newHeader(suite.srv),
 			Region: r,
 			Leader: peers[0],
 		}
-		err := tc.regionHeartbeat.Send(req)
-		re.NoError(err)
+		err := suite.regionHeartbeat.Send(req)
+		suite.NoError(err)
 	}
 
 	// Wait for region heartbeats.
+	t := suite.T()
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		scanRegions, err := tc.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
+		scanRegions, err := suite.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
 	// Set leader of region3 to nil.
 	region3 := core.NewRegionInfo(regions[3], nil)
-	tc.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
 
 	// Add down peer for region4.
 	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
-	tc.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
 
 	// Add pending peers for region5.
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
-	tc.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
+	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
 
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
-		scanRegions, err := tc.client.ScanRegions(context.Background(), start, end, limit)
-		re.NoError(err)
-		re.Len(scanRegions, len(expect))
+		scanRegions, err := suite.client.ScanRegions(context.Background(), start, end, limit)
+		suite.NoError(err)
+		suite.Len(scanRegions, len(expect))
 		t.Log("scanRegions", scanRegions)
 		t.Log("expect", expect)
 		for i := range expect {
-			re.True(reflect.DeepEqual(expect[i], scanRegions[i].Meta))
+			suite.True(reflect.DeepEqual(expect[i], scanRegions[i].Meta))
 
 			if scanRegions[i].Meta.GetId() == region3.GetID() {
-				re.True(reflect.DeepEqual(&metapb.Peer{}, scanRegions[i].Leader))
+				suite.True(reflect.DeepEqual(&metapb.Peer{}, scanRegions[i].Leader))
 			} else {
-				re.True(reflect.DeepEqual(expect[i].Peers[0], scanRegions[i].Leader))
+				suite.True(reflect.DeepEqual(expect[i].Peers[0], scanRegions[i].Leader))
 			}
 
 			if scanRegions[i].Meta.GetId() == region4.GetID() {
-				re.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers))
+				suite.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers))
 			}
 
 			if scanRegions[i].Meta.GetId() == region5.GetID() {
-				re.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers))
+				suite.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers))
 			}
 		}
 	}
@@ -961,10 +999,7 @@ func TestScanRegions(t *testing.T) {
 	check([]byte{1}, []byte{6}, 2, regions[1:3])
 }
 
-func TestGetRegionByID(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestGetRegionByID() {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -975,16 +1010,16 @@ func TestGetRegionByID(t *testing.T) {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(tc.srv),
+		Header: newHeader(suite.srv),
 		Region: region,
 		Leader: peers[0],
 	}
-	err := tc.regionHeartbeat.Send(req)
-	re.NoError(err)
+	err := suite.regionHeartbeat.Send(req)
+	suite.NoError(err)
 
-	testutil.WaitUntilWithTestingT(t, func() bool {
-		r, err := tc.client.GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
+	testutil.WaitUntilWithTestingT(suite.T(), func() bool {
+		r, err := suite.client.GetRegionByID(context.Background(), regionID)
+		suite.NoError(err)
 		if r == nil {
 			return false
 		}
@@ -993,116 +1028,107 @@ func TestGetRegionByID(t *testing.T) {
 	})
 }
 
-func TestGetStore(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
-	cluster := tc.srv.GetRaftCluster()
-	re.NotNil(cluster)
+func (suite *clientTestSuite) TestGetStore() {
+	cluster := suite.srv.GetRaftCluster()
+	suite.NotNil(cluster)
 	store := stores[0]
 
 	// Get an up store should be OK.
-	n, err := tc.client.GetStore(context.Background(), store.GetId())
-	re.NoError(err)
-	re.True(reflect.DeepEqual(store, n))
+	n, err := suite.client.GetStore(context.Background(), store.GetId())
+	suite.NoError(err)
+	suite.True(reflect.DeepEqual(store, n))
 
-	actualStores, err := tc.client.GetAllStores(context.Background())
-	re.NoError(err)
-	re.Len(actualStores, len(stores))
+	actualStores, err := suite.client.GetAllStores(context.Background())
+	suite.NoError(err)
+	suite.Len(actualStores, len(stores))
 	stores = actualStores
 
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
-	re.NoError(err)
+	suite.NoError(err)
 	offlineStore := proto.Clone(store).(*metapb.Store)
 	offlineStore.State = metapb.StoreState_Offline
 	offlineStore.NodeState = metapb.NodeState_Removing
 
 	// Get an offline store should be OK.
-	n, err = tc.client.GetStore(context.Background(), store.GetId())
-	re.NoError(err)
-	re.True(reflect.DeepEqual(offlineStore, n))
+	n, err = suite.client.GetStore(context.Background(), store.GetId())
+	suite.NoError(err)
+	suite.True(reflect.DeepEqual(offlineStore, n))
 
 	// Should return offline storetc.
 	contains := false
-	stores, err = tc.client.GetAllStores(context.Background())
-	re.NoError(err)
+	stores, err = suite.client.GetAllStores(context.Background())
+	suite.NoError(err)
 	for _, store := range stores {
 		if store.GetId() == offlineStore.GetId() {
 			contains = true
-			re.True(reflect.DeepEqual(offlineStore, store))
+			suite.True(reflect.DeepEqual(offlineStore, store))
 		}
 	}
-	re.True(contains)
+	suite.True(contains)
 
 	// Mark the store as physically destroyed and offline.
 	err = cluster.RemoveStore(store.GetId(), true)
-	re.NoError(err)
+	suite.NoError(err)
 	physicallyDestroyedStoreID := store.GetId()
 
 	// Get a physically destroyed and offline store
 	// It should be Tombstone(become Tombstone automically) or Offline
-	n, err = tc.client.GetStore(context.Background(), physicallyDestroyedStoreID)
-	re.NoError(err)
+	n, err = suite.client.GetStore(context.Background(), physicallyDestroyedStoreID)
+	suite.NoError(err)
 	if n != nil { // store is still offline and physically destroyed
-		re.Equal(metapb.NodeState_Removing, n.GetNodeState())
-		re.True(n.PhysicallyDestroyed)
+		suite.Equal(metapb.NodeState_Removing, n.GetNodeState())
+		suite.True(n.PhysicallyDestroyed)
 	}
 	// Should return tombstone storetc.
 	contains = false
-	stores, err = tc.client.GetAllStores(context.Background())
-	re.NoError(err)
+	stores, err = suite.client.GetAllStores(context.Background())
+	suite.NoError(err)
 	for _, store := range stores {
 		if store.GetId() == physicallyDestroyedStoreID {
 			contains = true
-			re.NotEqual(metapb.StoreState_Up, store.GetState())
-			re.True(store.PhysicallyDestroyed)
+			suite.NotEqual(metapb.StoreState_Up, store.GetState())
+			suite.True(store.PhysicallyDestroyed)
 		}
 	}
-	re.True(contains)
+	suite.True(contains)
 
 	// Should not return tombstone storetc.
-	stores, err = tc.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
-	re.NoError(err)
+	stores, err = suite.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
+	suite.NoError(err)
 	for _, store := range stores {
 		if store.GetId() == physicallyDestroyedStoreID {
-			re.Equal(metapb.StoreState_Offline, store.GetState())
-			re.True(store.PhysicallyDestroyed)
+			suite.Equal(metapb.StoreState_Offline, store.GetState())
+			suite.True(store.PhysicallyDestroyed)
 		}
 	}
 }
 
-func (tc *testClient) checkGCSafePoint(re *require.Assertions, expectedSafePoint uint64) {
+func (suite *clientTestSuite) checkGCSafePoint(expectedSafePoint uint64) {
 	req := &pdpb.GetGCSafePointRequest{
-		Header: newHeader(tc.srv),
+		Header: newHeader(suite.srv),
 	}
-	resp, err := tc.grpcSvr.GetGCSafePoint(context.Background(), req)
-	re.NoError(err)
-	re.Equal(expectedSafePoint, resp.SafePoint)
+	resp, err := suite.grpcSvr.GetGCSafePoint(context.Background(), req)
+	suite.NoError(err)
+	suite.Equal(expectedSafePoint, resp.SafePoint)
 }
 
-func TestUpdateGCSafePoint(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
-	tc.checkGCSafePoint(re, 0)
+func (suite *clientTestSuite) TestUpdateGCSafePoint() {
+	suite.checkGCSafePoint(0)
 	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
-		newSafePoint, err := tc.client.UpdateGCSafePoint(context.Background(), safePoint)
-		re.NoError(err)
-		re.Equal(safePoint, newSafePoint)
-		tc.checkGCSafePoint(re, safePoint)
+		newSafePoint, err := suite.client.UpdateGCSafePoint(context.Background(), safePoint)
+		suite.NoError(err)
+		suite.Equal(safePoint, newSafePoint)
+		suite.checkGCSafePoint(safePoint)
 	}
 	// If the new safe point is less than the old one, it should not be updated.
-	newSafePoint, err := tc.client.UpdateGCSafePoint(context.Background(), 1)
-	re.Equal(uint64(math.MaxUint64), newSafePoint)
-	re.NoError(err)
-	tc.checkGCSafePoint(re, math.MaxUint64)
+	newSafePoint, err := suite.client.UpdateGCSafePoint(context.Background(), 1)
+	suite.Equal(uint64(math.MaxUint64), newSafePoint)
+	suite.NoError(err)
+	suite.checkGCSafePoint(math.MaxUint64)
 }
 
-func TestUpdateServiceGCSafePoint(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	serviceSafePoints := []struct {
 		ServiceID string
 		TTL       int64
@@ -1113,105 +1139,105 @@ func TestUpdateServiceGCSafePoint(t *testing.T) {
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
-		min, err := tc.client.UpdateServiceGCSafePoint(context.Background(),
+		min, err := suite.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
-		re.NoError(err)
+		suite.NoError(err)
 		// An service safepoint of ID "gc_worker" is automatically initialized as 0
-		re.Equal(uint64(0), min)
+		suite.Equal(uint64(0), min)
 	}
 
-	min, err := tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err := suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", math.MaxInt64, 10)
-	re.NoError(err)
-	re.Equal(uint64(1), min)
+	suite.NoError(err)
+	suite.Equal(uint64(1), min)
 
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
-	re.NoError(err)
-	re.Equal(uint64(2), min)
+	suite.NoError(err)
+	suite.Equal(uint64(2), min)
 
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", -100, 2)
-	re.NoError(err)
-	re.Equal(uint64(3), min)
+	suite.NoError(err)
+	suite.Equal(uint64(3), min)
 
 	// Minimum safepoint does not regress
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 2)
-	re.NoError(err)
-	re.Equal(uint64(3), min)
+	suite.NoError(err)
+	suite.Equal(uint64(3), min)
 
 	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("c", oldMinSsp.ServiceID)
-	re.Equal(uint64(3), oldMinSsp.SafePoint)
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	oldMinSsp, err := suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("c", oldMinSsp.ServiceID)
+	suite.Equal(uint64(3), oldMinSsp.SafePoint)
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 2000, 3)
-	re.NoError(err)
-	re.Equal(uint64(3), min)
-	minSsp, err := tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("c", minSsp.ServiceID)
-	re.Equal(uint64(3), oldMinSsp.SafePoint)
-	re.GreaterOrEqual(minSsp.ExpiredAt-oldMinSsp.ExpiredAt, int64(1000))
+	suite.NoError(err)
+	suite.Equal(uint64(3), min)
+	minSsp, err := suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("c", minSsp.ServiceID)
+	suite.Equal(uint64(3), oldMinSsp.SafePoint)
+	suite.GreaterOrEqual(minSsp.ExpiredAt-oldMinSsp.ExpiredAt, int64(1000))
 
 	// Shrinking TTL is also allowed
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 1, 3)
-	re.NoError(err)
-	re.Equal(uint64(3), min)
-	minSsp, err = tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("c", minSsp.ServiceID)
-	re.Less(minSsp.ExpiredAt, oldMinSsp.ExpiredAt)
+	suite.NoError(err)
+	suite.Equal(uint64(3), min)
+	minSsp, err = suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("c", minSsp.ServiceID)
+	suite.Less(minSsp.ExpiredAt, oldMinSsp.ExpiredAt)
 
 	// TTL can be infinite (represented by math.MaxInt64)
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", math.MaxInt64, 3)
-	re.NoError(err)
-	re.Equal(uint64(3), min)
-	minSsp, err = tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("c", minSsp.ServiceID)
-	re.Equal(minSsp.ExpiredAt, int64(math.MaxInt64))
+	suite.NoError(err)
+	suite.Equal(uint64(3), min)
+	minSsp, err = suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("c", minSsp.ServiceID)
+	suite.Equal(minSsp.ExpiredAt, int64(math.MaxInt64))
 
 	// Delete "a" and "c"
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", -1, 3)
-	re.NoError(err)
-	re.Equal(uint64(4), min)
-	min, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	suite.NoError(err)
+	suite.Equal(uint64(4), min)
+	min, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", -1, 4)
-	re.NoError(err)
+	suite.NoError(err)
 	// Now gc_worker is the only remaining service safe point.
-	re.Equal(uint64(10), min)
+	suite.Equal(uint64(10), min)
 
 	// gc_worker cannot be deleted.
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", -1, 10)
-	re.Error(err)
+	suite.Error(err)
 
 	// Cannot set non-infinity TTL for gc_worker
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", 10000000, 10)
-	re.Error(err)
+	suite.Error(err)
 
 	// Service safepoint must have a non-empty ID
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"", 1000, 15)
-	re.Error(err)
+	suite.Error(err)
 
 	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 11)
-	re.NoError(err)
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	suite.NoError(err)
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 12)
-	re.NoError(err)
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	suite.NoError(err)
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 1000, 13)
-	re.NoError(err)
+	suite.NoError(err)
 
 	// Force set invalid ttl to gc_worker
 	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
@@ -1222,41 +1248,38 @@ func TestUpdateServiceGCSafePoint(t *testing.T) {
 			SafePoint: 10,
 		}
 		value, err := json.Marshal(gcWorkerSsp)
-		re.NoError(err)
-		err = tc.srv.GetStorage().Save(gcWorkerKey, string(value))
-		re.NoError(err)
+		suite.NoError(err)
+		err = suite.srv.GetStorage().Save(gcWorkerKey, string(value))
+		suite.NoError(err)
 	}
 
-	minSsp, err = tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("gc_worker", minSsp.ServiceID)
-	re.Equal(uint64(10), minSsp.SafePoint)
-	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
+	minSsp, err = suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("gc_worker", minSsp.ServiceID)
+	suite.Equal(uint64(10), minSsp.SafePoint)
+	suite.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 
 	// Force delete gc_worker, then the min service safepoint is 11 of "a".
-	err = tc.srv.GetStorage().Remove(gcWorkerKey)
-	re.NoError(err)
-	minSsp, err = tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal(uint64(11), minSsp.SafePoint)
+	err = suite.srv.GetStorage().Remove(gcWorkerKey)
+	suite.NoError(err)
+	minSsp, err = suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal(uint64(11), minSsp.SafePoint)
 	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
 	// will be newly created.
 	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
-	_, err = tc.client.UpdateServiceGCSafePoint(context.Background(),
+	_, err = suite.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 14)
-	re.NoError(err)
+	suite.NoError(err)
 
-	minSsp, err = tc.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("gc_worker", minSsp.ServiceID)
-	re.Equal(uint64(11), minSsp.SafePoint)
-	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
+	minSsp, err = suite.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	suite.NoError(err)
+	suite.Equal("gc_worker", minSsp.ServiceID)
+	suite.Equal(uint64(11), minSsp.SafePoint)
+	suite.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 }
 
-func TestScatterRegion(t *testing.T) {
-	re := require.New(t)
-	tc := newTestClient(re)
-	defer tc.close()
+func (suite *clientTestSuite) TestScatterRegion() {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -1269,23 +1292,24 @@ func TestScatterRegion(t *testing.T) {
 		EndKey:   []byte("ggg"),
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(tc.srv),
+		Header: newHeader(suite.srv),
 		Region: region,
 		Leader: peers[0],
 	}
-	err := tc.regionHeartbeat.Send(req)
+	err := suite.regionHeartbeat.Send(req)
 	regionsID := []uint64{regionID}
-	re.NoError(err)
+	suite.NoError(err)
 	// Test interface `ScatterRegions`.
+	t := suite.T()
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		scatterResp, err := tc.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
+		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if err != nil {
 			return false
 		}
 		if scatterResp.FinishedPercentage != uint64(100) {
 			return false
 		}
-		resp, err := tc.client.GetOperator(context.Background(), regionID)
+		resp, err := suite.client.GetOperator(context.Background(), regionID)
 		if err != nil {
 			return false
 		}
@@ -1297,12 +1321,12 @@ func TestScatterRegion(t *testing.T) {
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
 	testutil.WaitUntilWithTestingT(t, func() bool {
-		err := tc.client.ScatterRegion(context.Background(), regionID)
+		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
 			fmt.Println(err)
 			return false
 		}
-		resp, err := tc.client.GetOperator(context.Background(), regionID)
+		resp, err := suite.client.GetOperator(context.Background(), regionID)
 		if err != nil {
 			return false
 		}
@@ -1310,51 +1334,4 @@ func TestScatterRegion(t *testing.T) {
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
 	}, testutil.WithSleepInterval(1*time.Second))
-}
-
-func TestConfigTTLAfterTransferLeader(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
-	re.NoError(leader.BootstrapCluster())
-	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
-	postData, err := json.Marshal(map[string]interface{}{
-		"schedule.max-snapshot-count":             999,
-		"schedule.enable-location-replacement":    false,
-		"schedule.max-merge-region-size":          999,
-		"schedule.max-merge-region-keys":          999,
-		"schedule.scheduler-max-waiting-operator": 999,
-		"schedule.leader-schedule-limit":          999,
-		"schedule.region-schedule-limit":          999,
-		"schedule.hot-region-schedule-limit":      999,
-		"schedule.replica-schedule-limit":         999,
-		"schedule.merge-schedule-limit":           999,
-	})
-	re.NoError(err)
-	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
-	resp.Body.Close()
-	re.NoError(err)
-	time.Sleep(2 * time.Second)
-	re.NoError(leader.Destroy())
-	time.Sleep(2 * time.Second)
-	leader = cluster.GetServer(cluster.WaitLeader())
-	re.NotNil(leader)
-	options := leader.GetPersistOptions()
-	re.NotNil(options)
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
 }
