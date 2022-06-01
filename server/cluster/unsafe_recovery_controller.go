@@ -973,7 +973,7 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 			plan := u.getRecoveryPlan(storeID)
 			if plan.ForceLeader == nil {
 				// Fill an empty force leader plan to the stores that doesn't have any force leader plan
-				// to avoid exiting existed force leaders.
+				// to avoid exiting existing force leaders.
 				plan.ForceLeader = &pdpb.ForceLeader{}
 			}
 		}
