@@ -191,7 +191,7 @@ leader-schedule-limit = 0
 	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
 	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
 	// When defined, use values from config file.
-	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
+	c.Assert(int(cfg.Schedule.GetMaxMergeRegionKeys()), Equals, 20*10000)
 	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
 	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
 	// When undefined, use default values.
@@ -210,6 +210,7 @@ lease = 0
 
 [schedule]
 type = "random-merge"
+max-merge-region-keys = 400000
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
@@ -217,7 +218,7 @@ type = "random-merge"
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"), IsTrue)
-
+	c.Assert(int(cfg.Schedule.GetMaxMergeRegionKeys()), Equals, 40*10000)
 	// Check misspelled schedulers name
 	cfgData = `
 name = ""
@@ -231,7 +232,6 @@ type = "random-merge-schedulers"
 	c.Assert(err, IsNil)
 	err = cfg.Adjust(&meta, false)
 	c.Assert(err, NotNil)
-
 	// Check correct schedulers name
 	cfgData = `
 name = ""

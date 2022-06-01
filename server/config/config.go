@@ -823,9 +823,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("max-merge-region-size") {
 		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
-	if !meta.IsDefined("max-merge-region-keys") {
-		adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
-	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
@@ -909,6 +906,14 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
 		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
 	}
+}
+
+// GetMaxMergeRegionKeys returns the max merge keys.
+func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
+	if keys := c.MaxMergeRegionKeys; keys != 0 {
+		return keys
+	}
+	return c.MaxMergeRegionSize * 10000
 }
 
 func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {

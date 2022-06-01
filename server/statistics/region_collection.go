@@ -179,7 +179,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		OversizedRegion: region.GetApproximateSize() >= int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()) ||
 			region.GetApproximateKeys() >= int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
 		UndersizedRegion: region.NeedMerge(int64(r.opt.GetScheduleConfig().MaxMergeRegionSize),
-			int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys)),
+			int64(r.opt.GetScheduleConfig().GetMaxMergeRegionKeys())),
 	}
 
 	for typ, c := range conditions {

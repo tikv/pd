@@ -245,7 +245,7 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().MaxMergeRegionKeys)
+	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().GetMaxMergeRegionKeys())
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
