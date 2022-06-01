@@ -63,11 +63,15 @@ func (l *RateLimiter) AllowN(n int) bool {
 
 // SetBurst is shorthand for SetBurstAt(time.Now(), newBurst).
 func (l *RateLimiter) SetBurst(burst int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.limiter.SetBurst(burst)
 }
 
 // SetLimit is shorthand for SetLimitAt(time.Now(), newLimit).
 func (l *RateLimiter) SetLimit(limit rate.Limit) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.limiter.SetLimit(limit)
 }
 
@@ -89,7 +93,7 @@ func (l *RateLimiter) Burst() int {
 // canceled, or the expected wait time exceeds the Context's Deadline.
 // The burst limit is ignored if the rate limit is Inf.
 func (l *RateLimiter) WaitN(ctx context.Context, n int) error {
-	// Currently there is no need to add lock
-	// because WaitN and Available will not be used together.
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.limiter.WaitN(ctx, n)
 }
