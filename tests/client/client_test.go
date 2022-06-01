@@ -1312,32 +1312,6 @@ func TestScatterRegion(t *testing.T) {
 	}, testutil.WithSleepInterval(1*time.Second))
 }
 
-var ttlConfig = map[string]interface{}{
-	"schedule.max-snapshot-count":             999,
-	"schedule.enable-location-replacement":    false,
-	"schedule.max-merge-region-size":          999,
-	"schedule.max-merge-region-keys":          999,
-	"schedule.scheduler-max-waiting-operator": 999,
-	"schedule.leader-schedule-limit":          999,
-	"schedule.region-schedule-limit":          999,
-	"schedule.hot-region-schedule-limit":      999,
-	"schedule.replica-schedule-limit":         999,
-	"schedule.merge-schedule-limit":           999,
-}
-
-func assertTTLConfig(re *require.Assertions, options *config.PersistOptions) {
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
-}
-
 func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1350,7 +1324,18 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	leader := cluster.GetServer(cluster.WaitLeader())
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
-	postData, err := json.Marshal(ttlConfig)
+	postData, err := json.Marshal(map[string]interface{}{
+		"schedule.max-snapshot-count":             999,
+		"schedule.enable-location-replacement":    false,
+		"schedule.max-merge-region-size":          999,
+		"schedule.max-merge-region-keys":          999,
+		"schedule.scheduler-max-waiting-operator": 999,
+		"schedule.leader-schedule-limit":          999,
+		"schedule.region-schedule-limit":          999,
+		"schedule.hot-region-schedule-limit":      999,
+		"schedule.replica-schedule-limit":         999,
+		"schedule.merge-schedule-limit":           999,
+	})
 	re.NoError(err)
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	resp.Body.Close()
@@ -1360,5 +1345,16 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	leader = cluster.GetServer(cluster.WaitLeader())
 	re.NotNil(leader)
-	assertTTLConfig(re, leader.GetPersistOptions())
+	options := leader.GetPersistOptions()
+	re.NotNil(options)
+	re.Equal(uint64(999), options.GetMaxSnapshotCount())
+	re.False(options.IsLocationReplacementEnabled())
+	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
+	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
+	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
+	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
+	re.Equal(uint64(999), options.GetRegionScheduleLimit())
+	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
+	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
+	re.Equal(uint64(999), options.GetMergeScheduleLimit())
 }
