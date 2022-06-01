@@ -913,7 +913,7 @@ func (s *scheduleController) IsPaused() bool {
 	return time.Now().Unix() < delayUntil
 }
 
-// GetPausedSchedulerDelayAt returns if a scheduler is paused.
+// GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
 func (s *scheduleController) GetDelayAt() int64 {
 	if s.IsPaused() {
 		return atomic.LoadInt64(&s.delayAt)
@@ -921,7 +921,7 @@ func (s *scheduleController) GetDelayAt() int64 {
 	return 0
 }
 
-// GetPausedSchedulerDelayUntil returns if a scheduler is paused.
+// GetPausedSchedulerDelayUntil returns resume timestamp of a paused scheduler
 func (s *scheduleController) GetDelayUntil() int64 {
 	if s.IsPaused() {
 		return atomic.LoadInt64(&s.delayUntil)
