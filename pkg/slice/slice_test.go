@@ -21,7 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 )
 
-func Test(t *testing.T) {
+func TestSlice(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		a      []int

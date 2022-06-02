@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test(t *testing.T) {
+func TestProgress(t *testing.T) {
 	re := require.New(t)
 	n := "test"
 	m := NewManager()
