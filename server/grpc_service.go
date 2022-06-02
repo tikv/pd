@@ -1340,7 +1340,6 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return nil, err
 	}
 
-	// safepoint updated
 	if newSafePoint > oldSafePoint {
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
