@@ -77,6 +77,30 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	c.Assert(manager.source.(*TiKVConfigSource).schema, Equals, "http")
 }
 
+func (t *testTiKVConfigSuite) TestParseConfig(c *C) {
+	body := `
+{
+"coprocessor":{
+"split-region-on-table":false,
+"batch-split-limit":10,
+"region-max-size":"384MiB",
+"region-split-size":"256MiB",
+"region-max-keys":3840000,
+"region-split-keys":2560000,
+"consistency-check-method":"mvcc",
+"enable-region-bucket":true,
+"region-bucket-size":"96MiB",
+"region-size-threshold-for-approximate":"384MiB",
+"region-bucket-merge-size-ratio":0.33
+}
+}
+`
+
+	var config StoreConfig
+	c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
+	c.Assert(config.GetRegionBucketSize(), Equals, uint64(96))
+}
+
 func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 	testdata := []struct {
 		size      uint64

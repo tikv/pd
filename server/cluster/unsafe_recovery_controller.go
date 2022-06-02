@@ -454,6 +454,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 				stores += ", "
 			}
 		}
+		// TODO: clean up existing operators
 		output.Info = fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores)
 	case tombstoneTiFlashLearner:
 		output.Info = "Unsafe recovery enters tombstone TiFlash learner stage"
@@ -966,6 +967,17 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 		}
 		return true
 	})
+
+	if hasPlan {
+		for storeID := range u.storeReports {
+			plan := u.getRecoveryPlan(storeID)
+			if plan.ForceLeader == nil {
+				// Fill an empty force leader plan to the stores that doesn't have any force leader plan
+				// to avoid exiting existing force leaders.
+				plan.ForceLeader = &pdpb.ForceLeader{}
+			}
+		}
+	}
 
 	return hasPlan
 }

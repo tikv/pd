@@ -20,82 +20,76 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
 func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testProgressSuite{})
-
-type testProgressSuite struct{}
-
-func (s *testProgressSuite) Test(c *C) {
+	re := require.New(t)
 	n := "test"
 	m := NewManager()
-	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
+	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
 	p, ls, cs, err := m.Status(n)
-	c.Assert(err, IsNil)
-	c.Assert(p, Equals, 0.0)
-	c.Assert(ls, Equals, math.MaxFloat64)
-	c.Assert(cs, Equals, 0.0)
+	re.NoError(err)
+	re.Equal(0.0, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
 	time.Sleep(time.Second)
-	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsTrue)
+	re.True(m.AddProgress(n, 100, 100, 10*time.Second))
 
 	m.UpdateProgress(n, 30, 30, false)
 	p, ls, cs, err = m.Status(n)
-	c.Assert(err, IsNil)
-	c.Assert(p, Equals, 0.7)
+	re.NoError(err)
+	re.Equal(0.7, p)
 	// 30/(70/1s+) > 30/70
-	c.Assert(ls, Greater, 30.0/70.0)
+	re.Greater(ls, 30.0/70.0)
 	// 70/1s+ > 70
-	c.Assert(cs, Less, 70.0)
+	re.Less(cs, 70.0)
 	// there is no scheduling
 	for i := 0; i < 100; i++ {
 		m.UpdateProgress(n, 30, 30, false)
 	}
-	c.Assert(m.progesses[n].history.Len(), Equals, 61)
+	re.Equal(61, m.progesses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
-	c.Assert(err, IsNil)
-	c.Assert(p, Equals, 0.7)
-	c.Assert(ls, Equals, math.MaxFloat64)
-	c.Assert(cs, Equals, 0.0)
+	re.NoError(err)
+	re.Equal(0.7, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
 
 	ps := m.GetProgresses(func(p string) bool {
 		return strings.Contains(p, n)
 	})
-	c.Assert(ps, HasLen, 1)
-	c.Assert(ps[0], Equals, n)
+	re.Len(ps, 1)
+	re.Equal(n, ps[0])
 	ps = m.GetProgresses(func(p string) bool {
 		return strings.Contains(p, "a")
 	})
-	c.Assert(ps, HasLen, 0)
-	c.Assert(m.RemoveProgress(n), IsTrue)
-	c.Assert(m.RemoveProgress(n), IsFalse)
+	re.Len(ps, 0)
+	re.True(m.RemoveProgress(n))
+	re.False(m.RemoveProgress(n))
 }
 
-func (s *testProgressSuite) TestAbnormal(c *C) {
+func TestAbnormal(t *testing.T) {
+	re := require.New(t)
 	n := "test"
 	m := NewManager()
-	c.Assert(m.AddProgress(n, 100, 100, 10*time.Second), IsFalse)
+	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
 	p, ls, cs, err := m.Status(n)
-	c.Assert(err, IsNil)
-	c.Assert(p, Equals, 0.0)
-	c.Assert(ls, Equals, math.MaxFloat64)
-	c.Assert(cs, Equals, 0.0)
+	re.NoError(err)
+	re.Equal(0.0, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
 	// When offline a store, but there are still many write operations
 	m.UpdateProgress(n, 110, 110, false)
 	p, ls, cs, err = m.Status(n)
-	c.Assert(err, IsNil)
-	c.Assert(p, Equals, 0.0)
-	c.Assert(ls, Equals, math.MaxFloat64)
-	c.Assert(cs, Equals, 0.0)
+	re.NoError(err)
+	re.Equal(0.0, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
 	// It usually won't happens
 	m.UpdateProgressTotal(n, 10)
 	p, ls, cs, err = m.Status(n)
-	c.Assert(err, NotNil)
-	c.Assert(p, Equals, 0.0)
-	c.Assert(ls, Equals, 0.0)
-	c.Assert(cs, Equals, 0.0)
+	re.Error(err)
+	re.Equal(0.0, p)
+	re.Equal(0.0, ls)
+	re.Equal(0.0, cs)
 }
