@@ -18,53 +18,44 @@ import (
 	"sync"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 )
-
-func TestStorage(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testGCManagerSuite{})
-
-type testGCManagerSuite struct {
-}
 
 func newGCStorage() endpoint.GCSafePointStorage {
 	return endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 }
 
-func (s *testGCManagerSuite) TestGCSafePointUpdateSequentially(c *C) {
+func TestGCSafePointUpdateSequentially(t *testing.T) {
 	gcSafePointManager := newGCSafePointManager(newGCStorage())
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
 	for id := 10; id < 20; id++ {
 		safePoint, err := gcSafePointManager.LoadGCSafePoint()
-		c.Assert(err, IsNil)
-		c.Assert(safePoint, Equals, curSafePoint)
+		require.NoError(t, err)
+		require.Equal(t, safePoint, curSafePoint)
 		previousSafePoint := curSafePoint
 		curSafePoint = uint64(id)
 		oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(curSafePoint)
-		c.Assert(err, IsNil)
-		c.Assert(oldSafePoint, Equals, previousSafePoint)
+		require.NoError(t, err)
+		require.Equal(t, oldSafePoint, previousSafePoint)
 	}
 
 	safePoint, err := gcSafePointManager.LoadGCSafePoint()
-	c.Assert(err, IsNil)
-	c.Assert(safePoint, Equals, safePoint)
+	require.NoError(t, err)
+	require.Equal(t, safePoint, curSafePoint)
 	// update with smaller value should be failed.
 	oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(safePoint - 5)
-	c.Assert(err, IsNil)
-	c.Assert(oldSafePoint, Equals, safePoint)
+	require.NoError(t, err)
+	require.Equal(t, oldSafePoint, safePoint)
 	curSafePoint, err = gcSafePointManager.LoadGCSafePoint()
-	c.Assert(err, IsNil)
+	require.NoError(t, err)
 	// current safePoint should not change since the update value was smaller
-	c.Assert(curSafePoint, Equals, safePoint)
+	require.Equal(t, curSafePoint, safePoint)
 }
 
-func (s *testGCManagerSuite) TestGCSafePointUpdateCurrently(c *C) {
+func TestGCSafePointUpdateCurrently(t *testing.T) {
 	gcSafePointManager := newGCSafePointManager(newGCStorage())
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
@@ -75,13 +66,13 @@ func (s *testGCManagerSuite) TestGCSafePointUpdateCurrently(c *C) {
 		go func(step uint64) {
 			for safePoint := step; safePoint <= maxSafePoint; safePoint += step {
 				_, err := gcSafePointManager.UpdateGCSafePoint(safePoint)
-				c.Assert(err, IsNil)
+				require.NoError(t, err)
 			}
 			wg.Done()
 		}(uint64(id + 1))
 	}
 	wg.Wait()
 	safePoint, err := gcSafePointManager.LoadGCSafePoint()
-	c.Assert(err, IsNil)
-	c.Assert(safePoint, Equals, maxSafePoint)
+	require.NoError(t, err)
+	require.Equal(t, safePoint, maxSafePoint)
 }
