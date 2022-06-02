@@ -52,18 +52,10 @@ func AddLabelAllowList() Option {
 }
 
 func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatus {
-	l.configMux.Lock()
-	defer l.configMux.Unlock()
-
-	cfg, ok := l.labelConfig[label]
-	if !ok {
-		cfg = &DimensionConfig{}
-		l.labelConfig[label] = cfg
-	}
-	if cfg.ConcurrencyLimit == limit {
+	oldConcurrencyLimit, _ := l.GetConcurrencyLimiterStatus(label)
+	if oldConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
-	cfg.ConcurrencyLimit = limit
 	if limit < 1 {
 		l.ConcurrencyUnlimit(label)
 		return ConcurrencyDeleted
@@ -75,20 +67,12 @@ func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatu
 }
 
 func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateStatus {
-	l.configMux.Lock()
-	defer l.configMux.Unlock()
+	oldQPSLimit, oldBurst := l.GetQPSLimiterStatus(label)
 
-	cfg, ok := l.labelConfig[label]
-	if !ok {
-		cfg = &DimensionConfig{}
-		l.labelConfig[label] = cfg
-	}
-	if (cfg.QPS-limit < eps && cfg.QPS-limit > -eps) && cfg.QPSBurst == burst {
+	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
 		return QPSNoChange
 	}
-	cfg.QPS = limit
-	cfg.QPSBurst = burst
-	if limit <= 0 || burst < 1 {
+	if limit <= eps || burst < 1 {
 		l.QPSUnlimit(label)
 		return QPSDeleted
 	}
