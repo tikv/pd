@@ -2,12 +2,15 @@ package pd
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/gcpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -36,11 +39,31 @@ func (c *client) gcHeader() *gcpb.RequestHeader {
 	}
 }
 
-func (c *client) gcClient() gcpb.GCClient {
+func (c *client) leaderGCClient() gcpb.GCClient {
 	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
 		return gcpb.NewGCClient(cc.(*grpc.ClientConn))
 	}
 	return nil
+}
+
+// followerGCClient gets a gcClient of the currently reachable and healthy PD follower randomly.
+func (c *client) followerGCClient() (gcpb.GCClient, string) {
+	cc, addr := c.healthyFollower()
+	if cc == nil {
+		return nil, ""
+	}
+	return gcpb.NewGCClient(cc), addr
+}
+
+func (c *client) gcClient() gcpb.GCClient {
+	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+		followerClient, addr := c.followerGCClient()
+		if followerClient != nil {
+			log.Debug("[pd] use follower Client", zap.String("addr", addr))
+			return followerClient
+		}
+	}
+	return c.leaderGCClient()
 }
 
 func (c *client) ListKeySpaces(ctx context.Context, withGCSafePoint bool) ([]*gcpb.KeySpace, error) {

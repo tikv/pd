@@ -1181,6 +1181,15 @@ func (c *client) leaderClient() pdpb.PDClient {
 
 // followerClient gets a client of the current reachable and healthy PD follower randomly.
 func (c *client) followerClient() (pdpb.PDClient, string) {
+	cc, addr := c.healthyFollower()
+	if cc == nil {
+		return nil, ""
+	}
+	return pdpb.NewPDClient(cc), addr
+}
+
+// healthyFollower gets the connection and address of a reachable healthy PD follower randomly.
+func (c *client) healthyFollower() (*grpc.ClientConn, string) {
 	addrs := c.GetFollowerAddrs()
 	if len(addrs) < 1 {
 		return nil, ""
@@ -1198,7 +1207,7 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return pdpb.NewPDClient(cc), addr
+			return cc, addr
 		}
 	}
 	return nil, ""
