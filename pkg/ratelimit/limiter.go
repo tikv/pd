@@ -31,8 +31,6 @@ type DimensionConfig struct {
 
 // Limiter is a controller for the request rate.
 type Limiter struct {
-	configMux          sync.Mutex
-	labelConfig        map[string]*DimensionConfig
 	qpsLimiter         sync.Map
 	concurrencyLimiter sync.Map
 	// the label which is in labelAllowList won't be limited
@@ -43,7 +41,6 @@ type Limiter struct {
 func NewLimiter() *Limiter {
 	return &Limiter{
 		labelAllowList: make(map[string]struct{}),
-		labelConfig:    make(map[string]*DimensionConfig),
 	}
 }
 
