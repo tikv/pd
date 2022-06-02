@@ -19,90 +19,86 @@ import (
 	"encoding/hex"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/stretchr/testify/require"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
+func TestEncryptionMethodSupported(t *testing.T) {
+	re := require.New(t)
+	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
+	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR))
 }
 
-type testCrypterSuite struct{}
-
-var _ = Suite(&testCrypterSuite{})
-
-func (s *testCrypterSuite) TestEncryptionMethodSupported(c *C) {
-	c.Assert(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT), Not(IsNil))
-	c.Assert(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN), Not(IsNil))
-	c.Assert(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR), IsNil)
-	c.Assert(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR), IsNil)
-	c.Assert(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR), IsNil)
-}
-
-func (s *testCrypterSuite) TestKeyLength(c *C) {
+func TestKeyLength(t *testing.T) {
+	re := require.New(t)
 	_, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
-	c.Assert(err, Not(IsNil))
+	re.NotNil(err)
 	_, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
-	c.Assert(err, Not(IsNil))
+	re.NotNil(err)
 	length, err := KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
-	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 16)
+	re.NoError(err)
+	re.Equal(16, length)
 	length, err = KeyLength(encryptionpb.EncryptionMethod_AES192_CTR)
-	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 24)
+	re.NoError(err)
+	re.Equal(24, length)
 	length, err = KeyLength(encryptionpb.EncryptionMethod_AES256_CTR)
-	c.Assert(err, IsNil)
-	c.Assert(length, Equals, 32)
+	re.NoError(err)
+	re.Equal(32, length)
 }
 
-func (s *testCrypterSuite) TestNewIv(c *C) {
+func TestNewIv(t *testing.T) {
+	re := require.New(t)
 	ivCtr, err := NewIvCTR()
-	c.Assert(err, IsNil)
-	c.Assert([]byte(ivCtr), HasLen, ivLengthCTR)
+	re.NoError(err)
+	re.Len([]byte(ivCtr), ivLengthCTR)
 	ivGcm, err := NewIvGCM()
-	c.Assert(err, IsNil)
-	c.Assert([]byte(ivGcm), HasLen, ivLengthGCM)
+	re.NoError(err)
+	re.Len([]byte(ivGcm), ivLengthGCM)
 }
 
-func testNewDataKey(c *C, method encryptionpb.EncryptionMethod) {
-	_, key, err := NewDataKey(method, uint64(123))
-	c.Assert(err, IsNil)
-	length, err := KeyLength(method)
-	c.Assert(err, IsNil)
-	c.Assert(key.Key, HasLen, length)
-	c.Assert(key.Method, Equals, method)
-	c.Assert(key.WasExposed, IsFalse)
-	c.Assert(key.CreationTime, Equals, uint64(123))
+func TestNewDataKey(t *testing.T) {
+	re := require.New(t)
+	for _, method := range []encryptionpb.EncryptionMethod{
+		encryptionpb.EncryptionMethod_AES128_CTR,
+		encryptionpb.EncryptionMethod_AES192_CTR,
+		encryptionpb.EncryptionMethod_AES256_CTR,
+	} {
+		_, key, err := NewDataKey(method, uint64(123))
+		re.NoError(err)
+		length, err := KeyLength(method)
+		re.NoError(err)
+		re.Len(key.Key, length)
+		re.Equal(method, key.Method)
+		re.False(key.WasExposed)
+		re.Equal(uint64(123), key.CreationTime)
+	}
 }
 
-func (s *testCrypterSuite) TestNewDataKey(c *C) {
-	testNewDataKey(c, encryptionpb.EncryptionMethod_AES128_CTR)
-	testNewDataKey(c, encryptionpb.EncryptionMethod_AES192_CTR)
-	testNewDataKey(c, encryptionpb.EncryptionMethod_AES256_CTR)
-}
-
-func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
+func TestAesGcmCrypter(t *testing.T) {
+	re := require.New(t)
 	key, err := hex.DecodeString("ed568fbd8c8018ed2d042a4e5d38d6341486922d401d2022fb81e47c900d3f07")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	plaintext, err := hex.DecodeString(
 		"5c873a18af5e7c7c368cb2635e5a15c7f87282085f4b991e84b78c5967e946d4")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	// encrypt
 	ivBytes, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
-	c.Assert(err, IsNil)
-	c.Assert([]byte(iv), HasLen, ivLengthGCM)
-	c.Assert(
-		hex.EncodeToString(ciphertext),
-		Equals,
+	re.NoError(err)
+	re.Len([]byte(iv), ivLengthGCM)
+	re.Equal(
 		"bbb9b49546350880cf55d4e4eaccc831c506a4aeae7f6cda9c821d4cb8cfc269dcdaecb09592ef25d7a33b40d3f02208",
+		hex.EncodeToString(ciphertext),
 	)
 	// decrypt
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
-	c.Assert(err, IsNil)
-	c.Assert(bytes.Equal(plaintext2, plaintext), IsTrue)
+	re.NoError(err)
+	re.True(bytes.Equal(plaintext2, plaintext))
 	// Modify ciphertext to test authentication failure. We modify the beginning of the ciphertext,
 	// which is the real ciphertext part, not the tag.
 	fakeCiphertext := make([]byte, len(ciphertext))
@@ -110,5 +106,5 @@ func (s *testCrypterSuite) TestAesGcmCrypter(c *C) {
 	// ignore overflow
 	fakeCiphertext[0] = ciphertext[0] + 1
 	_, err = AesGcmDecrypt(key, fakeCiphertext, iv)
-	c.Assert(err, Not(IsNil))
+	re.NotNil(err)
 }
