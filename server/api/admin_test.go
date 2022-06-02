@@ -170,22 +170,3 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 		tu.StringEqual(c, "\"invalid tso value\"\n"))
 	c.Assert(err, IsNil)
 }
-
-var _ = Suite(&testServiceSuite{})
-
-type testServiceSuite struct {
-	svr     *server.Server
-	cleanup cleanUpFunc
-}
-
-func (s *testServiceSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (s *testServiceSuite) TearDownSuite(c *C) {
-	s.cleanup()
-}
