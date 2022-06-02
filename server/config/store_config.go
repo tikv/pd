@@ -35,6 +35,8 @@ var (
 	defaultRegionMaxSize = uint64(144)
 	// default region split size is 96MB
 	defaultRegionSplitSize = uint64(96)
+	// default bucket size is 96MB
+	defaultBucketSize = uint64(96)
 	// default region max key is 144000
 	defaultRegionMaxKey = uint64(1440000)
 	// default region split key is 960000
@@ -54,9 +56,11 @@ type Coprocessor struct {
 	// split by RegionSplitSize.
 	RegionMaxSize string `json:"region-max-size"`
 	// RegionSplitSize is the split size of a region, region will according to this value to split.
-	RegionSplitSize string `json:"region-split-size"`
-	RegionMaxKeys   int    `json:"region-max-keys"`
-	RegionSplitKeys int    `json:"region-split-keys"`
+	RegionSplitSize    string `json:"region-split-size"`
+	RegionMaxKeys      int    `json:"region-max-keys"`
+	RegionSplitKeys    int    `json:"region-split-keys"`
+	EnableRegionBucket bool   `json:"enable-region-bucket"`
+	RegionBucketSize   string `json:"region-bucket-size"`
 }
 
 // String implements fmt.Stringer interface.
@@ -98,6 +102,25 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 		return defaultRegionMaxKey
 	}
 	return uint64(c.Coprocessor.RegionMaxKeys)
+}
+
+// IsEnableRegionBucket return ture if the region bucket is enabled.
+func (c *StoreConfig) IsEnableRegionBucket() bool {
+	if c == nil {
+		return false
+	}
+	return c.Coprocessor.EnableRegionBucket
+}
+
+// GetRegionBucketSize returns region bucket size if enable region buckets.
+func (c *StoreConfig) GetRegionBucketSize() uint64 {
+	if c == nil || !c.Coprocessor.EnableRegionBucket {
+		return 0
+	}
+	if len(c.Coprocessor.RegionBucketSize) == 0 {
+		return defaultBucketSize
+	}
+	return typeutil.ParseMBFromText(c.Coprocessor.RegionBucketSize, defaultBucketSize)
 }
 
 // CheckRegionSize return error if the smallest region's size is less than mergeSize

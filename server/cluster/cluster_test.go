@@ -263,7 +263,7 @@ func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	// test bury store
 	for storeID := uint64(0); storeID <= 4; storeID++ {
 		store := cluster.GetStore(storeID)
-		if store == nil || store.IsPreparing() || store.IsServing() {
+		if store == nil || store.IsUp() {
 			c.Assert(cluster.BuryStore(storeID, false), NotNil)
 		} else {
 			c.Assert(cluster.BuryStore(storeID, false), IsNil)
@@ -431,6 +431,8 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.SetPrepared()
 
 	// Put 5 stores.
 	stores := newTestStores(5, "5.0.0")
@@ -452,7 +454,8 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 	cluster.checkStores()
 	process := "removing-1"
 	// no region moving
-	p, l, cs := cluster.progressManager.Status(process)
+	p, l, cs, err := cluster.progressManager.Status(process)
+	c.Assert(err, IsNil)
 	c.Assert(p, Equals, 0.0)
 	c.Assert(l, Equals, math.MaxFloat64)
 	c.Assert(cs, Equals, 0.0)
@@ -465,19 +468,17 @@ func (s *testClusterInfoSuite) TestRemovingProcess(c *C) {
 		cluster.DropCacheRegion(region.GetID())
 		i++
 	}
-	time.Sleep(time.Second)
 	cluster.checkStores()
-	p, l, cs = cluster.progressManager.Status(process)
+	p, l, cs, err = cluster.progressManager.Status(process)
+	c.Assert(err, IsNil)
 	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
 	// process = 5 / 20 = 0.25
 	c.Assert(p, Equals, 0.25)
 	// Each region is 100MB, we use more than 1s to move 5 region.
-	// speed = 5 * 100MB / 1s+ ~= 400MB/s+
-	c.Assert(cs, Greater, 400.0)
-	c.Assert(cs, Less, 500.0)
-	// left second = 15 * 100MB / 400MB/s+ ~= 3s+
-	c.Assert(l, Greater, 3.0)
-	c.Assert(l, Less, 4.0)
+	// speed = 5 * 100MB / 20s = 25MB/s
+	c.Assert(cs, Equals, 25.0)
+	// left second = 15 * 100MB / 25s = 60s
+	c.Assert(l, Equals, 60.0)
 }
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
@@ -577,7 +578,7 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 
 	// case1: region is not exist
 	buckets := &metapb.Buckets{
-		RegionId: 0,
+		RegionId: 1,
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
@@ -585,28 +586,43 @@ func (s *testClusterInfoSuite) TestBucketHeartbeat(c *C) {
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
-	n, np := uint64(1), uint64(1)
+	n, np := uint64(2), uint64(2)
 	regions := newTestRegions(n, n, np)
 	for _, store := range stores {
 		c.Assert(cluster.putStoreLocked(store), IsNil)
 	}
 
 	c.Assert(cluster.processRegionHeartbeat(regions[0]), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), IsNil)
+	c.Assert(cluster.processRegionHeartbeat(regions[1]), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), IsNil)
 	c.Assert(cluster.processReportBuckets(buckets), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), DeepEquals, buckets)
 
 	// case3: the bucket version is same.
 	c.Assert(cluster.processReportBuckets(buckets), IsNil)
 	// case4: the bucket version is changed.
-	buckets.Version = 3
-	c.Assert(cluster.processReportBuckets(buckets), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), DeepEquals, buckets)
+	newBuckets := &metapb.Buckets{
+		RegionId: 1,
+		Version:  3,
+		Keys:     [][]byte{{'1'}, {'2'}},
+	}
+	c.Assert(cluster.processReportBuckets(newBuckets), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), DeepEquals, newBuckets)
 
-	//case5: region update should inherit buckets.
-	newRegion := regions[0].Clone(core.WithIncConfVer())
+	// case5: region update should inherit buckets.
+	newRegion := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
+	cluster.storeConfigManager = config.NewTestStoreConfigManager(nil)
+	config := cluster.storeConfigManager.GetStoreConfig()
+	config.Coprocessor.EnableRegionBucket = true
 	c.Assert(cluster.processRegionHeartbeat(newRegion), IsNil)
-	c.Assert(cluster.GetRegion(uint64(0)).GetBuckets(), NotNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), HasLen, 2)
+
+	// case6: disable region bucket in
+	config.Coprocessor.EnableRegionBucket = false
+	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
+	c.Assert(cluster.processRegionHeartbeat(newRegion2), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets(), IsNil)
+	c.Assert(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), HasLen, 0)
 }
 
 func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {

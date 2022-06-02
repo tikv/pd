@@ -32,12 +32,14 @@ type Storage interface {
 	// Introducing the kv.Base here is to provide
 	// the basic key-value read/write ability for the Storage.
 	kv.Base
+	endpoint.ServiceMiddlewareStorage
 	endpoint.ConfigStorage
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
+	endpoint.KeySpaceGCSafePointStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

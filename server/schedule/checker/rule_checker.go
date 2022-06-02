@@ -15,10 +15,10 @@
 package checker
 
 import (
+	"errors"
 	"math"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -30,6 +30,13 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
+)
+
+var (
+	errNoStoreToAdd       = errors.New("no store to add peer")
+	errNoStoreToReplace   = errors.New("no store to replace peer")
+	errPeerCannotBeLeader = errors.New("peer cannot be leader")
+	errNoNewLeader        = errors.New("no new leader")
 )
 
 // RuleChecker fix/improve region by placement rules.
@@ -154,11 +161,13 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
-		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to add peer")
+		if filterByTempState {
+			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+		return nil, errNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -172,11 +181,13 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 // The peer's store may in Offline or Down, need to be replace.
 func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
-		c.regionWaitingList.Put(region.GetID(), nil)
-		return nil, errors.New("no store to replace peer")
+		if filterByTempState {
+			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+		return nil, errNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
@@ -229,7 +240,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), []uint64{}, 0)
 		}
 		checkerCounter.WithLabelValues("rule_checker", "not-allow-leader")
-		return nil, errors.New("peer cannot be leader")
+		return nil, errPeerCannotBeLeader
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		checkerCounter.WithLabelValues("rule_checker", "fix-follower-role").Inc()
@@ -239,7 +250,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			}
 		}
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
-		return nil, errors.New("no new leader")
+		return nil, errNoNewLeader
 	}
 	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
@@ -280,7 +291,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	newStore, _ := strategy.SelectStoreToImprove(ruleStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		return nil, nil

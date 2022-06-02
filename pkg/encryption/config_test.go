@@ -15,37 +15,38 @@
 package encryption
 
 import (
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/typeutil"
 )
 
-type testConfigSuite struct{}
-
-var _ = Suite(&testConfigSuite{})
-
-func (s *testConfigSuite) TestAdjustDefaultValue(c *C) {
+func TestAdjustDefaultValue(t *testing.T) {
+	re := require.New(t)
 	config := &Config{}
 	err := config.Adjust()
-	c.Assert(err, IsNil)
-	c.Assert(config.DataEncryptionMethod, Equals, methodPlaintext)
+	re.NoError(err)
+	re.Equal(methodPlaintext, config.DataEncryptionMethod)
 	defaultRotationPeriod, _ := time.ParseDuration(defaultDataKeyRotationPeriod)
-	c.Assert(config.DataKeyRotationPeriod.Duration, Equals, defaultRotationPeriod)
-	c.Assert(config.MasterKey.Type, Equals, masterKeyTypePlaintext)
+	re.Equal(defaultRotationPeriod, config.DataKeyRotationPeriod.Duration)
+	re.Equal(masterKeyTypePlaintext, config.MasterKey.Type)
 }
 
-func (s *testConfigSuite) TestAdjustInvalidDataEncryptionMethod(c *C) {
+func TestAdjustInvalidDataEncryptionMethod(t *testing.T) {
+	re := require.New(t)
 	config := &Config{DataEncryptionMethod: "unknown"}
-	c.Assert(config.Adjust(), NotNil)
+	re.NotNil(config.Adjust())
 }
 
-func (s *testConfigSuite) TestAdjustNegativeRotationDuration(c *C) {
+func TestAdjustNegativeRotationDuration(t *testing.T) {
+	re := require.New(t)
 	config := &Config{DataKeyRotationPeriod: typeutil.NewDuration(time.Duration(int64(-1)))}
-	c.Assert(config.Adjust(), NotNil)
+	re.NotNil(config.Adjust())
 }
 
-func (s *testConfigSuite) TestAdjustInvalidMasterKeyType(c *C) {
+func TestAdjustInvalidMasterKeyType(t *testing.T) {
+	re := require.New(t)
 	config := &Config{MasterKey: MasterKeyConfig{Type: "unknown"}}
-	c.Assert(config.Adjust(), NotNil)
+	re.NotNil(config.Adjust())
 }

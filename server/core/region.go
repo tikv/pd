@@ -61,7 +61,8 @@ type RegionInfo struct {
 	QueryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets unsafe.Pointer
+	buckets       unsafe.Pointer
+	fromHeartbeat bool
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -120,6 +121,8 @@ const (
 	// Only statistics within this interval limit are valid.
 	statsReportMinInterval = 3      // 3s
 	statsReportMaxInterval = 5 * 60 // 5min
+	// InitClusterRegionThreshold is a threshold which represent a new cluster.
+	InitClusterRegionThreshold = 50
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -169,10 +172,10 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// Inherit inherits the buckets and region size from the parent region.
+// Inherit inherits the buckets and region size from the parent region if bucket enabled.
 // correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
-func (r *RegionInfo) Inherit(origin *RegionInfo) {
+func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	// regionSize should not be zero if region is not empty.
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
@@ -181,7 +184,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	if origin != nil && r.buckets == nil {
+	if bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -219,6 +222,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	}
 	classifyVoterAndLearner(region)
 	return region
+}
+
+// NeedMerge returns true if size is less than merge size and keys is less than mergeKeys.
+func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
+	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
 }
 
 // GetTerm returns the current term of the region
@@ -415,8 +423,8 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 
 // UpdateBuckets sets the buckets of the region.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
-	// the bucket can't be nil except in the test cases.
 	if buckets == nil {
+		atomic.StorePointer(&r.buckets, nil)
 		return true
 	}
 	// only need to update bucket keys, versions.
@@ -538,6 +546,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFromHeartbeat returns whether the region info is from the region heartbeat.
+func (r *RegionInfo) IsFromHeartbeat() bool {
+	return r.fromHeartbeat
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -604,6 +617,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
 			}
+			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
+				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+				saveKV, saveCache = true, true
+			}
 
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
 				region.GetApproximateKeys() != origin.GetApproximateKeys() {
@@ -621,6 +638,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+			}
+			if !origin.IsFromHeartbeat() {
+				isNew = true
 			}
 		}
 		return

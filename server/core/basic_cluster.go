@@ -338,6 +338,13 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
+// ResetStores resets the store cache.
+func (bc *BasicCluster) ResetStores() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores = NewStoresInfo()
+}
+
 // DeleteStore deletes a store.
 func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Lock()
@@ -422,6 +429,13 @@ func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
 	if r := bc.Regions.GetRegion(id); r != nil {
 		bc.Regions.RemoveRegion(r)
 	}
+}
+
+// ResetRegionCache drops all region cache.
+func (bc *BasicCluster) ResetRegionCache() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Regions = NewRegionsInfo()
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap.

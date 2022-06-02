@@ -23,7 +23,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -60,7 +60,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
@@ -137,7 +137,7 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.46.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -158,6 +158,7 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
+	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 	
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
