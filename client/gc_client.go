@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// GCClient represents a garbage collection client
 type GCClient interface {
 	// ListKeySpaces returns all key spaces that has gc safe point.
 	// If withGCSafePoint set to true, it will also return their corresponding gc safe points, otherwise they will be 0.
