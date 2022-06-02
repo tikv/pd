@@ -1123,3 +1123,21 @@ func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
 	}
 	return nil
 }
+
+// GetPausedSchedulerDelayAt returns paused unix timestamp when a scheduler is paused
+func (h *Handler) GetPausedSchedulerDelayAt(name string) (int64, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return -1, err
+	}
+	return rc.GetPausedSchedulerDelayAt(name)
+}
+
+// GetPausedSchedulerDelayUntil returns resume unix timestamp when a scheduler is paused
+func (h *Handler) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return -1, err
+	}
+	return rc.GetPausedSchedulerDelayUntil(name)
+}
