@@ -30,6 +30,7 @@ import (
 )
 
 func TestGetScaledTiKVGroups(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// case1 indicates the tikv cluster with not any group existed
@@ -193,10 +194,10 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		t.Log(testCase.name)
 		plans, err := getScaledTiKVGroups(testCase.informer, testCase.healthyInstances)
 		if testCase.expectedPlan == nil {
-			require.Len(t, plans, 0)
-			require.Equal(t, testCase.noError, err == nil)
+			re.Len(plans, 0)
+			re.Equal(testCase.noError, err == nil)
 		} else {
-			require.True(t, reflect.DeepEqual(testCase.expectedPlan, plans))
+			re.True(reflect.DeepEqual(testCase.expectedPlan, plans))
 		}
 	}
 }
@@ -213,6 +214,7 @@ func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 }
 
 func TestGetTotalCPUUseTime(t *testing.T) {
+	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
 		{
@@ -230,10 +232,11 @@ func TestGetTotalCPUUseTime(t *testing.T) {
 	}
 	totalCPUUseTime, _ := getTotalCPUUseTime(querier, TiDB, instances, time.Now(), 0)
 	expected := mockResultValue * float64(len(instances))
-	require.True(t, math.Abs(expected-totalCPUUseTime) < 1e-6)
+	re.True(math.Abs(expected-totalCPUUseTime) < 1e-6)
 }
 
 func TestGetTotalCPUQuota(t *testing.T) {
+	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
 		{
@@ -251,10 +254,11 @@ func TestGetTotalCPUQuota(t *testing.T) {
 	}
 	totalCPUQuota, _ := getTotalCPUQuota(querier, TiDB, instances, time.Now())
 	expected := uint64(mockResultValue * float64(len(instances)*milliCores))
-	require.Equal(t, expected, totalCPUQuota)
+	re.Equal(expected, totalCPUQuota)
 }
 
 func TestScaleOutGroupLabel(t *testing.T) {
+	re := require.New(t)
 	var jsonStr = []byte(`
 {
     "rules":[
@@ -288,14 +292,15 @@ func TestScaleOutGroupLabel(t *testing.T) {
 }`)
 	strategy := &Strategy{}
 	err := json.Unmarshal(jsonStr, strategy)
-	require.NoError(t, err)
+	re.NoError(err)
 	plan := findBestGroupToScaleOut(strategy, nil, TiKV)
-	require.Equal(t, "hotRegion", plan.Labels["specialUse"])
+	re.Equal("hotRegion", plan.Labels["specialUse"])
 	plan = findBestGroupToScaleOut(strategy, nil, TiDB)
-	require.Equal(t, "", plan.Labels["specialUse"])
+	re.Equal("", plan.Labels["specialUse"])
 }
 
 func TestStrategyChangeCount(t *testing.T) {
+	re := require.New(t)
 	var count uint64 = 2
 	strategy := &Strategy{
 		Rules: []*Rule{
@@ -343,21 +348,21 @@ func TestStrategyChangeCount(t *testing.T) {
 
 	// exist two scaled TiKVs and plan does not change due to the limit of resource count
 	groups, err := getScaledTiKVGroups(cluster, instances)
-	require.NoError(t, err)
+	re.NoError(err)
 	plans := calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	require.Equal(t, uint64(2), plans[0].Count)
+	re.Equal(uint64(2), plans[0].Count)
 
 	// change the resource count to 3 and plan increates one more tikv
 	groups, err = getScaledTiKVGroups(cluster, instances)
-	require.NoError(t, err)
+	re.NoError(err)
 	*strategy.Resources[0].Count = 3
 	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	require.Equal(t, uint64(3), plans[0].Count)
+	re.Equal(uint64(3), plans[0].Count)
 
 	// change the resource count to 1 and plan decreases to 1 tikv due to the limit of resource count
 	groups, err = getScaledTiKVGroups(cluster, instances)
-	require.NoError(t, err)
+	re.NoError(err)
 	*strategy.Resources[0].Count = 1
 	plans = calculateScaleOutPlan(strategy, TiKV, scaleOutQuota, groups)
-	require.Equal(t, uint64(1), plans[0].Count)
+	re.Equal(uint64(1), plans[0].Count)
 }
