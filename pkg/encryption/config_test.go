@@ -23,26 +23,30 @@ import (
 )
 
 func TestAdjustDefaultValue(t *testing.T) {
+	re := require.New(t)
 	config := &Config{}
 	err := config.Adjust()
-	require.NoError(t, err)
-	require.Equal(t, methodPlaintext, config.DataEncryptionMethod)
+	re.NoError(err)
+	re.Equal(methodPlaintext, config.DataEncryptionMethod)
 	defaultRotationPeriod, _ := time.ParseDuration(defaultDataKeyRotationPeriod)
-	require.Equal(t, defaultRotationPeriod, config.DataKeyRotationPeriod.Duration)
-	require.Equal(t, masterKeyTypePlaintext, config.MasterKey.Type)
+	re.Equal(defaultRotationPeriod, config.DataKeyRotationPeriod.Duration)
+	re.Equal(masterKeyTypePlaintext, config.MasterKey.Type)
 }
 
 func TestAdjustInvalidDataEncryptionMethod(t *testing.T) {
+	re := require.New(t)
 	config := &Config{DataEncryptionMethod: "unknown"}
-	require.NotNil(t, config.Adjust())
+	re.NotNil(config.Adjust())
 }
 
 func TestAdjustNegativeRotationDuration(t *testing.T) {
+	re := require.New(t)
 	config := &Config{DataKeyRotationPeriod: typeutil.NewDuration(time.Duration(int64(-1)))}
-	require.NotNil(t, config.Adjust())
+	re.NotNil(config.Adjust())
 }
 
 func TestAdjustInvalidMasterKeyType(t *testing.T) {
+	re := require.New(t)
 	config := &Config{MasterKey: MasterKeyConfig{Type: "unknown"}}
-	require.NotNil(t, config.Adjust())
+	re.NotNil(config.Adjust())
 }
