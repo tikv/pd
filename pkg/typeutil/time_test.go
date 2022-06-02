@@ -16,62 +16,62 @@ package typeutil
 
 import (
 	"math/rand"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testTimeSuite{})
-
-type testTimeSuite struct{}
-
-func (s *testTimeSuite) TestParseTimestamp(c *C) {
+func TestParseTimestamp(t *testing.T) {
+	re := require.New(t)
 	for i := 0; i < 3; i++ {
 		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
 		data := Uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := ParseTimestamp(data)
-		c.Assert(err, IsNil)
-		c.Assert(nt.Equal(t), IsTrue)
+		re.NoError(err)
+		re.True(nt.Equal(t))
 	}
 	data := []byte("pd")
 	nt, err := ParseTimestamp(data)
-	c.Assert(err, NotNil)
-	c.Assert(nt.Equal(ZeroTime), IsTrue)
+	re.Error(err)
+	re.True(nt.Equal(ZeroTime))
 }
 
-func (s *testTimeSuite) TestSubTimeByWallClock(c *C) {
+func TestSubTimeByWallClock(t *testing.T) {
+	re := require.New(t)
 	for i := 0; i < 100; i++ {
 		r := rand.Int63n(1000)
 		t1 := time.Now()
 		// Add r seconds.
 		t2 := t1.Add(time.Second * time.Duration(r))
 		duration := SubRealTimeByWallClock(t2, t1)
-		c.Assert(duration, Equals, time.Second*time.Duration(r))
+		re.Equal(time.Second*time.Duration(r), duration)
 		milliseconds := SubTSOPhysicalByWallClock(t2, t1)
-		c.Assert(milliseconds, Equals, r*time.Second.Milliseconds())
-		// Add r millionseconds.
+		re.Equal(r*time.Second.Milliseconds(), milliseconds)
+		// Add r milliseconds.
 		t3 := t1.Add(time.Millisecond * time.Duration(r))
 		milliseconds = SubTSOPhysicalByWallClock(t3, t1)
-		c.Assert(milliseconds, Equals, r)
+		re.Equal(r, milliseconds)
 		// Add r nanoseconds.
 		t4 := t1.Add(time.Duration(-r))
 		duration = SubRealTimeByWallClock(t4, t1)
-		c.Assert(duration, Equals, time.Duration(-r))
+		re.Equal(time.Duration(-r), duration)
 		// For the millisecond comparison, please see TestSmallTimeDifference.
 	}
 }
 
-func (s *testTimeSuite) TestSmallTimeDifference(c *C) {
+func TestSmallTimeDifference(t *testing.T) {
+	re := require.New(t)
 	t1, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.682")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	t2, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.681918")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	duration := SubRealTimeByWallClock(t1, t2)
-	c.Assert(duration, Equals, time.Duration(82)*time.Microsecond)
+	re.Equal(time.Duration(82)*time.Microsecond, duration)
 	duration = SubRealTimeByWallClock(t2, t1)
-	c.Assert(duration, Equals, time.Duration(-82)*time.Microsecond)
+	re.Equal(time.Duration(-82)*time.Microsecond, duration)
 	milliseconds := SubTSOPhysicalByWallClock(t1, t2)
-	c.Assert(milliseconds, Equals, int64(1))
+	re.Equal(int64(1), milliseconds)
 	milliseconds = SubTSOPhysicalByWallClock(t2, t1)
-	c.Assert(milliseconds, Equals, int64(-1))
+	re.Equal(int64(-1), milliseconds)
 }
