@@ -135,13 +135,13 @@ func (s *configTestSuite) TestConfig(c *C) {
 
 	// set max-merge-region-size to 40MB
 	args = []string{"-u", pdAddr, "config", "set", "max-merge-region-size", "40"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(int(svr.GetScheduleConfig().MaxMergeRegionSize), Equals, 40)
 	c.Assert(int(svr.GetScheduleConfig().MaxMergeRegionKeys), Equals, 0)
 	c.Assert(int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()), Equals, 40*10000)
 	args = []string{"-u", pdAddr, "config", "set", "max-merge-region-keys", "200000"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
+	_, err = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(err, IsNil)
 	c.Assert(int(svr.GetScheduleConfig().MaxMergeRegionKeys), Equals, 20*10000)
 	c.Assert(int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()), Equals, 20*10000)
