@@ -26,14 +26,9 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	. "github.com/pingcap/check"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/storage"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
 
 func TestSecurity(t *testing.T) {
 	re := require.New(t)
@@ -53,7 +48,7 @@ func TestBadFormatJoinAddr(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
-	re.NotNil(cfg.Adjust(nil, false))
+	re.Error(cfg.Adjust(nil, false))
 }
 
 func TestReloadConfig(t *testing.T) {
@@ -67,7 +62,7 @@ func TestReloadConfig(t *testing.T) {
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
-	re.Nil(opt.Persist(storage))
+	re.NoError(opt.Persist(storage))
 
 	// Add a new default enable scheduler "shuffle-leader"
 	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "shuffle-leader"})
@@ -77,7 +72,7 @@ func TestReloadConfig(t *testing.T) {
 
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
-	re.Nil(newOpt.Reload(storage))
+	re.NoError(newOpt.Reload(storage))
 	schedulers := newOpt.GetSchedulers()
 	re.Len(schedulers, len(DefaultSchedulers))
 	re.True(newOpt.IsUseRegionStorage())
@@ -110,7 +105,7 @@ func TestReloadUpgrade(t *testing.T) {
 
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
-	re.Nil(newOpt.Reload(storage))
+	re.NoError(newOpt.Reload(storage))
 	re.Equal(defaultKeyType, newOpt.GetPDServerConfig().KeyType) // should be set to default value.
 }
 
@@ -132,7 +127,7 @@ func TestReloadUpgrade2(t *testing.T) {
 
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
-	re.Nil(newOpt.Reload(storage))
+	re.NoError(newOpt.Reload(storage))
 	re.Equal("", newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
 }
 
@@ -499,7 +494,7 @@ func TestConfigClone(t *testing.T) {
 	registerDefaultSchedulers()
 	cfg := &Config{}
 	cfg.Adjust(nil, false)
-	re.True(reflect.DeepEqual(cfg.Clone(), cfg))
+	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := newConfigMetadata(nil)
 
