@@ -49,6 +49,7 @@ func TestDefault(t *testing.T) {
 	re.Equal(Voter, rules[0].Role)
 	re.Equal([]string{"zone", "rack", "host"}, rules[0].LocationLabels)
 }
+
 func TestAdjustRule(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
@@ -90,6 +91,7 @@ func TestAdjustRule(t *testing.T) {
 		Count:       3,
 	}, "group"))
 }
+
 func TestLeaderCheck(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
@@ -106,6 +108,7 @@ func TestLeaderCheck(t *testing.T) {
 		},
 	}).Error())
 }
+
 func TestSaveLoad(t *testing.T) {
 	re := require.New(t)
 	store, manager := newTestManager(t)
@@ -126,6 +129,7 @@ func TestSaveLoad(t *testing.T) {
 	re.Equal(rules[1].String(), m2.GetRule("foo", "baz").String())
 	re.Equal(rules[2].String(), m2.GetRule("foo", "bar").String())
 }
+
 func TestSetAfterGet(t *testing.T) {
 	re := require.New(t)
 	store, manager := newTestManager(t)
@@ -237,6 +241,7 @@ func TestKeys(t *testing.T) {
 		}
 	}
 }
+
 func TestDeleteByIDPrefix(t *testing.T) {
 	_, manager := newTestManager(t)
 	manager.SetRules([]*Rule{
@@ -255,6 +260,7 @@ func TestDeleteByIDPrefix(t *testing.T) {
 	}})
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}})
 }
+
 func TestRangeGap(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
@@ -277,6 +283,7 @@ func TestRangeGap(t *testing.T) {
 	err = manager.SetRule(&Rule{GroupID: "pd", ID: "foo", StartKeyHex: "", EndKeyHex: "abaa", Role: "voter", Count: 1})
 	re.Error(err)
 }
+
 func TestGroupConfig(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
@@ -312,6 +319,7 @@ func TestGroupConfig(t *testing.T) {
 	re.NoError(err)
 	re.Equal([]*RuleGroup{g2}, manager.GetRuleGroups())
 }
+
 func TestRuleVersion(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
@@ -339,6 +347,7 @@ func TestRuleVersion(t *testing.T) {
 	newRule = manager.GetRule("g1", "id")
 	re.Equal(uint64(0), newRule.Version)
 }
+
 func TestCheckApplyRules(t *testing.T) {
 	re := require.New(t)
 	err := checkApplyRules([]*Rule{
