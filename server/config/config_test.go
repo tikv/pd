@@ -20,7 +20,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
@@ -215,7 +214,7 @@ type = "random-merge"
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
-	re.True(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"))
+	re.Contains(cfg.WarningMsgs[0], "Config contains undefined item")
 
 	// Check misspelled schedulers name
 	cfgData = `
@@ -310,8 +309,8 @@ enable-remove-extra-replica = false
 	re.False(cfg.Schedule.EnableRemoveExtraReplica)
 	b, err := json.Marshal(cfg)
 	re.NoError(err)
-	re.False(strings.Contains(string(b), "disable-replace-offline-replica"))
-	re.False(strings.Contains(string(b), "disable-remove-down-replica"))
+	re.NotContains(string(b), "disable-replace-offline-replica")
+	re.NotContains(string(b), "disable-remove-down-replica")
 
 	_, err = load(`
 [schedule]
