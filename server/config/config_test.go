@@ -20,7 +20,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -500,19 +499,19 @@ func TestConfigClone(t *testing.T) {
 
 	schedule := &ScheduleConfig{}
 	schedule.adjust(emptyConfigMetaData, false)
-	re.True(reflect.DeepEqual(schedule.Clone(), schedule))
+	re.Equal(schedule, schedule.Clone())
 
 	replication := &ReplicationConfig{}
 	replication.adjust(emptyConfigMetaData)
-	re.True(reflect.DeepEqual(replication.Clone(), replication))
+	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
 	pdServer.adjust(emptyConfigMetaData)
-	re.True(reflect.DeepEqual(pdServer.Clone(), pdServer))
+	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}
 	replicationMode.adjust(emptyConfigMetaData)
-	re.True(reflect.DeepEqual(replicationMode.Clone(), replicationMode))
+	re.Equal(replicationMode, replicationMode.Clone())
 }
 
 func newTestScheduleOption() (*PersistOptions, error) {
