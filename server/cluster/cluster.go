@@ -1893,7 +1893,6 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	log.Info("cluster version changed",
 		zap.Stringer("old-cluster-version", clusterVersion),
 		zap.Stringer("new-cluster-version", minVersion))
-
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
