@@ -59,13 +59,13 @@ func (s *testReplicationMode) TestInitial(c *C) {
 	c.Assert(rep.GetReplicationStatus(), DeepEquals, &pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY})
 
 	conf = config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "dr-label",
-		Primary:          "l1",
-		DR:               "l2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "dr-label",
+		Primary:             "l1",
+		DR:                  "l2",
+		PrimaryReplicas:     2,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	rep, err = NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
@@ -83,8 +83,8 @@ func (s *testReplicationMode) TestInitial(c *C) {
 func (s *testReplicationMode) TestStatus(c *C) {
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:        "dr-label",
-		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "dr-label",
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
@@ -175,13 +175,13 @@ func newMockReplicator(ids []uint64) *mockFileReplicator {
 func (s *testReplicationMode) TestStateSwitch(c *C) {
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "zone",
-		Primary:          "zone1",
-		DR:               "zone2",
-		PrimaryReplicas:  4,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "zone",
+		Primary:             "zone1",
+		DR:                  "zone2",
+		PrimaryReplicas:     4,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
@@ -359,13 +359,13 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 func (s *testReplicationMode) TestReplicateState(c *C) {
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "zone",
-		Primary:          "zone1",
-		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "zone",
+		Primary:             "zone1",
+		DR:                  "zone2",
+		PrimaryReplicas:     2,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
@@ -399,14 +399,13 @@ func (s *testReplicationMode) TestReplicateState(c *C) {
 func (s *testReplicationMode) TestAsynctimeout(c *C) {
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "zone",
-		Primary:          "zone1",
-		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
-		WaitAsyncTimeout: typeutil.Duration{Duration: 2 * time.Minute},
+		LabelKey:            "zone",
+		Primary:             "zone1",
+		DR:                  "zone2",
+		PrimaryReplicas:     2,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	var replicator mockFileReplicator
@@ -453,13 +452,13 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "zone",
-		Primary:          "zone1",
-		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "zone",
+		Primary:             "zone1",
+		DR:                  "zone2",
+		PrimaryReplicas:     2,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
@@ -513,13 +512,13 @@ func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
 
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
-		LabelKey:         "zone",
-		Primary:          "zone1",
-		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
-		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
-		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+		LabelKey:            "zone",
+		Primary:             "zone1",
+		DR:                  "zone2",
+		PrimaryReplicas:     2,
+		DRReplicas:          1,
+		WaitStoreTimeout:    typeutil.Duration{Duration: time.Minute},
+		TiKVSyncTimeoutHint: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
