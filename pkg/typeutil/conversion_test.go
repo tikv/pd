@@ -35,7 +35,7 @@ func TestUint64ToBytes(t *testing.T) {
 	var a uint64 = 1000
 	b := Uint64ToBytes(a)
 	str := "\x00\x00\x00\x00\x00\x00\x03\xe8"
-	re.True(reflect.DeepEqual([]byte(str), b))
+	re.Equal([]byte(str), b)
 }
 
 func TestJSONToUint64Slice(t *testing.T) {
