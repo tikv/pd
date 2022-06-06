@@ -418,19 +418,6 @@ func (s *testReplicationMode) TestAsynctimeout(c *C) {
 
 	s.setStoreState(cluster, "up", "up", "down")
 	rep.tickDR()
-	c.Assert(rep.drGetState(), Equals, drStateSync) // cannot switch state due to recently start
-
-	rep.initTime = time.Now().Add(-3 * time.Minute)
-	rep.tickDR()
-	c.Assert(rep.drGetState(), Equals, drStateAsyncWait)
-
-	rep.drSwitchToSync()
-	rep.UpdateMemberWaitAsyncTime(42)
-	rep.tickDR()
-	c.Assert(rep.drGetState(), Equals, drStateSync) // cannot switch state due to member not timeout
-
-	rep.drMemberWaitAsyncTime[42] = time.Now().Add(-3 * time.Minute)
-	rep.tickDR()
 	c.Assert(rep.drGetState(), Equals, drStateAsyncWait)
 }
 
