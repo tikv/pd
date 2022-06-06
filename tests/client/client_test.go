@@ -75,7 +75,7 @@ func TestClientLeaderChange(t *testing.T) {
 	cli := setupCli(re, ctx, endpoints)
 
 	var ts1, ts2 uint64
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		p1, l1, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts1 = tsoutil.ComposeTS(p1, l1)
@@ -87,16 +87,16 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(t, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
-	waitLeader(t, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		p2, l2, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts2 = tsoutil.ComposeTS(p2, l2)
@@ -128,7 +128,7 @@ func TestLeaderTransfer(t *testing.T) {
 	cli := setupCli(re, ctx, endpoints)
 
 	var lastTS uint64
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -187,7 +187,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
 
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
@@ -200,7 +200,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
 	// Request a new TSO.
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
@@ -209,7 +209,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 	err = cluster.GetServer(newLeaderName).ResignLeader()
 	re.NoError(err)
 	// Should NOT panic here.
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
@@ -235,7 +235,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitAllLeadersWithTestingT(t, dcLocationConfig)
+	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
 
 	var (
 		testServers  = cluster.GetServers()
@@ -249,7 +249,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 	var allocatorLeaderMap = make(map[string]string)
 	for _, dcLocation := range dcLocationConfig {
 		var pdName string
-		testutil.WaitUntilWithTestingT(t, func() bool {
+		testutil.Eventually(re, func() bool {
 			pdName = cluster.WaitAllocatorLeader(dcLocation)
 			return len(pdName) > 0
 		})
@@ -347,7 +347,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NoError(err)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	cluster.WaitAllLeadersWithTestingT(t, dcLocationConfig)
+	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
 
 	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
@@ -475,7 +475,7 @@ func TestGetTsoFromFollowerClient1(t *testing.T) {
 
 	re.Nil(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 	var lastTS uint64
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -506,7 +506,7 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 
 	re.Nil(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 	var lastTS uint64
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			lastTS = tsoutil.ComposeTS(physical, logical)
@@ -560,8 +560,8 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(t *testing.T, cli client, leader string) {
-	testutil.WaitUntilWithTestingT(t, func() bool {
+func waitLeader(re *require.Assertions, cli client, leader string) {
+	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckLeader()
 		return cli.GetLeaderAddr() == leader
 	})
@@ -835,8 +835,8 @@ func (suite *clientTestSuite) TestGetRegion() {
 	}
 	err := suite.regionHeartbeat.Send(req)
 	suite.NoError(err)
-	t := suite.T()
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
 		suite.NoError(err)
 		if r == nil {
@@ -864,7 +864,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		},
 	}
 	suite.NoError(suite.reportBucket.Send(breq))
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
 		suite.NoError(err)
 		if r == nil {
@@ -874,7 +874,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 	})
 	config := suite.srv.GetRaftCluster().GetStoreConfig()
 	config.EnableRegionBucket = false
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
 		suite.NoError(err)
 		if r == nil {
@@ -911,7 +911,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 	}
 	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
-		testutil.WaitUntilWithTestingT(suite.T(), func() bool {
+		testutil.Eventually(suite.Require(), func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			suite.NoError(err)
 			if i > 0 && i < regionLen {
@@ -949,8 +949,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	}
 
 	// Wait for region heartbeats.
-	t := suite.T()
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(suite.Require(), func() bool {
 		scanRegions, err := suite.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
@@ -967,6 +966,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
 
+	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
 		scanRegions, err := suite.client.ScanRegions(context.Background(), start, end, limit)
 		suite.NoError(err)
@@ -1017,7 +1017,7 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 	err := suite.regionHeartbeat.Send(req)
 	suite.NoError(err)
 
-	testutil.WaitUntilWithTestingT(suite.T(), func() bool {
+	testutil.Eventually(suite.Require(), func() bool {
 		r, err := suite.client.GetRegionByID(context.Background(), regionID)
 		suite.NoError(err)
 		if r == nil {
@@ -1300,8 +1300,8 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	regionsID := []uint64{regionID}
 	suite.NoError(err)
 	// Test interface `ScatterRegions`.
-	t := suite.T()
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
 		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
 		if err != nil {
 			return false
@@ -1320,7 +1320,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
 			fmt.Println(err)
