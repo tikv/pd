@@ -73,7 +73,6 @@ func TestAdjustRule(t *testing.T) {
 
 	for i := 2; i < len(rules); i++ {
 		re.Error(manager.adjustRule(&rules[i], "group"))
-
 	}
 
 	manager.SetKeyType(core.Table.String())
