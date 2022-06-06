@@ -17,21 +17,13 @@ package keyutil
 import (
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testKeyUtilSuite{})
-
-type testKeyUtilSuite struct {
-}
-
-func (s *testKeyUtilSuite) TestKeyUtil(c *C) {
+func TestKeyUtil(t *testing.T) {
+	re := require.New(t)
 	startKey := []byte("a")
 	endKey := []byte("b")
 	key := BuildKeyRangeKey(startKey, endKey)
-	c.Assert(key, Equals, "61-62")
+	re.Equal("61-62", key)
 }

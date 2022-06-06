@@ -2353,3 +2353,13 @@ func newCacheCluster(c *RaftCluster) *cacheCluster {
 		stores:      c.GetStores(),
 	}
 }
+
+// GetPausedSchedulerDelayAt returns DelayAt of a paused scheduler
+func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
+	return c.coordinator.getPausedSchedulerDelayAt(name)
+}
+
+// GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
+func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+	return c.coordinator.getPausedSchedulerDelayUntil(name)
+}
