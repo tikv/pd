@@ -101,7 +101,7 @@ func TestReloadUpgrade(t *testing.T) {
 		Replication: *opt.GetReplicationConfig(),
 	}
 	storage := storage.NewStorageWithMemoryBackend()
-	re.Nil(storage.SaveConfig(old))
+	re.NoError(storage.SaveConfig(old))
 
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
@@ -123,7 +123,7 @@ func TestReloadUpgrade2(t *testing.T) {
 		Replication: *opt.GetReplicationConfig(),
 	}
 	storage := storage.NewStorageWithMemoryBackend()
-	re.Nil(storage.SaveConfig(old))
+	re.NoError(storage.SaveConfig(old))
 
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
@@ -135,24 +135,24 @@ func TestValidation(t *testing.T) {
 	re := require.New(t)
 	registerDefaultSchedulers()
 	cfg := NewConfig()
-	re.Nil(cfg.Adjust(nil, false))
+	re.NoError(cfg.Adjust(nil, false))
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
-	re.NotNil(cfg.Validate())
+	re.Error(cfg.Validate())
 
 	// check schedule config
 	cfg.Schedule.HighSpaceRatio = -0.1
-	re.NotNil(cfg.Schedule.Validate())
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.HighSpaceRatio = 0.6
-	re.Nil(cfg.Schedule.Validate())
+	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 1.1
-	re.NotNil(cfg.Schedule.Validate())
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.4
-	re.NotNil(cfg.Schedule.Validate())
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.8
-	re.Nil(cfg.Schedule.Validate())
+	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
-	re.NotNil(cfg.Schedule.Validate())
+	re.Error(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes
@@ -187,7 +187,7 @@ leader-schedule-limit = 0
 	// When invalid, use default values.
 	host, err := os.Hostname()
 	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s-%s", defaultName, host), cfg.Name, Equals)
+	re.Equal(fmt.Sprintf("%s-%s", defaultName, host), cfg.Name)
 	re.Equal(defaultLeaderLease, cfg.LeaderLease)
 	re.Equal(uint(20000000), cfg.MaxRequestBytes)
 	// When defined, use values from config file.
