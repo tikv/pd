@@ -23,4 +23,22 @@ if [ "$res" ]; then
   exit 1
 fi
 
+# Check if there is any inefficient assert function usage in package.
+
+res=$(grep -rn --include=\*_test.go -E "(re|suite|require)\.(True|False)\(reflect\.DeepEqual\(" . | sort -u) \
+
+if [ "$res" ]; then
+  echo "following packages use the inefficient assert function: please replace reflect.DeepEqual with require.Equal"
+  echo "$res"
+  exit 1
+fi
+
+res=$(grep -rn --include=\*_test.go -E "(re|suite|require)\.(True|False)\(strings\.Contains\(" . | sort -u)
+
+if [ "$res" ]; then
+  echo "following packages use the inefficient assert function: please replace strings.Contains with require.Contains"
+  echo "$res"
+  exit 1
+fi
+
 exit 0

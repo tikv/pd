@@ -144,7 +144,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools static tidy check-plugin errdoc check-testing-t
+check: install-tools static tidy check-plugin errdoc check-test
 
 static: install-tools
 	@ echo "gofmt ..."
@@ -171,10 +171,10 @@ errdoc: install-tools
 	@echo "generator errors.toml"
 	./scripts/check-errdoc.sh
 
-check-testing-t:
-	./scripts/check-testing-t.sh
+check-test:
+	./scripts/check-test.sh
 
-.PHONY: check static tidy check-plugin errdoc docker-build-test check-testing-t
+.PHONY: check static tidy check-plugin errdoc docker-build-test check-test
 
 #### Test utils ####
 
