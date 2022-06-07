@@ -16,7 +16,6 @@ package typeutil
 
 import (
 	"encoding/json"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,7 +31,7 @@ func TestStringSliceJSON(t *testing.T) {
 	var nb StringSlice
 	err = json.Unmarshal(o, &nb)
 	re.NoError(err)
-	re.True(reflect.DeepEqual(b, nb))
+	re.Equal(b, nb)
 }
 
 func TestEmpty(t *testing.T) {
@@ -44,5 +43,5 @@ func TestEmpty(t *testing.T) {
 
 	var ss2 StringSlice
 	re.NoError(ss2.UnmarshalJSON(b))
-	re.True(reflect.DeepEqual(ss, ss2))
+	re.Equal(ss, ss2)
 }

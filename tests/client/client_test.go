@@ -113,7 +113,7 @@ func TestClientLeaderChange(t *testing.T) {
 	urls := cli.(client).GetURLs()
 	sort.Strings(urls)
 	sort.Strings(endpoints)
-	re.True(reflect.DeepEqual(endpoints, urls))
+	re.Equal(endpoints, urls)
 }
 
 func TestLeaderTransfer(t *testing.T) {
@@ -264,7 +264,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 			urls := cli.(client).GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
-			re.True(reflect.DeepEqual(endpoints, urls))
+			re.Equal(endpoints, urls)
 			continue
 		}
 		pdName, exist := allocatorLeaderMap[dcLocation]
@@ -974,20 +974,20 @@ func (suite *clientTestSuite) TestScanRegions() {
 		t.Log("scanRegions", scanRegions)
 		t.Log("expect", expect)
 		for i := range expect {
-			suite.True(reflect.DeepEqual(expect[i], scanRegions[i].Meta))
+			suite.Equal(expect[i], scanRegions[i].Meta)
 
 			if scanRegions[i].Meta.GetId() == region3.GetID() {
-				suite.True(reflect.DeepEqual(&metapb.Peer{}, scanRegions[i].Leader))
+				suite.Equal(&metapb.Peer{}, scanRegions[i].Leader)
 			} else {
-				suite.True(reflect.DeepEqual(expect[i].Peers[0], scanRegions[i].Leader))
+				suite.Equal(expect[i].Peers[0], scanRegions[i].Leader)
 			}
 
 			if scanRegions[i].Meta.GetId() == region4.GetID() {
-				suite.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers))
+				suite.Equal([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers)
 			}
 
 			if scanRegions[i].Meta.GetId() == region5.GetID() {
-				suite.True(reflect.DeepEqual([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers))
+				suite.Equal([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers)
 			}
 		}
 	}
@@ -1036,7 +1036,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	suite.NoError(err)
-	suite.True(reflect.DeepEqual(store, n))
+	suite.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	suite.NoError(err)
@@ -1053,7 +1053,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an offline store should be OK.
 	n, err = suite.client.GetStore(context.Background(), store.GetId())
 	suite.NoError(err)
-	suite.True(reflect.DeepEqual(offlineStore, n))
+	suite.Equal(offlineStore, n)
 
 	// Should return offline stores.
 	contains := false
@@ -1062,7 +1062,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	for _, store := range stores {
 		if store.GetId() == offlineStore.GetId() {
 			contains = true
-			suite.True(reflect.DeepEqual(offlineStore, store))
+			suite.Equal(offlineStore, store)
 		}
 	}
 	suite.True(contains)
