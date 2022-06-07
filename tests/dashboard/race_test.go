@@ -28,10 +28,8 @@ import (
 )
 
 func TestCancelDuringStarting(t *testing.T) {
-	dashboard.SetCheckInterval(50 * time.Millisecond)
-	tests.WaitLeaderReturnDelay = 0
-	tests.WaitLeaderCheckInterval = 20 * time.Millisecond
-
+	prepareTestConfig()
+	defer resetTestConfig()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -44,7 +42,15 @@ func TestCancelDuringStarting(t *testing.T) {
 
 	time.Sleep(60 * time.Millisecond)
 	cancel()
+}
 
+func prepareTestConfig() {
+	dashboard.SetCheckInterval(50 * time.Millisecond)
+	tests.WaitLeaderReturnDelay = 0
+	tests.WaitLeaderCheckInterval = 20 * time.Millisecond
+}
+
+func resetTestConfig() {
 	dashboard.SetCheckInterval(time.Second)
 	tests.WaitLeaderReturnDelay = 20 * time.Millisecond
 	tests.WaitLeaderCheckInterval = 500 * time.Millisecond
