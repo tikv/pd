@@ -32,6 +32,18 @@ import (
 	"go.uber.org/zap"
 )
 
+<<<<<<< HEAD
+=======
+var (
+	errNoStoreToAdd       = errors.New("no store to add peer")
+	errNoStoreToReplace   = errors.New("no store to replace peer")
+	errPeerCannotBeLeader = errors.New("peer cannot be leader")
+	errNoNewLeader        = errors.New("no new leader")
+)
+
+const maxPendingListLen = 100000
+
+>>>>>>> e19dc71ac (*: fix the wrong pending status (#5080))
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
@@ -39,6 +51,7 @@ type RuleChecker struct {
 	ruleManager       *placement.RuleManager
 	name              string
 	regionWaitingList cache.Cache
+	pendingList       cache.Cache
 	record            *recorder
 }
 
@@ -49,6 +62,7 @@ func NewRuleChecker(cluster opt.Cluster, ruleManager *placement.RuleManager, reg
 		ruleManager:       ruleManager,
 		name:              "rule-checker",
 		regionWaitingList: regionWaitingList,
+		pendingList:       cache.NewDefaultCache(maxPendingListLen),
 		record:            newRecord(),
 	}
 }
@@ -100,6 +114,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if err != nil {
 		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	} else if op != nil {
+		c.pendingList.Remove(region.GetID())
 		return op
 	}
 	for _, rf := range fit.RuleFits {
@@ -109,6 +124,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			continue
 		}
 		if op != nil {
+			c.pendingList.Remove(region.GetID())
 			return op
 		}
 	}
@@ -157,8 +173,13 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
+<<<<<<< HEAD
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to add peer")
+=======
+		c.handleFilterState(region, filterByTempState)
+		return nil, errNoStoreToAdd
+>>>>>>> e19dc71ac (*: fix the wrong pending status (#5080))
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -175,8 +196,13 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
+<<<<<<< HEAD
 		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil, errors.New("no store to replace peer")
+=======
+		c.handleFilterState(region, filterByTempState)
+		return nil, errNoStoreToReplace
+>>>>>>> e19dc71ac (*: fix the wrong pending status (#5080))
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
@@ -280,9 +306,14 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
+<<<<<<< HEAD
 	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
+=======
+	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+>>>>>>> e19dc71ac (*: fix the wrong pending status (#5080))
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
+		c.handleFilterState(region, filterByTempState)
 		return nil, nil
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
@@ -369,6 +400,15 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 		}
 	}
 	return stores
+}
+
+func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
+	if filterByTempState {
+		c.regionWaitingList.Put(region.GetID(), nil)
+		c.pendingList.Remove(region.GetID())
+	} else {
+		c.pendingList.Put(region.GetID(), nil)
+	}
 }
 
 type recorder struct {
