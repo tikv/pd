@@ -24,6 +24,7 @@ import (
 )
 
 func TestUpdateConcurrencyLimiter(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 
 	opts := []Option{UpdateConcurrencyLimiter(10)}
@@ -88,6 +89,7 @@ func TestUpdateConcurrencyLimiter(t *testing.T) {
 }
 
 func TestBlockList(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	opts := []Option{AddLabelAllowList()}
 	limiter := NewLimiter()
@@ -107,6 +109,7 @@ func TestBlockList(t *testing.T) {
 }
 
 func TestUpdateQPSLimiter(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	opts := []Option{UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)}
 	limiter := NewLimiter()
@@ -160,6 +163,7 @@ func TestUpdateQPSLimiter(t *testing.T) {
 }
 
 func TestQPSLimiter(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	opts := []Option{UpdateQPSLimiter(float64(rate.Every(3*time.Second)), 100)}
 	limiter := NewLimiter()
@@ -189,6 +193,7 @@ func TestQPSLimiter(t *testing.T) {
 }
 
 func TestTwoLimiters(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cfg := &DimensionConfig{
 		QPS:              100,

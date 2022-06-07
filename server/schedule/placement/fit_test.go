@@ -18,17 +18,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testFitSuite{})
-
-type testFitSuite struct{}
-
-func (s *testFitSuite) makeStores() StoreSet {
+func makeStores() StoreSet {
 	stores := core.NewStoresInfo()
 	for zone := 1; zone <= 5; zone++ {
 		for rack := 1; rack <= 5; rack++ {
@@ -50,7 +48,7 @@ func (s *testFitSuite) makeStores() StoreSet {
 }
 
 // example: "1111_leader,1234,2111_learner"
-func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
+func makeRegion(def string) *core.RegionInfo {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
 	for _, peerDef := range strings.Split(def, ",") {
@@ -71,7 +69,7 @@ func (s *testFitSuite) makeRegion(def string) *core.RegionInfo {
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
 //       count role constraints location_labels
-func (s *testFitSuite) makeRule(def string) *Rule {
+func makeRule(def string) *Rule {
 	var rule Rule
 	splits := strings.Split(def, "/")
 	rule.Count, _ = strconv.Atoi(splits[0])
@@ -92,7 +90,7 @@ func (s *testFitSuite) makeRule(def string) *Rule {
 	return &rule
 }
 
-func (s *testFitSuite) checkPeerMatch(peers []*metapb.Peer, expect string) bool {
+func checkPeerMatch(peers []*metapb.Peer, expect string) bool {
 	if len(peers) == 0 && expect == "" {
 		return true
 	}
@@ -111,8 +109,9 @@ func (s *testFitSuite) checkPeerMatch(peers []*metapb.Peer, expect string) bool 
 	return len(m) == 0
 }
 
-func (s *testFitSuite) TestFitRegion(c *C) {
-	stores := s.makeStores()
+func TestFitRegion(t *testing.T) {
+	re := require.New(t)
+	stores := makeStores()
 
 	cases := []struct {
 		region   string
@@ -140,34 +139,34 @@ func (s *testFitSuite) TestFitRegion(c *C) {
 	}
 
 	for _, cc := range cases {
-		region := s.makeRegion(cc.region)
+		region := makeRegion(cc.region)
 		var rules []*Rule
 		for _, r := range cc.rules {
-			rules = append(rules, s.makeRule(r))
+			rules = append(rules, makeRule(r))
 		}
 		rf := fitRegion(stores.GetStores(), region, rules)
 		expects := strings.Split(cc.fitPeers, "/")
 		for i, f := range rf.RuleFits {
-			c.Assert(s.checkPeerMatch(f.Peers, expects[i]), IsTrue)
+			re.True(checkPeerMatch(f.Peers, expects[i]))
 		}
 		if len(rf.RuleFits) < len(expects) {
-			c.Assert(s.checkPeerMatch(rf.OrphanPeers, expects[len(rf.RuleFits)]), IsTrue)
+			re.True(checkPeerMatch(rf.OrphanPeers, expects[len(rf.RuleFits)]))
 		}
 	}
 }
-
-func (s *testFitSuite) TestIsolationScore(c *C) {
-	stores := s.makeStores()
+func TestIsolationScore(t *testing.T) {
+	as := assert.New(t)
+	stores := makeStores()
 	testCases := []struct {
-		peers1 []uint64
-		Checker
-		peers2 []uint64
+		checker func(interface{}, interface{}, ...interface{}) bool
+		peers1  []uint64
+		peers2  []uint64
 	}{
-		{[]uint64{1111, 1112}, Less, []uint64{1111, 1121}},
-		{[]uint64{1111, 1211}, Less, []uint64{1111, 2111}},
-		{[]uint64{1111, 1211, 1311, 2111, 3111}, Less, []uint64{1111, 1211, 2111, 2211, 3111}},
-		{[]uint64{1111, 1211, 2111, 2211, 3111}, Equals, []uint64{1111, 2111, 2211, 3111, 3211}},
-		{[]uint64{1111, 1211, 2111, 2211, 3111}, Greater, []uint64{1111, 1121, 2111, 2211, 3111}},
+		{as.Less, []uint64{1111, 1112}, []uint64{1111, 1121}},
+		{as.Less, []uint64{1111, 1211}, []uint64{1111, 2111}},
+		{as.Less, []uint64{1111, 1211, 1311, 2111, 3111}, []uint64{1111, 1211, 2111, 2211, 3111}},
+		{as.Equal, []uint64{1111, 1211, 2111, 2211, 3111}, []uint64{1111, 2111, 2211, 3111, 3211}},
+		{as.Greater, []uint64{1111, 1211, 2111, 2211, 3111}, []uint64{1111, 1121, 2111, 2211, 3111}},
 	}
 
 	makePeers := func(ids []uint64) []*fitPeer {
@@ -185,6 +184,6 @@ func (s *testFitSuite) TestIsolationScore(c *C) {
 		peers1, peers2 := makePeers(tc.peers1), makePeers(tc.peers2)
 		score1 := isolationScore(peers1, []string{"zone", "rack", "host"})
 		score2 := isolationScore(peers2, []string{"zone", "rack", "host"})
-		c.Assert(score1, tc.Checker, score2)
+		tc.checker(score1, score2)
 	}
 }
