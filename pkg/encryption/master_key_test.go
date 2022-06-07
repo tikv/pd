@@ -24,59 +24,67 @@ import (
 )
 
 func TestPlaintextMasterKey(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_Plaintext{
 			Plaintext: &encryptionpb.MasterKeyPlaintext{},
 		},
 	}
 	masterKey, err := NewMasterKey(config, nil)
-	require.NoError(t, err)
-	require.NotNil(t, masterKey)
-	require.Len(t, masterKey.key, 0)
+	re.NoError(err)
+	re.NotNil(masterKey)
+	re.Len(masterKey.key, 0)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
-	require.NoError(t, err)
-	require.Len(t, iv, 0)
-	require.Equal(t, plaintext, string(ciphertext))
+	re.NoError(err)
+	re.Len(iv, 0)
+	re.Equal(plaintext, string(ciphertext))
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
-	require.NoError(t, err)
-	require.Equal(t, plaintext, string(plaintext2))
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 
-	require.True(t, masterKey.IsPlaintext())
+	re.True(masterKey.IsPlaintext())
 }
 
 func TestEncrypt(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
 	key, err := hex.DecodeString(keyHex)
-	require.NoError(t, err)
+	re.NoError(err)
 	masterKey := &MasterKey{key: key}
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
-	require.NoError(t, err)
-	require.Len(t, iv, ivLengthGCM)
+	re.NoError(err)
+	re.Len(iv, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
-	require.NoError(t, err)
-	require.Equal(t, plaintext, string(plaintext2))
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 }
 
 func TestDecrypt(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
 	key, err := hex.DecodeString(keyHex)
-	require.NoError(t, err)
+	re.NoError(err)
 	plaintext := "this-is-a-plaintext"
 	iv, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
-	require.NoError(t, err)
+	re.NoError(err)
 	ciphertext, err := aesGcmEncryptImpl(key, []byte(plaintext), iv)
-	require.NoError(t, err)
+	re.NoError(err)
 	masterKey := &MasterKey{key: key}
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
-	require.NoError(t, err)
-	require.Equal(t, plaintext, string(plaintext2))
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 }
 
 func TestNewFileMasterKeyMissingPath(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -85,12 +93,14 @@ func TestNewFileMasterKeyMissingPath(t *testing.T) {
 		},
 	}
 	_, err := NewMasterKey(config, nil)
-	require.Error(t, err)
+	re.Error(err)
 }
 
 func TestNewFileMasterKeyMissingFile(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	dir, err := os.MkdirTemp("", "test_key_files")
-	require.NoError(t, err)
+	re.NoError(err)
 	path := dir + "/key"
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -100,12 +110,14 @@ func TestNewFileMasterKeyMissingFile(t *testing.T) {
 		},
 	}
 	_, err = NewMasterKey(config, nil)
-	require.Error(t, err)
+	re.Error(err)
 }
 
 func TestNewFileMasterKeyNotHexString(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	dir, err := os.MkdirTemp("", "test_key_files")
-	require.NoError(t, err)
+	re.NoError(err)
 	path := dir + "/key"
 	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -116,12 +128,14 @@ func TestNewFileMasterKeyNotHexString(t *testing.T) {
 		},
 	}
 	_, err = NewMasterKey(config, nil)
-	require.Error(t, err)
+	re.Error(err)
 }
 
 func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	dir, err := os.MkdirTemp("", "test_key_files")
-	require.NoError(t, err)
+	re.NoError(err)
 	path := dir + "/key"
 	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -132,13 +146,15 @@ func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 		},
 	}
 	_, err = NewMasterKey(config, nil)
-	require.Error(t, err)
+	re.Error(err)
 }
 
 func TestNewFileMasterKey(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
 	dir, err := os.MkdirTemp("", "test_key_files")
-	require.NoError(t, err)
+	re.NoError(err)
 	path := dir + "/key"
 	os.WriteFile(path, []byte(key), 0600)
 	config := &encryptionpb.MasterKey{
@@ -149,6 +165,6 @@ func TestNewFileMasterKey(t *testing.T) {
 		},
 	}
 	masterKey, err := NewMasterKey(config, nil)
-	require.NoError(t, err)
-	require.Equal(t, key, hex.EncodeToString(masterKey.key))
+	re.NoError(err)
+	re.Equal(key, hex.EncodeToString(masterKey.key))
 }

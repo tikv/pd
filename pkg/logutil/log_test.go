@@ -18,30 +18,26 @@ import (
 	"fmt"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
+func TestStringToZapLogLevel(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.Equal(zapcore.FatalLevel, StringToZapLogLevel("fatal"))
+	re.Equal(zapcore.ErrorLevel, StringToZapLogLevel("ERROR"))
+	re.Equal(zapcore.WarnLevel, StringToZapLogLevel("warn"))
+	re.Equal(zapcore.WarnLevel, StringToZapLogLevel("warning"))
+	re.Equal(zapcore.DebugLevel, StringToZapLogLevel("debug"))
+	re.Equal(zapcore.InfoLevel, StringToZapLogLevel("info"))
+	re.Equal(zapcore.InfoLevel, StringToZapLogLevel("whatever"))
 }
 
-var _ = Suite(&testLogSuite{})
-
-type testLogSuite struct{}
-
-func (s *testLogSuite) TestStringToZapLogLevel(c *C) {
-	c.Assert(StringToZapLogLevel("fatal"), Equals, zapcore.FatalLevel)
-	c.Assert(StringToZapLogLevel("ERROR"), Equals, zapcore.ErrorLevel)
-	c.Assert(StringToZapLogLevel("warn"), Equals, zapcore.WarnLevel)
-	c.Assert(StringToZapLogLevel("warning"), Equals, zapcore.WarnLevel)
-	c.Assert(StringToZapLogLevel("debug"), Equals, zapcore.DebugLevel)
-	c.Assert(StringToZapLogLevel("info"), Equals, zapcore.InfoLevel)
-	c.Assert(StringToZapLogLevel("whatever"), Equals, zapcore.InfoLevel)
-}
-
-func (s *testLogSuite) TestRedactLog(c *C) {
-	testcases := []struct {
+func TestRedactLog(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	testCases := []struct {
 		name            string
 		arg             interface{}
 		enableRedactLog bool
@@ -73,16 +69,16 @@ func (s *testLogSuite) TestRedactLog(c *C) {
 		},
 	}
 
-	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		SetRedactLog(testcase.enableRedactLog)
-		switch r := testcase.arg.(type) {
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		SetRedactLog(testCase.enableRedactLog)
+		switch r := testCase.arg.(type) {
 		case []byte:
-			c.Assert(RedactBytes(r), DeepEquals, testcase.expect)
+			re.Equal(testCase.expect, RedactBytes(r))
 		case string:
-			c.Assert(RedactString(r), DeepEquals, testcase.expect)
+			re.Equal(testCase.expect, RedactString(r))
 		case fmt.Stringer:
-			c.Assert(RedactStringer(r), DeepEquals, testcase.expect)
+			re.Equal(testCase.expect, RedactStringer(r))
 		default:
 			panic("unmatched case")
 		}

@@ -25,6 +25,8 @@ import (
 )
 
 func TestJsonRespondErrorOk(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
@@ -33,15 +35,17 @@ func TestJsonRespondErrorOk(t *testing.T) {
 	var input map[string]string
 	output := map[string]string{"zone": "cn", "host": "local"}
 	err := ReadJSONRespondError(rd, response, body, &input)
-	require.NoError(t, err)
-	require.Equal(t, output["zone"], input["zone"])
-	require.Equal(t, output["host"], input["host"])
+	re.NoError(err)
+	re.Equal(output["zone"], input["zone"])
+	re.Equal(output["host"], input["host"])
 	result := response.Result()
 	defer result.Body.Close()
-	require.Equal(t, 200, result.StatusCode)
+	re.Equal(200, result.StatusCode)
 }
 
 func TestJsonRespondErrorBadInput(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
@@ -49,18 +53,18 @@ func TestJsonRespondErrorBadInput(t *testing.T) {
 	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input []string
 	err := ReadJSONRespondError(rd, response, body, &input)
-	require.EqualError(t, err, "json: cannot unmarshal object into Go value of type []string")
+	re.EqualError(err, "json: cannot unmarshal object into Go value of type []string")
 	result := response.Result()
 	defer result.Body.Close()
-	require.Equal(t, 400, result.StatusCode)
+	re.Equal(400, result.StatusCode)
 
 	{
 		body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
 		var input []string
 		err := ReadJSONRespondError(rd, response, body, &input)
-		require.EqualError(t, err, "unexpected end of JSON input")
+		re.EqualError(err, "unexpected end of JSON input")
 		result := response.Result()
 		defer result.Body.Close()
-		require.Equal(t, 400, result.StatusCode)
+		re.Equal(400, result.StatusCode)
 	}
 }

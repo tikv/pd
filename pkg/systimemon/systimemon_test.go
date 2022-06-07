@@ -26,11 +26,11 @@ func TestSystimeMonitor(t *testing.T) {
 	defer cancel()
 	var jumpForward int32
 
-	trigged := false
+	triggered := false
 	go StartMonitor(ctx,
 		func() time.Time {
-			if !trigged {
-				trigged = true
+			if !triggered {
+				triggered = true
 				return time.Now()
 			}
 

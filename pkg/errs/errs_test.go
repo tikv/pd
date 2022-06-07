@@ -72,44 +72,47 @@ func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
 }
 
 func TestError(t *testing.T) {
+	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
 	rfc := `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found`
 	log.Error("test", zap.Error(ErrEtcdLeaderNotFound.FastGenByArgs()))
-	require.Contains(t, lg.Message(), rfc)
+	re.Contains(lg.Message(), rfc)
 	err := errors.New("test error")
 	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
 	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error`
-	require.Contains(t, lg.Message(), rfc)
+	re.Contains(lg.Message(), rfc)
 }
 
 func TestErrorEqual(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	err1 := ErrSchedulerNotFound.FastGenByArgs()
 	err2 := ErrSchedulerNotFound.FastGenByArgs()
-	require.True(t, errors.ErrorEqual(err1, err2))
+	re.True(errors.ErrorEqual(err1, err2))
 
 	err := errors.New("test")
 	err1 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
 	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
-	require.True(t, errors.ErrorEqual(err1, err2))
+	re.True(errors.ErrorEqual(err1, err2))
 
 	err1 = ErrSchedulerNotFound.FastGenByArgs()
 	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
-	require.False(t, errors.ErrorEqual(err1, err2))
+	re.False(errors.ErrorEqual(err1, err2))
 
 	err3 := errors.New("test")
 	err4 := errors.New("test")
 	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
 	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
-	require.True(t, errors.ErrorEqual(err1, err2))
+	re.True(errors.ErrorEqual(err1, err2))
 
 	err3 = errors.New("test1")
 	err4 = errors.New("test")
 	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
 	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
-	require.False(t, errors.ErrorEqual(err1, err2))
+	re.False(errors.ErrorEqual(err1, err2))
 }
 
 func TestZapError(t *testing.T) {
@@ -121,6 +124,8 @@ func TestZapError(t *testing.T) {
 }
 
 func TestErrorWithStack(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
@@ -133,8 +138,8 @@ func TestErrorWithStack(t *testing.T) {
 	// This test is based on line number and the first log is in line 141, the second is in line 142.
 	// So they have the same length stack. Move this test to another place need to change the corresponding length.
 	idx1 := strings.Index(m1, "[stack=")
-	require.GreaterOrEqual(t, idx1, -1)
+	re.GreaterOrEqual(idx1, -1)
 	idx2 := strings.Index(m2, "[stack=")
-	require.GreaterOrEqual(t, idx2, -1)
-	require.Equal(t, len(m1[idx1:]), len(m2[idx2:]))
+	re.GreaterOrEqual(idx2, -1)
+	re.Equal(len(m1[idx1:]), len(m2[idx2:]))
 }
