@@ -97,6 +97,10 @@ func (c *coordinator) GetWaitingRegions() []*cache.Item {
 	return c.checkers.GetWaitingRegions()
 }
 
+func (c *coordinator) IsPendingRegion(region uint64) bool {
+	return c.checkers.IsPendingRegion(region)
+}
+
 // patrolRegions is used to scan regions.
 // The checkers will check these regions to decide if they need to do some operations.
 func (c *coordinator) patrolRegions() {
