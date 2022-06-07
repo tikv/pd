@@ -907,6 +907,11 @@ func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
 	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
 	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
 	c.Assert(paused, Equals, true)
+	pausedAt, err := co.getPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
+	c.Assert(err, IsNil)
+	resumeAt, err := co.getPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
+	c.Assert(err, IsNil)
+	c.Assert(resumeAt-pausedAt, Equals, int64(60))
 	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
 	c.Assert(allowed, Equals, false)
 }

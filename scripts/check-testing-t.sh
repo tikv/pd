@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# TODO: remove this script after migrating all tests to the new test framework.
+
 # Check if there are any packages foget to add `TestingT` when use "github.com/pingcap/check".
 
 res=$(diff <(grep -rl --include=\*_test.go "github.com/pingcap/check" . | xargs -L 1 dirname | sort -u) \
@@ -13,7 +15,7 @@ fi
 
 # Check if there are duplicated `TestingT` in package.
 
-res=$(grep -r --include=\*_test.go "TestingT(" . | cut -f1 | xargs -L 1 dirname | sort | uniq -d)
+res=$(grep -r --include=\*_test.go "TestingT(t)" . | cut -f1 | xargs -L 1 dirname | sort | uniq -d)
 
 if [ "$res" ]; then
   echo "following packages may have duplicated TestingT:"

@@ -16,155 +16,151 @@ package ratelimit
 
 import (
 	"sync"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
 )
 
-var _ = Suite(&testRatelimiterSuite{})
-
-type testRatelimiterSuite struct {
-}
-
-func (s *testRatelimiterSuite) TestUpdateConcurrencyLimiter(c *C) {
-	c.Parallel()
+func TestUpdateConcurrencyLimiter(t *testing.T) {
+	re := require.New(t)
 
 	opts := []Option{UpdateConcurrencyLimiter(10)}
 	limiter := NewLimiter()
 
 	label := "test"
 	status := limiter.Update(label, opts...)
-	c.Assert(status&ConcurrencyChanged != 0, IsTrue)
+	re.True(status&ConcurrencyChanged != 0)
 	var lock sync.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	for i := 0; i < 15; i++ {
 		wg.Add(1)
 		go func() {
-			CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+			countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 		}()
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 5)
-	c.Assert(successCount, Equals, 10)
+	re.Equal(5, failedCount)
+	re.Equal(10, successCount)
 	for i := 0; i < 10; i++ {
 		limiter.Release(label)
 	}
 
 	limit, current := limiter.GetConcurrencyLimiterStatus(label)
-	c.Assert(limit, Equals, uint64(10))
-	c.Assert(current, Equals, uint64(0))
+	re.Equal(uint64(10), limit)
+	re.Equal(uint64(0), current)
 
 	status = limiter.Update(label, UpdateConcurrencyLimiter(10))
-	c.Assert(status&ConcurrencyNoChange != 0, IsTrue)
+	re.True(status&ConcurrencyNoChange != 0)
 
 	status = limiter.Update(label, UpdateConcurrencyLimiter(5))
-	c.Assert(status&ConcurrencyChanged != 0, IsTrue)
+	re.True(status&ConcurrencyChanged != 0)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
 		wg.Add(1)
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 10)
-	c.Assert(successCount, Equals, 5)
+	re.Equal(10, failedCount)
+	re.Equal(5, successCount)
 	for i := 0; i < 5; i++ {
 		limiter.Release(label)
 	}
 
 	status = limiter.Update(label, UpdateConcurrencyLimiter(0))
-	c.Assert(status&ConcurrencyDeleted != 0, IsTrue)
+	re.True(status&ConcurrencyDeleted != 0)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
 		wg.Add(1)
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 0)
-	c.Assert(successCount, Equals, 15)
+	re.Equal(0, failedCount)
+	re.Equal(15, successCount)
 
 	limit, current = limiter.GetConcurrencyLimiterStatus(label)
-	c.Assert(limit, Equals, uint64(0))
-	c.Assert(current, Equals, uint64(0))
+	re.Equal(uint64(0), limit)
+	re.Equal(uint64(0), current)
 }
 
-func (s *testRatelimiterSuite) TestBlockList(c *C) {
-	c.Parallel()
+func TestBlockList(t *testing.T) {
+	re := require.New(t)
 	opts := []Option{AddLabelAllowList()}
 	limiter := NewLimiter()
 	label := "test"
 
-	c.Assert(limiter.IsInAllowList(label), Equals, false)
+	re.False(limiter.IsInAllowList(label))
 	for _, opt := range opts {
 		opt(label, limiter)
 	}
-	c.Assert(limiter.IsInAllowList(label), Equals, true)
+	re.True(limiter.IsInAllowList(label))
 
 	status := UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
-	c.Assert(status&InAllowList != 0, Equals, true)
+	re.True(status&InAllowList != 0)
 	for i := 0; i < 10; i++ {
-		c.Assert(limiter.Allow(label), Equals, true)
+		re.True(limiter.Allow(label))
 	}
 }
 
-func (s *testRatelimiterSuite) TestUpdateQPSLimiter(c *C) {
-	c.Parallel()
+func TestUpdateQPSLimiter(t *testing.T) {
+	re := require.New(t)
 	opts := []Option{UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)}
 	limiter := NewLimiter()
 
 	label := "test"
 	status := limiter.Update(label, opts...)
-	c.Assert(status&QPSChanged != 0, IsTrue)
+	re.True(status&QPSChanged != 0)
 
 	var lock sync.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	wg.Add(3)
 	for i := 0; i < 3; i++ {
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 2)
-	c.Assert(successCount, Equals, 1)
+	re.Equal(2, failedCount)
+	re.Equal(1, successCount)
 
 	limit, burst := limiter.GetQPSLimiterStatus(label)
-	c.Assert(limit, Equals, rate.Limit(1))
-	c.Assert(burst, Equals, 1)
+	re.Equal(rate.Limit(1), limit)
+	re.Equal(1, burst)
 
 	status = limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(time.Second)), 1))
-	c.Assert(status&QPSNoChange != 0, IsTrue)
+	re.True(status&QPSNoChange != 0)
 
 	status = limiter.Update(label, UpdateQPSLimiter(5, 5))
-	c.Assert(status&QPSChanged != 0, IsTrue)
+	re.True(status&QPSChanged != 0)
 	limit, burst = limiter.GetQPSLimiterStatus(label)
-	c.Assert(limit, Equals, rate.Limit(5))
-	c.Assert(burst, Equals, 5)
+	re.Equal(rate.Limit(5), limit)
+	re.Equal(5, burst)
 	time.Sleep(time.Second)
 
 	for i := 0; i < 10; i++ {
 		if i < 5 {
-			c.Assert(limiter.Allow(label), Equals, true)
+			re.True(limiter.Allow(label))
 		} else {
-			c.Assert(limiter.Allow(label), Equals, false)
+			re.False(limiter.Allow(label))
 		}
 	}
 	time.Sleep(time.Second)
 
 	status = limiter.Update(label, UpdateQPSLimiter(0, 0))
-	c.Assert(status&QPSDeleted != 0, IsTrue)
+	re.True(status&QPSDeleted != 0)
 	for i := 0; i < 10; i++ {
-		c.Assert(limiter.Allow(label), Equals, true)
+		re.True(limiter.Allow(label))
 	}
 	qLimit, qCurrent := limiter.GetQPSLimiterStatus(label)
-	c.Assert(qLimit, Equals, rate.Limit(0))
-	c.Assert(qCurrent, Equals, 0)
+	re.Equal(rate.Limit(0), qLimit)
+	re.Equal(0, qCurrent)
 }
 
-func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
-	c.Parallel()
+func TestQPSLimiter(t *testing.T) {
+	re := require.New(t)
 	opts := []Option{UpdateQPSLimiter(float64(rate.Every(3*time.Second)), 100)}
 	limiter := NewLimiter()
 
@@ -178,22 +174,22 @@ func (s *testRatelimiterSuite) TestQPSLimiter(c *C) {
 	var wg sync.WaitGroup
 	wg.Add(200)
 	for i := 0; i < 200; i++ {
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount+successCount, Equals, 200)
-	c.Assert(failedCount, Equals, 100)
-	c.Assert(successCount, Equals, 100)
+	re.Equal(200, failedCount+successCount)
+	re.Equal(100, failedCount)
+	re.Equal(100, successCount)
 
 	time.Sleep(4 * time.Second) // 3+1
 	wg.Add(1)
-	CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	wg.Wait()
-	c.Assert(successCount, Equals, 101)
+	re.Equal(101, successCount)
 }
 
-func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
-	c.Parallel()
+func TestTwoLimiters(t *testing.T) {
+	re := require.New(t)
 	cfg := &DimensionConfig{
 		QPS:              100,
 		QPSBurst:         100,
@@ -212,20 +208,20 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	var wg sync.WaitGroup
 	wg.Add(200)
 	for i := 0; i < 200; i++ {
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 100)
-	c.Assert(successCount, Equals, 100)
+	re.Equal(100, failedCount)
+	re.Equal(100, successCount)
 	time.Sleep(1 * time.Second)
 
 	wg.Add(100)
 	for i := 0; i < 100; i++ {
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(failedCount, Equals, 200)
-	c.Assert(successCount, Equals, 100)
+	re.Equal(200, failedCount)
+	re.Equal(100, successCount)
 
 	for i := 0; i < 100; i++ {
 		limiter.Release(label)
@@ -233,17 +229,17 @@ func (s *testRatelimiterSuite) TestTwoLimiters(c *C) {
 	limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(10*time.Second)), 1))
 	wg.Add(100)
 	for i := 0; i < 100; i++ {
-		go CountRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
 	}
 	wg.Wait()
-	c.Assert(successCount, Equals, 101)
-	c.Assert(failedCount, Equals, 299)
+	re.Equal(101, successCount)
+	re.Equal(299, failedCount)
 	limit, current := limiter.GetConcurrencyLimiterStatus(label)
-	c.Assert(limit, Equals, uint64(100))
-	c.Assert(current, Equals, uint64(1))
+	re.Equal(uint64(100), limit)
+	re.Equal(uint64(1), current)
 }
 
-func CountRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
+func countRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
 	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
 	result := limiter.Allow(label)
 	lock.Lock()

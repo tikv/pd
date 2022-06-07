@@ -17,33 +17,29 @@ package typeutil
 import (
 	"encoding/json"
 	"reflect"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testUint64BytesSuite{})
-
-type testUint64BytesSuite struct{}
-
-func (s *testUint64BytesSuite) TestBytesToUint64(c *C) {
+func TestBytesToUint64(t *testing.T) {
+	re := require.New(t)
 	str := "\x00\x00\x00\x00\x00\x00\x03\xe8"
 	a, err := BytesToUint64([]byte(str))
-	c.Assert(err, IsNil)
-	c.Assert(a, Equals, uint64(1000))
+	re.NoError(err)
+	re.Equal(uint64(1000), a)
 }
 
-func (s *testUint64BytesSuite) TestUint64ToBytes(c *C) {
+func TestUint64ToBytes(t *testing.T) {
+	re := require.New(t)
 	var a uint64 = 1000
 	b := Uint64ToBytes(a)
 	str := "\x00\x00\x00\x00\x00\x00\x03\xe8"
-	c.Assert(b, DeepEquals, []byte(str))
+	re.Equal([]byte(str), b)
 }
 
-var _ = Suite(&testJSONSuite{})
-
-type testJSONSuite struct{}
-
-func (s *testJSONSuite) TestJSONToUint64Slice(c *C) {
+func TestJSONToUint64Slice(t *testing.T) {
+	re := require.New(t)
 	type testArray struct {
 		Array []uint64 `json:"array"`
 	}
@@ -51,16 +47,16 @@ func (s *testJSONSuite) TestJSONToUint64Slice(c *C) {
 		Array: []uint64{1, 2, 3},
 	}
 	bytes, _ := json.Marshal(a)
-	var t map[string]interface{}
-	err := json.Unmarshal(bytes, &t)
-	c.Assert(err, IsNil)
+	var jsonStr map[string]interface{}
+	err := json.Unmarshal(bytes, &jsonStr)
+	re.NoError(err)
 	// valid case
-	res, ok := JSONToUint64Slice(t["array"])
-	c.Assert(ok, IsTrue)
-	c.Assert(reflect.TypeOf(res[0]).Kind(), Equals, reflect.Uint64)
+	res, ok := JSONToUint64Slice(jsonStr["array"])
+	re.True(ok)
+	re.Equal(reflect.Uint64, reflect.TypeOf(res[0]).Kind())
 	// invalid case
-	_, ok = t["array"].([]uint64)
-	c.Assert(ok, IsFalse)
+	_, ok = jsonStr["array"].([]uint64)
+	re.False(ok)
 
 	// invalid type
 	type testArray1 struct {
@@ -70,10 +66,10 @@ func (s *testJSONSuite) TestJSONToUint64Slice(c *C) {
 		Array: []string{"1", "2", "3"},
 	}
 	bytes, _ = json.Marshal(a1)
-	var t1 map[string]interface{}
-	err = json.Unmarshal(bytes, &t1)
-	c.Assert(err, IsNil)
-	res, ok = JSONToUint64Slice(t1["array"])
-	c.Assert(ok, IsFalse)
-	c.Assert(res, IsNil)
+	var jsonStr1 map[string]interface{}
+	err = json.Unmarshal(bytes, &jsonStr1)
+	re.NoError(err)
+	res, ok = JSONToUint64Slice(jsonStr1["array"])
+	re.False(ok)
+	re.Nil(res)
 }
