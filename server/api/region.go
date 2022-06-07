@@ -264,9 +264,18 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	regions := rc.ScanRegions(startKey, endKey, -1)
 	replicated := true
 	for _, region := range regions {
+<<<<<<< HEAD
 		if !opt.IsRegionReplicated(rc, region) {
 			replicated = false
 			break
+=======
+		if !schedule.IsRegionReplicated(rc, region) {
+			state = "INPROGRESS"
+			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
+				state = "PENDING"
+				break
+			}
+>>>>>>> e19dc71ac (*: fix the wrong pending status (#5080))
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, replicated)
