@@ -21,7 +21,6 @@ import (
 	. "github.com/pingcap/check"
 
 	"github.com/tikv/pd/pkg/dashboard"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 
 	// Register schedulers.
@@ -33,14 +32,12 @@ var _ = Suite(&raceTestSuite{})
 type raceTestSuite struct{}
 
 func (s *raceTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
 	dashboard.SetCheckInterval(50 * time.Millisecond)
 	tests.WaitLeaderReturnDelay = 0
 	tests.WaitLeaderCheckInterval = 20 * time.Millisecond
 }
 
 func (s *raceTestSuite) TearDownSuite(c *C) {
-	server.EnableZap = false
 	dashboard.SetCheckInterval(time.Second)
 	tests.WaitLeaderReturnDelay = 20 * time.Millisecond
 	tests.WaitLeaderCheckInterval = 500 * time.Millisecond

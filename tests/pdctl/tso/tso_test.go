@@ -21,7 +21,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
@@ -33,10 +32,6 @@ func Test(t *testing.T) {
 var _ = Suite(&tsoTestSuite{})
 
 type tsoTestSuite struct{}
-
-func (s *tsoTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *tsoTestSuite) TestTSO(c *C) {
 	cmd := pdctlCmd.GetRootCmd()

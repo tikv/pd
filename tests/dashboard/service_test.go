@@ -27,7 +27,6 @@ import (
 
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -54,7 +53,6 @@ type dashboardTestSuite struct {
 }
 
 func (s *dashboardTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
 	dashboard.SetCheckInterval(10 * time.Millisecond)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.httpClient = &http.Client{
@@ -71,7 +69,6 @@ func (s *dashboardTestSuite) SetUpSuite(c *C) {
 func (s *dashboardTestSuite) TearDownSuite(c *C) {
 	s.cancel()
 	s.httpClient.CloseIdleConnections()
-	server.EnableZap = false
 	dashboard.SetCheckInterval(time.Second)
 }
 

@@ -39,7 +39,6 @@ type compatibilityTestSuite struct {
 
 func (s *compatibilityTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *compatibilityTestSuite) TearDownSuite(c *C) {

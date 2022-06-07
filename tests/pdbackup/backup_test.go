@@ -23,7 +23,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-backup/pdbackup"
 	"go.etcd.io/etcd/clientv3"
@@ -36,10 +35,6 @@ func Test(t *testing.T) {
 var _ = Suite(&backupTestSuite{})
 
 type backupTestSuite struct{}
-
-func (s *backupTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *backupTestSuite) TestBackup(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
