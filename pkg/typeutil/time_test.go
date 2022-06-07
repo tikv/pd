@@ -23,6 +23,7 @@ import (
 )
 
 func TestParseTimestamp(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	for i := 0; i < 3; i++ {
 		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
@@ -38,6 +39,7 @@ func TestParseTimestamp(t *testing.T) {
 }
 
 func TestSubTimeByWallClock(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	for i := 0; i < 100; i++ {
 		r := rand.Int63n(1000)
@@ -61,6 +63,7 @@ func TestSubTimeByWallClock(t *testing.T) {
 }
 
 func TestSmallTimeDifference(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	t1, err := time.Parse("2006-01-02 15:04:05.999", "2021-04-26 00:44:25.682")
 	re.NoError(err)

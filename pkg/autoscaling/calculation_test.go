@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"testing"
 	"time"
 
@@ -30,6 +29,7 @@ import (
 )
 
 func TestGetScaledTiKVGroups(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -70,7 +70,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
-		noError          bool
+		errorChecker     func(err error, msgAndArgs ...interface{})
 	}{
 		{
 			name:     "no scaled tikv group",
@@ -90,7 +90,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "exist 1 scaled tikv group",
@@ -120,7 +120,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 					},
 				},
 			},
-			noError: true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "exist 1 tikv scaled group with inconsistency healthy instances",
@@ -140,7 +140,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      false,
+			errorChecker: re.Error,
 		},
 		{
 			name:     "exist 1 tikv scaled group with less healthy instances",
@@ -166,7 +166,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 					},
 				},
 			},
-			noError: true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "existed other tikv group",
@@ -186,7 +186,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      true,
+			errorChecker: re.NoError,
 		},
 	}
 
@@ -195,9 +195,9 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		plans, err := getScaledTiKVGroups(testCase.informer, testCase.healthyInstances)
 		if testCase.expectedPlan == nil {
 			re.Len(plans, 0)
-			re.Equal(testCase.noError, err == nil)
+			testCase.errorChecker(err)
 		} else {
-			re.True(reflect.DeepEqual(testCase.expectedPlan, plans))
+			re.Equal(testCase.expectedPlan, plans)
 		}
 	}
 }
@@ -214,6 +214,7 @@ func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 }
 
 func TestGetTotalCPUUseTime(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
@@ -236,6 +237,7 @@ func TestGetTotalCPUUseTime(t *testing.T) {
 }
 
 func TestGetTotalCPUQuota(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
@@ -258,6 +260,7 @@ func TestGetTotalCPUQuota(t *testing.T) {
 }
 
 func TestScaleOutGroupLabel(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	var jsonStr = []byte(`
 {
@@ -300,6 +303,7 @@ func TestScaleOutGroupLabel(t *testing.T) {
 }
 
 func TestStrategyChangeCount(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	var count uint64 = 2
 	strategy := &Strategy{
