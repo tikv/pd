@@ -1056,7 +1056,11 @@ func (s *Server) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePoin
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+<<<<<<< HEAD
 	safePoint, err := s.storage.LoadGCSafePoint()
+=======
+	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
+>>>>>>> 12a9513c7 (server/grpc_service: make update gc_safepoint concurrently safe (#5070))
 	if err != nil {
 		return nil, err
 	}
@@ -1096,18 +1100,23 @@ func (s *Server) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSa
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+<<<<<<< HEAD
 	oldSafePoint, err := s.storage.LoadGCSafePoint()
+=======
+	newSafePoint := request.GetSafePoint()
+	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
+>>>>>>> 12a9513c7 (server/grpc_service: make update gc_safepoint concurrently safe (#5070))
 	if err != nil {
 		return nil, err
 	}
 
-	newSafePoint := request.SafePoint
-
-	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
+<<<<<<< HEAD
 		if err := s.storage.SaveGCSafePoint(newSafePoint); err != nil {
 			return nil, err
 		}
+=======
+>>>>>>> 12a9513c7 (server/grpc_service: make update gc_safepoint concurrently safe (#5070))
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {

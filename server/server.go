@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
+	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/kv"
 	"github.com/tikv/pd/server/member"
@@ -120,7 +121,13 @@ type Server struct {
 	// for encryption
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
+<<<<<<< HEAD
 	storage *core.Storage
+=======
+	storage storage.Storage
+	// safepoint manager
+	gcSafePointManager *gc.SafePointManager
+>>>>>>> 12a9513c7 (server/grpc_service: make update gc_safepoint concurrently safe (#5070))
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -382,12 +389,18 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 
 	s.storage = core.NewStorage(
 		kvBase,
 		core.WithRegionStorage(regionStorage),
 		core.WithEncryptionKeyManager(encryptionKeyManager),
 	)
+=======
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.gcSafePointManager = gc.NewSafepointManager(s.storage)
+>>>>>>> 12a9513c7 (server/grpc_service: make update gc_safepoint concurrently safe (#5070))
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetClusterRootPath(), s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
