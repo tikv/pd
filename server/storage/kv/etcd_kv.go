@@ -93,8 +93,8 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 
 func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(kv.client.Ctx(), requestTimeout)
 	start := time.Now()
+	ctx, cancel := context.WithTimeout(kv.client.Ctx(), requestTimeout)
 	resp, err := etcdutil.EtcdKVPutWithTTL(ctx, kv.client, key, value, ttlSeconds)
 	cancel()
 

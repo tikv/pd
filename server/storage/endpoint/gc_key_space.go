@@ -33,7 +33,6 @@ type KeySpaceGCSafePoint struct {
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
 type KeySpaceGCSafePointStorage interface {
 	// Service safe point interfaces.
-	// NOTE: field ServiceSafePoint.ExpiredAt will be ignored, use etcd's lease to manage lifetime instead.
 	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint, ttl int64) error
 	LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error)
 	LoadMinServiceSafePoint(spaceID string) (*ServiceSafePoint, error)
