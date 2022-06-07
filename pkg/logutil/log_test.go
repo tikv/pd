@@ -16,7 +16,6 @@ package logutil
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,11 +74,11 @@ func TestRedactLog(t *testing.T) {
 		SetRedactLog(testCase.enableRedactLog)
 		switch r := testCase.arg.(type) {
 		case []byte:
-			re.True(reflect.DeepEqual(testCase.expect, RedactBytes(r)))
+			re.Equal(testCase.expect, RedactBytes(r))
 		case string:
-			re.True(reflect.DeepEqual(testCase.expect, RedactString(r)))
+			re.Equal(testCase.expect, RedactString(r))
 		case fmt.Stringer:
-			re.True(reflect.DeepEqual(testCase.expect, RedactStringer(r)))
+			re.Equal(testCase.expect, RedactStringer(r))
 		default:
 			panic("unmatched case")
 		}

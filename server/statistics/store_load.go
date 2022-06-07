@@ -73,6 +73,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	}
 }
 
+// IsUniform returns true if the stores are uniform.
+func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
+	return li.LoadPred.Stddev.Loads[dim] < threshold
+}
+
 func toHotPeerStatShow(p *HotPeerStat, kind RWType) HotPeerStatShow {
 	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
 	byteRate := p.Loads[b]
@@ -206,6 +211,7 @@ type StoreLoadPred struct {
 	Current StoreLoad
 	Future  StoreLoad
 	Expect  StoreLoad
+	Stddev  StoreLoad
 }
 
 // Min returns the min load between current and future.

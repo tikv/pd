@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"testing"
 	"time"
 
@@ -71,7 +70,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
-		noError          bool
+		errorChecker     func(err error, msgAndArgs ...interface{})
 	}{
 		{
 			name:     "no scaled tikv group",
@@ -91,7 +90,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "exist 1 scaled tikv group",
@@ -121,7 +120,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 					},
 				},
 			},
-			noError: true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "exist 1 tikv scaled group with inconsistency healthy instances",
@@ -141,7 +140,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      false,
+			errorChecker: re.Error,
 		},
 		{
 			name:     "exist 1 tikv scaled group with less healthy instances",
@@ -167,7 +166,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 					},
 				},
 			},
-			noError: true,
+			errorChecker: re.NoError,
 		},
 		{
 			name:     "existed other tikv group",
@@ -187,7 +186,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 				},
 			},
 			expectedPlan: nil,
-			noError:      true,
+			errorChecker: re.NoError,
 		},
 	}
 
@@ -196,9 +195,9 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		plans, err := getScaledTiKVGroups(testCase.informer, testCase.healthyInstances)
 		if testCase.expectedPlan == nil {
 			re.Len(plans, 0)
-			re.Equal(testCase.noError, err == nil)
+			testCase.errorChecker(err)
 		} else {
-			re.True(reflect.DeepEqual(testCase.expectedPlan, plans))
+			re.Equal(testCase.expectedPlan, plans)
 		}
 	}
 }
