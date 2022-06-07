@@ -15,15 +15,14 @@
 package config
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testUtilSuite{})
-
-type testUtilSuite struct{}
-
-func (s *testUtilSuite) TestValidateLabels(c *C) {
+func TestValidateLabels(t *testing.T) {
+	re := require.New(t)
 	tests := []struct {
 		label  string
 		hasErr bool
@@ -51,12 +50,13 @@ func (s *testUtilSuite) TestValidateLabels(c *C) {
 		{"a$b", true},
 		{"$$", true},
 	}
-	for _, t := range tests {
-		c.Assert(ValidateLabels([]*metapb.StoreLabel{{Key: t.label}}) != nil, Equals, t.hasErr)
+	for _, test := range tests {
+		re.Equal(test.hasErr, ValidateLabels([]*metapb.StoreLabel{{Key: test.label}}) != nil)
 	}
 }
 
-func (s *testUtilSuite) TestValidateURLWithScheme(c *C) {
+func TestValidateURLWithScheme(t *testing.T) {
+	re := require.New(t)
 	tests := []struct {
 		addr   string
 		hasErr bool
@@ -73,7 +73,7 @@ func (s *testUtilSuite) TestValidateURLWithScheme(c *C) {
 		{"https://foo.com/bar", false},
 		{"https://foo.com/bar/", false},
 	}
-	for _, t := range tests {
-		c.Assert(ValidateURLWithScheme(t.addr) != nil, Equals, t.hasErr)
+	for _, test := range tests {
+		re.Equal(test.hasErr, ValidateURLWithScheme(test.addr) != nil)
 	}
 }
