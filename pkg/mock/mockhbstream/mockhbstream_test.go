@@ -30,6 +30,7 @@ import (
 )
 
 func TestActivity(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

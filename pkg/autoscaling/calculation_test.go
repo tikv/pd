@@ -29,6 +29,7 @@ import (
 )
 
 func TestGetScaledTiKVGroups(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -213,6 +214,7 @@ func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 }
 
 func TestGetTotalCPUUseTime(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
@@ -235,6 +237,7 @@ func TestGetTotalCPUUseTime(t *testing.T) {
 }
 
 func TestGetTotalCPUQuota(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	querier := &mockQuerier{}
 	instances := []instance{
@@ -257,6 +260,7 @@ func TestGetTotalCPUQuota(t *testing.T) {
 }
 
 func TestScaleOutGroupLabel(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	var jsonStr = []byte(`
 {
@@ -299,6 +303,7 @@ func TestScaleOutGroupLabel(t *testing.T) {
 }
 
 func TestStrategyChangeCount(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	var count uint64 = 2
 	strategy := &Strategy{

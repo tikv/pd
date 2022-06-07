@@ -24,6 +24,7 @@ import (
 )
 
 func TestExpireRegionCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -115,6 +116,7 @@ func sortIDs(ids []uint64) []uint64 {
 }
 
 func TestLRUCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := newLRU(3)
 
@@ -192,6 +194,7 @@ func TestLRUCache(t *testing.T) {
 }
 
 func TestFifoCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := NewFIFO(3)
 	cache.Put(1, "1")
@@ -219,6 +222,7 @@ func TestFifoCache(t *testing.T) {
 }
 
 func TestTwoQueueCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := newTwoQueue(3)
 	cache.Put(1, "1")
@@ -303,6 +307,7 @@ func (pq PriorityQueueItemTest) ID() uint64 {
 }
 
 func TestPriorityQueue(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	testData := []PriorityQueueItemTest{0, 1, 2, 3, 4, 5}
 	pq := NewPriorityQueue(0)

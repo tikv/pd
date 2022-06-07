@@ -22,6 +22,7 @@ import (
 )
 
 func TestStringSliceJSON(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	b := StringSlice([]string{"zone", "rack"})
 	o, err := json.Marshal(b)
@@ -35,6 +36,7 @@ func TestStringSliceJSON(t *testing.T) {
 }
 
 func TestEmpty(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ss := StringSlice([]string{})
 	b, err := json.Marshal(ss)

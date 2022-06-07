@@ -27,6 +27,7 @@ type example struct {
 }
 
 func TestDurationJSON(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	example := &example{}
 
@@ -40,6 +41,7 @@ func TestDurationJSON(t *testing.T) {
 }
 
 func TestDurationTOML(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	example := &example{}
 
