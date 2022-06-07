@@ -16,10 +16,10 @@ package dashboard_test
 
 import (
 	"context"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
-
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
 
@@ -27,33 +27,25 @@ import (
 	_ "github.com/tikv/pd/server/schedulers"
 )
 
-var _ = Suite(&raceTestSuite{})
-
-type raceTestSuite struct{}
-
-func (s *raceTestSuite) SetUpSuite(c *C) {
+func TestCancelDuringStarting(t *testing.T) {
 	dashboard.SetCheckInterval(50 * time.Millisecond)
 	tests.WaitLeaderReturnDelay = 0
 	tests.WaitLeaderCheckInterval = 20 * time.Millisecond
-}
 
-func (s *raceTestSuite) TearDownSuite(c *C) {
-	dashboard.SetCheckInterval(time.Second)
-	tests.WaitLeaderReturnDelay = 20 * time.Millisecond
-	tests.WaitLeaderCheckInterval = 500 * time.Millisecond
-}
-
-func (s *raceTestSuite) TestCancelDuringStarting(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	re := require.New(t)
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 
 	time.Sleep(60 * time.Millisecond)
 	cancel()
+
+	dashboard.SetCheckInterval(time.Second)
+	tests.WaitLeaderReturnDelay = 20 * time.Millisecond
+	tests.WaitLeaderCheckInterval = 500 * time.Millisecond
 }

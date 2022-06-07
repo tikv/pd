@@ -22,27 +22,20 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-backup/pdbackup"
 	"go.etcd.io/etcd/clientv3"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&backupTestSuite{})
-
-type backupTestSuite struct{}
-
-func (s *backupTestSuite) TestBackup(c *C) {
+func TestBackup(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
@@ -52,18 +45,18 @@ func (s *backupTestSuite) TestBackup(c *C) {
 		DialTimeout: 3 * time.Second,
 		TLS:         nil,
 	})
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	backupInfo, err := pdbackup.GetBackupInfo(client, pdAddr)
-	c.Assert(err, IsNil)
-	c.Assert(backupInfo, NotNil)
+	re.NoError(err)
+	re.NotNil(backupInfo)
 	backBytes, err := json.Marshal(backupInfo)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	var formatBuffer bytes.Buffer
 	err = json.Indent(&formatBuffer, backBytes, "", "    ")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	newInfo := &pdbackup.BackupInfo{}
 	err = json.Unmarshal(formatBuffer.Bytes(), newInfo)
-	c.Assert(err, IsNil)
-	c.Assert(backupInfo, DeepEquals, newInfo)
+	re.NoError(err)
+	re.Equal(newInfo, backupInfo)
 }
