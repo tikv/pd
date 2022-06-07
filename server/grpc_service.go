@@ -1334,7 +1334,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	newSafePoint := request.SafePoint
+	newSafePoint := request.GetSafePoint()
 	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
 	if err != nil {
 		return nil, err
