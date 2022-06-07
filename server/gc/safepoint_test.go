@@ -29,38 +29,38 @@ func newGCStorage() endpoint.GCSafePointStorage {
 
 func TestGCSafePointUpdateSequentially(t *testing.T) {
 	gcSafePointManager := newGCSafePointManager(newGCStorage())
-	req := require.New(t)
+	re := require.New(t)
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
 	for id := 10; id < 20; id++ {
 		safePoint, err := gcSafePointManager.LoadGCSafePoint()
-		req.NoError(err)
-		req.Equal(curSafePoint, safePoint)
+		re.NoError(err)
+		re.Equal(curSafePoint, safePoint)
 		previousSafePoint := curSafePoint
 		curSafePoint = uint64(id)
 		oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(curSafePoint)
-		req.NoError(err)
-		req.Equal(previousSafePoint, oldSafePoint)
+		re.NoError(err)
+		re.Equal(previousSafePoint, oldSafePoint)
 	}
 
 	safePoint, err := gcSafePointManager.LoadGCSafePoint()
-	req.NoError(err)
-	req.Equal(curSafePoint, safePoint)
+	re.NoError(err)
+	re.Equal(curSafePoint, safePoint)
 	// update with smaller value should be failed.
 	oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(safePoint - 5)
-	req.NoError(err)
-	req.Equal(safePoint, oldSafePoint)
+	re.NoError(err)
+	re.Equal(safePoint, oldSafePoint)
 	curSafePoint, err = gcSafePointManager.LoadGCSafePoint()
-	req.NoError(err)
+	re.NoError(err)
 	// current safePoint should not change since the update value was smaller
-	req.Equal(safePoint, curSafePoint)
+	re.Equal(safePoint, curSafePoint)
 }
 
 func TestGCSafePointUpdateCurrently(t *testing.T) {
 	gcSafePointManager := newGCSafePointManager(newGCStorage())
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
-	req := require.New(t)
+	re := require.New(t)
 
 	// update gc safePoint concurrently
 	for id := 0; id < 20; id++ {
@@ -68,13 +68,13 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 		go func(step uint64) {
 			for safePoint := step; safePoint <= maxSafePoint; safePoint += step {
 				_, err := gcSafePointManager.UpdateGCSafePoint(safePoint)
-				req.NoError(err)
+				re.NoError(err)
 			}
 			wg.Done()
 		}(uint64(id + 1))
 	}
 	wg.Wait()
 	safePoint, err := gcSafePointManager.LoadGCSafePoint()
-	req.NoError(err)
-	req.Equal(maxSafePoint, safePoint)
+	re.NoError(err)
+	re.Equal(maxSafePoint, safePoint)
 }
