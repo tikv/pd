@@ -21,6 +21,7 @@ import (
 )
 
 func TestQueue(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	sq := NewSafeQueue()
 	sq.PushBack(1)
@@ -32,6 +33,7 @@ func TestQueue(t *testing.T) {
 }
 
 func TestClone(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	s1 := NewSafeQueue()
 	s1.PushBack(1)

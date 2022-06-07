@@ -21,6 +21,7 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 }
 
 func TestToTLSConfig(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
 		KeyPath:  "../../tests/client/cert/pd-server-key.pem",

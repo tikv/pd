@@ -22,6 +22,7 @@ import (
 )
 
 func TestSlice(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		a      []int
@@ -44,6 +45,7 @@ func TestSlice(t *testing.T) {
 }
 
 func TestSliceContains(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ss := []string{"a", "b", "c"}
 	re.Contains(ss, "a")

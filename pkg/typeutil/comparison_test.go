@@ -22,6 +22,7 @@ import (
 )
 
 func TestMinUint64(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	re.Equal(uint64(1), MinUint64(1, 2))
 	re.Equal(uint64(1), MinUint64(2, 1))
@@ -29,6 +30,7 @@ func TestMinUint64(t *testing.T) {
 }
 
 func TestMaxUint64(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	re.Equal(uint64(2), MaxUint64(1, 2))
 	re.Equal(uint64(2), MaxUint64(2, 1))
@@ -36,6 +38,7 @@ func TestMaxUint64(t *testing.T) {
 }
 
 func TestMinDuration(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	re.Equal(time.Second, MinDuration(time.Minute, time.Second))
 	re.Equal(time.Second, MinDuration(time.Second, time.Minute))
