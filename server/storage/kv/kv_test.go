@@ -45,8 +45,8 @@ func TestEtcd(t *testing.T) {
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 
 	kv := NewEtcdKVBase(client, rootPath)
-	testReadWrite(t, kv)
-	testRange(t, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -57,18 +57,18 @@ func TestLevelDB(t *testing.T) {
 	kv, err := NewLevelDBKV(dir)
 	re.NoError(err)
 
-	testReadWrite(t, kv)
-	testRange(t, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
 func TestMemKV(t *testing.T) {
+	re := require.New(t)
 	kv := NewMemoryKV()
-	testReadWrite(t, kv)
-	testRange(t, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
-func testReadWrite(t *testing.T, kv Base) {
-	re := require.New(t)
+func testReadWrite(re *require.Assertions, kv Base) {
 	v, err := kv.Load("key")
 	re.NoError(err)
 	re.Equal("", v)
@@ -86,8 +86,7 @@ func testReadWrite(t *testing.T, kv Base) {
 	re.NoError(err)
 }
 
-func testRange(t *testing.T, kv Base) {
-	re := require.New(t)
+func testRange(re *require.Assertions, kv Base) {
 	keys := []string{
 		"test-a", "test-a/a", "test-a/ab",
 		"test", "test/a", "test/ab",
