@@ -14,16 +14,10 @@
 
 package kv
 
-// RevisionUnavailable is the value of unavailable revision,
-// when the kv does not exist (etcd_kv), or is not supported (mem_kv & leveldb_kv).
-const RevisionUnavailable = -1
-
 // Base is an abstract interface for load/save pd cluster data.
 type Base interface {
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
-	LoadRevision(key string) (string, int64, error)
 	Save(key, value string) error
-	SaveWithTTL(key, value string, ttlSeconds int64) error
 	Remove(key string) error
 }

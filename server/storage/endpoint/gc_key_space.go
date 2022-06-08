@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/tikv/pd/server/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -41,6 +42,9 @@ type KeySpaceGCSafePointStorage interface {
 	SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error
 	LoadKeySpaceGCSafePoint(spaceID string) (uint64, error)
 	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error)
+	// Revision interfaces.
+	TouchKeySpaceRevision(spaceID string) error
+	LoadKeySpaceRevision(spaceID string) (int64, error)
 }
 
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
@@ -50,12 +54,16 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafe
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
+	etcdEndpoint, err := se.getEtcdBase()
+	if err != nil {
+		return err
+	}
 	key := KeySpaceServiceSafePointPath(spaceID, ssp.ServiceID)
 	value, err := json.Marshal(ssp)
 	if err != nil {
 		return err
 	}
-	return se.SaveWithTTL(key, string(value), ttl)
+	return etcdEndpoint.SaveWithTTL(key, string(value), ttl)
 }
 
 // LoadServiceSafePoint reads ServiceSafePoint for the given key-space ID and service name.
@@ -158,4 +166,32 @@ func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]
 		safePoints = append(safePoints, safePoint)
 	}
 	return safePoints, nil
+}
+
+// TouchKeySpaceRevision advances revision of the given key space.
+// It's used when new service safe point is saved.
+func (se *StorageEndpoint) TouchKeySpaceRevision(spaceID string) error {
+	path := KeySpacePath(spaceID)
+	return se.Save(path, "")
+}
+
+// LoadKeySpaceRevision loads the revision of the given key space.
+func (se *StorageEndpoint) LoadKeySpaceRevision(spaceID string) (int64, error) {
+	etcdEndpoint, err := se.getEtcdBase()
+	if err != nil {
+		return 0, err
+	}
+	keySpacePath := KeySpacePath(spaceID)
+	_, revision, err := etcdEndpoint.LoadRevision(keySpacePath)
+	return revision, err
+}
+
+// getEtcdBase retrieves etcd base from storage endpoint.
+// It's used by operations that needs etcd endpoint specifically.
+func (se *StorageEndpoint) getEtcdBase() (*kv.EtcdKVBase, error) {
+	etcdBase, ok := interface{}(se.Base).(*kv.EtcdKVBase)
+	if !ok {
+		return nil, errors.New("safepoint storage only supports etcd backend")
+	}
+	return etcdBase, nil
 }

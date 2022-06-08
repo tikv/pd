@@ -32,28 +32,31 @@ import (
 const (
 	requestTimeout  = 10 * time.Second
 	slowRequestTime = 1 * time.Second
+	// RevisionUnavailable is the value of unavailable revision,
+	// when the kv does not exist.
+	RevisionUnavailable = -1
 )
 
-type etcdKVBase struct {
+type EtcdKVBase struct {
 	client   *clientv3.Client
 	rootPath string
 }
 
 // NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
-	return &etcdKVBase{
+func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
+	return &EtcdKVBase{
 		client:   client,
 		rootPath: rootPath,
 	}
 }
 
-func (kv *etcdKVBase) Load(key string) (string, error) {
+func (kv *EtcdKVBase) Load(key string) (string, error) {
 	value, _, err := kv.LoadRevision(key)
 	return value, err
 }
 
 // LoadRevision gets a value along with revision.
-func (kv *etcdKVBase) LoadRevision(key string) (string, int64, error) {
+func (kv *EtcdKVBase) LoadRevision(key string) (string, int64, error) {
 	key = path.Join(kv.rootPath, key)
 
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
@@ -68,7 +71,7 @@ func (kv *etcdKVBase) LoadRevision(key string) (string, int64, error) {
 	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
 }
 
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+func (kv *EtcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
 	// removes suffix '/' of the joined string.
 	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
@@ -91,7 +94,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	return keys, values, nil
 }
 
-func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
+func (kv *EtcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
 	key = path.Join(kv.rootPath, key)
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(kv.client.Ctx(), requestTimeout)
@@ -119,7 +122,7 @@ func (kv *etcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
 	return nil
 }
 
-func (kv *etcdKVBase) Save(key, value string) error {
+func (kv *EtcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
@@ -137,7 +140,7 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	return nil
 }
 
-func (kv *etcdKVBase) Remove(key string) error {
+func (kv *EtcdKVBase) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 
 	txn := NewSlowLogTxn(kv.client)

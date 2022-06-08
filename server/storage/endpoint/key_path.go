@@ -107,6 +107,12 @@ func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
 }
 
+// KeySpacePath returns path to given key space
+// Path: /key_space/gc_safepoint/{space_id}
+func KeySpacePath(spaceID string) string {
+	return path.Join(keySpaceSafePointPrefix, spaceID)
+}
+
 // KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
 // Prefix: /key_space/gc_safepoint/{space_id}/service/
 func KeySpaceServiceSafePointPrefix(spaceID string) string {

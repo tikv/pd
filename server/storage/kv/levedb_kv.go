@@ -49,12 +49,6 @@ func (kv *LevelDBKV) Load(key string) (string, error) {
 	return string(v), err
 }
 
-// LoadRevision gets a value along with revision. The revision is unavailable for `LevelDBKV`.
-func (kv *LevelDBKV) LoadRevision(key string) (string, int64, error) {
-	value, err := kv.Load(key)
-	return value, RevisionUnavailable, err
-}
-
 // LoadRange gets a range of value for a given key range.
 func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
 	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
@@ -76,11 +70,6 @@ func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []
 // Save stores a key-value pair.
 func (kv *LevelDBKV) Save(key, value string) error {
 	return errors.WithStack(kv.Put([]byte(key), []byte(value), nil))
-}
-
-// SaveWithTTL not supported on LevelDBKV
-func (kv *LevelDBKV) SaveWithTTL(key, value string, ttlSeconds int64) error {
-	return errors.New("ttl operation not supported on LevelDBKV")
 }
 
 // Remove deletes a key-value pair for a given key.
