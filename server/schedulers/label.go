@@ -126,7 +126,9 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
+				FilterTarget(cluster.GetOpts(),
+					&filter.LongTermStateFilter{ActionScope: LabelName, TransferLeader: true},
+					&filter.TemporaryStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))

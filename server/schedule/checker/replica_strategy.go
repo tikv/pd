@@ -56,7 +56,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),
-		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
+		&filter.LongTermStateFilter{ActionScope: s.checkerName, MoveRegion: true},
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
@@ -69,7 +69,6 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetOpts(), filters...).
 		Sort(isolationComparer).Reverse().Top(isolationComparer). // greater isolation score is better
@@ -77,6 +76,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	if targetCandidate.Len() == 0 {
 		return 0, false
 	}
+	strictStateFilter := &filter.TemporaryStateFilter{ActionScope: s.checkerName, MoveRegion: true}
 	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), strictStateFilter).PickFirst() // the filter does not ignore temp states
 	if target == nil {
 		return 0, true // filter by temporary states
@@ -123,7 +123,9 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
+		FilterSource(s.cluster.GetOpts(),
+			&filter.LongTermStateFilter{ActionScope: replicaCheckerName, MoveRegion: true},
+			&filter.TemporaryStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		Sort(isolationComparer).Top(isolationComparer).
 		Sort(filter.RegionScoreComparer(s.cluster.GetOpts())).Reverse().
 		PickFirst()
