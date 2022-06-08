@@ -37,6 +37,7 @@ const (
 	RevisionUnavailable = -1
 )
 
+// EtcdKVBase is a kv store using etcd.
 type EtcdKVBase struct {
 	client   *clientv3.Client
 	rootPath string
@@ -50,6 +51,7 @@ func NewEtcdKVBase(client *clientv3.Client, rootPath string) *EtcdKVBase {
 	}
 }
 
+// Load gets a value for a given key.
 func (kv *EtcdKVBase) Load(key string) (string, error) {
 	value, _, err := kv.LoadRevision(key)
 	return value, err
@@ -71,6 +73,7 @@ func (kv *EtcdKVBase) LoadRevision(key string) (string, int64, error) {
 	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
 }
 
+// LoadRange gets a range of value for a given key range.
 func (kv *EtcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
 	// removes suffix '/' of the joined string.
@@ -94,6 +97,7 @@ func (kv *EtcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	return keys, values, nil
 }
 
+// SaveWithTTL stores a key-value pair that expires after ttlSeconds seconds.
 func (kv *EtcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
 	key = path.Join(kv.rootPath, key)
 	start := time.Now()
@@ -122,6 +126,7 @@ func (kv *EtcdKVBase) SaveWithTTL(key, value string, ttlSeconds int64) error {
 	return nil
 }
 
+// Save stores a key-value pair.
 func (kv *EtcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
@@ -140,6 +145,7 @@ func (kv *EtcdKVBase) Save(key, value string) error {
 	return nil
 }
 
+// Remove deletes a key-value pair for a given key.
 func (kv *EtcdKVBase) Remove(key string) error {
 	key = path.Join(kv.rootPath, key)
 
