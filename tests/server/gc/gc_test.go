@@ -92,10 +92,10 @@ func (c *testClient) mustListKeySpaces(withGCSafePoint bool) []*gcpb.KeySpace {
 	return resp.KeySpaces
 }
 
-func (c *testClient) mustUpdateServiceSafePoint(SpaceID []byte, serviceID []byte, ttl int64, safepoint uint64) *gcpb.UpdateServiceSafePointResponse {
+func (c *testClient) mustUpdateServiceSafePoint(spaceID []byte, serviceID []byte, ttl int64, safepoint uint64) *gcpb.UpdateServiceSafePointResponse {
 	req := &gcpb.UpdateServiceSafePointRequest{
 		Header:     newRequestHeader(c.clusterID),
-		SpaceId:    SpaceID,
+		SpaceId:    spaceID,
 		ServiceId:  serviceID,
 		TimeToLive: ttl,
 		SafePoint:  safepoint,
@@ -105,20 +105,20 @@ func (c *testClient) mustUpdateServiceSafePoint(SpaceID []byte, serviceID []byte
 	return resp
 }
 
-func (c *testClient) mustGetMinServiceSafePoint(SpaceID []byte) (safepoint uint64, revision int64) {
+func (c *testClient) mustGetMinServiceSafePoint(spaceID []byte) (safepoint uint64, revision int64) {
 	req := &gcpb.GetMinServiceSafePointRequest{
 		Header:  newRequestHeader(c.clusterID),
-		SpaceId: SpaceID,
+		SpaceId: spaceID,
 	}
 	resp, err := c.cli.GetMinServiceSafePoint(c.ctx, req)
 	c.c.Assert(err, IsNil)
 	return resp.GetSafePoint(), resp.GetRevision()
 }
 
-func (c *testClient) mustUpdateGCSafePoint(SpaceID []byte, safepoint uint64, revision int64) *gcpb.UpdateGCSafePointResponse {
+func (c *testClient) mustUpdateGCSafePoint(spaceID []byte, safepoint uint64, revision int64) *gcpb.UpdateGCSafePointResponse {
 	req := &gcpb.UpdateGCSafePointRequest{
 		Header:    newRequestHeader(c.clusterID),
-		SpaceId:   SpaceID,
+		SpaceId:   spaceID,
 		SafePoint: safepoint,
 		Revision:  revision,
 	}

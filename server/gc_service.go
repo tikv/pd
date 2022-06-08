@@ -239,7 +239,7 @@ func (s *GcServer) UpdateServiceSafePoint(ctx context.Context, request *gcpb.Upd
 	// safePointLowerBound is the minimum request.SafePoint for update request to succeed.
 	// It is oldServiceSafePoint if oldServiceSafePoint exists, else gcSafePoint if it exists.
 	// For any new service, this will be 0, indicate any safePoint would be accepted.
-	var safePointLowerBound uint64 = 0
+	var safePointLowerBound uint64
 	if oldServiceSafePoint != nil {
 		safePointLowerBound = oldServiceSafePoint.SafePoint
 		response.OldSafePoint = oldServiceSafePoint.SafePoint
