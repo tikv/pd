@@ -63,6 +63,10 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafe
 	if err != nil {
 		return err
 	}
+	// A MaxInt64 ttl means safe point never expire.
+	if ttl == math.MaxInt64 {
+		return etcdEndpoint.Save(key, string(value))
+	}
 	return etcdEndpoint.SaveWithTTL(key, string(value), ttl)
 }
 
