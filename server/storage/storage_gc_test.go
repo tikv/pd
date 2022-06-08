@@ -232,11 +232,13 @@ func (s *testStorageGCSuite) TestRevision(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(storage.TouchKeySpaceRevision("KeySpace2"), IsNil)
 	newRevision, err := storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(err, IsNil)
 	c.Assert(oldRevision, Equals, newRevision)
 
 	// Touching the same key space should change revision
 	c.Assert(storage.TouchKeySpaceRevision("KeySpace1"), IsNil)
 	newRevision, err = storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(err, IsNil)
 	c.Assert(oldRevision, Not(Equals), newRevision)
 }
 
