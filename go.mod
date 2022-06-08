@@ -2,6 +2,8 @@ module github.com/tikv/pd
 
 go 1.16
 
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220604043941-cbd9fb76600c
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1

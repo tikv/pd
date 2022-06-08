@@ -25,7 +25,7 @@ type GCClient interface {
 	GetMinServiceSafePoint(ctx context.Context, spaceID string) (safePoint uint64, revision int64, err error)
 	// UpdateKeySpaceGCSafePoint update the target safe point, previously obtained revision is required.
 	// If failed, caller should retry from GetMinServiceSafePoint.
-	UpdateKeySpaceGCSafePoint(ctx context.Context, spaceID string, safePoint uint64, revision int64) (succeeded bool, newSafePoint uint64, err error)
+	UpdateKeySpaceGCSafePoint(ctx context.Context, spaceID string, safePoint uint64, revision int64) (succeeded bool, err error)
 	// UpdateServiceSafePoint update the given service's safe point
 	// Pass in a negative ttl to remove it
 	// If failed, caller should retry with higher safe point
@@ -117,7 +117,7 @@ func (c *client) GetMinServiceSafePoint(ctx context.Context, spaceID string) (sa
 	return resp.SafePoint, resp.Revision, nil
 }
 
-func (c *client) UpdateKeySpaceGCSafePoint(ctx context.Context, spaceID string, safePoint uint64, revision int64) (succeeded bool, newSafePoint uint64, err error) {
+func (c *client) UpdateKeySpaceGCSafePoint(ctx context.Context, spaceID string, safePoint uint64, revision int64) (succeeded bool, err error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.UpdateKeySpaceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -138,9 +138,9 @@ func (c *client) UpdateKeySpaceGCSafePoint(ctx context.Context, spaceID string, 
 	if err != nil {
 		cmdFailedDurationUpdateKeySpaceGCSafePoint.Observe(time.Since(start).Seconds())
 		c.ScheduleCheckLeader()
-		return false, 0, errors.WithStack(err)
+		return false, errors.WithStack(err)
 	}
-	return resp.Succeeded, resp.NewSafePoint, nil
+	return resp.Succeeded, nil
 }
 
 func (c *client) UpdateServiceSafePoint(ctx context.Context, spaceID, serviceID string, ttl int64, safePoint uint64) (succeeded bool, gcSafePoint, oldSafePoint, newSafePoint uint64, err error) {
@@ -152,11 +152,11 @@ func (c *client) UpdateServiceSafePoint(ctx context.Context, spaceID, serviceID 
 	defer func() { cmdDurationUpdateServiceSafePoint.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &gcpb.UpdateServiceSafePointRequest{
-		Header:    c.gcHeader(),
-		SpaceId:   []byte(spaceID),
-		ServiceId: []byte(serviceID),
-		TTL:       ttl,
-		SafePoint: safePoint,
+		Header:     c.gcHeader(),
+		SpaceId:    []byte(spaceID),
+		ServiceId:  []byte(serviceID),
+		TimeToLive: ttl,
+		SafePoint:  safePoint,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.gcClient().UpdateServiceSafePoint(ctx, req)
