@@ -65,6 +65,7 @@ type TestServer struct {
 	sync.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
+	gcServer   *server.GcServer
 	state      int32
 }
 
@@ -92,6 +93,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	return &TestServer{
 		server:     svr,
 		grpcServer: &server.GrpcServer{Server: svr},
+		gcServer:   &server.GcServer{Server: svr},
 		state:      Initial,
 	}, nil
 }
@@ -184,6 +186,13 @@ func (s *TestServer) GetServer() *server.Server {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server
+}
+
+// GetGCServer returns the real gc server of TestServer
+func (s *TestServer) GetGCServer() *server.GcServer {
+	s.RLock()
+	defer s.RUnlock()
+	return s.gcServer
 }
 
 // GetClusterID returns the cluster ID.
