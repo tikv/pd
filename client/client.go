@@ -57,6 +57,8 @@ type GlobalConfigItem struct {
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
+	// GCClient provides gc related functionalities.
+	GCClient
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
 	// GetAllMembers gets the members Info from PD
@@ -1179,6 +1181,15 @@ func (c *client) leaderClient() pdpb.PDClient {
 
 // followerClient gets a client of the current reachable and healthy PD follower randomly.
 func (c *client) followerClient() (pdpb.PDClient, string) {
+	cc, addr := c.healthyFollower()
+	if cc == nil {
+		return nil, ""
+	}
+	return pdpb.NewPDClient(cc), addr
+}
+
+// healthyFollower gets the connection and address of a reachable healthy PD follower randomly.
+func (c *client) healthyFollower() (*grpc.ClientConn, string) {
 	addrs := c.GetFollowerAddrs()
 	if len(addrs) < 1 {
 		return nil, ""
@@ -1196,7 +1207,7 @@ func (c *client) followerClient() (pdpb.PDClient, string) {
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return pdpb.NewPDClient(cc), addr
+			return cc, addr
 		}
 	}
 	return nil, ""
