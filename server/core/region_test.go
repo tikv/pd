@@ -202,16 +202,16 @@ func TestInherit(t *testing.T) {
 		{true, 1, 2, 2},
 		{true, 2, 0, 2},
 	}
-	for _, t := range testcases {
+	for _, test := range testcases {
 		var origin *RegionInfo
-		if t.originExists {
+		if test.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.approximateSize = int64(t.originSize)
+			origin.approximateSize = int64(test.originSize)
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.approximateSize = int64(t.size)
+		r.approximateSize = int64(test.size)
 		r.Inherit(origin, false)
-		re.Equal(int64(t.expect), r.approximateSize)
+		re.Equal(int64(test.expect), r.approximateSize)
 	}
 
 	// bucket
@@ -357,11 +357,11 @@ func TestNeedSync(t *testing.T) {
 		},
 	}
 
-	for _, t := range testcases {
-		regionA := region.Clone(t.optionsA...)
-		regionB := region.Clone(t.optionsB...)
+	for _, test := range testcases {
+		regionA := region.Clone(test.optionsA...)
+		regionB := region.Clone(test.optionsB...)
 		_, _, _, needSync := RegionGuide(regionA, regionB)
-		re.Equal(t.needSync, needSync)
+		re.Equal(test.needSync, needSync)
 	}
 }
 
@@ -430,7 +430,7 @@ func TestRegionKey(t *testing.T) {
 	}
 	for _, test := range testCase {
 		got, err := strconv.Unquote(test.key)
-		re.Nil(err)
+		re.NoError(err)
 		s := fmt.Sprintln(RegionToHexMeta(&metapb.Region{StartKey: []byte(got)}))
 		re.Contains(s, test.expect)
 
