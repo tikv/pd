@@ -34,7 +34,7 @@ const (
 	slowRequestTime = 1 * time.Second
 	// RevisionUnavailable is the value of unavailable revision,
 	// when the kv does not exist.
-	RevisionUnavailable = -1
+	RevisionUnavailable int64 = -1
 )
 
 // EtcdKVBase is a kv store using etcd.
