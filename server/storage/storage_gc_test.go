@@ -26,6 +26,7 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
@@ -223,6 +224,21 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 		c.Assert(loadedSafePoints[i].SafePoint, Equals, uint64(0))
 	}
 }
+func (s *testStorageGCSuite) TestRevision(c *C) {
+	storage := s.storage
+	// Touching KeySpace2 should not change revision of KeySpace1
+	c.Assert(storage.TouchKeySpaceRevision("KeySpace1"), IsNil)
+	oldRevision, err := storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(err, IsNil)
+	c.Assert(storage.TouchKeySpaceRevision("KeySpace2"), IsNil)
+	newRevision, err := storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(oldRevision, Equals, newRevision)
+
+	// Touching the same key space should change revision
+	c.Assert(storage.TouchKeySpaceRevision("KeySpace1"), IsNil)
+	newRevision, err = storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(oldRevision, Not(Equals), newRevision)
+}
 
 func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	storage := s.storage
@@ -241,6 +257,11 @@ func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
 	c.Assert(safePoints, HasLen, 0)
+
+	// Loading untouched key spaces should return unavailable revision
+	revision, err := storage.LoadKeySpaceRevision("testKeySpace")
+	c.Assert(err, IsNil)
+	c.Assert(revision, Equals, kv.RevisionUnavailable)
 }
 
 func newTestSingleConfig() *embed.Config {
