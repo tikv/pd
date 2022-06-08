@@ -15,42 +15,35 @@
 package gc
 
 import (
+	"math"
+	"time"
+
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 // SafePointManager is the manager for safePoint of GC and services
 type SafePointManager struct {
-	*gcSafePointManager
-	// TODO add ServiceSafepointManager
+	gcLock        syncutil.Mutex
+	serviceGCLock syncutil.Mutex
+	store         endpoint.GCSafePointStorage
 }
 
-// NewSafepointManager creates a SafePointManager of GC and services
-func NewSafepointManager(store endpoint.GCSafePointStorage) *SafePointManager {
-	return &SafePointManager{
-		newGCSafePointManager(store),
-	}
-}
-
-type gcSafePointManager struct {
-	syncutil.Mutex
-	store endpoint.GCSafePointStorage
-}
-
-func newGCSafePointManager(store endpoint.GCSafePointStorage) *gcSafePointManager {
-	return &gcSafePointManager{store: store}
+// NewSafePointManager creates a SafePointManager of GC and services
+func NewSafePointManager(store endpoint.GCSafePointStorage) *SafePointManager {
+	return &SafePointManager{store: store}
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (manager *gcSafePointManager) LoadGCSafePoint() (uint64, error) {
+func (manager *SafePointManager) LoadGCSafePoint() (uint64, error) {
 	return manager.store.LoadGCSafePoint()
 }
 
 // UpdateGCSafePoint updates the safepoint if it is greater than the previous one
 // it returns the old safepoint in the storage.
-func (manager *gcSafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafePoint uint64, err error) {
-	manager.Lock()
-	defer manager.Unlock()
+func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafePoint uint64, err error) {
+	manager.gcLock.Lock()
+	defer manager.gcLock.Unlock()
 	// TODO: cache the safepoint in the storage.
 	oldSafePoint, err = manager.store.LoadGCSafePoint()
 	if err != nil {
@@ -61,4 +54,32 @@ func (manager *gcSafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSa
 	}
 	err = manager.store.SaveGCSafePoint(newSafePoint)
 	return
+}
+
+// UpdateServiceGCSafePoint update the safepoint for a specific service
+func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+	manager.serviceGCLock.Lock()
+	defer manager.serviceGCLock.Unlock()
+	minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
+	if err != nil || ttl <= 0 || newSafePoint < minServiceSafePoint.SafePoint {
+		return minServiceSafePoint, false, err
+	}
+
+	ssp := &endpoint.ServiceSafePoint{
+		ServiceID: serviceID,
+		ExpiredAt: now.Unix() + ttl,
+		SafePoint: newSafePoint,
+	}
+	if math.MaxInt64-now.Unix() <= ttl {
+		ssp.ExpiredAt = math.MaxInt64
+	}
+	if err := manager.store.SaveServiceGCSafePoint(ssp); err != nil {
+		return nil, false, err
+	}
+
+	// If the min safepoint is updated, load the next one
+	if string(serviceID) == minServiceSafePoint.ServiceID {
+		minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
+	}
+	return minServiceSafePoint, true, err
 }

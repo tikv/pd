@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -148,9 +147,6 @@ type Server struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
-
-	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock syncutil.Mutex
 
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
@@ -413,7 +409,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	s.gcSafePointManager = gc.NewSafepointManager(s.storage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
