@@ -15,8 +15,9 @@
 package filter
 
 import (
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
+	"testing"
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -55,45 +56,42 @@ func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool
 	return f(store.GetID())
 }
 
-type testCandidatesSuite struct{}
-
-var _ = Suite(&testCandidatesSuite{})
-
-func (s *testCandidatesSuite) TestCandidates(c *C) {
-	cs := s.newCandidates(1, 2, 3, 4, 5)
+func TestCandidates(t *testing.T) {
+	re := require.New(t)
+	cs := newCandidates(1, 2, 3, 4, 5)
 	cs.FilterSource(nil, idFilter(func(id uint64) bool { return id > 2 }))
-	s.check(c, cs, 3, 4, 5)
+	check(re, cs, 3, 4, 5)
 	cs.FilterTarget(nil, idFilter(func(id uint64) bool { return id%2 == 1 }))
-	s.check(c, cs, 3, 5)
+	check(re, cs, 3, 5)
 	cs.FilterTarget(nil, idFilter(func(id uint64) bool { return id > 100 }))
-	s.check(c, cs)
+	check(re, cs)
 	store := cs.PickFirst()
-	c.Assert(store, IsNil)
+	re.Nil(store)
 	store = cs.RandomPick()
-	c.Assert(store, IsNil)
+	re.Nil(store)
 
-	cs = s.newCandidates(1, 3, 5, 7, 6, 2, 4)
+	cs = newCandidates(1, 3, 5, 7, 6, 2, 4)
 	cs.Sort(idComparer)
-	s.check(c, cs, 1, 2, 3, 4, 5, 6, 7)
+	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.PickFirst()
-	c.Assert(store.GetID(), Equals, uint64(1))
+	re.Equal(uint64(1), store.GetID())
 	cs.Reverse()
-	s.check(c, cs, 7, 6, 5, 4, 3, 2, 1)
+	check(re, cs, 7, 6, 5, 4, 3, 2, 1)
 	store = cs.PickFirst()
-	c.Assert(store.GetID(), Equals, uint64(7))
+	re.Equal(uint64(7), store.GetID())
 	cs.Shuffle()
 	cs.Sort(idComparer)
-	s.check(c, cs, 1, 2, 3, 4, 5, 6, 7)
+	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.RandomPick()
-	c.Assert(store.GetID(), Greater, uint64(0))
-	c.Assert(store.GetID(), Less, uint64(8))
+	re.Greater(store.GetID(), uint64(0))
+	re.Less(store.GetID(), uint64(8))
 
-	cs = s.newCandidates(10, 15, 23, 20, 33, 32, 31)
+	cs = newCandidates(10, 15, 23, 20, 33, 32, 31)
 	cs.Sort(idComparer).Reverse().Top(idComparer2)
-	s.check(c, cs, 33, 32, 31)
+	check(re, cs, 33, 32, 31)
 }
 
-func (s *testCandidatesSuite) newCandidates(ids ...uint64) *StoreCandidates {
+func newCandidates(ids ...uint64) *StoreCandidates {
 	stores := make([]*core.StoreInfo, 0, len(ids))
 	for _, id := range ids {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id}))
@@ -101,9 +99,9 @@ func (s *testCandidatesSuite) newCandidates(ids ...uint64) *StoreCandidates {
 	return NewCandidates(stores)
 }
 
-func (s *testCandidatesSuite) check(c *C, candidates *StoreCandidates, ids ...uint64) {
-	c.Assert(candidates.Stores, HasLen, len(ids))
+func check(re *require.Assertions, candidates *StoreCandidates, ids ...uint64) {
+	re.Len(candidates.Stores, len(ids))
 	for i, s := range candidates.Stores {
-		c.Assert(s.GetID(), Equals, ids[i])
+		re.Equal(ids[i], s.GetID())
 	}
 }
