@@ -343,23 +343,29 @@ type solution struct {
 }
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
-func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
-	return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
+func (bs *balanceSolver) getExtremeLoad(source, target *core.StoreInfo, dim int) (src float64, dst float64) {
+	sourceStore := bs.stLoadDetail[source.GetID()]
+	targetStore := bs.stLoadDetail[target.GetID()]
+	return sourceStore.LoadPred.Min().Loads[dim], targetStore.LoadPred.Max().Loads[dim]
 }
 
 // getCurrentLoad returns the current load of the src store and the dst store.
-func (s *solution) getCurrentLoad(dim int) (src float64, dst float64) {
-	return s.srcStore.LoadPred.Current.Loads[dim], s.dstStore.LoadPred.Current.Loads[dim]
+func (bs *balanceSolver) getCurrentLoad(source, target *core.StoreInfo, dim int) (src float64, dst float64) {
+	sourceStore := bs.stLoadDetail[source.GetID()]
+	targetStore := bs.stLoadDetail[target.GetID()]
+	return sourceStore.LoadPred.Current.Loads[dim], targetStore.LoadPred.Current.Loads[dim]
 }
 
 // getPendingLoad returns the pending load of the src store and the dst store.
-func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
-	return s.srcStore.LoadPred.Pending().Loads[dim], s.dstStore.LoadPred.Pending().Loads[dim]
+func (bs *balanceSolver) getPendingLoad(source, target *core.StoreInfo, dim int) (src float64, dst float64) {
+	sourceStore := bs.stLoadDetail[source.GetID()]
+	targetStore := bs.stLoadDetail[target.GetID()]
+	return sourceStore.LoadPred.Pending().Loads[dim], targetStore.LoadPred.Pending().Loads[dim]
 }
 
 // getPeerRate returns the load of the peer.
-func (s *solution) getPeerRate(rw statistics.RWType, dim int) float64 {
-	return s.srcPeerStat.GetLoad(statistics.GetRegionStatKind(rw, dim))
+func (bs *balanceSolver) getPeerRate(srcPeerStat *statistics.HotPeerStat, rw statistics.RWType, dim int) float64 {
+	return srcPeerStat.GetLoad(statistics.GetRegionStatKind(rw, dim))
 }
 
 type balanceSolver struct {
@@ -369,8 +375,8 @@ type balanceSolver struct {
 	rwTy         statistics.RWType
 	opTy         opType
 
-	cur  *solution
-	best *solution
+	cur  *schedulePlan
+	best *schedulePlan
 	ops  []*operator.Operator
 	infl statistics.Influence
 
@@ -481,16 +487,16 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() {
 		return nil
 	}
-	bs.cur = &solution{}
+	bs.cur = newSchedulePlan()
 
 	tryUpdateBestSolution := func(isUniformFirstPriority bool) {
-		if bs.cur.progressiveRank == -1 && isUniformFirstPriority {
+		if bs.cur.score == -1 && isUniformFirstPriority {
 			// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 			// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", bs.cur.TargetMetricLabel()).Inc()
 			return
 		}
-		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
+		if bs.cur.score < 0 && bs.betterThan(bs.best) {
 			if newOps, newInfl := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				bs.infl = *newInfl
@@ -501,11 +507,12 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	for _, srcStore := range bs.filterSrcStores() {
-		bs.cur.srcStore = srcStore
+		bs.cur.source = srcStore.StoreInfo
 		srcStoreID := srcStore.GetID()
-		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
+		sourceLoad := bs.stLoadDetail[bs.cur.source.GetID()]
+		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(sourceLoad), bs.isUniformSecondPriority(sourceLoad)
 		if isUniformFirstPriority && isUniformSecondPriority {
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.srcStore.GetID(), 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", bs.cur.SourceMetricLabel()).Inc()
 			continue
 		}
 		for _, srcPeerStat := range bs.filterHotPeers(srcStore) {
@@ -517,9 +524,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 			bs.cur.srcPeerStat = srcPeerStat
 
-			for _, dstStore := range bs.filterDstStores() {
-				bs.cur.dstStore = dstStore
-				bs.calcProgressiveRank()
+			for _, target := range bs.filterDstStores() {
+				bs.cur.target = target.StoreInfo
+				bs.calcScore()
 				tryUpdateBestSolution(isUniformFirstPriority)
 			}
 		}
@@ -531,7 +538,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	if bs.best == nil || len(bs.ops) == 0 {
 		return false
 	}
-	if bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
+	if bs.best.source.IsTiFlash() != bs.best.target.IsTiFlash() {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
@@ -542,7 +549,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	case writeLeader:
 		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
+		if bs.best.source.IsTiFlash() {
 			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
 		} else {
 			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
@@ -550,7 +557,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	default:
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
-	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.srcStore.GetID(), bs.best.dstStore.GetID(), bs.infl, maxZombieDur)
+	return bs.sche.tryAddPendingInfluence(bs.ops[0], bs.best.source.GetID(), bs.best.target.GetID(), bs.infl, maxZombieDur)
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -723,7 +730,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		filters    []filter.Filter
 		candidates []*statistics.StoreLoadDetail
 	)
-	srcStore := bs.cur.srcStore.StoreInfo
+	srcStore := bs.cur.source
 	switch bs.opTy {
 	case movePeer:
 		filters = []filter.Filter{
@@ -805,19 +812,19 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 	return store.IsUniform(bs.secondPriority, stddevThreshold)
 }
 
-// calcProgressiveRank calculates `bs.cur.progressiveRank`.
+// calcScore calculates `bs.cur.score`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
 // |   isBetter                         | -4       | -3            | -1 / 0   |
 // |   isNotWorsened                    | -2       | 1             | 1        |
 // |   Worsened                         | 0        | 1             | 1        |
-func (bs *balanceSolver) calcProgressiveRank() {
-	bs.cur.progressiveRank = 1
+func (bs *balanceSolver) calcScore() {
+	bs.cur.score = 1
 
 	if toResourceType(bs.rwTy, bs.opTy) == writeLeader {
 		// For write leader, only compare the first priority.
 		if bs.isBetterForWriteLeader() {
-			bs.cur.progressiveRank = -1
+			bs.cur.score = -1
 		}
 		return
 	}
@@ -828,33 +835,33 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	switch {
 	case isFirstBetter && isSecondBetter:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
-		bs.cur.progressiveRank = -4
+		bs.cur.score = -4
 	case isFirstBetter && isSecondNotWorsened:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
-		bs.cur.progressiveRank = -3
+		bs.cur.score = -3
 	case isFirstNotWorsened && isSecondBetter:
 		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
-		bs.cur.progressiveRank = -2
+		bs.cur.score = -2
 	case isFirstBetter:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
-		bs.cur.progressiveRank = -1
+		bs.cur.score = -1
 	case isSecondBetter:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
 		// It's a solution that cannot be used directly, but can be optimized.
-		bs.cur.progressiveRank = 0
+		bs.cur.score = 0
 	}
 }
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
 func (bs *balanceSolver) isTolerance(dim int) bool {
-	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
+	srcRate, dstRate := bs.getCurrentLoad(bs.cur.source, bs.cur.target, dim)
 	if srcRate <= dstRate {
 		return false
 	}
-	srcPending, dstPending := bs.cur.getPendingLoad(dim)
+	srcPending, dstPending := bs.getPendingLoad(bs.cur.source, bs.cur.target, dim)
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStore.GetID(), 10), strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Set(pendingAmp)
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.source.GetID(), 10), strconv.FormatUint(bs.cur.target.GetID(), 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
@@ -867,16 +874,16 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (bool, float64) {
 		}
 		return a - b
 	}
-	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
-	peerRate := bs.cur.getPeerRate(bs.rwTy, dim)
+	srcRate, dstRate := bs.getExtremeLoad(bs.cur.source, bs.cur.target, dim)
+	peerRate := bs.getPeerRate(bs.cur.srcPeerStat, bs.rwTy, dim)
 	isHot := peerRate >= bs.getMinRate(dim)
 	decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
 	return isHot, decRatio
 }
 
 func (bs *balanceSolver) isBetterForWriteLeader() bool {
-	srcRate, dstRate := bs.cur.getExtremeLoad(bs.firstPriority)
-	peerRate := bs.cur.getPeerRate(bs.rwTy, bs.firstPriority)
+	srcRate, dstRate := bs.getExtremeLoad(bs.cur.source, bs.cur.target, bs.firstPriority)
+	peerRate := bs.getPeerRate(bs.cur.srcPeerStat, bs.rwTy, bs.firstPriority)
 	return srcRate-peerRate >= dstRate+peerRate && bs.isTolerance(bs.firstPriority)
 }
 
@@ -904,25 +911,25 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThan(old *solution) bool {
+func (bs *balanceSolver) betterThan(old *schedulePlan) bool {
 	if old == nil {
 		return true
 	}
 
 	switch {
-	case bs.cur.progressiveRank < old.progressiveRank:
+	case bs.cur.score < old.score:
 		return true
-	case bs.cur.progressiveRank > old.progressiveRank:
+	case bs.cur.score > old.score:
 		return false
 	}
 
-	if r := bs.compareSrcStore(bs.cur.srcStore, old.srcStore); r < 0 {
+	if r := bs.compareSourceStore(bs.cur.source, old.source); r < 0 {
 		return true
 	} else if r > 0 {
 		return false
 	}
 
-	if r := bs.compareDstStore(bs.cur.dstStore, old.dstStore); r < 0 {
+	if r := bs.compareTargetStore(bs.cur.target, old.target); r < 0 {
 		return true
 	} else if r > 0 {
 		return false
@@ -937,7 +944,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 
 		// We will firstly consider ensuring converge faster, secondly reduce oscillation
 		firstCmp, secondCmp := bs.getRkCmpPriorities(old)
-		switch bs.cur.progressiveRank {
+		switch bs.cur.score {
 		case -4: // isBetter(firstPriority) && isBetter(secondPriority)
 			if firstCmp != 0 {
 				return firstCmp > 0
@@ -964,7 +971,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	return false
 }
 
-func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
+func (bs *balanceSolver) getRkCmpPriorities(old *schedulePlan) (firstCmp int, secondCmp int) {
 	fk, sk := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority), statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
 	dimToStep := func(priority int) float64 {
 		switch priority {
@@ -983,7 +990,9 @@ func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, second
 }
 
 // smaller is better
-func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
+func (bs *balanceSolver) compareSourceStore(cur, old *core.StoreInfo) int {
+	detail1 := bs.stLoadDetail[cur.GetID()]
+	detail2 := bs.stLoadDetail[old.GetID()]
 	if detail1 != detail2 {
 		// compare source store
 		var lpCmp storeLPCmp
@@ -1016,7 +1025,9 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 }
 
 // smaller is better
-func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
+func (bs *balanceSolver) compareTargetStore(cur, old *core.StoreInfo) int {
+	detail1 := bs.stLoadDetail[cur.GetID()]
+	detail2 := bs.stLoadDetail[old.GetID()]
 	if detail1 != detail2 {
 		// compare destination store
 		var lpCmp storeLPCmp
@@ -1058,8 +1069,8 @@ func stepRank(rk0 float64, step float64) func(float64) int64 {
 // 2. the peer we choose as a source in the current solution is not nil and it belongs to the source store
 // 3. the region which owns the peer in the current solution is not nil and its ID should equal to the peer's region ID
 func (bs *balanceSolver) isReadyToBuild() bool {
-	return bs.cur.srcStore != nil && bs.cur.dstStore != nil &&
-		bs.cur.srcPeerStat != nil && bs.cur.srcPeerStat.StoreID == bs.cur.srcStore.GetID() &&
+	return bs.cur.source != nil && bs.cur.target != nil &&
+		bs.cur.srcPeerStat != nil && bs.cur.srcPeerStat.StoreID == bs.cur.source.GetID() &&
 		bs.cur.region != nil && bs.cur.region.GetID() == bs.cur.srcPeerStat.ID()
 }
 
@@ -1068,12 +1079,12 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator, infl *stati
 		return nil, nil
 	}
 
-	srcStoreID := bs.cur.srcStore.GetID()
-	dstStoreID := bs.cur.dstStore.GetID()
+	srcStoreID := bs.cur.source.GetID()
+	dstStoreID := bs.cur.target.GetID()
 	sourceLabel := strconv.FormatUint(srcStoreID, 10)
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := ""
-	switch bs.cur.progressiveRank {
+	switch bs.cur.score {
 	case -4:
 		dim = "all"
 	case -3:

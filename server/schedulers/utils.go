@@ -38,22 +38,18 @@ const (
 	defaultRetryQuotaAttenuation         = 2
 )
 
-type balancePlan struct {
+type solver struct {
 	schedule.Cluster
 	kind              core.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 
-	source *core.StoreInfo
-	target *core.StoreInfo
-	region *core.RegionInfo
-
 	sourceScore float64
 	targetScore float64
 }
 
-func newBalancePlan(kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *balancePlan {
-	return &balancePlan{
+func newSolver(kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+	return &solver{
 		Cluster:           cluster,
 		kind:              kind,
 		opInfluence:       opInfluence,
@@ -61,33 +57,17 @@ func newBalancePlan(kind core.ScheduleKind, cluster schedule.Cluster, opInfluenc
 	}
 }
 
-func (p *balancePlan) GetOpInfluence(storeID uint64) int64 {
+func (p *solver) GetOpInfluence(storeID uint64) int64 {
 	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
 }
 
-func (p *balancePlan) SourceStoreID() uint64 {
-	return p.source.GetID()
-}
-
-func (p *balancePlan) SourceMetricLabel() string {
-	return strconv.FormatUint(p.SourceStoreID(), 10)
-}
-
-func (p *balancePlan) TargetStoreID() uint64 {
-	return p.target.GetID()
-}
-
-func (p *balancePlan) TargetMetricLabel() string {
-	return strconv.FormatUint(p.TargetStoreID(), 10)
-}
-
-func (p *balancePlan) shouldBalance(scheduleName string) bool {
+func (p *solver) shouldBalance(scheduleName string, plan *schedulePlan) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	sourceID := p.source.GetID()
-	targetID := p.target.GetID()
-	tolerantResource := p.getTolerantResource()
+	sourceID := plan.source.GetID()
+	targetID := plan.target.GetID()
+	tolerantResource := p.getTolerantResource(plan.region)
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
 	sourceInfluence := p.GetOpInfluence(sourceID)
@@ -107,12 +87,12 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	switch p.kind.Resource {
 	case core.LeaderKind:
 		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
-		p.sourceScore = p.source.LeaderScore(p.kind.Policy, sourceDelta)
-		p.targetScore = p.target.LeaderScore(p.kind.Policy, targetDelta)
+		p.sourceScore = plan.source.LeaderScore(p.kind.Policy, sourceDelta)
+		p.targetScore = plan.target.LeaderScore(p.kind.Policy, targetDelta)
 	case core.RegionKind:
 		sourceDelta, targetDelta := sourceInfluence*influenceAmp-tolerantResource, targetInfluence*influenceAmp+tolerantResource
-		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
-		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+		p.sourceScore = plan.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		p.targetScore = plan.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
 	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
@@ -124,10 +104,10 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 
 	if !shouldBalance {
 		log.Debug("skip balance "+p.kind.Resource.String(),
-			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", p.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
+			zap.String("scheduler", scheduleName), zap.Uint64("region-id", plan.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+			zap.Int64("source-size", plan.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("source-influence", sourceInfluence),
-			zap.Int64("target-size", p.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
+			zap.Int64("target-size", plan.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("target-influence", targetInfluence),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", tolerantResource))
@@ -135,11 +115,11 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	return shouldBalance
 }
 
-func (p *balancePlan) getTolerantResource() int64 {
+func (p *solver) getTolerantResource(region *core.RegionInfo) int64 {
 	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
 		return int64(p.tolerantSizeRatio)
 	}
-	regionSize := p.region.GetApproximateSize()
+	regionSize := region.GetApproximateSize()
 	if regionSize < p.GetAverageRegionSize() {
 		regionSize = p.GetAverageRegionSize()
 	}

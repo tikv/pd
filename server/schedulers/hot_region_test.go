@@ -1545,11 +1545,13 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 			// try schedule
 			hb.prepareForBalance(testcase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
-			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]}
-			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 0) // skip schedule
+			ld := hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]
+			leaderSolver.cur = &schedulePlan{source: ld.StoreInfo}
+
+			c.Check(leaderSolver.filterHotPeers(ld), HasLen, 0) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
 			leaderSolver.minHotDegree = 0
-			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 1)
+			c.Check(leaderSolver.filterHotPeers(ld), HasLen, 1)
 			leaderSolver.minHotDegree = threshold
 		}
 

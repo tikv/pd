@@ -127,9 +127,10 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(t.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
-		plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
+		solver := newSolver(kind, tc, oc.GetOpInfluence(tc))
+		plan := newSchedulePlan()
 		plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-		c.Assert(plan.shouldBalance(""), Equals, t.expectedResult)
+		c.Assert(solver.shouldBalance("", plan), Equals, t.expectedResult)
 	}
 
 	for _, t := range tests {
@@ -139,9 +140,10 @@ func (s *testBalanceSuite) TestShouldBalance(c *C) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, t.kind)
-			plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
+			solver := newSolver(kind, tc, oc.GetOpInfluence(tc))
+			plan := newSchedulePlan()
 			plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-			c.Assert(plan.shouldBalance(""), Equals, t.expectedResult)
+			c.Assert(solver.shouldBalance("", plan), Equals, t.expectedResult)
 		}
 	}
 }
@@ -186,9 +188,10 @@ func (s *testBalanceSuite) TestTolerantRatio(c *C) {
 	}
 	for i, t := range tbl {
 		tc.SetTolerantSizeRatio(t.ratio)
-		plan := newBalancePlan(t.kind, tc, operator.OpInfluence{})
+		solver := newSolver(t.kind, tc, operator.OpInfluence{})
+		plan := newSchedulePlan()
 		plan.region = region
-		c.Assert(plan.getTolerantResource(), Equals, t.expectTolerantResource(t.kind), Commentf("case #%d", i+1))
+		c.Assert(solver.getTolerantResource(plan.region), Equals, t.expectTolerantResource(t.kind), Commentf("case #%d", i+1))
 	}
 }
 
