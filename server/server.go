@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/gcpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -151,8 +152,10 @@ type Server struct {
 
 	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
 	serviceSafePointLock syncutil.Mutex
+	// Lock for key space GC interfaces
+	keySpaceGCLock syncutil.Mutex
 
-	// hot region history info storeage
+	// hot region history info storage
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
@@ -279,6 +282,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
+		gcpb.RegisterGCServer(gs, &GcServer{Server: s})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
