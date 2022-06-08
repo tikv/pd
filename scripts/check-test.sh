@@ -41,4 +41,12 @@ if [ "$res" ]; then
   exit 1
 fi
 
+res=$(grep -rn --include=\*_test.go -E "(re|suite|require)\.(Nil|NotNil)\((t, )?(err|error)" . | sort -u)
+
+if [ "$res" ]; then
+  echo "following packages use the inefficient assert function: please replace require.Nil/NotNil with require.NoError/Error"
+  echo "$res"
+  exit 1
+fi
+
 exit 0
