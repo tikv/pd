@@ -37,9 +37,9 @@ func TestKeyLength(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	_, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
-	re.NotNil(err)
+	re.Error(err)
 	_, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
-	re.NotNil(err)
+	re.Error(err)
 	length, err := KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
 	re.NoError(err)
 	re.Equal(16, length)
@@ -111,5 +111,5 @@ func TestAesGcmCrypter(t *testing.T) {
 	// ignore overflow
 	fakeCiphertext[0] = ciphertext[0] + 1
 	_, err = AesGcmDecrypt(key, fakeCiphertext, iv)
-	re.NotNil(err)
+	re.Error(err)
 }
