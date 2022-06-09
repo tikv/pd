@@ -154,14 +154,16 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 
-	var allowBalanceEmptyRegion func(*core.RegionInfo) bool
-
+	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
+	downFilter := filter.NewRegionDownFilter(s.GetName())
+	replicaFilter := filter.NewRegionReplicatedFilter(s.GetName(), cluster)
+	var allowBalanceEmptyRegion filter.RegionFilter
 	switch cluster.(type) {
 	case *schedule.RangeCluster:
 		// allow empty region to be scheduled in range cluster
-		allowBalanceEmptyRegion = func(region *core.RegionInfo) bool { return true }
+		allowBalanceEmptyRegion = filter.NewRegionAlwaysAllowFilter()
 	default:
-		allowBalanceEmptyRegion = isAllowBalanceEmptyRegion(cluster)
+		allowBalanceEmptyRegion = filter.NewRegionEmptyFilter(s.GetName(), cluster)
 	}
 
 	for _, plan.source = range stores {
@@ -170,18 +172,22 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = cluster.RandPendingRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthyAllowPending, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+			plan.region = filter.SelectOneRegion(cluster.RandPendingRegions(plan.SourceStoreID(), s.conf.Ranges),
+				downFilter, replicaFilter, allowBalanceEmptyRegion)
 			if plan.region == nil {
 				// Then pick the region that has a follower in the source store.
-				plan.region = cluster.RandFollowerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.SourceStoreID(), s.conf.Ranges),
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				// Then pick the region has the leader in the source store.
-				plan.region = cluster.RandLeaderRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.SourceStoreID(), s.conf.Ranges),
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				// Finally pick learner.
-				plan.region = cluster.RandLearnerRegion(plan.SourceStoreID(), s.conf.Ranges, schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster), allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.SourceStoreID(), s.conf.Ranges),
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
 			}
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
@@ -260,14 +266,4 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 
 	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 	return nil
-}
-
-// isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
-func isEmptyRegionAllowBalance(cluster schedule.Cluster, region *core.RegionInfo) bool {
-	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
-}
-
-// isAllowBalanceEmptyRegion returns a function that checks if a region is an empty region and can be balanced.
-func isAllowBalanceEmptyRegion(cluster schedule.Cluster) func(*core.RegionInfo) bool {
-	return func(region *core.RegionInfo) bool { return isEmptyRegionAllowBalance(cluster, region) }
 }
