@@ -101,6 +101,18 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	return res
 }
 
+// IsRegionStatsType returns whether the status of the region is the given type.
+func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisticType) bool {
+	r.RLock()
+	defer r.RUnlock()
+	for _, r := range r.stats[typ] {
+		if r.GetID() == regionID {
+			return true
+		}
+	}
+	return false
+}
+
 // GetOfflineRegionStatsByType gets the status of the offline region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
 func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	r.RLock()
@@ -126,6 +138,20 @@ func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, r
 			delete(r.offlineStats[typ], regionID)
 		}
 	}
+}
+
+// RegionStatsNeedUpdate checks whether the region's status need to be updated
+// due to some special state types.
+func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
+	regionID := region.GetID()
+	maxSize := int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize())
+	maxKeys := int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())
+	if r.IsRegionStatsType(regionID, OversizedRegion) != region.IsOversized(maxSize, maxKeys) {
+		return true
+	}
+	minSize := int64(r.opt.GetMaxMergeRegionSize())
+	minKeys := int64(r.opt.GetMaxMergeRegionKeys())
+	return r.IsRegionStatsType(regionID, UndersizedRegion) != region.IsUndersized(minSize, minKeys)
 }
 
 // Observe records the current regions' status.
@@ -169,6 +195,9 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 
+	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
+	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
+	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and ``UndersizedRegion` are updated.
 	conditions := map[RegionStatisticType]bool{
 		MissPeer:    len(region.GetPeers()) < desiredReplicas,
 		ExtraPeer:   len(region.GetPeers()) > desiredReplicas,
@@ -176,10 +205,14 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
-		OversizedRegion: region.GetApproximateSize() >= int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()) ||
-			region.GetApproximateKeys() >= int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
-		UndersizedRegion: region.NeedMerge(int64(r.opt.GetScheduleConfig().MaxMergeRegionSize),
-			int64(r.opt.GetScheduleConfig().MaxMergeRegionKeys)),
+		OversizedRegion: region.IsOversized(
+			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()),
+			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
+		),
+		UndersizedRegion: region.IsUndersized(
+			int64(r.opt.GetMaxMergeRegionSize()),
+			int64(r.opt.GetMaxMergeRegionKeys()),
+		),
 	}
 
 	for typ, c := range conditions {
