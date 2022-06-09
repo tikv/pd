@@ -945,23 +945,23 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 }
 
 // RandLeaderRegion returns a random region that has leader on the store.
-func (c *RaftCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandLeaderRegion(storeID, ranges, opts...)
+func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandLeaderRegions(storeID, ranges)
 }
 
 // RandFollowerRegion returns a random region that has a follower on the store.
-func (c *RaftCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandFollowerRegion(storeID, ranges, opts...)
+func (c *RaftCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandFollowerRegions(storeID, ranges)
 }
 
 // RandPendingRegion returns a random region that has a pending peer on the store.
-func (c *RaftCluster) RandPendingRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandPendingRegion(storeID, ranges, opts...)
+func (c *RaftCluster) RandPendingRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandPendingRegions(storeID, ranges)
 }
 
 // RandLearnerRegion returns a random region that has a learner peer on the store.
-func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandLearnerRegion(storeID, ranges, opts...)
+func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandLearnerRegions(storeID, ranges)
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.

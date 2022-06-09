@@ -114,7 +114,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator
 	}
 	log.Debug("label scheduler reject leader store list", zap.Reflect("stores", rejectLeaderStores))
 	for id := range rejectLeaderStores {
-		if region := cluster.RandLeaderRegion(id, s.conf.Ranges); region != nil {
+		if region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, s.conf.Ranges)); region != nil {
 			log.Debug("label scheduler selects region to transfer leader", zap.Uint64("region-id", region.GetID()))
 			excludeStores := make(map[uint64]struct{})
 			for _, p := range region.GetDownPeers() {

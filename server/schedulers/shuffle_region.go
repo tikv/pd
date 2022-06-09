@@ -132,16 +132,22 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		FilterSource(cluster.GetOpts(), s.filters...).
 		Shuffle()
 
+	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
+	downFilter := filter.NewRegionDownFilter(s.GetName())
+	replicaFilter := filter.NewRegionReplicatedFilter(s.GetName(), cluster)
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
-			region = cluster.RandFollowerRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
+			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), s.conf.Ranges),
+				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLeader) {
-			region = cluster.RandLeaderRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), s.conf.Ranges),
+				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLearner) {
-			region = cluster.RandLearnerRegion(source.GetID(), s.conf.GetRanges(), schedule.IsRegionHealthy, schedule.ReplicatedRegion(cluster))
+			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), s.conf.Ranges),
+				pendingFilter, downFilter, replicaFilter)
 		}
 		if region != nil {
 			return region, region.GetStorePeer(source.GetID())

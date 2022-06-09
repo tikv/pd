@@ -23,9 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
 
-// RegionOption is used to select region.
-type RegionOption func(region *RegionInfo) bool
-
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 
