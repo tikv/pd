@@ -312,7 +312,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), pendingFilter, downFilter)
 		if region == nil {
 			// try to pick unhealthy region
-			region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges))
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges))
 			if region == nil {
 				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
 				continue
