@@ -58,7 +58,7 @@ func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool
 
 func TestCandidates(t *testing.T) {
 	re := require.New(t)
-	cs := newCandidates(1, 2, 3, 4, 5)
+	cs := newTestCandidates(1, 2, 3, 4, 5)
 	cs.FilterSource(nil, idFilter(func(id uint64) bool { return id > 2 }))
 	check(re, cs, 3, 4, 5)
 	cs.FilterTarget(nil, idFilter(func(id uint64) bool { return id%2 == 1 }))
@@ -70,7 +70,7 @@ func TestCandidates(t *testing.T) {
 	store = cs.RandomPick()
 	re.Nil(store)
 
-	cs = newCandidates(1, 3, 5, 7, 6, 2, 4)
+	cs = newTestCandidates(1, 3, 5, 7, 6, 2, 4)
 	cs.Sort(idComparer)
 	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.PickFirst()
@@ -86,12 +86,12 @@ func TestCandidates(t *testing.T) {
 	re.Greater(store.GetID(), uint64(0))
 	re.Less(store.GetID(), uint64(8))
 
-	cs = newCandidates(10, 15, 23, 20, 33, 32, 31)
+	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
 	cs.Sort(idComparer).Reverse().Top(idComparer2)
 	check(re, cs, 33, 32, 31)
 }
 
-func newCandidates(ids ...uint64) *StoreCandidates {
+func newTestCandidates(ids ...uint64) *StoreCandidates {
 	stores := make([]*core.StoreInfo, 0, len(ids))
 	for _, id := range ids {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id}))
