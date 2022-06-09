@@ -22,7 +22,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -45,7 +44,6 @@ type watchTestSuite struct {
 
 func (s *watchTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *watchTestSuite) TearDownSuite(c *C) {

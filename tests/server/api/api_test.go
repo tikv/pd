@@ -133,7 +133,6 @@ type testMiddlewareSuite struct {
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	s.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
@@ -200,7 +199,6 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -223,7 +221,6 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -348,7 +345,6 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -371,7 +367,6 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -400,7 +395,6 @@ type testRedirectorSuite struct {
 
 func (s *testRedirectorSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	s.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
