@@ -261,14 +261,14 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 }
 
 // SetMaxMergeRegionSize sets the max merge region size.
-func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64)  {
+func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = maxMergeRegionSize
 	o.SetScheduleConfig(v)
 }
 
-// SetMaxMergeRegionSize sets the max merge region keys.
-func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64)  {
+// SetMaxMergeRegionKeys sets the max merge region keys.
+func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionKeys = maxMergeRegionKeys
 	o.SetScheduleConfig(v)
