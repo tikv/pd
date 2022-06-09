@@ -105,12 +105,8 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisticType) bool {
 	r.RLock()
 	defer r.RUnlock()
-	for _, r := range r.stats[typ] {
-		if r.GetID() == regionID {
-			return true
-		}
-	}
-	return false
+	_, exist := r.stats[typ][regionID]
+	return exist
 }
 
 // GetOfflineRegionStatsByType gets the status of the offline region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
