@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -162,7 +161,7 @@ func TestHotRegionWrite(t *testing.T) {
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		copyHotRegionStorages[index].StartKey = core.HexRegionKeyStr([]byte(copyHotRegionStorages[index].StartKey))
 		copyHotRegionStorages[index].EndKey = core.HexRegionKeyStr([]byte(copyHotRegionStorages[index].EndKey))
-		re.True(reflect.DeepEqual(&copyHotRegionStorages[index], next))
+		re.Equal(&copyHotRegionStorages[index], next)
 		index++
 	}
 	re.NoError(err)
@@ -198,7 +197,7 @@ func TestHotRegionDelete(t *testing.T) {
 	num := 0
 	for next, err := iter.Next(); next != nil && err == nil; next, err = iter.Next() {
 		num++
-		re.True(reflect.DeepEqual(next, &historyHotRegions[defaultRemainDay-num]))
+		re.Equal(&historyHotRegions[defaultRemainDay-num], next)
 	}
 }
 
