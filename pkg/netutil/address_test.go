@@ -22,6 +22,7 @@ import (
 )
 
 func TestResolveLoopBackAddr(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	nodes := []struct {
 		address     string
@@ -39,6 +40,7 @@ func TestResolveLoopBackAddr(t *testing.T) {
 }
 
 func TestIsEnableHttps(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	re.False(IsEnableHTTPS(http.DefaultClient))
 	httpClient := &http.Client{

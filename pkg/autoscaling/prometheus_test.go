@@ -181,6 +181,7 @@ func (c *normalClient) Do(_ context.Context, req *http.Request) (response *http.
 }
 
 func TestRetrieveCPUMetrics(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	client := &normalClient{
 		mockData: make(map[string]*response),
@@ -225,6 +226,7 @@ func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.
 }
 
 func TestEmptyResponse(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	client := &emptyResponseClient{}
 	querier := NewPrometheusQuerier(client)
@@ -252,6 +254,7 @@ func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *htt
 }
 
 func TestErrorHTTPStatus(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	client := &errorHTTPStatusClient{}
 	querier := NewPrometheusQuerier(client)
@@ -277,6 +280,7 @@ func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (
 }
 
 func TestErrorPrometheusStatus(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	client := &errorPrometheusStatusClient{}
 	querier := NewPrometheusQuerier(client)
@@ -287,6 +291,7 @@ func TestErrorPrometheusStatus(t *testing.T) {
 }
 
 func TestGetInstanceNameFromAddress(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		address              string
@@ -324,6 +329,7 @@ func TestGetInstanceNameFromAddress(t *testing.T) {
 }
 
 func TestGetDurationExpression(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		duration           time.Duration

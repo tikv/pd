@@ -42,7 +42,6 @@ type logTestSuite struct {
 }
 
 func (s *logTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	var err error
 	s.cluster, err = tests.NewTestCluster(s.ctx, 3)

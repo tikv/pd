@@ -32,6 +32,7 @@ import (
 )
 
 func TestLabelMatcher(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
@@ -41,6 +42,7 @@ func TestLabelMatcher(t *testing.T) {
 }
 
 func TestPrometheusHistogramBackend(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -87,6 +89,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
 	fname := initLog()

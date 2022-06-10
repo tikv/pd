@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -38,10 +37,6 @@ func Test(t *testing.T) {
 var _ = Suite(&memberTestSuite{})
 
 type memberTestSuite struct{}
-
-func (s *memberTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *memberTestSuite) TestMember(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -23,7 +23,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -40,10 +39,6 @@ func Test(t *testing.T) {
 var _ = Suite(&storeTestSuite{})
 
 type storeTestSuite struct{}
-
-func (s *storeTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *storeTestSuite) TestStore(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

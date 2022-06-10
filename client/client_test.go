@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"reflect"
 	"testing"
 	"time"
 
@@ -58,11 +57,11 @@ func TestUpdateURLs(t *testing.T) {
 	cli := &baseClient{option: newOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
-	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs()))
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
 	cli.updateURLs(members[1:])
-	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs()))
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
 	cli.updateURLs(members)
-	re.True(reflect.DeepEqual(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetURLs()))
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetURLs())
 }
 
 const testClientURL = "tmp://test.url:5255"

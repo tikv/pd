@@ -820,3 +820,24 @@ func (s *testRuleCheckerSuite) TestOfflineAndDownStore(c *C) {
 	c.Assert(op, NotNil)
 	c.Assert(op.Desc(), Equals, "replace-rule-down-peer")
 }
+
+func (s *testRuleCheckerSuite) TestPendingList(c *C) {
+	// no enough store
+	s.cluster.AddLeaderStore(1, 1)
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
+	op := s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, IsNil)
+	_, exist := s.rc.pendingList.Get(1)
+	c.Assert(exist, IsTrue)
+
+	// add more stores
+	s.cluster.AddLeaderStore(2, 1)
+	s.cluster.AddLeaderStore(3, 1)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Desc(), Equals, "add-rule-peer")
+	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(3))
+	_, exist = s.rc.pendingList.Get(1)
+	c.Assert(exist, IsFalse)
+}

@@ -86,6 +86,7 @@ func bucketDebrisFactory(startKey, endKey []byte, item RangeItem) []RangeItem {
 }
 
 func TestRingPutItem(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	bucketTree := NewRangeTree(2, bucketDebrisFactory)
 	bucketTree.Update(newSimpleBucketItem([]byte("002"), []byte("100")))
@@ -120,6 +121,7 @@ func TestRingPutItem(t *testing.T) {
 }
 
 func TestDebris(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ringItem := newSimpleBucketItem([]byte("010"), []byte("090"))
 	var overlaps []RangeItem
