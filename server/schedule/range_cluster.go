@@ -99,14 +99,14 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 	return r.Cluster.GetOpts().GetTolerantSizeRatio()
 }
 
-// RandFollowerRegion returns a random region that has a follower on the store.
-func (r *RangeCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return r.subCluster.RandFollowerRegion(storeID, ranges, opts...)
+// RandFollowerRegions returns a random region that has a follower on the store.
+func (r *RangeCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return r.subCluster.RandFollowerRegions(storeID, ranges)
 }
 
-// RandLeaderRegion returns a random region that has leader on the store.
-func (r *RangeCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return r.subCluster.RandLeaderRegion(storeID, ranges, opts...)
+// RandLeaderRegions returns a random region that has leader on the store.
+func (r *RangeCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return r.subCluster.RandLeaderRegions(storeID, ranges)
 }
 
 // GetAverageRegionSize returns the average region approximate size.

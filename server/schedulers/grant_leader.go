@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
@@ -231,8 +232,10 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
+	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
+	downFilter := filter.NewRegionDownFilter(s.GetName())
 	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := cluster.RandFollowerRegion(id, ranges, schedule.IsRegionHealthy)
+		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), pendingFilter, downFilter)
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 			continue

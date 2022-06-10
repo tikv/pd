@@ -109,7 +109,9 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil
 	}
-	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, schedule.IsRegionHealthy)
+	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
+	downFilter := filter.NewRegionDownFilter(s.GetName())
+	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), pendingFilter, downFilter)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil
