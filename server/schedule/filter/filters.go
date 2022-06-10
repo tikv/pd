@@ -264,99 +264,6 @@ func (f *distinctScoreFilter) GetSourceStoreID() uint64 {
 	return f.srcStore
 }
 
-// StoreStateFilter is used to determine whether a store can be selected as the
-// source or target of the schedule based on the store's state.
-type StoreStateFilter struct {
-	ActionScope string
-	// Set true if the schedule involves any transfer leader operation.
-	TransferLeader bool
-	// Set true if the schedule involves any move region operation.
-	MoveRegion bool
-	// Set true if the scatter move the region
-	ScatterRegion bool
-	// Set true if allows temporary states.
-	AllowTemporaryStates bool
-	// Reason is used to distinguish the reason of store state filter
-	Reason string
-}
-
-// Scope returns the scheduler or the checker which the filter acts on.
-func (f *StoreStateFilter) Scope() string {
-	return f.ActionScope
-}
-
-// Type returns the type of the Filter.
-func (f *StoreStateFilter) Type() string {
-	return fmt.Sprintf("store-state-%s-filter", f.Reason)
-}
-
-// conditionFunc defines condition to determine a store should be selected.
-// It should consider if the filter allows temporary states.
-type conditionFunc func(*config.PersistOptions, *core.StoreInfo) bool
-
-func (f *StoreStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "tombstone"
-	return store.IsRemoved()
-}
-
-func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "down"
-	return store.DownTime() > opt.GetMaxStoreDownTime()
-}
-
-func (f *StoreStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "offline"
-	return store.IsRemoving()
-}
-
-func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "pause-leader"
-	return !store.AllowLeaderTransfer()
-}
-
-func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "slow-store"
-	return store.EvictedAsSlowStore()
-}
-
-func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "disconnected"
-	return !f.AllowTemporaryStates && store.IsDisconnected()
-}
-
-func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "busy"
-	return !f.AllowTemporaryStates && store.IsBusy()
-}
-
-func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-remove-limit"
-	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
-}
-
-func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-add-limit"
-	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
-}
-
-func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-snapshot"
-	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
-		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount())
-}
-
-func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-pending-peer"
-	return !f.AllowTemporaryStates &&
-		opt.GetMaxPendingPeerCount() > 0 &&
-		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
-}
-
-func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "reject-leader"
-	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
-}
-
 // The condition table.
 // Y: the condition is temporary (expected to become false soon).
 // N: the condition is expected to be true for a long time.
@@ -378,21 +285,81 @@ const (
 	scatterRegionTarget
 )
 
-func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
+// conditionFunc defines condition to determine a store should be selected.
+// It should consider if the filter allows temporary states.
+type conditionFunc func(*config.PersistOptions, *core.StoreInfo) bool
+
+// TemporaryStateFilter is used to determine whether a store can be selected as the
+// source or target of the schedule based on the store's temporary state.
+type TemporaryStateFilter struct {
+	ActionScope string
+	// Set true if the schedule involves any transfer leader operation.
+	TransferLeader bool
+	// Set true if the schedule involves any move region operation.
+	MoveRegion bool
+	// Set true if the scatter move the region
+	ScatterRegion bool
+	// Reason is used to distinguish the reason of store state filter
+	Reason string
+	// StateType is used to distinguish the type of store state
+	StateType int
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *TemporaryStateFilter) Scope() string {
+	return f.ActionScope
+}
+
+// Type returns the type of the Filter.
+func (f *TemporaryStateFilter) Type() string {
+	return fmt.Sprintf("store-state-%s-filter", f.Reason)
+}
+
+func (f *TemporaryStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "disconnected"
+	return store.IsDisconnected()
+}
+
+func (f *TemporaryStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "busy"
+	return store.IsBusy()
+}
+
+func (f *TemporaryStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "exceed-remove-limit"
+	return !store.IsAvailable(storelimit.RemovePeer)
+}
+
+func (f *TemporaryStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "exceed-add-limit"
+	return !store.IsAvailable(storelimit.AddPeer)
+}
+
+func (f *TemporaryStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "too-many-snapshot"
+	return (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount())
+}
+
+func (f *TemporaryStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "too-many-pending-peer"
+	return opt.GetMaxPendingPeerCount() > 0 &&
+		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
+}
+
+func (f *TemporaryStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+		funcs = []conditionFunc{f.isDisconnected}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
-			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+		funcs = []conditionFunc{f.isDisconnected, f.isBusy}
 	case regionTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
-			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+		funcs = []conditionFunc{f.isDisconnected, f.isBusy, f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
 	case scatterRegionTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
+		funcs = []conditionFunc{f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
 		if cf(opt, store) {
@@ -404,7 +371,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 
 // Source returns true when the store can be selected as the schedule
 // source.
-func (f *StoreStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *TemporaryStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	if f.TransferLeader && f.anyConditionMatch(leaderSource, opts, store) {
 		return false
 	}
@@ -416,7 +383,111 @@ func (f *StoreStateFilter) Source(opts *config.PersistOptions, store *core.Store
 
 // Target returns true when the store can be selected as the schedule
 // target.
-func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *TemporaryStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) bool {
+	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
+		return false
+	}
+	if f.MoveRegion && f.ScatterRegion && f.anyConditionMatch(scatterRegionTarget, opts, store) {
+		return false
+	}
+	if f.MoveRegion && !f.ScatterRegion && f.anyConditionMatch(regionTarget, opts, store) {
+		return false
+	}
+	return true
+}
+
+// LongTermStateFilter is used to determine whether a store can be selected as the
+// source or target of the schedule based on the store's long-term state.
+type LongTermStateFilter struct {
+	ActionScope string
+	// Set true if the schedule involves any transfer leader operation.
+	TransferLeader bool
+	// Set true if the schedule involves any move region operation.
+	MoveRegion bool
+	// Set true if the scatter move the region
+	ScatterRegion bool
+	// Reason is used to distinguish the reason of store state filter
+	Reason string
+	// StateType is used to distinguish the type of store state
+	StateType int
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *LongTermStateFilter) Scope() string {
+	return f.ActionScope
+}
+
+// Type returns the type of the Filter.
+func (f *LongTermStateFilter) Type() string {
+	return fmt.Sprintf("store-state-%s-filter", f.Reason)
+}
+
+func (f *LongTermStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "tombstone"
+	return store.IsRemoved()
+}
+
+func (f *LongTermStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "down"
+	return store.DownTime() > opt.GetMaxStoreDownTime()
+}
+
+func (f *LongTermStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "offline"
+	return store.IsRemoving()
+}
+
+func (f *LongTermStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "pause-leader"
+	return !store.AllowLeaderTransfer()
+}
+
+func (f *LongTermStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "slow-store"
+	return store.EvictedAsSlowStore()
+}
+
+func (f *LongTermStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
+	f.Reason = "reject-leader"
+	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
+}
+
+func (f *LongTermStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) bool {
+	var funcs []conditionFunc
+	switch typ {
+	case leaderSource:
+		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer}
+	case leaderTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
+			f.slowStoreEvicted, f.hasRejectLeaderProperty}
+	case regionTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown}
+	case scatterRegionTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown}
+	}
+	for _, cf := range funcs {
+		if cf(opt, store) {
+			return true
+		}
+	}
+	return false
+}
+
+// Source returns true when the store can be selected as the schedule
+// source.
+func (f *LongTermStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) bool {
+	if f.TransferLeader && f.anyConditionMatch(leaderSource, opts, store) {
+		return false
+	}
+	if f.MoveRegion && f.anyConditionMatch(regionSource, opts, store) {
+		return false
+	}
+	return true
+}
+
+// Target returns true when the store can be selected as the schedule
+// target.
+func (f *LongTermStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) bool {
 	if f.TransferLeader && f.anyConditionMatch(leaderTarget, opts, store) {
 		return false
 	}

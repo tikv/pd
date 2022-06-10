@@ -766,10 +766,13 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 		return true
 	}
 
-	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
+	stateFilter := []filter.Filter{&filter.LongTermStateFilter{ActionScope: "operator-builder", TransferLeader: true},
+		&filter.TemporaryStateFilter{ActionScope: "operator-builder", TransferLeader: true}}
 	// store state filter
-	if !stateFilter.Target(b.GetOpts(), store) {
-		return false
+	for _, filter := range stateFilter {
+		if !filter.Target(b.GetOpts(), store) {
+			return false
+		}
 	}
 
 	// placement rules
