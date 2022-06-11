@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 )
@@ -37,7 +36,6 @@ type clusterWorkerTestSuite struct {
 
 func (s *clusterWorkerTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *clusterWorkerTestSuite) TearDownSuite(c *C) {

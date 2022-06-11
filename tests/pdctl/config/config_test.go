@@ -28,7 +28,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tests"
@@ -43,10 +42,6 @@ func Test(t *testing.T) {
 var _ = Suite(&configTestSuite{})
 
 type configTestSuite struct{}
-
-func (s *configTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 type testItem struct {
 	name  string
@@ -571,9 +566,8 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 	conf := config.ReplicationModeConfig{
 		ReplicationMode: "majority",
 		DRAutoSync: config.DRAutoSyncReplicationConfig{
-			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
-			WaitSyncTimeout:  typeutil.NewDuration(time.Minute),
-			WaitAsyncTimeout: typeutil.NewDuration(2 * time.Minute),
+			WaitStoreTimeout:    typeutil.NewDuration(time.Minute),
+			TiKVSyncTimeoutHint: typeutil.NewDuration(time.Minute),
 		},
 	}
 	check := func() {

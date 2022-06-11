@@ -454,7 +454,6 @@ wait-store-timeout = "120s"
 	re.Equal(2, cfg.ReplicationMode.DRAutoSync.PrimaryReplicas)
 	re.Equal(1, cfg.ReplicationMode.DRAutoSync.DRReplicas)
 	re.Equal(2*time.Minute, cfg.ReplicationMode.DRAutoSync.WaitStoreTimeout.Duration)
-	re.Equal(time.Minute, cfg.ReplicationMode.DRAutoSync.WaitSyncTimeout.Duration)
 
 	cfg = NewConfig()
 	meta, err = toml.Decode("", &cfg)

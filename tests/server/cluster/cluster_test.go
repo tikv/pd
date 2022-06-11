@@ -68,7 +68,6 @@ type clusterTestSuite struct {
 
 func (s *clusterTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 }

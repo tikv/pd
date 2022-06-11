@@ -82,12 +82,8 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
-var (
-	// EnableZap enable the zap logger in embed etcd.
-	EnableZap = false
-	// EtcdStartTimeout the timeout of the startup etcd.
-	EtcdStartTimeout = time.Minute * 5
-)
+// EtcdStartTimeout the timeout of the startup etcd.
+var EtcdStartTimeout = time.Minute * 5
 
 // Server is the pd server.
 // nolint
@@ -282,14 +278,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
-	if EnableZap {
-		// The etcd master version has removed embed.Config.SetupLogging.
-		// Now logger is set up automatically based on embed.Config.Logger,
-		// Use zap logger in the test, otherwise will panic.
-		// Reference: https://go.etcd.io/etcd/blob/master/embed/config_logging.go#L45
-		s.etcdCfg.Logger = "zap"
-		s.etcdCfg.LogOutputs = []string{"stdout"}
-	}
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()
 	return s, nil

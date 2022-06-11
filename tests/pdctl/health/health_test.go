@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	. "github.com/pingcap/check"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
@@ -35,10 +34,6 @@ func Test(t *testing.T) {
 var _ = Suite(&healthTestSuite{})
 
 type healthTestSuite struct{}
-
-func (s *healthTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *healthTestSuite) TestHealth(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
