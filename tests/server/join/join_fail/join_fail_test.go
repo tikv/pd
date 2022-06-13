@@ -22,7 +22,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
@@ -38,10 +37,6 @@ func TestMain(m *testing.M) {
 var _ = Suite(&joinTestSuite{})
 
 type joinTestSuite struct{}
-
-func (s *joinTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

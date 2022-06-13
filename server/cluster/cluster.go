@@ -1879,19 +1879,20 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
-
-	if minVersion != nil && clusterVersion.LessThan(*minVersion) {
-		if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
-			log.Error("cluster version changed by API at the same time")
-		}
-		err := c.opt.Persist(c.storage)
-		if err != nil {
-			log.Error("persist cluster version meet error", errs.ZapError(err))
-		}
-		log.Info("cluster version changed",
-			zap.Stringer("old-cluster-version", clusterVersion),
-			zap.Stringer("new-cluster-version", minVersion))
+	if minVersion == nil || clusterVersion.Equal(*minVersion) {
+		return
 	}
+
+	if !c.opt.CASClusterVersion(clusterVersion, minVersion) {
+		log.Error("cluster version changed by API at the same time")
+	}
+	err := c.opt.Persist(c.storage)
+	if err != nil {
+		log.Error("persist cluster version meet error", errs.ZapError(err))
+	}
+	log.Info("cluster version changed",
+		zap.Stringer("old-cluster-version", clusterVersion),
+		zap.Stringer("new-cluster-version", minVersion))
 }
 
 func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
@@ -2350,4 +2351,14 @@ func newCacheCluster(c *RaftCluster) *cacheCluster {
 		RaftCluster: c,
 		stores:      c.GetStores(),
 	}
+}
+
+// GetPausedSchedulerDelayAt returns DelayAt of a paused scheduler
+func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
+	return c.coordinator.getPausedSchedulerDelayAt(name)
+}
+
+// GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
+func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+	return c.coordinator.getPausedSchedulerDelayUntil(name)
 }

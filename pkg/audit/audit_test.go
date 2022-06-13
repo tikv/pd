@@ -32,14 +32,18 @@ import (
 )
 
 func TestLabelMatcher(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
-	require.True(t, matcher.Match(labels1))
+	re.True(matcher.Match(labels1))
 	labels2 := &BackendLabels{Labels: []string{"testFail"}}
-	require.False(t, matcher.Match(labels2))
+	re.False(matcher.Match(labels2))
 }
 
 func TestPrometheusHistogramBackend(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -60,43 +64,44 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	info.ServiceLabel = "test"
 	info.Component = "user1"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	require.False(t, backend.ProcessHTTPRequest(req))
+	re.False(backend.ProcessHTTPRequest(req))
 
 	endTime := time.Now().Unix() + 20
 	req = req.WithContext(requestutil.WithEndTime(req.Context(), endTime))
 
-	require.True(t, backend.ProcessHTTPRequest(req))
-	require.True(t, backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
 
 	info.Component = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	require.True(t, backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
 	time.Sleep(1 * time.Second)
 	req, _ = http.NewRequest("GET", ts.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
+	re.NoError(err)
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	require.Contains(t, output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2")
-	require.Contains(t, output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1")
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
 	defer os.Remove(fname)
 	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
-	require.False(t, backend.ProcessHTTPRequest(req))
+	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-	require.True(t, backend.ProcessHTTPRequest(req))
+	re.True(backend.ProcessHTTPRequest(req))
 	b, _ := os.ReadFile(fname)
 	output := strings.SplitN(string(b), "]", 4)
-	require.Equal(
-		t,
+	re.Equal(
 		fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
 			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),

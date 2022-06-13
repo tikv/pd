@@ -18,31 +18,29 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-func TestTypeUtil(t *testing.T) {
-	TestingT(t)
+func TestMinUint64(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.Equal(uint64(1), MinUint64(1, 2))
+	re.Equal(uint64(1), MinUint64(2, 1))
+	re.Equal(uint64(1), MinUint64(1, 1))
 }
 
-var _ = Suite(&testMinMaxSuite{})
-
-type testMinMaxSuite struct{}
-
-func (s *testMinMaxSuite) TestMinUint64(c *C) {
-	c.Assert(MinUint64(1, 2), Equals, uint64(1))
-	c.Assert(MinUint64(2, 1), Equals, uint64(1))
-	c.Assert(MinUint64(1, 1), Equals, uint64(1))
+func TestMaxUint64(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.Equal(uint64(2), MaxUint64(1, 2))
+	re.Equal(uint64(2), MaxUint64(2, 1))
+	re.Equal(uint64(1), MaxUint64(1, 1))
 }
 
-func (s *testMinMaxSuite) TestMaxUint64(c *C) {
-	c.Assert(MaxUint64(1, 2), Equals, uint64(2))
-	c.Assert(MaxUint64(2, 1), Equals, uint64(2))
-	c.Assert(MaxUint64(1, 1), Equals, uint64(1))
-}
-
-func (s *testMinMaxSuite) TestMinDuration(c *C) {
-	c.Assert(MinDuration(time.Minute, time.Second), Equals, time.Second)
-	c.Assert(MinDuration(time.Second, time.Minute), Equals, time.Second)
-	c.Assert(MinDuration(time.Second, time.Second), Equals, time.Second)
+func TestMinDuration(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.Equal(time.Second, MinDuration(time.Minute, time.Second))
+	re.Equal(time.Second, MinDuration(time.Second, time.Minute))
+	re.Equal(time.Second, MinDuration(time.Second, time.Second))
 }

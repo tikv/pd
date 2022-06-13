@@ -24,77 +24,86 @@ import (
 )
 
 func TestEncryptionMethodSupported(t *testing.T) {
-	require.NotNil(t, CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
-	require.NotNil(t, CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
-	require.Nil(t, CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR))
-	require.Nil(t, CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR))
-	require.Nil(t, CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR))
+	t.Parallel()
+	re := require.New(t)
+	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
+	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR))
+	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR))
 }
 
 func TestKeyLength(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	_, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
-	require.NotNil(t, err)
+	re.Error(err)
 	_, err = KeyLength(encryptionpb.EncryptionMethod_UNKNOWN)
-	require.NotNil(t, err)
+	re.Error(err)
 	length, err := KeyLength(encryptionpb.EncryptionMethod_AES128_CTR)
-	require.NoError(t, err)
-	require.Equal(t, 16, length)
+	re.NoError(err)
+	re.Equal(16, length)
 	length, err = KeyLength(encryptionpb.EncryptionMethod_AES192_CTR)
-	require.NoError(t, err)
-	require.Equal(t, 24, length)
+	re.NoError(err)
+	re.Equal(24, length)
 	length, err = KeyLength(encryptionpb.EncryptionMethod_AES256_CTR)
-	require.NoError(t, err)
-	require.Equal(t, 32, length)
+	re.NoError(err)
+	re.Equal(32, length)
 }
 
 func TestNewIv(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	ivCtr, err := NewIvCTR()
-	require.NoError(t, err)
-	require.Len(t, []byte(ivCtr), ivLengthCTR)
+	re.NoError(err)
+	re.Len([]byte(ivCtr), ivLengthCTR)
 	ivGcm, err := NewIvGCM()
-	require.NoError(t, err)
-	require.Len(t, []byte(ivGcm), ivLengthGCM)
+	re.NoError(err)
+	re.Len([]byte(ivGcm), ivLengthGCM)
 }
 
 func TestNewDataKey(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	for _, method := range []encryptionpb.EncryptionMethod{
 		encryptionpb.EncryptionMethod_AES128_CTR,
 		encryptionpb.EncryptionMethod_AES192_CTR,
 		encryptionpb.EncryptionMethod_AES256_CTR,
 	} {
 		_, key, err := NewDataKey(method, uint64(123))
-		require.NoError(t, err)
+		re.NoError(err)
 		length, err := KeyLength(method)
-		require.NoError(t, err)
-		require.Len(t, key.Key, length)
-		require.Equal(t, method, key.Method)
-		require.False(t, key.WasExposed)
-		require.Equal(t, uint64(123), key.CreationTime)
+		re.NoError(err)
+		re.Len(key.Key, length)
+		re.Equal(method, key.Method)
+		re.False(key.WasExposed)
+		re.Equal(uint64(123), key.CreationTime)
 	}
 }
 
 func TestAesGcmCrypter(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	key, err := hex.DecodeString("ed568fbd8c8018ed2d042a4e5d38d6341486922d401d2022fb81e47c900d3f07")
-	require.NoError(t, err)
+	re.NoError(err)
 	plaintext, err := hex.DecodeString(
 		"5c873a18af5e7c7c368cb2635e5a15c7f87282085f4b991e84b78c5967e946d4")
-	require.NoError(t, err)
+	re.NoError(err)
 	// encrypt
 	ivBytes, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
-	require.NoError(t, err)
+	re.NoError(err)
 	iv := IvGCM(ivBytes)
 	ciphertext, err := aesGcmEncryptImpl(key, plaintext, iv)
-	require.NoError(t, err)
-	require.Len(t, []byte(iv), ivLengthGCM)
-	require.Equal(
-		t,
+	re.NoError(err)
+	re.Len([]byte(iv), ivLengthGCM)
+	re.Equal(
 		"bbb9b49546350880cf55d4e4eaccc831c506a4aeae7f6cda9c821d4cb8cfc269dcdaecb09592ef25d7a33b40d3f02208",
 		hex.EncodeToString(ciphertext),
 	)
 	// decrypt
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
-	require.NoError(t, err)
-	require.True(t, bytes.Equal(plaintext2, plaintext))
+	re.NoError(err)
+	re.True(bytes.Equal(plaintext2, plaintext))
 	// Modify ciphertext to test authentication failure. We modify the beginning of the ciphertext,
 	// which is the real ciphertext part, not the tag.
 	fakeCiphertext := make([]byte, len(ciphertext))
@@ -102,5 +111,5 @@ func TestAesGcmCrypter(t *testing.T) {
 	// ignore overflow
 	fakeCiphertext[0] = ciphertext[0] + 1
 	_, err = AesGcmDecrypt(key, fakeCiphertext, iv)
-	require.NotNil(t, err)
+	re.Error(err)
 }

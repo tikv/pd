@@ -21,27 +21,31 @@ import (
 )
 
 func TestDecodeBytes(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	key := "abcdefghijklmnopqrstuvwxyz"
 	for i := 0; i < len(key); i++ {
 		_, k, err := DecodeBytes(EncodeBytes([]byte(key[:i])))
-		require.NoError(t, err)
-		require.Equal(t, key[:i], string(k))
+		re.NoError(err)
+		re.Equal(key[:i], string(k))
 	}
 }
 
 func TestTableID(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	require.Equal(t, int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableID())
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	require.Equal(t, int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableID())
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	require.Equal(t, int64(0), key.TableID())
+	re.Equal(int64(0), key.TableID())
 
 	key = EncodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	require.Equal(t, int64(0), key.TableID())
+	re.Equal(int64(0), key.TableID())
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	require.Equal(t, int64(0), key.TableID())
+	re.Equal(int64(0), key.TableID())
 }

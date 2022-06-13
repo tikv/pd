@@ -63,7 +63,6 @@ type memberTestSuite struct {
 
 func (s *memberTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *memberTestSuite) TearDownSuite(c *C) {

@@ -22,7 +22,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
@@ -38,10 +37,6 @@ func Test(t *testing.T) {
 var _ = Suite(&hotRegionHistorySuite{})
 
 type hotRegionHistorySuite struct{}
-
-func (s *hotRegionHistorySuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *hotRegionHistorySuite) TestHotRegionStorage(c *C) {
 	statistics.Denoising = false

@@ -21,8 +21,10 @@ import (
 )
 
 func TestKeyUtil(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	startKey := []byte("a")
 	endKey := []byte("b")
 	key := BuildKeyRangeKey(startKey, endKey)
-	require.Equal(t, "61-62", key)
+	re.Equal("61-62", key)
 }

@@ -23,7 +23,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -43,7 +42,6 @@ type schedulerTestSuite struct {
 }
 
 func (s *schedulerTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
 	s.context, s.cancel = context.WithCancel(context.Background())
 }
 

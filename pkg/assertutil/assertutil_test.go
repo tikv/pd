@@ -22,11 +22,13 @@ import (
 )
 
 func TestNilFail(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	var failErr error
 	checker := NewChecker(func() {
 		failErr = errors.New("called assert func not exist")
 	})
-	require.Nil(t, checker.IsNil)
+	re.Nil(checker.IsNil)
 	checker.AssertNil(nil)
-	require.NotNil(t, failErr)
+	re.NotNil(failErr)
 }

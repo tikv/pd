@@ -15,9 +15,8 @@
 package testutil
 
 import (
+	"testing"
 	"time"
-
-	"github.com/pingcap/check"
 )
 
 const (
@@ -45,8 +44,8 @@ func WithSleepInterval(sleep time.Duration) WaitOption {
 }
 
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
-func WaitUntil(c *check.C, f func() bool, opts ...WaitOption) {
-	c.Log("wait start")
+func WaitUntil(t *testing.T, f func() bool, opts ...WaitOption) {
+	t.Log("wait start")
 	option := &WaitOp{
 		retryTimes:    waitMaxRetry,
 		sleepInterval: waitRetrySleep,
@@ -60,5 +59,5 @@ func WaitUntil(c *check.C, f func() bool, opts ...WaitOption) {
 		}
 		time.Sleep(option.sleepInterval)
 	}
-	c.Fatal("wait timeout")
+	t.Fatal("wait timeout")
 }

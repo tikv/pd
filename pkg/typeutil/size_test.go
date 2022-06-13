@@ -16,32 +16,32 @@ package typeutil
 
 import (
 	"encoding/json"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testSizeSuite{})
-
-type testSizeSuite struct {
-}
-
-func (s *testSizeSuite) TestJSON(c *C) {
+func TestSizeJSON(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	b := ByteSize(265421587)
 	o, err := json.Marshal(b)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	var nb ByteSize
 	err = json.Unmarshal(o, &nb)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	b = ByteSize(1756821276000)
 	o, err = json.Marshal(b)
-	c.Assert(err, IsNil)
-	c.Assert(string(o), Equals, `"1.598TiB"`)
+	re.NoError(err)
+	re.Equal(`"1.598TiB"`, string(o))
 }
 
-func (s *testSizeSuite) TestParseMbFromText(c *C) {
-	testdata := []struct {
+func TestParseMbFromText(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	testCases := []struct {
 		body []string
 		size uint64
 	}{{
@@ -55,9 +55,9 @@ func (s *testSizeSuite) TestParseMbFromText(c *C) {
 		size: uint64(1),
 	}}
 
-	for _, t := range testdata {
-		for _, b := range t.body {
-			c.Assert(int(ParseMBFromText(b, 1)), Equals, int(t.size))
+	for _, testCase := range testCases {
+		for _, b := range testCase.body {
+			re.Equal(int(testCase.size), int(ParseMBFromText(b, 1)))
 		}
 	}
 }

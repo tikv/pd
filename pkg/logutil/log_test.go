@@ -16,7 +16,6 @@ package logutil
 
 import (
 	"fmt"
-	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,16 +23,20 @@ import (
 )
 
 func TestStringToZapLogLevel(t *testing.T) {
-	require.Equal(t, zapcore.FatalLevel, StringToZapLogLevel("fatal"))
-	require.Equal(t, zapcore.ErrorLevel, StringToZapLogLevel("ERROR"))
-	require.Equal(t, zapcore.WarnLevel, StringToZapLogLevel("warn"))
-	require.Equal(t, zapcore.WarnLevel, StringToZapLogLevel("warning"))
-	require.Equal(t, zapcore.DebugLevel, StringToZapLogLevel("debug"))
-	require.Equal(t, zapcore.InfoLevel, StringToZapLogLevel("info"))
-	require.Equal(t, zapcore.InfoLevel, StringToZapLogLevel("whatever"))
+	t.Parallel()
+	re := require.New(t)
+	re.Equal(zapcore.FatalLevel, StringToZapLogLevel("fatal"))
+	re.Equal(zapcore.ErrorLevel, StringToZapLogLevel("ERROR"))
+	re.Equal(zapcore.WarnLevel, StringToZapLogLevel("warn"))
+	re.Equal(zapcore.WarnLevel, StringToZapLogLevel("warning"))
+	re.Equal(zapcore.DebugLevel, StringToZapLogLevel("debug"))
+	re.Equal(zapcore.InfoLevel, StringToZapLogLevel("info"))
+	re.Equal(zapcore.InfoLevel, StringToZapLogLevel("whatever"))
 }
 
 func TestRedactLog(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	testCases := []struct {
 		name            string
 		arg             interface{}
@@ -71,11 +74,11 @@ func TestRedactLog(t *testing.T) {
 		SetRedactLog(testCase.enableRedactLog)
 		switch r := testCase.arg.(type) {
 		case []byte:
-			require.True(t, reflect.DeepEqual(testCase.expect, RedactBytes(r)))
+			re.Equal(testCase.expect, RedactBytes(r))
 		case string:
-			require.True(t, reflect.DeepEqual(testCase.expect, RedactString(r)))
+			re.Equal(testCase.expect, RedactString(r))
 		case fmt.Stringer:
-			require.True(t, reflect.DeepEqual(testCase.expect, RedactStringer(r)))
+			re.Equal(testCase.expect, RedactStringer(r))
 		default:
 			panic("unmatched case")
 		}
