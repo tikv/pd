@@ -172,7 +172,7 @@ func (s *testServiceSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testServerServiceSuite) TestServiceLabels(c *C) {
+func (s *testServiceSuite) TestServiceLabels(c *C) {
 	accessPaths := s.svr.GetServiceLabels("Profile")
 	c.Assert(accessPaths, HasLen, 1)
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/debug/pprof/profile")

@@ -107,12 +107,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
 
-	setRateLimit := func(config ratelimit.DimensionConfig) createRouteOption {
-		return func(route *mux.Route) {
-			svr.UpdateServiceRateLimiter(route.GetName(), opts...)
-		}
-	}
-	allowList := ratelimit.AddLabelAllowList()
+	// following code is used for default config, but now there is no default config.
+	// setRateLimit := func(cfg *ratelimit.DimensionConfig) createRouteOption {
+	// 	return func(route *mux.Route) {
+	// 		opt := ratelimit.UpdateDimensionConfig(cfg)
+	// 		svr.UpdateServiceRateLimiter(route.GetName(), opt)
+	// 	}
+	// }
 	setRateLimitAllowList := func() createRouteOption {
 		return func(route *mux.Route) {
 			svr.UpdateServiceRateLimiter(route.GetName(), ratelimit.AddLabelAllowList())
