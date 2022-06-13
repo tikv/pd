@@ -327,21 +327,6 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*opera
 	return nil
 }
 
-type solution struct {
-	srcStore    *statistics.StoreLoadDetail
-	srcPeerStat *statistics.HotPeerStat
-	region      *core.RegionInfo
-	dstStore    *statistics.StoreLoadDetail
-
-	// progressiveRank measures the contribution for balance.
-	// The smaller the rank, the better this solution is.
-	// If progressiveRank <= 0, this solution makes thing better.
-	// 0 indicates that this is a solution that cannot be used directly, but can be optimized.
-	// 1 indicates that this is a non-optimizable solution.
-	// See `calcProgressiveRank` for more about progressive rank.
-	progressiveRank int64
-}
-
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
 func (bs *balanceSolver) getExtremeLoad(source, target *core.StoreInfo, dim int) (src float64, dst float64) {
 	sourceStore := bs.stLoadDetail[source.GetID()]

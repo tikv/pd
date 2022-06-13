@@ -231,24 +231,20 @@ func (s *balanceRegionScheduler) transferPeer(plan *schedulePlan) *operator.Oper
 		FilterTarget(s.solver.GetOpts(), filters...).
 		Sort(filter.RegionScoreComparer(s.solver.GetOpts()))
 
-	for _, target := range candidates.Stores {
-		newPlan := newSchedulePlan()
-		newPlan.source = plan.source.Clone()
-		newPlan.region = plan.region.Clone()
-		newPlan.target = target
-		regionID := newPlan.region.GetID()
-		sourceID := newPlan.source.GetID()
-		targetID := newPlan.target.GetID()
+	for _, plan.target = range candidates.Stores {
+		regionID := plan.region.GetID()
+		sourceID := plan.source.GetID()
+		targetID := plan.target.GetID()
 		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-		if !s.solver.shouldBalance(s.GetName(), newPlan) {
+		if !s.solver.shouldBalance(s.GetName(), plan) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 			continue
 		}
 
-		oldPeer := newPlan.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: newPlan.target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, s.solver, newPlan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		oldPeer := plan.region.GetStorePeer(sourceID)
+		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, s.solver, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
