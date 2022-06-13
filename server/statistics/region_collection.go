@@ -140,14 +140,12 @@ func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, r
 // due to some special state types.
 func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	regionID := region.GetID()
-	maxSize := int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize())
-	maxKeys := int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())
-	if r.IsRegionStatsType(regionID, OversizedRegion) != region.IsOversized(maxSize, maxKeys) {
+	if r.IsRegionStatsType(regionID, OversizedRegion) !=
+		region.IsOversized(int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()), int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())) {
 		return true
 	}
-	minSize := int64(r.opt.GetMaxMergeRegionSize())
-	minKeys := int64(r.opt.GetMaxMergeRegionKeys())
-	return r.IsRegionStatsType(regionID, UndersizedRegion) != region.IsUndersized(minSize, minKeys)
+	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
+		region.NeedMerge(int64(r.opt.GetMaxMergeRegionSize()), int64(r.opt.GetMaxMergeRegionKeys()))
 }
 
 // Observe records the current regions' status.
@@ -205,7 +203,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()),
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
 		),
-		UndersizedRegion: region.IsUndersized(
+		UndersizedRegion: region.NeedMerge(
 			int64(r.opt.GetMaxMergeRegionSize()),
 			int64(r.opt.GetMaxMergeRegionKeys()),
 		),
