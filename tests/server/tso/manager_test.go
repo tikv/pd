@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
@@ -42,7 +41,6 @@ type testManagerSuite struct {
 
 func (s *testManagerSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *testManagerSuite) TearDownSuite(c *C) {
