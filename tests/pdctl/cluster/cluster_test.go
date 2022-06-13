@@ -23,7 +23,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -37,10 +36,6 @@ func Test(t *testing.T) {
 var _ = Suite(&clusterTestSuite{})
 
 type clusterTestSuite struct{}
-
-func (s *clusterTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -37,10 +37,6 @@ var _ = Suite(&globalTestSuite{})
 
 type globalTestSuite struct{}
 
-func (s *globalTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
 func (s *globalTestSuite) TestSendAndGetComponent(c *C) {
 	handler := func(ctx context.Context, s *server.Server) (http.Handler, server.ServiceGroup, error) {
 		mux := http.NewServeMux()

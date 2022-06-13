@@ -78,7 +78,7 @@ func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newS
 	}
 
 	// If the min safepoint is updated, load the next one
-	if string(serviceID) == minServiceSafePoint.ServiceID {
+	if serviceID == minServiceSafePoint.ServiceID {
 		minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
 	}
 	return minServiceSafePoint, true, err
