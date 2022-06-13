@@ -125,7 +125,7 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 	source := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		KeepTheTopStores(isolationComparer, true).
-		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true)
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0
