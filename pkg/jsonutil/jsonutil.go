@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/reflectutil"
 )
 
+// AddKeyValue is used to add a key value pair into `old`
 func AddKeyValue(old interface{}, key string, value interface{}) (updated bool, found bool, err error) {
 	data, err := json.Marshal(map[string]interface{}{key: value})
 	if err != nil {
@@ -29,6 +30,7 @@ func AddKeyValue(old interface{}, key string, value interface{}) (updated bool, 
 	return MergeJsonObject(old, data)
 }
 
+// MergeJsonObject is used to merge a marshaled json object into v
 func MergeJsonObject(v interface{}, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
