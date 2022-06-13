@@ -34,6 +34,7 @@ func NewServiceMiddlewareConfig() *ServiceMiddlewareConfig {
 	}
 	ratelimit := RateLimitConfig{
 		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
 	}
 	cfg := &ServiceMiddlewareConfig{
 		AuditConfig:     audit,

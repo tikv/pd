@@ -15,7 +15,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,6 +28,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/server"
@@ -153,7 +153,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 		}
 		return h.updateReplicationModeConfig(cfg, kp[1:], value)
 	case "pd-server":
-		return updatePDServerConfig(h.svr, cfg, kp[len(kp)-1], value)
+		return h.updatePDServerConfig(cfg, kp[len(kp)-1], value)
 	case "log":
 		return h.updateLogLevel(kp, value)
 	case "cluster-version":
@@ -164,12 +164,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 }
 
 func (h *confHandler) updateSchedule(config *config.Config, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.Schedule, data)
+	updated, found, err := jsonutil.AddKeyValue(&config.Schedule, key, value)
 	if err != nil {
 		return err
 	}
@@ -185,12 +180,7 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value in
 }
 
 func (h *confHandler) updateReplication(config *config.Config, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.Replication, data)
+	updated, found, err := jsonutil.AddKeyValue(&config.Replication, key, value)
 	if err != nil {
 		return err
 	}
@@ -212,8 +202,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	if err != nil {
 		return err
 	}
-
-	updated, found, err := mergeConfig(&config.ReplicationMode, data)
+	updated, found, err := jsonutil.MergeJSONObject(&config.ReplicationMode, data)
 	if err != nil {
 		return err
 	}
@@ -228,13 +217,8 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	return err
 }
 
-func updatePDServerConfig(svr *server.Server, config *config.Config, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.PDServerCfg, data)
+func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(&config.PDServerCfg, key, value)
 	if err != nil {
 		return err
 	}
@@ -244,7 +228,7 @@ func updatePDServerConfig(svr *server.Server, config *config.Config, key string,
 	}
 
 	if updated {
-		err = svr.SetPDServerConfig(config.PDServerCfg)
+		err = h.svr.SetPDServerConfig(config.PDServerCfg)
 	}
 	return err
 }
@@ -284,23 +268,6 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 	subConfig := make(map[string]interface{})
 	cfg[key[0]] = getConfigMap(subConfig, key[1:], value)
 	return cfg
-}
-
-func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
-	old, _ := json.Marshal(v)
-	if err := json.Unmarshal(data, v); err != nil {
-		return false, false, err
-	}
-	new, _ := json.Marshal(v)
-	if !bytes.Equal(old, new) {
-		return true, true, nil
-	}
-	m := make(map[string]interface{})
-	if err := json.Unmarshal(data, &m); err != nil {
-		return false, false, err
-	}
-	found = reflectutil.FindSameFieldByJSON(v, m)
-	return false, found, nil
 }
 
 // @Tags config
