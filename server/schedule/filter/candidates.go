@@ -52,6 +52,7 @@ func (c *StoreCandidates) Sort(less StoreComparer) *StoreCandidates {
 }
 
 // Reverse reverses the candidate store list.
+// Deprecated function, only used in the tests.
 func (c *StoreCandidates) Reverse() *StoreCandidates {
 	for i := len(c.Stores)/2 - 1; i >= 0; i-- {
 		opp := len(c.Stores) - 1 - i
@@ -68,12 +69,50 @@ func (c *StoreCandidates) Shuffle() *StoreCandidates {
 
 // Top keeps all stores that have the same priority with the first store.
 // The store list should be sorted before calling Top.
+// Deprecated function, use KeepTheTopItems instead,only used in tests.
 func (c *StoreCandidates) Top(less StoreComparer) *StoreCandidates {
 	var i int
 	for i < len(c.Stores) && less(c.Stores[0], c.Stores[i]) == 0 {
 		i++
 	}
 	c.Stores = c.Stores[:i]
+	return c
+}
+
+// PickTheTopItem returns the first item order by asc.
+// it returns the min item when asc is true, return the max item when asc is false.
+func (c *StoreCandidates) PickTheTopItem(cmp StoreComparer, asc bool) *core.StoreInfo {
+	if len(c.Stores) == 0 {
+		return nil
+	}
+	topIdx := 0
+	for idx := 1; idx < len(c.Stores); idx++ {
+		compare := cmp(c.Stores[topIdx], c.Stores[idx])
+		if compare > 0 && asc || (!asc && compare < 0) {
+			topIdx = idx
+		}
+	}
+	return c.Stores[topIdx]
+}
+
+// KeepTheTopItems keeps the slice of the items in the front order by asc.
+func (c *StoreCandidates) KeepTheTopItems(cmp StoreComparer, asc bool) *StoreCandidates {
+	if len(c.Stores) <= 1 {
+		return c
+	}
+	topIdx := 0
+	for idx := 1; idx < c.Len(); idx++ {
+		compare := cmp(c.Stores[topIdx], c.Stores[idx])
+		if compare == 0 {
+			topIdx++
+		} else if compare > 0 && asc || (!asc && compare < 0) {
+			topIdx = 0
+		} else {
+			continue
+		}
+		c.Stores[idx], c.Stores[topIdx] = c.Stores[topIdx], c.Stores[idx]
+	}
+	c.Stores = c.Stores[:topIdx+1]
 	return c
 }
 

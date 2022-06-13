@@ -15,9 +15,10 @@
 package filter
 
 import (
+	"testing"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"testing"
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -71,6 +72,11 @@ func TestCandidates(t *testing.T) {
 	re.Nil(store)
 
 	cs = newTestCandidates(1, 3, 5, 7, 6, 2, 4)
+	minStore := cs.PickTheTopItem(idComparer, true)
+	re.Equal(uint64(1), minStore.GetID())
+	maxStore := cs.PickTheTopItem(idComparer, false)
+	re.Equal(uint64(7), maxStore.GetID())
+
 	cs.Sort(idComparer)
 	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.PickFirst()
@@ -89,6 +95,13 @@ func TestCandidates(t *testing.T) {
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
 	cs.Sort(idComparer).Reverse().Top(idComparer2)
 	check(re, cs, 33, 32, 31)
+
+	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
+	cs.KeepTheTopItems(idComparer2, false).Sort(idComparer).Reverse()
+	check(re, cs, 33, 32, 31)
+
+	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
+	cs.PickTheTopItem(idComparer, false)
 }
 
 func newTestCandidates(ids ...uint64) *StoreCandidates {
