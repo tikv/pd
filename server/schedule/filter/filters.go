@@ -17,6 +17,7 @@ package filter
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -25,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
@@ -37,7 +39,24 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				sourceID := strconv.FormatUint(s.GetID(), 10)
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
-					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+					sourceID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
+				return false
+			}
+			return true
+		})
+	})
+}
+
+// SelectSourceStores selects stores that be selected as source store from the list.
+func SelectSourceStoresWithDiagnosis(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions,
+	diagnosisController *diagnosis.DiagnosisController) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AllOf(filters, func(i int) bool {
+			if !filters[i].Source(opt, s) {
+				sourceID := strconv.FormatUint(s.GetID(), 10)
+				targetID := ""
+				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
+					sourceID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
 				return false
 			}
 			return true
@@ -58,7 +77,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
-					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+					targetID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
 				return false
 			}
 			return true
@@ -80,6 +99,8 @@ type Filter interface {
 	// Scope is used to indicate where the filter will act on.
 	Scope() string
 	Type() string
+	Reason() string
+	Metrics() string
 	// Return true if the store can be used as a source store.
 	Source(opt *config.PersistOptions, store *core.StoreInfo) bool
 	// Return true if the store can be used as a target store.
@@ -149,6 +170,14 @@ func (f *excludedFilter) Scope() string {
 }
 
 func (f *excludedFilter) Type() string {
+	return "exclude"
+}
+
+func (f *excludedFilter) Reason() string {
+	return "exclude"
+}
+
+func (f *excludedFilter) Metrics() string {
 	return "exclude-filter"
 }
 
@@ -175,6 +204,14 @@ func (f *storageThresholdFilter) Scope() string {
 }
 
 func (f *storageThresholdFilter) Type() string {
+	return "long-term-state"
+}
+
+func (f *storageThresholdFilter) Reason() string {
+	return "low-space"
+}
+
+func (f *storageThresholdFilter) Metrics() string {
 	return "storage-threshold-filter"
 }
 
@@ -240,6 +277,17 @@ func (f *distinctScoreFilter) Scope() string {
 }
 
 func (f *distinctScoreFilter) Type() string {
+	return "placement-state"
+}
+
+func (f *distinctScoreFilter) Reason() string {
+	if f.policy == locationImprove {
+		return "distinct-not-improve"
+	}
+	return "distinct-not-safeguard"
+}
+
+func (f *distinctScoreFilter) Metrics() string {
 	return "distinct-filter"
 }
 
@@ -300,7 +348,7 @@ type TemporaryStateFilter struct {
 	// Set true if the scatter move the region
 	ScatterRegion bool
 	// Reason is used to distinguish the reason of store state filter
-	Reason string
+	reason string
 	// StateType is used to distinguish the type of store state
 	StateType int
 }
@@ -312,37 +360,45 @@ func (f *TemporaryStateFilter) Scope() string {
 
 // Type returns the type of the Filter.
 func (f *TemporaryStateFilter) Type() string {
-	return fmt.Sprintf("store-state-%s-filter", f.Reason)
+	return "temporary-state"
+}
+
+func (f *TemporaryStateFilter) Reason() string {
+	return f.reason
+}
+
+func (f *TemporaryStateFilter) Metrics() string {
+	return fmt.Sprintf("store-state-%s-filter", f.reason)
 }
 
 func (f *TemporaryStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "disconnected"
+	f.reason = "disconnected"
 	return store.IsDisconnected()
 }
 
 func (f *TemporaryStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "busy"
+	f.reason = "busy"
 	return store.IsBusy()
 }
 
 func (f *TemporaryStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-remove-limit"
+	f.reason = "exceed-remove-limit"
 	return !store.IsAvailable(storelimit.RemovePeer)
 }
 
 func (f *TemporaryStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-add-limit"
+	f.reason = "exceed-add-limit"
 	return !store.IsAvailable(storelimit.AddPeer)
 }
 
 func (f *TemporaryStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-snapshot"
+	f.reason = "too-many-snapshot"
 	return (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount())
 }
 
 func (f *TemporaryStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-pending-peer"
+	f.reason = "too-many-pending-peer"
 	return opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
 }
@@ -407,7 +463,7 @@ type LongTermStateFilter struct {
 	// Set true if the scatter move the region
 	ScatterRegion bool
 	// Reason is used to distinguish the reason of store state filter
-	Reason string
+	reason string
 	// StateType is used to distinguish the type of store state
 	StateType int
 }
@@ -419,36 +475,44 @@ func (f *LongTermStateFilter) Scope() string {
 
 // Type returns the type of the Filter.
 func (f *LongTermStateFilter) Type() string {
+	return "long-term-state"
+}
+
+func (f *LongTermStateFilter) Reason() string {
+	return f.reason
+}
+
+func (f *LongTermStateFilter) Metrics() string {
 	return fmt.Sprintf("store-state-%s-filter", f.Reason)
 }
 
 func (f *LongTermStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "tombstone"
+	f.reason = "tombstone"
 	return store.IsRemoved()
 }
 
 func (f *LongTermStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "down"
+	f.reason = "down"
 	return store.DownTime() > opt.GetMaxStoreDownTime()
 }
 
 func (f *LongTermStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "offline"
+	f.reason = "offline"
 	return store.IsRemoving()
 }
 
 func (f *LongTermStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "pause-leader"
+	f.reason = "pause-leader"
 	return !store.AllowLeaderTransfer()
 }
 
 func (f *LongTermStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "slow-store"
+	f.reason = "slow-store"
 	return store.EvictedAsSlowStore()
 }
 
 func (f *LongTermStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "reject-leader"
+	f.reason = "reject-leader"
 	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
 }
 
@@ -508,26 +572,34 @@ type labelConstraintFilter struct {
 
 // NewLabelConstaintFilter creates a filter that selects stores satisfy the constraints.
 func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint) Filter {
-	return labelConstraintFilter{scope: scope, constraints: constraints}
+	return &labelConstraintFilter{scope: scope, constraints: constraints}
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
-func (f labelConstraintFilter) Scope() string {
+func (f *labelConstraintFilter) Scope() string {
 	return f.scope
 }
 
+func (f *labelConstraintFilter) Type() string {
+	return "placement-state"
+}
+
+func (f *labelConstraintFilter) Reason() string {
+	return "label-not-match"
+}
+
 // Type returns the name of the filter.
-func (f labelConstraintFilter) Type() string {
+func (f *labelConstraintFilter) Metrics() string {
 	return "label-constraint-filter"
 }
 
 // Source filters stores when select them as schedule source.
-func (f labelConstraintFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *labelConstraintFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
 // Target filters stores when select them as schedule target.
-func (f labelConstraintFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
+func (f *labelConstraintFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
@@ -559,6 +631,14 @@ func (f *ruleFitFilter) Scope() string {
 }
 
 func (f *ruleFitFilter) Type() string {
+	return "placement-state"
+}
+
+func (f *ruleFitFilter) Reason() string {
+	return "rule-not-fit"
+}
+
+func (f *ruleFitFilter) Metrics() string {
 	return "rule-fit-filter"
 }
 
@@ -606,6 +686,14 @@ func (f *ruleLeaderFitFilter) Scope() string {
 }
 
 func (f *ruleLeaderFitFilter) Type() string {
+	return "placement-state"
+}
+
+func (f *ruleLeaderFitFilter) Reason() string {
+	return "rule-not-fit"
+}
+
+func (f *ruleLeaderFitFilter) Metrics() string {
 	return "rule-fit-leader-filter"
 }
 
@@ -667,6 +755,14 @@ func (f *engineFilter) Scope() string {
 }
 
 func (f *engineFilter) Type() string {
+	return "engine"
+}
+
+func (f *engineFilter) Reason() string {
+	return "allowed-engine"
+}
+
+func (f *engineFilter) Metrics() string {
 	return "engine-filter"
 }
 
@@ -696,6 +792,14 @@ func (f *ordinaryEngineFilter) Scope() string {
 }
 
 func (f *ordinaryEngineFilter) Type() string {
+	return "engine"
+}
+
+func (f *ordinaryEngineFilter) Reason() string {
+	return "ordinary-engine"
+}
+
+func (f *ordinaryEngineFilter) Metrics() string {
 	return "ordinary-engine-filter"
 }
 
@@ -733,6 +837,14 @@ func (f *specialUseFilter) Scope() string {
 }
 
 func (f *specialUseFilter) Type() string {
+	return "placement-rule"
+}
+
+func (f *specialUseFilter) Reason() string {
+	return fmt.Sprintf("special-label-%s", strings.Join(f.constraint.Values, "-"))
+}
+
+func (f *specialUseFilter) Metrics() string {
 	return "special-use-filter"
 }
 
@@ -800,6 +912,14 @@ func (f *isolationFilter) Scope() string {
 }
 
 func (f *isolationFilter) Type() string {
+	return "placement-rule"
+}
+
+func (f *isolationFilter) Reason() string {
+	return "isolation-not-match"
+}
+
+func (f *isolationFilter) Metrics() string {
 	return "isolation-filter"
 }
 
@@ -868,6 +988,14 @@ func (f *RegionScoreFilter) Scope() string {
 
 // Type types region score filter
 func (f *RegionScoreFilter) Type() string {
+	return "comparor"
+}
+
+func (f *RegionScoreFilter) Reason() string {
+	return "region-score"
+}
+
+func (f *RegionScoreFilter) Metrics() string {
 	return "region-score-filter"
 }
 

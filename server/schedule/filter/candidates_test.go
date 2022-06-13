@@ -46,8 +46,10 @@ func idComparer2(a, b *core.StoreInfo) int {
 
 type idFilter func(uint64) bool
 
-func (f idFilter) Scope() string { return "idFilter" }
-func (f idFilter) Type() string  { return "idFilter" }
+func (f idFilter) Scope() string   { return "idFilter" }
+func (f idFilter) Metrics() string { return "idFilter" }
+func (f idFilter) Reason() string  { return "idFilter" }
+func (f idFilter) Type() string    { return "idFilter" }
 func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
 	return f(store.GetID())
 }

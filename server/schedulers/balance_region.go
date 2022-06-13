@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -76,6 +77,7 @@ type balanceRegionScheduler struct {
 	opController *schedule.OperatorController
 	filters      []filter.Filter
 	counter      *prometheus.CounterVec
+	*diagnosis.DiagnosisController
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
@@ -83,11 +85,12 @@ type balanceRegionScheduler struct {
 func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: base,
-		retryQuota:    newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
-		conf:          conf,
-		opController:  opController,
-		counter:       balanceRegionCounter,
+		BaseScheduler:       base,
+		retryQuota:          newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		conf:                conf,
+		opController:        opController,
+		counter:             balanceRegionCounter,
+		DiagnosisController: diagnosis.NewDiagnosisController(opController.Ctx()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -139,14 +142,19 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
+
+	// source init
+	stores := cluster.GetStores()
+
+	// source filter
 	stores = filter.SelectSourceStores(stores, s.filters, opts)
+
+	//
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	plan := newBalancePlan(kind, cluster, opInfluence)
-
 	sort.Slice(stores, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(stores[i].GetID())
 		jOp := plan.GetOpInfluence(stores[j].GetID())
