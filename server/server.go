@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/syncutil"
@@ -980,6 +981,32 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 	}
 	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
+}
+
+func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+	cfg := s.GetServiceMiddlewareConfig()
+	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
+	for label, item := range cfg.LimiterConfig {
+		rateLimitCfg[label] = item
+	}
+	rateLimitCfg[label] = value
+	return s.UpdateRateLimit(cfg, key, &rateLimitCfg)
+}
+
+func (s *Server) UpdateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(&config.RateLimitConfig, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = s.SetRateLimitConfig(config.RateLimitConfig)
+	}
+	return err
 }
 
 // GetRateLimitConfig gets the rate limit config information.

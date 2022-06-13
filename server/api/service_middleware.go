@@ -110,7 +110,7 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 	case "audit":
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
 	case "rate-limit":
-		return h.updateRateLimit(cfg, kp[len(kp)-1], value)
+		return h.svr.UpdateRateLimit(cfg, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
@@ -129,32 +129,6 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 		err = h.svr.SetAuditConfig(config.AuditConfig)
 	}
 	return err
-}
-
-func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.RateLimitConfig, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetRateLimitConfig(config.RateLimitConfig)
-	}
-	return err
-}
-
-func (h *serviceMiddlewareHandler) updateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
-	cfg := h.svr.GetServiceMiddlewareConfig()
-	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.LimiterConfig {
-		rateLimitCfg[label] = item
-	}
-	rateLimitCfg[label] = value
-	return h.updateRateLimit(cfg, key, &rateLimitCfg)
 }
 
 // @Tags service_middleware
@@ -245,7 +219,7 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		case status&ratelimit.ConcurrencyDeleted != 0:
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
-		err := h.updateRateLimitConfig("limiter-config", serviceLabel, cfg)
+		err := h.svr.UpdateRateLimitConfig("limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
