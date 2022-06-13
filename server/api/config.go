@@ -202,7 +202,7 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	if err != nil {
 		return err
 	}
-	updated, found, err := jsonutil.MergeJsonObject(&config.ReplicationMode, data)
+	updated, found, err := jsonutil.MergeJSONObject(&config.ReplicationMode, data)
 	if err != nil {
 		return err
 	}

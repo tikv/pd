@@ -27,11 +27,11 @@ func AddKeyValue(old interface{}, key string, value interface{}) (updated bool, 
 	if err != nil {
 		return false, false, err
 	}
-	return MergeJsonObject(old, data)
+	return MergeJSONObject(old, data)
 }
 
-// MergeJsonObject is used to merge a marshaled json object into v
-func MergeJsonObject(v interface{}, data []byte) (updated bool, found bool, err error) {
+// MergeJSONObject is used to merge a marshaled json object into v
+func MergeJSONObject(v interface{}, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
 		return false, false, err
