@@ -72,12 +72,12 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetOpts(), filters...).
-		KeepTheTopItems(isolationComparer, false) // greater isolation score is better
+		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
 		return 0, false
 	}
 	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), strictStateFilter).
-		PickTheTopItem(filter.RegionScoreComparer(s.cluster.GetOpts()), true) // less region score is better
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true) // less region score is better
 	if target == nil {
 		return 0, true // filter by temporary states
 	}
@@ -124,8 +124,8 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	source := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
-		KeepTheTopItems(isolationComparer, true).
-		PickTheTopItem(filter.RegionScoreComparer(s.cluster.GetOpts()), true)
+		KeepTheTopStores(isolationComparer, true).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true)
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0

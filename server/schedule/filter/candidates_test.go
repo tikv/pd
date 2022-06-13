@@ -72,9 +72,9 @@ func TestCandidates(t *testing.T) {
 	re.Nil(store)
 
 	cs = newTestCandidates(1, 3, 5, 7, 6, 2, 4)
-	minStore := cs.PickTheTopItem(idComparer, true)
+	minStore := cs.PickTheTopStore(idComparer, true)
 	re.Equal(uint64(1), minStore.GetID())
-	maxStore := cs.PickTheTopItem(idComparer, false)
+	maxStore := cs.PickTheTopStore(idComparer, false)
 	re.Equal(uint64(7), maxStore.GetID())
 
 	cs.Sort(idComparer)
@@ -97,11 +97,11 @@ func TestCandidates(t *testing.T) {
 	check(re, cs, 33, 32, 31)
 
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
-	cs.KeepTheTopItems(idComparer2, false).Sort(idComparer).Reverse()
+	cs.KeepTheTopStores(idComparer2, false).Sort(idComparer).Reverse()
 	check(re, cs, 33, 32, 31)
 
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
-	cs.PickTheTopItem(idComparer, false)
+	cs.PickTheTopStore(idComparer, false)
 }
 
 func newTestCandidates(ids ...uint64) *StoreCandidates {
