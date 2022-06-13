@@ -62,5 +62,4 @@ func TestJSONUtil(t *testing.T) {
 	re.NoError(err)
 	re.False(update)
 	re.True(found)
-
 }
