@@ -234,12 +234,6 @@ func (r *RegionInfo) IsOversized(maxSize int64, maxKeys int64) bool {
 	return r.GetApproximateSize() >= maxSize || r.GetApproximateKeys() >= maxKeys
 }
 
-// IsUndersized indicates whether the region is undersized.
-// PS: This is an alias of `NeedMerge`.
-func (r *RegionInfo) IsUndersized(minSize int64, minKeys int64) bool {
-	return r.NeedMerge(minSize, minKeys)
-}
-
 // GetTerm returns the current term of the region
 func (r *RegionInfo) GetTerm() uint64 {
 	return r.term
