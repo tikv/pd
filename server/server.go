@@ -984,6 +984,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 	return nil
 }
 
+// UpdateRateLimitConfig is used to update rate-limit config which will reserve old limiter-config
 func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
@@ -994,6 +995,7 @@ func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.Dimens
 	return s.UpdateRateLimit(cfg, key, &rateLimitCfg)
 }
 
+// UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
 func (s *Server) UpdateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
 	updated, found, err := jsonutil.AddKeyValue(&config.RateLimitConfig, key, value)
 	if err != nil {
