@@ -58,10 +58,10 @@ func TestGetLoads(t *testing.T) {
 
 	loads = regionA.GetWriteLoads()
 	re.Len(loads, int(RegionStatCount))
-	re.Equal(loads[RegionReadBytes], 0.0)
-	re.Equal(loads[RegionReadKeys], 0.0)
-	re.Equal(loads[RegionReadQuery], 0.0)
-	re.Equal(loads[RegionWriteBytes], float64(regionA.GetBytesWritten()))
-	re.Equal(loads[RegionWriteKeys], float64(regionA.GetKeysWritten()))
-	re.Equal(loads[RegionWriteQuery], float64(regionA.GetWriteQueryNum()))
+	re.Equal(0.0, loads[RegionReadBytes])
+	re.Equal(0.0, loads[RegionReadKeys])
+	re.Equal(0.0, loads[RegionReadQuery])
+	re.Equal(float64(regionA.GetBytesWritten()), loads[RegionWriteBytes])
+	re.Equal(float64(regionA.GetKeysWritten()), loads[RegionWriteKeys])
+	re.Equal(float64(regionA.GetWriteQueryNum()), loads[RegionWriteQuery])
 }
