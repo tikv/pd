@@ -907,6 +907,7 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 }
 
 // GetMaxMergeRegionKeys returns the max merge keys.
+// it should keep consistent with tikv: https://github.com/tikv/tikv/pull/12484
 func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	if keys := c.MaxMergeRegionKeys; keys != 0 {
 		return keys
