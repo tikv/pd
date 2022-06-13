@@ -112,6 +112,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// 	return func(route *mux.Route) {
 	// 		opt := ratelimit.UpdateDimensionConfig(cfg)
 	// 		svr.UpdateServiceRateLimiter(route.GetName(), opt)
+	// 		svr.UpdateRateLimitConfig("limiter-config", route.GetName(), *cfg)
 	// 	}
 	// }
 	setRateLimitAllowList := func() createRouteOption {
