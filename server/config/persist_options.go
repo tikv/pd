@@ -260,6 +260,20 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// SetMaxMergeRegionSize sets the max merge region size.
+func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxMergeRegionKeys sets the max merge region keys.
+func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionKeys = maxMergeRegionKeys
+	o.SetScheduleConfig(v)
+}
+
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
