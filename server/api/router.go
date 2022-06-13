@@ -237,6 +237,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/confver", regionsHandler.GetTopConfVerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/version", regionsHandler.GetTopVersionRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/size", regionsHandler.GetTopSizeRegions, setMethods("GET"))
+	registerFunc(clusterRouter, "/regions/keys", regionsHandler.GetTopKeysRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/miss-peer", regionsHandler.GetMissPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/extra-peer", regionsHandler.GetExtraPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/pending-peer", regionsHandler.GetPendingPeerRegions, setMethods("GET"))
@@ -280,7 +281,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))

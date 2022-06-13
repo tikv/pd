@@ -39,6 +39,8 @@ var (
 	errNoNewLeader        = errors.New("no new leader")
 )
 
+const maxPendingListLen = 100000
+
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
@@ -46,6 +48,7 @@ type RuleChecker struct {
 	ruleManager       *placement.RuleManager
 	name              string
 	regionWaitingList cache.Cache
+	pendingList       cache.Cache
 	record            *recorder
 }
 
@@ -56,6 +59,7 @@ func NewRuleChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager
 		ruleManager:       ruleManager,
 		name:              "rule-checker",
 		regionWaitingList: regionWaitingList,
+		pendingList:       cache.NewDefaultCache(maxPendingListLen),
 		record:            newRecord(),
 	}
 }
@@ -107,6 +111,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	if err != nil {
 		log.Debug("fail to fix orphan peer", errs.ZapError(err))
 	} else if op != nil {
+		c.pendingList.Remove(region.GetID())
 		return op
 	}
 	for _, rf := range fit.RuleFits {
@@ -116,6 +121,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			continue
 		}
 		if op != nil {
+			c.pendingList.Remove(region.GetID())
 			return op
 		}
 	}
@@ -161,10 +167,10 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
-		c.regionWaitingList.Put(region.GetID(), nil)
+		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
@@ -179,10 +185,10 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 // The peer's store may in Offline or Down, need to be replace.
 func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	ruleStores := c.getRuleFitStores(rf)
-	store := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
-		c.regionWaitingList.Put(region.GetID(), nil)
+		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
@@ -287,9 +293,10 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
+		c.handleFilterState(region, filterByTempState)
 		return nil, nil
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
@@ -376,6 +383,15 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 		}
 	}
 	return stores
+}
+
+func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
+	if filterByTempState {
+		c.regionWaitingList.Put(region.GetID(), nil)
+		c.pendingList.Remove(region.GetID())
+	} else {
+		c.pendingList.Put(region.GetID(), nil)
+	}
 }
 
 type recorder struct {

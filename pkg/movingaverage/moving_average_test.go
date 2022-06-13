@@ -20,16 +20,8 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testMovingAvg{})
-
-type testMovingAvg struct{}
 
 func addRandData(ma MovingAvg, n int, mx float64) {
 	rand.Seed(time.Now().UnixNano())
@@ -40,55 +32,57 @@ func addRandData(ma MovingAvg, n int, mx float64) {
 
 // checkReset checks the Reset works properly.
 // emptyValue is the moving average of empty data set.
-func checkReset(c *C, ma MovingAvg, emptyValue float64) {
+func checkReset(re *require.Assertions, ma MovingAvg, emptyValue float64) {
 	addRandData(ma, 100, 1000)
 	ma.Reset()
-	c.Assert(ma.Get(), Equals, emptyValue)
+	re.Equal(emptyValue, ma.Get())
 }
 
 // checkAddGet checks Add works properly.
-func checkAdd(c *C, ma MovingAvg, data []float64, expected []float64) {
-	c.Assert(len(data), Equals, len(expected))
+func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []float64) {
+	re.Equal(len(expected), len(data))
 	for i, x := range data {
 		ma.Add(x)
-		c.Assert(math.Abs(ma.Get()-expected[i]), LessEqual, 1e-7)
+		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
 	}
 }
 
 // checkSet checks Set = Reset + Add
-func checkSet(c *C, ma MovingAvg, data []float64, expected []float64) {
-	c.Assert(len(data), Equals, len(expected))
+func checkSet(re *require.Assertions, ma MovingAvg, data []float64, expected []float64) {
+	re.Equal(len(expected), len(data))
 
 	// Reset + Add
 	addRandData(ma, 100, 1000)
 	ma.Reset()
-	checkAdd(c, ma, data, expected)
+	checkAdd(re, ma, data, expected)
 
 	// Set
 	addRandData(ma, 100, 1000)
 	ma.Set(data[0])
-	c.Assert(ma.Get(), Equals, expected[0])
-	checkAdd(c, ma, data[1:], expected[1:])
+	re.Equal(expected[0], ma.Get())
+	checkAdd(re, ma, data[1:], expected[1:])
 }
 
 // checkInstantaneous checks GetInstantaneous
-func checkInstantaneous(c *C, ma MovingAvg) {
+func checkInstantaneous(re *require.Assertions, ma MovingAvg) {
 	value := 100.000000
 	ma.Add(value)
-	c.Assert(ma.GetInstantaneous(), Equals, value)
+	re.Equal(value, ma.GetInstantaneous())
 }
 
-func (t *testMovingAvg) TestMedianFilter(c *C) {
+func TestMedianFilter(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{2, 4, 2, 800, 600, 6, 3}
 	expected := []float64{2, 3, 2, 3, 4, 6, 6}
 
 	mf := NewMedianFilter(5)
-	c.Assert(mf.Get(), Equals, empty)
+	re.Equal(empty, mf.Get())
 
-	checkReset(c, mf, empty)
-	checkAdd(c, mf, data, expected)
-	checkSet(c, mf, data, expected)
+	checkReset(re, mf, empty)
+	checkAdd(re, mf, data, expected)
+	checkSet(re, mf, data, expected)
 }
 
 type testCase struct {
@@ -96,7 +90,9 @@ type testCase struct {
 	expected []float64
 }
 
-func (t *testMovingAvg) TestMovingAvg(c *C) {
+func TestMovingAvg(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{1, 1, 1, 1, 5, 1, 1, 1}
 	testCases := []testCase{{
@@ -116,11 +112,11 @@ func (t *testMovingAvg) TestMovingAvg(c *C) {
 		expected: []float64{1.000000, 1.000000, 1.000000, 1.000000, 5.000000, 5.000000, 5.000000, 5.000000},
 	},
 	}
-	for _, test := range testCases {
-		c.Assert(test.ma.Get(), Equals, empty)
-		checkReset(c, test.ma, empty)
-		checkAdd(c, test.ma, data, test.expected)
-		checkSet(c, test.ma, data, test.expected)
-		checkInstantaneous(c, test.ma)
+	for _, testCase := range testCases {
+		re.Equal(empty, testCase.ma.Get())
+		checkReset(re, testCase.ma, empty)
+		checkAdd(re, testCase.ma, data, testCase.expected)
+		checkSet(re, testCase.ma, data, testCase.expected)
+		checkInstantaneous(re, testCase.ma)
 	}
 }

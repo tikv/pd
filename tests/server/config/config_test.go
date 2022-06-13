@@ -48,7 +48,6 @@ type testConfigPresistSuite struct {
 
 func (s *testConfigPresistSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	s.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)

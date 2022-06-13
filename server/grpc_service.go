@@ -933,7 +933,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -967,7 +967,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1000,7 +1000,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1295,8 +1295,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	safePoint, err := storage.LoadGCSafePoint()
+	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -1335,19 +1334,13 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	oldSafePoint, err := storage.LoadGCSafePoint()
+	newSafePoint := request.GetSafePoint()
+	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
 	if err != nil {
 		return nil, err
 	}
 
-	newSafePoint := request.SafePoint
-
-	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := storage.SaveGCSafePoint(newSafePoint); err != nil {
-			return nil, err
-		}
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {

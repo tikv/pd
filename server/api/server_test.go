@@ -62,7 +62,6 @@ var (
 )
 
 func TestAPIServer(t *testing.T) {
-	server.EnableZap = true
 	TestingT(t)
 }
 
@@ -154,14 +153,14 @@ func mustBootstrapCluster(c *C, s *server.Server) {
 	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }
 
-var _ = Suite(&testServerServiceSuite{})
+var _ = Suite(&testServiceSuite{})
 
-type testServerServiceSuite struct {
+type testServiceSuite struct {
 	svr     *server.Server
 	cleanup cleanUpFunc
 }
 
-func (s *testServerServiceSuite) SetUpSuite(c *C) {
+func (s *testServiceSuite) SetUpSuite(c *C) {
 	s.svr, s.cleanup = mustNewServer(c)
 	mustWaitLeader(c, []*server.Server{s.svr})
 
@@ -169,11 +168,11 @@ func (s *testServerServiceSuite) SetUpSuite(c *C) {
 	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
-func (s *testServerServiceSuite) TearDownSuite(c *C) {
+func (s *testServiceSuite) TearDownSuite(c *C) {
 	s.cleanup()
 }
 
-func (s *testServerServiceSuite) TestServiceLabels(c *C) {
+func (s *testServiceSuite) TestServiceLabels(c *C) {
 	accessPaths := s.svr.GetServiceLabels("Profile")
 	c.Assert(accessPaths, HasLen, 1)
 	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/debug/pprof/profile")

@@ -15,26 +15,32 @@
 package movingaverage
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-func (t *testMovingAvg) TestQueue(c *C) {
+func TestQueue(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	sq := NewSafeQueue()
 	sq.PushBack(1)
 	sq.PushBack(2)
 	v1 := sq.PopFront()
 	v2 := sq.PopFront()
-	c.Assert(1, Equals, v1.(int))
-	c.Assert(2, Equals, v2.(int))
+	re.Equal(1, v1.(int))
+	re.Equal(2, v2.(int))
 }
 
-func (t *testMovingAvg) TestClone(c *C) {
+func TestClone(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	s1 := NewSafeQueue()
 	s1.PushBack(1)
 	s1.PushBack(2)
 	s2 := s1.Clone()
 	s2.PopFront()
 	s2.PopFront()
-	c.Assert(s1.que.Len(), Equals, 2)
-	c.Assert(s2.que.Len(), Equals, 0)
+	re.Equal(2, s1.que.Len())
+	re.Equal(0, s2.que.Len())
 }

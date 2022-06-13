@@ -280,13 +280,10 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	for _, region := range regions {
 		if !schedule.IsRegionReplicated(rc, region) {
 			state = "INPROGRESS"
-			for _, item := range rc.GetCoordinator().GetWaitingRegions() {
-				if item.Key == region.GetID() {
-					state = "PENDING"
-					break
-				}
+			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
+				state = "PENDING"
+				break
 			}
-			break
 		}
 	}
 	failpoint.Inject("mockPending", func(val failpoint.Value) {
@@ -755,6 +752,19 @@ func (h *regionsHandler) GetTopVersionRegions(w http.ResponseWriter, r *http.Req
 func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateSize() < b.GetApproximateSize()
+	})
+}
+
+// @Tags region
+// @Summary List regions with the largest keys.
+// @Param limit query integer false "Limit count" default(16)
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/keys [get]
+func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetApproximateKeys() < b.GetApproximateKeys()
 	})
 }
 

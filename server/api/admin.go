@@ -116,25 +116,3 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	}
 	h.rd.Text(w, http.StatusOK, "")
 }
-
-// Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server.
-func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
-		return
-	}
-	memberIDValue, ok := input["member_id"].(string)
-	if !ok || len(memberIDValue) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
-		return
-	}
-	memberID, err := strconv.ParseUint(memberIDValue, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
-		return
-	}
-	cluster := getCluster(r)
-	cluster.GetReplicationMode().UpdateMemberWaitAsyncTime(memberID)
-	h.rd.JSON(w, http.StatusOK, nil)
-}

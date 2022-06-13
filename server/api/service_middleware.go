@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/server"
@@ -115,12 +116,7 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 }
 
 func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.AuditConfig, data)
+	updated, found, err := jsonutil.AddKeyValue(&config.AuditConfig, key, value)
 	if err != nil {
 		return err
 	}
@@ -136,12 +132,7 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 }
 
 func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
-	data, err := json.Marshal(map[string]interface{}{key: value})
-	if err != nil {
-		return err
-	}
-
-	updated, found, err := mergeConfig(&config.RateLimitConfig, data)
+	updated, found, err := jsonutil.AddKeyValue(&config.RateLimitConfig, key, value)
 	if err != nil {
 		return err
 	}

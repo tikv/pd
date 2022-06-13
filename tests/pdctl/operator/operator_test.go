@@ -23,7 +23,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -38,10 +37,6 @@ func Test(t *testing.T) {
 var _ = Suite(&operatorTestSuite{})
 
 type operatorTestSuite struct{}
-
-func (s *operatorTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *operatorTestSuite) TestOperator(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -39,7 +38,6 @@ type testTSOSuite struct {
 
 func (s *testTSOSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *testTSOSuite) TearDownSuite(c *C) {

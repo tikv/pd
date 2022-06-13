@@ -17,18 +17,16 @@ package core
 import (
 	"math"
 	"sync"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testDistinctScoreSuite{})
-
-type testDistinctScoreSuite struct{}
-
-func (s *testDistinctScoreSuite) TestDistinctScore(c *C) {
+func TestDistinctScore(t *testing.T) {
+	re := require.New(t)
 	labels := []string{"zone", "rack", "host"}
 	zones := []string{"z1", "z2", "z3"}
 	racks := []string{"r1", "r2", "r3"}
@@ -54,19 +52,15 @@ func (s *testDistinctScoreSuite) TestDistinctScore(c *C) {
 				// Number of stores in the same rack but in different hosts.
 				numHosts := k
 				score := (numZones*replicaBaseScore+numRacks)*replicaBaseScore + numHosts
-				c.Assert(DistinctScore(labels, stores, store), Equals, float64(score))
+				re.Equal(float64(score), DistinctScore(labels, stores, store))
 			}
 		}
 	}
 	store := NewStoreInfoWithLabel(100, 1, nil)
-	c.Assert(DistinctScore(labels, stores, store), Equals, float64(0))
+	re.Equal(float64(0), DistinctScore(labels, stores, store))
 }
 
-var _ = Suite(&testConcurrencySuite{})
-
-type testConcurrencySuite struct{}
-
-func (s *testConcurrencySuite) TestCloneStore(c *C) {
+func TestCloneStore(t *testing.T) {
 	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	start := time.Now()
@@ -96,11 +90,8 @@ func (s *testConcurrencySuite) TestCloneStore(c *C) {
 	wg.Wait()
 }
 
-var _ = Suite(&testStoreSuite{})
-
-type testStoreSuite struct{}
-
-func (s *testStoreSuite) TestRegionScore(c *C) {
+func TestRegionScore(t *testing.T) {
+	re := require.New(t)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = 512 * (1 << 20)  // 512 MB
 	stats.Available = 100 * (1 << 20) // 100 MB
@@ -113,22 +104,24 @@ func (s *testStoreSuite) TestRegionScore(c *C) {
 	)
 	score := store.RegionScore("v1", 0.7, 0.9, 0)
 	// Region score should never be NaN, or /store API would fail.
-	c.Assert(math.IsNaN(score), IsFalse)
+	re.False(math.IsNaN(score))
 }
 
-func (s *testStoreSuite) TestLowSpaceRatio(c *C) {
+func TestLowSpaceRatio(t *testing.T) {
+	re := require.New(t)
 	store := NewStoreInfoWithLabel(1, 20, nil)
 	store.rawStats.Capacity = initialMinSpace << 4
 	store.rawStats.Available = store.rawStats.Capacity >> 3
 
-	c.Assert(store.IsLowSpace(0.8), IsFalse)
+	re.False(store.IsLowSpace(0.8))
 	store.regionCount = 31
-	c.Assert(store.IsLowSpace(0.8), IsTrue)
+	re.True(store.IsLowSpace(0.8))
 	store.rawStats.Available = store.rawStats.Capacity >> 2
-	c.Assert(store.IsLowSpace(0.8), IsFalse)
+	re.False(store.IsLowSpace(0.8))
 }
 
-func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
+func TestLowSpaceScoreV2(t *testing.T) {
+	re := require.New(t)
 	testdata := []struct {
 		bigger *StoreInfo
 		small  *StoreInfo
@@ -172,6 +165,6 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 	for _, v := range testdata {
 		score1 := v.bigger.regionScoreV2(0, 0.8)
 		score2 := v.small.regionScoreV2(0, 0.8)
-		c.Assert(score1, Greater, score2)
+		re.Greater(score1, score2)
 	}
 }

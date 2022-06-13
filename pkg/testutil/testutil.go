@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
 
@@ -53,6 +54,7 @@ func WithSleepInterval(sleep time.Duration) WaitOption {
 }
 
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
+// NOTICE: this function will be removed soon, please use `Eventually` instead.
 func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 	c.Log("wait start")
 	option := &WaitOp{
@@ -71,6 +73,22 @@ func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 	c.Fatal("wait timeout")
 }
 
+// Eventually asserts that given condition will be met in a period of time.
+func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+	option := &WaitOp{
+		retryTimes:    waitMaxRetry,
+		sleepInterval: waitRetrySleep,
+	}
+	for _, opt := range opts {
+		opt(option)
+	}
+	re.Eventually(
+		condition,
+		option.sleepInterval*time.Duration(option.retryTimes),
+		option.sleepInterval,
+	)
+}
+
 // NewRequestHeader creates a new request header.
 func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
@@ -83,6 +101,15 @@ func MustNewGrpcClient(c *check.C, addr string) pdpb.PDClient {
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 
 	c.Assert(err, check.IsNil)
+	return pdpb.NewPDClient(conn)
+}
+
+// MustNewGrpcClientWithTestify must create a new grpc client.
+// NOTICE: this is a temporary function that we will be used to replace `MustNewGrpcClient` later.
+func MustNewGrpcClientWithTestify(re *require.Assertions, addr string) pdpb.PDClient {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+
+	re.NoError(err)
 	return pdpb.NewPDClient(conn)
 }
 

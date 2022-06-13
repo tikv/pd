@@ -23,7 +23,6 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -38,10 +37,6 @@ func Test(t *testing.T) {
 var _ = Suite(&labelTestSuite{})
 
 type labelTestSuite struct{}
-
-func (s *labelTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *labelTestSuite) TestLabel(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())

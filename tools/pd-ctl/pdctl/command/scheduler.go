@@ -104,6 +104,7 @@ func NewShowSchedulerCommand() *cobra.Command {
 		Run:   showSchedulerCommandFunc,
 	}
 	c.Flags().String("status", "", "the scheduler status value can be [paused | disabled]")
+	c.Flags().BoolP("timestamp", "t", false, "fetch the paused and resume timestamp for paused scheduler(s)")
 	return c
 }
 
@@ -116,6 +117,9 @@ func showSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	url := schedulersPrefix
 	if flag := cmd.Flag("status"); flag != nil && flag.Value.String() != "" {
 		url = fmt.Sprintf("%s?status=%s", url, flag.Value.String())
+		if tsFlag, _ := cmd.Flags().GetBool("timestamp"); tsFlag {
+			url += "&timestamp=true"
+		}
 	}
 	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
