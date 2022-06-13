@@ -188,8 +188,7 @@ func (s *testRateLimitConfigSuite) TestConfigLimiterConifgByOriginAPI(c *C) {
 		"CreateOperator": dimensionConfig,
 	}
 	ms := map[string]interface{}{
-		"enable-rate-limit": "true",
-		"limiter-config":    limiterConfig,
+		"limiter-config": limiterConfig,
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
