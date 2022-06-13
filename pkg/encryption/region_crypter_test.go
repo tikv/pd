@@ -70,6 +70,7 @@ func (m *testKeyManager) GetKey(keyID uint64) (*encryptionpb.DataKey, error) {
 }
 
 func TestNilRegion(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	m := newTestKeyManager()
 	region, err := EncryptRegion(nil, m)
@@ -80,6 +81,7 @@ func TestNilRegion(t *testing.T) {
 }
 
 func TestEncryptRegionWithoutKeyManager(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	region := &metapb.Region{
 		Id:             10,
@@ -96,6 +98,7 @@ func TestEncryptRegionWithoutKeyManager(t *testing.T) {
 }
 
 func TestEncryptRegionWhileEncryptionDisabled(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	region := &metapb.Region{
 		Id:             10,
@@ -114,6 +117,7 @@ func TestEncryptRegionWhileEncryptionDisabled(t *testing.T) {
 }
 
 func TestEncryptRegion(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	startKey := []byte("abc")
 	endKey := []byte("xyz")
@@ -148,6 +152,7 @@ func TestEncryptRegion(t *testing.T) {
 }
 
 func TestDecryptRegionNotEncrypted(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	region := &metapb.Region{
 		Id:             10,
@@ -165,6 +170,7 @@ func TestDecryptRegionNotEncrypted(t *testing.T) {
 }
 
 func TestDecryptRegionWithoutKeyManager(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	region := &metapb.Region{
 		Id:       10,
@@ -180,6 +186,7 @@ func TestDecryptRegionWithoutKeyManager(t *testing.T) {
 }
 
 func TestDecryptRegionWhileKeyMissing(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	keyID := uint64(3)
 	m := newTestKeyManager()
@@ -200,6 +207,7 @@ func TestDecryptRegionWhileKeyMissing(t *testing.T) {
 }
 
 func TestDecryptRegion(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	keyID := uint64(1)
 	startKey := []byte("abc")

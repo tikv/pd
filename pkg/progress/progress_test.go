@@ -24,6 +24,7 @@ import (
 )
 
 func TestProgress(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	n := "test"
 	m := NewManager()
@@ -69,6 +70,7 @@ func TestProgress(t *testing.T) {
 }
 
 func TestAbnormal(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	n := "test"
 	m := NewManager()

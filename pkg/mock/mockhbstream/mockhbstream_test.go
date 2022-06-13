@@ -30,6 +30,7 @@ import (
 )
 
 func TestActivity(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -48,13 +49,13 @@ func TestActivity(t *testing.T) {
 
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
@@ -65,7 +66,7 @@ func TestActivity(t *testing.T) {
 	re.NotNil(res.GetHeader().GetError())
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
-	testutil.WaitUntilWithTestingT(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})

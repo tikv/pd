@@ -17,19 +17,12 @@ package placement
 import (
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 )
 
-func TestPlacement(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testLabelConstraintsSuite{})
-
-type testLabelConstraintsSuite struct{}
-
-func (s *testLabelConstraintsSuite) TestLabelConstraint(c *C) {
+func TestLabelConstraint(t *testing.T) {
+	re := require.New(t)
 	stores := []map[string]string{
 		{"zone": "zone1", "rack": "rack1"},                    // 1
 		{"zone": "zone1", "rack": "rack2"},                    // 2
@@ -61,11 +54,11 @@ func (s *testLabelConstraintsSuite) TestLabelConstraint(c *C) {
 				matched = append(matched, j+1)
 			}
 		}
-		c.Assert(matched, DeepEquals, expect[i])
+		re.Equal(expect[i], matched)
 	}
 }
-
-func (s *testLabelConstraintsSuite) TestLabelConstraints(c *C) {
+func TestLabelConstraints(t *testing.T) {
+	re := require.New(t)
 	stores := []map[string]string{
 		{},                                       // 1
 		{"k1": "v1"},                             // 2
@@ -100,6 +93,6 @@ func (s *testLabelConstraintsSuite) TestLabelConstraints(c *C) {
 				matched = append(matched, j+1)
 			}
 		}
-		c.Assert(matched, DeepEquals, expect[i])
+		re.Equal(expect[i], matched)
 	}
 }

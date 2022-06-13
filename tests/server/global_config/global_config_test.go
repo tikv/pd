@@ -68,7 +68,6 @@ func (s *GlobalConfigTestSuite) SetUpSuite(c *C) {
 	gsi, s.cleanup, err = server.NewTestServer(assertutil.NewChecker(func() {}))
 	s.server = &server.GrpcServer{Server: gsi}
 	c.Assert(err, IsNil)
-	server.EnableZap = true
 	addr := s.server.GetAddr()
 	s.client, err = grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 	c.Assert(err, IsNil)

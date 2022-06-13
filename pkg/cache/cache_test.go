@@ -16,7 +16,6 @@ package cache
 
 import (
 	"context"
-	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -25,6 +24,7 @@ import (
 )
 
 func TestExpireRegionCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -76,7 +76,7 @@ func TestExpireRegionCache(t *testing.T) {
 
 	re.Equal(3, cache.Len())
 
-	re.True(reflect.DeepEqual(sortIDs(cache.GetAllID()), []uint64{1, 2, 3}))
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{1, 2, 3})
 
 	time.Sleep(2 * time.Second)
 
@@ -93,7 +93,7 @@ func TestExpireRegionCache(t *testing.T) {
 	re.Equal(3.0, value)
 
 	re.Equal(2, cache.Len())
-	re.True(reflect.DeepEqual(sortIDs(cache.GetAllID()), []uint64{2, 3}))
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{2, 3})
 
 	cache.Remove(2)
 
@@ -106,7 +106,7 @@ func TestExpireRegionCache(t *testing.T) {
 	re.Equal(3.0, value)
 
 	re.Equal(1, cache.Len())
-	re.True(reflect.DeepEqual(sortIDs(cache.GetAllID()), []uint64{3}))
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{3})
 }
 
 func sortIDs(ids []uint64) []uint64 {
@@ -116,6 +116,7 @@ func sortIDs(ids []uint64) []uint64 {
 }
 
 func TestLRUCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := newLRU(3)
 
@@ -125,15 +126,15 @@ func TestLRUCache(t *testing.T) {
 
 	val, ok := cache.Get(3)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "3"))
+	re.Equal(val, "3")
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "2"))
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	re.Equal(3, cache.Len())
 
@@ -147,27 +148,27 @@ func TestLRUCache(t *testing.T) {
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "2"))
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(4)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "4"))
+	re.Equal(val, "4")
 
 	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.True(reflect.DeepEqual(elems[0].Value, "4"))
-	re.True(reflect.DeepEqual(elems[1].Value, "2"))
-	re.True(reflect.DeepEqual(elems[2].Value, "1"))
+	re.Equal(elems[0].Value, "4")
+	re.Equal(elems[1].Value, "2")
+	re.Equal(elems[2].Value, "1")
 
 	cache.Remove(1)
 	cache.Remove(2)
@@ -193,6 +194,7 @@ func TestLRUCache(t *testing.T) {
 }
 
 func TestFifoCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := NewFIFO(3)
 	cache.Put(1, "1")
@@ -205,13 +207,13 @@ func TestFifoCache(t *testing.T) {
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.True(reflect.DeepEqual(elems[0].Value, "2"))
-	re.True(reflect.DeepEqual(elems[1].Value, "3"))
-	re.True(reflect.DeepEqual(elems[2].Value, "4"))
+	re.Equal(elems[0].Value, "2")
+	re.Equal(elems[1].Value, "3")
+	re.Equal(elems[2].Value, "4")
 
 	elems = cache.FromElems(3)
 	re.Len(elems, 1)
-	re.True(reflect.DeepEqual(elems[0].Value, "4"))
+	re.Equal(elems[0].Value, "4")
 
 	cache.Remove()
 	cache.Remove()
@@ -220,6 +222,7 @@ func TestFifoCache(t *testing.T) {
 }
 
 func TestTwoQueueCache(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	cache := newTwoQueue(3)
 	cache.Put(1, "1")
@@ -228,15 +231,15 @@ func TestTwoQueueCache(t *testing.T) {
 
 	val, ok := cache.Get(3)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "3"))
+	re.Equal(val, "3")
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "2"))
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	re.Equal(3, cache.Len())
 
@@ -250,27 +253,27 @@ func TestTwoQueueCache(t *testing.T) {
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "2"))
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(4)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "4"))
+	re.Equal(val, "4")
 
 	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
 	re.True(ok)
-	re.True(reflect.DeepEqual(val, "1"))
+	re.Equal(val, "1")
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.True(reflect.DeepEqual(elems[0].Value, "4"))
-	re.True(reflect.DeepEqual(elems[1].Value, "2"))
-	re.True(reflect.DeepEqual(elems[2].Value, "1"))
+	re.Equal(elems[0].Value, "4")
+	re.Equal(elems[1].Value, "2")
+	re.Equal(elems[2].Value, "1")
 
 	cache.Remove(1)
 	cache.Remove(2)
@@ -304,6 +307,7 @@ func (pq PriorityQueueItemTest) ID() uint64 {
 }
 
 func TestPriorityQueue(t *testing.T) {
+	t.Parallel()
 	re := require.New(t)
 	testData := []PriorityQueueItemTest{0, 1, 2, 3, 4, 5}
 	pq := NewPriorityQueue(0)

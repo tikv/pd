@@ -15,15 +15,17 @@
 package placement
 
 import (
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 )
 
-func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
+func TestRegionRuleFitCache(t *testing.T) {
+	re := require.New(t)
 	originRegion := mockRegion(3, 0)
 	originRules := addExtraRules(0)
 	originStores := mockStores(3)
@@ -174,20 +176,20 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 		},
 	}
 	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
+		t.Log(testcase.name)
+		re.Equal(testcase.unchanged, cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)))
 	}
 	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStoresNoHeartbeat(3)), Equals, false)
+		t.Log(testcase.name)
+		re.Equal(false, cache.IsUnchanged(testcase.region, testcase.rules, mockStoresNoHeartbeat(3)))
 	}
 	// Invalid Input4
-	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil), IsFalse)
+	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil))
 	// Invalid Input5
-	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}), IsFalse)
+	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}))
 	// origin rules changed, assert whether cache is changed
 	originRules[0].Version++
-	c.Assert(cache.IsUnchanged(originRegion, originRules, originStores), IsFalse)
+	re.False(cache.IsUnchanged(originRegion, originRules, originStores))
 }
 
 func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *RegionRuleFitCache {

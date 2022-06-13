@@ -20,58 +20,47 @@ import (
 	"math"
 	"os"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/storage"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testConfigSuite{})
-
-type testConfigSuite struct{}
-
-func (s *testConfigSuite) SetUpSuite(c *C) {
-	for _, d := range DefaultSchedulers {
-		RegisterScheduler(d.Type)
-	}
-	RegisterScheduler("random-merge")
-	RegisterScheduler("shuffle-leader")
-}
-
-func (s *testConfigSuite) TestSecurity(c *C) {
+func TestSecurity(t *testing.T) {
+	re := require.New(t)
 	cfg := NewConfig()
-	c.Assert(cfg.Security.RedactInfoLog, IsFalse)
+	re.False(cfg.Security.RedactInfoLog)
 }
 
-func (s *testConfigSuite) TestTLS(c *C) {
+func TestTLS(t *testing.T) {
+	re := require.New(t)
 	cfg := NewConfig()
 	tls, err := cfg.Security.ToTLSConfig()
-	c.Assert(err, IsNil)
-	c.Assert(tls, IsNil)
+	re.NoError(err)
+	re.Nil(tls)
 }
 
-func (s *testConfigSuite) TestBadFormatJoinAddr(c *C) {
+func TestBadFormatJoinAddr(t *testing.T) {
+	re := require.New(t)
 	cfg := NewConfig()
 	cfg.Join = "127.0.0.1:2379" // Wrong join addr without scheme.
-	c.Assert(cfg.Adjust(nil, false), NotNil)
+	re.Error(cfg.Adjust(nil, false))
 }
 
-func (s *testConfigSuite) TestReloadConfig(c *C) {
+func TestReloadConfig(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
+	RegisterScheduler("shuffle-leader")
 	opt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	storage := storage.NewStorageWithMemoryBackend()
 	scheduleCfg := opt.GetScheduleConfig()
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
-	c.Assert(opt.Persist(storage), IsNil)
+	re.NoError(opt.Persist(storage))
 
 	// Add a new default enable scheduler "shuffle-leader"
 	DefaultSchedulers = append(DefaultSchedulers, SchedulerConfig{Type: "shuffle-leader"})
@@ -80,23 +69,25 @@ func (s *testConfigSuite) TestReloadConfig(c *C) {
 	}()
 
 	newOpt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(storage), IsNil)
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
 	schedulers := newOpt.GetSchedulers()
-	c.Assert(schedulers, HasLen, len(DefaultSchedulers))
-	c.Assert(newOpt.IsUseRegionStorage(), IsTrue)
+	re.Len(schedulers, len(DefaultSchedulers))
+	re.True(newOpt.IsUseRegionStorage())
 	for i, s := range schedulers {
-		c.Assert(s.Type, Equals, DefaultSchedulers[i].Type)
-		c.Assert(s.Disable, IsFalse)
+		re.Equal(DefaultSchedulers[i].Type, s.Type)
+		re.False(s.Disable)
 	}
-	c.Assert(newOpt.GetMaxReplicas(), Equals, 5)
-	c.Assert(newOpt.GetMaxSnapshotCount(), Equals, uint64(10))
-	c.Assert(newOpt.GetMaxMovableHotPeerSize(), Equals, int64(512))
+	re.Equal(5, newOpt.GetMaxReplicas())
+	re.Equal(uint64(10), newOpt.GetMaxSnapshotCount())
+	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
-func (s *testConfigSuite) TestReloadUpgrade(c *C) {
+func TestReloadUpgrade(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	opt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// Simulate an old configuration that only contains 2 fields.
 	type OldConfig struct {
@@ -108,17 +99,19 @@ func (s *testConfigSuite) TestReloadUpgrade(c *C) {
 		Replication: *opt.GetReplicationConfig(),
 	}
 	storage := storage.NewStorageWithMemoryBackend()
-	c.Assert(storage.SaveConfig(old), IsNil)
+	re.NoError(storage.SaveConfig(old))
 
 	newOpt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(storage), IsNil)
-	c.Assert(newOpt.GetPDServerConfig().KeyType, Equals, defaultKeyType) // should be set to default value.
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
+	re.Equal(defaultKeyType, newOpt.GetPDServerConfig().KeyType) // should be set to default value.
 }
 
-func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
+func TestReloadUpgrade2(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	opt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// Simulate an old configuration that does not contain ScheduleConfig.
 	type OldConfig struct {
@@ -128,43 +121,48 @@ func (s *testConfigSuite) TestReloadUpgrade2(c *C) {
 		Replication: *opt.GetReplicationConfig(),
 	}
 	storage := storage.NewStorageWithMemoryBackend()
-	c.Assert(storage.SaveConfig(old), IsNil)
+	re.NoError(storage.SaveConfig(old))
 
 	newOpt, err := newTestScheduleOption()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(storage), IsNil)
-	c.Assert(newOpt.GetScheduleConfig().RegionScoreFormulaVersion, Equals, "") // formulaVersion keep old value when reloading.
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
+	re.Equal("", newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
 }
 
-func (s *testConfigSuite) TestValidation(c *C) {
+func TestValidation(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	cfg := NewConfig()
-	c.Assert(cfg.Adjust(nil, false), IsNil)
+	re.NoError(cfg.Adjust(nil, false))
 
 	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
-	c.Assert(cfg.Validate(), NotNil)
+	re.Error(cfg.Validate())
 
 	// check schedule config
 	cfg.Schedule.HighSpaceRatio = -0.1
-	c.Assert(cfg.Schedule.Validate(), NotNil)
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.HighSpaceRatio = 0.6
-	c.Assert(cfg.Schedule.Validate(), IsNil)
+	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 1.1
-	c.Assert(cfg.Schedule.Validate(), NotNil)
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.4
-	c.Assert(cfg.Schedule.Validate(), NotNil)
+	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.8
-	c.Assert(cfg.Schedule.Validate(), IsNil)
+	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
-	c.Assert(cfg.Schedule.Validate(), NotNil)
+	re.Error(cfg.Schedule.Validate())
 	// check quota
-	c.Assert(cfg.QuotaBackendBytes, Equals, defaultQuotaBackendBytes)
+	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes
-	c.Assert(cfg.MaxRequestBytes, Equals, defaultMaxRequestBytes)
+	re.Equal(defaultMaxRequestBytes, cfg.MaxRequestBytes)
 
-	c.Assert(cfg.Log.Format, Equals, defaultLogFormat)
+	re.Equal(defaultLogFormat, cfg.Log.Format)
 }
 
-func (s *testConfigSuite) TestAdjust(c *C) {
+func TestAdjust(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
+	RegisterScheduler("random-merge")
 	cfgData := `
 name = ""
 lease = 0
@@ -180,27 +178,27 @@ leader-schedule-limit = 0
 `
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// When invalid, use default values.
 	host, err := os.Hostname()
-	c.Assert(err, IsNil)
-	c.Assert(cfg.Name, Equals, fmt.Sprintf("%s-%s", defaultName, host))
-	c.Assert(cfg.LeaderLease, Equals, defaultLeaderLease)
-	c.Assert(cfg.MaxRequestBytes, Equals, uint(20000000))
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s-%s", defaultName, host), cfg.Name)
+	re.Equal(defaultLeaderLease, cfg.LeaderLease)
+	re.Equal(uint(20000000), cfg.MaxRequestBytes)
 	// When defined, use values from config file.
-	c.Assert(cfg.Schedule.MaxMergeRegionSize, Equals, uint64(0))
-	c.Assert(cfg.Schedule.EnableOneWayMerge, IsTrue)
-	c.Assert(cfg.Schedule.LeaderScheduleLimit, Equals, uint64(0))
+	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionSize)
+	re.True(cfg.Schedule.EnableOneWayMerge)
+	re.Equal(uint64(0), cfg.Schedule.LeaderScheduleLimit)
 	// When undefined, use default values.
-	c.Assert(cfg.PreVote, IsTrue)
-	c.Assert(cfg.Log.Level, Equals, "info")
-	c.Assert(cfg.Schedule.MaxMergeRegionKeys, Equals, uint64(defaultMaxMergeRegionKeys))
-	c.Assert(cfg.PDServerCfg.MetricStorage, Equals, "http://127.0.0.1:9090")
+	re.True(cfg.PreVote)
+	re.Equal("info", cfg.Log.Level)
+	re.Equal(uint64(defaultMaxMergeRegionKeys), cfg.Schedule.MaxMergeRegionKeys)
+	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
-	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, DefaultTSOUpdatePhysicalInterval)
+	re.Equal(DefaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
 	// Check undefined config fields
 	cfgData = `
@@ -213,10 +211,10 @@ type = "random-merge"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(cfg.WarningMsgs[0], "Config contains undefined item"), IsTrue)
+	re.NoError(err)
+	re.Contains(cfg.WarningMsgs[0], "Config contains undefined item")
 
 	// Check misspelled schedulers name
 	cfgData = `
@@ -228,9 +226,9 @@ type = "random-merge-schedulers"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, NotNil)
+	re.Error(err)
 
 	// Check correct schedulers name
 	cfgData = `
@@ -242,9 +240,9 @@ type = "random-merge"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	cfgData = `
 [metric]
@@ -253,12 +251,12 @@ address = "localhost:9090"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	c.Assert(cfg.Metric.PushInterval.Duration, Equals, 35*time.Second)
-	c.Assert(cfg.Metric.PushAddress, Equals, "localhost:9090")
+	re.Equal(35*time.Second, cfg.Metric.PushInterval.Duration)
+	re.Equal("localhost:9090", cfg.Metric.PushAddress)
 
 	// Test clamping TSOUpdatePhysicalInterval value
 	cfgData = `
@@ -266,29 +264,31 @@ tso-update-physical-interval = "10ms"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, minTSOUpdatePhysicalInterval)
+	re.Equal(minTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
 	cfgData = `
 tso-update-physical-interval = "15s"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	c.Assert(cfg.TSOUpdatePhysicalInterval.Duration, Equals, maxTSOUpdatePhysicalInterval)
+	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 }
 
-func (s *testConfigSuite) TestMigrateFlags(c *C) {
+func TestMigrateFlags(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	load := func(s string) (*Config, error) {
 		cfg := NewConfig()
 		meta, err := toml.Decode(s, &cfg)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		err = cfg.Adjust(&meta, false)
 		return cfg, err
 	}
@@ -301,35 +301,28 @@ enable-make-up-replica = false
 disable-remove-extra-replica = true
 enable-remove-extra-replica = false
 `)
-	c.Assert(err, IsNil)
-	c.Assert(cfg.PDServerCfg.FlowRoundByDigit, Equals, math.MaxInt8)
-	c.Assert(cfg.Schedule.EnableReplaceOfflineReplica, IsTrue)
-	c.Assert(cfg.Schedule.EnableRemoveDownReplica, IsFalse)
-	c.Assert(cfg.Schedule.EnableMakeUpReplica, IsFalse)
-	c.Assert(cfg.Schedule.EnableRemoveExtraReplica, IsFalse)
+	re.NoError(err)
+	re.Equal(math.MaxInt8, cfg.PDServerCfg.FlowRoundByDigit)
+	re.True(cfg.Schedule.EnableReplaceOfflineReplica)
+	re.False(cfg.Schedule.EnableRemoveDownReplica)
+	re.False(cfg.Schedule.EnableMakeUpReplica)
+	re.False(cfg.Schedule.EnableRemoveExtraReplica)
 	b, err := json.Marshal(cfg)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(b), "disable-replace-offline-replica"), IsFalse)
-	c.Assert(strings.Contains(string(b), "disable-remove-down-replica"), IsFalse)
+	re.NoError(err)
+	re.NotContains(string(b), "disable-replace-offline-replica")
+	re.NotContains(string(b), "disable-remove-down-replica")
 
 	_, err = load(`
 [schedule]
 enable-make-up-replica = false
 disable-make-up-replica = false
 `)
-	c.Assert(err, NotNil)
+	re.Error(err)
 }
 
-func newTestScheduleOption() (*PersistOptions, error) {
-	cfg := NewConfig()
-	if err := cfg.Adjust(nil, false); err != nil {
-		return nil, err
-	}
-	opt := NewPersistOptions(cfg)
-	return opt, nil
-}
-
-func (s *testConfigSuite) TestPDServerConfig(c *C) {
+func TestPDServerConfig(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	tests := []struct {
 		cfgData          string
 		hasErr           bool
@@ -382,19 +375,21 @@ dashboard-address = "foo"
 		},
 	}
 
-	for _, t := range tests {
+	for _, test := range tests {
 		cfg := NewConfig()
-		meta, err := toml.Decode(t.cfgData, &cfg)
-		c.Assert(err, IsNil)
+		meta, err := toml.Decode(test.cfgData, &cfg)
+		re.NoError(err)
 		err = cfg.Adjust(&meta, false)
-		c.Assert(err != nil, Equals, t.hasErr)
-		if !t.hasErr {
-			c.Assert(cfg.PDServerCfg.DashboardAddress, Equals, t.dashboardAddress)
+		re.Equal(test.hasErr, err != nil)
+		if !test.hasErr {
+			re.Equal(test.dashboardAddress, cfg.PDServerCfg.DashboardAddress)
 		}
 	}
 }
 
-func (s *testConfigSuite) TestDashboardConfig(c *C) {
+func TestDashboardConfig(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	cfgData := `
 [dashboard]
 tidb-cacert-path = "/path/ca.pem"
@@ -403,12 +398,12 @@ tidb-cert-path = "/path/client.pem"
 `
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
-	c.Assert(cfg.Dashboard.TiDBCAPath, Equals, "/path/ca.pem")
-	c.Assert(cfg.Dashboard.TiDBKeyPath, Equals, "/path/client-key.pem")
-	c.Assert(cfg.Dashboard.TiDBCertPath, Equals, "/path/client.pem")
+	re.NoError(err)
+	re.Equal("/path/ca.pem", cfg.Dashboard.TiDBCAPath)
+	re.Equal("/path/client-key.pem", cfg.Dashboard.TiDBKeyPath)
+	re.Equal("/path/client.pem", cfg.Dashboard.TiDBCertPath)
 
 	// Test different editions
 	tests := []struct {
@@ -424,15 +419,17 @@ tidb-cert-path = "/path/client.pem"
 		initByLDFlags(test.Edition)
 		cfg = NewConfig()
 		meta, err = toml.Decode(cfgData, &cfg)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		err = cfg.Adjust(&meta, false)
-		c.Assert(err, IsNil)
-		c.Assert(cfg.Dashboard.EnableTelemetry, Equals, test.EnableTelemetry)
+		re.NoError(err)
+		re.Equal(test.EnableTelemetry, cfg.Dashboard.EnableTelemetry)
 	}
 	defaultEnableTelemetry = originalDefaultEnableTelemetry
 }
 
-func (s *testConfigSuite) TestReplicationMode(c *C) {
+func TestReplicationMode(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	cfgData := `
 [replication-mode]
 replication-mode = "dr-auto-sync"
@@ -446,28 +443,29 @@ wait-store-timeout = "120s"
 `
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "dr-auto-sync")
-	c.Assert(cfg.ReplicationMode.DRAutoSync.LabelKey, Equals, "zone")
-	c.Assert(cfg.ReplicationMode.DRAutoSync.Primary, Equals, "zone1")
-	c.Assert(cfg.ReplicationMode.DRAutoSync.DR, Equals, "zone2")
-	c.Assert(cfg.ReplicationMode.DRAutoSync.PrimaryReplicas, Equals, 2)
-	c.Assert(cfg.ReplicationMode.DRAutoSync.DRReplicas, Equals, 1)
-	c.Assert(cfg.ReplicationMode.DRAutoSync.WaitStoreTimeout.Duration, Equals, 2*time.Minute)
-	c.Assert(cfg.ReplicationMode.DRAutoSync.WaitSyncTimeout.Duration, Equals, time.Minute)
+	re.Equal("dr-auto-sync", cfg.ReplicationMode.ReplicationMode)
+	re.Equal("zone", cfg.ReplicationMode.DRAutoSync.LabelKey)
+	re.Equal("zone1", cfg.ReplicationMode.DRAutoSync.Primary)
+	re.Equal("zone2", cfg.ReplicationMode.DRAutoSync.DR)
+	re.Equal(2, cfg.ReplicationMode.DRAutoSync.PrimaryReplicas)
+	re.Equal(1, cfg.ReplicationMode.DRAutoSync.DRReplicas)
+	re.Equal(2*time.Minute, cfg.ReplicationMode.DRAutoSync.WaitStoreTimeout.Duration)
 
 	cfg = NewConfig()
 	meta, err = toml.Decode("", &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
-	c.Assert(cfg.ReplicationMode.ReplicationMode, Equals, "majority")
+	re.NoError(err)
+	re.Equal("majority", cfg.ReplicationMode.ReplicationMode)
 }
 
-func (s *testConfigSuite) TestHotHistoryRegionConfig(c *C) {
+func TestHotHistoryRegionConfig(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	cfgData := `
 [schedule]
 hot-regions-reserved-days= 30
@@ -475,39 +473,56 @@ hot-regions-write-interval= "30m"
 `
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
-	c.Assert(err, IsNil)
-	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 30*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(30))
+	re.NoError(err)
+	re.Equal(30*time.Minute, cfg.Schedule.HotRegionsWriteInterval.Duration)
+	re.Equal(uint64(30), cfg.Schedule.HotRegionsReservedDays)
 	// Verify default value
 	cfg = NewConfig()
 	err = cfg.Adjust(nil, false)
-	c.Assert(err, IsNil)
-	c.Assert(cfg.Schedule.HotRegionsWriteInterval.Duration, Equals, 10*time.Minute)
-	c.Assert(cfg.Schedule.HotRegionsReservedDays, Equals, uint64(7))
+	re.NoError(err)
+	re.Equal(10*time.Minute, cfg.Schedule.HotRegionsWriteInterval.Duration)
+	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
 }
 
-func (s *testConfigSuite) TestConfigClone(c *C) {
+func TestConfigClone(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
 	cfg := &Config{}
 	cfg.Adjust(nil, false)
-	c.Assert(cfg.Clone(), DeepEquals, cfg)
+	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := newConfigMetadata(nil)
 
 	schedule := &ScheduleConfig{}
 	schedule.adjust(emptyConfigMetaData, false)
-	c.Assert(schedule.Clone(), DeepEquals, schedule)
+	re.Equal(schedule, schedule.Clone())
 
 	replication := &ReplicationConfig{}
 	replication.adjust(emptyConfigMetaData)
-	c.Assert(replication.Clone(), DeepEquals, replication)
+	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
 	pdServer.adjust(emptyConfigMetaData)
-	c.Assert(pdServer.Clone(), DeepEquals, pdServer)
+	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}
 	replicationMode.adjust(emptyConfigMetaData)
-	c.Assert(replicationMode.Clone(), DeepEquals, replicationMode)
+	re.Equal(replicationMode, replicationMode.Clone())
+}
+
+func newTestScheduleOption() (*PersistOptions, error) {
+	cfg := NewConfig()
+	if err := cfg.Adjust(nil, false); err != nil {
+		return nil, err
+	}
+	opt := NewPersistOptions(cfg)
+	return opt, nil
+}
+
+func registerDefaultSchedulers() {
+	for _, d := range DefaultSchedulers {
+		RegisterScheduler(d.Type)
+	}
 }

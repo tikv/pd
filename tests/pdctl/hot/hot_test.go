@@ -25,7 +25,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -43,10 +42,6 @@ func Test(t *testing.T) {
 var _ = Suite(&hotTestSuite{})
 
 type hotTestSuite struct{}
-
-func (s *hotTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *hotTestSuite) TestHot(c *C) {
 	statistics.Denoising = false
