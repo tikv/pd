@@ -470,7 +470,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		for _, srcPeerStat := range bs.filterHotPeers() {
 			bs.cur.srcPeerStat = srcPeerStat
 			bs.cur.region = bs.getRegion()
-			if bs.cur.region == nil {
+			if bs.cur.region == nil || bs.cur.region.GetLeader() == nil {
 				continue
 			}
 			for _, dstDetail := range bs.filterDstStores() {
@@ -1057,7 +1057,7 @@ func (bs *balanceSolver) buildOperator() (op *operator.Operator, infl *Influence
 		sourceLabel = strconv.FormatUint(srcStoreID, 10)
 		targetLabel = strconv.FormatUint(dstPeer.GetStoreId(), 10)
 
-		if bs.rwTy == read && bs.cur.region.GetLeader().StoreId == srcStoreID { // move read leader
+		if bs.rwTy == read && bs.cur.region.GetLeader().GetStoreId() == srcStoreID { // move read leader
 			op, err = operator.CreateMoveLeaderOperator(
 				"move-hot-read-leader",
 				bs.cluster,
