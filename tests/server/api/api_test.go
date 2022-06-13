@@ -133,7 +133,6 @@ type testMiddlewareSuite struct {
 func (s *testMiddlewareSuite) SetUpSuite(c *C) {
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/api/enableFailpointAPI", "return(true)"), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	s.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	c.Assert(err, IsNil)
@@ -200,7 +199,6 @@ func (s *testMiddlewareSuite) TestRequestInfoMiddleware(c *C) {
 func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -223,7 +221,6 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -509,7 +506,6 @@ func (s *testMiddlewareSuite) TestAuditLocalLogBackend(c *C) {
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -532,7 +528,6 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -561,7 +556,6 @@ type testRedirectorSuite struct {
 
 func (s *testRedirectorSuite) SetUpSuite(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
-	server.EnableZap = true
 	s.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
@@ -664,7 +658,6 @@ var _ = Suite(&testProgressSuite{})
 type testProgressSuite struct{}
 
 func (s *testProgressSuite) TestRemovingProgress(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -740,6 +733,16 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
 	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
+	// is not prepared
+	time.Sleep(2 * time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+	c.Assert(json.Unmarshal(output, &p), IsNil)
+	c.Assert(p.Action, Equals, "removing")
+	c.Assert(p.Progress, Equals, 0.0)
+	c.Assert(p.CurrentSpeed, Equals, 0.0)
+	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
+
+	leader.GetRaftCluster().SetPrepared()
 	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
@@ -767,12 +770,10 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	// store 2: (10+40)/2 = 25s
 	c.Assert(p.LeftSeconds, Equals, 25.0)
 
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 
 func (s *testProgressSuite) TestPreparingProgress(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/hasPrepared", `return(true)`), IsNil)
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`), IsNil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -846,8 +847,16 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
 
+	// is not prepared
 	time.Sleep(2 * time.Second)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the action"), IsTrue)
+	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
+	c.Assert(strings.Contains((string(output)), "no progress found for the given store ID"), IsTrue)
+
 	// size is not changed.
+	leader.GetRaftCluster().SetPrepared()
+	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	var p api.Progress
 	c.Assert(json.Unmarshal(output, &p), IsNil)
@@ -883,7 +892,6 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	c.Assert(p.CurrentSpeed, Equals, 1.0)
 	c.Assert(p.LeftSeconds, Equals, 179.0)
 
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/hasPrepared"), IsNil)
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
 }
 

@@ -24,7 +24,6 @@ import (
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -39,10 +38,6 @@ func Test(t *testing.T) {
 var _ = Suite(&regionTestSuite{})
 
 type regionTestSuite struct{}
-
-func (s *regionTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
 
 func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -90,7 +85,8 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),
-		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(1),
+		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
+		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
 			{Id: 5, StoreId: 2},
@@ -98,13 +94,18 @@ func (s *regionTestSuite) TestRegion(c *C) {
 			{Id: 7, StoreId: 4},
 		}))
 	r2 := pdctl.MustPutRegion(c, cluster, 2, 1, []byte("b"), []byte("c"),
-		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3), core.SetApproximateSize(144))
+		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2),
+		core.SetRegionVersion(3), core.SetApproximateSize(144), core.SetApproximateKeys(14400),
+	)
 	r3 := pdctl.MustPutRegion(c, cluster, 3, 1, []byte("c"), []byte("d"),
-		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2), core.SetApproximateSize(30),
+		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3),
+		core.SetRegionVersion(2), core.SetApproximateSize(30), core.SetApproximateKeys(3000),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
 		core.WithPendingPeers([]*metapb.Peer{downPeer}), core.WithLearners([]*metapb.Peer{{Id: 3, StoreId: 1}}))
 	r4 := pdctl.MustPutRegion(c, cluster, 4, 1, []byte("d"), []byte("e"),
-		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetApproximateSize(10))
+		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1),
+		core.SetRegionVersion(1), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
+	)
 	defer cluster.Destroy()
 
 	var testRegionsCases = []struct {
@@ -133,6 +134,10 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		// region topsize [limit] command
 		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
 			return a.GetApproximateSize() < b.GetApproximateSize()
+		}, 2)},
+		// region topkeys [limit] command
+		{[]string{"region", "topkeys", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetApproximateKeys() < b.GetApproximateKeys()
 		}, 2)},
 		// region check extra-peer command
 		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},

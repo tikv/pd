@@ -18,15 +18,13 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"net/http"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testTiKVConfigSuite{})
-
-type testTiKVConfigSuite struct{}
-
-func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
+func TestTiKVConfig(t *testing.T) {
+	re := require.New(t)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -40,32 +38,33 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
         "perf-level": 2
     	}}`
 		var config StoreConfig
-		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
+		re.NoError(json.Unmarshal([]byte(body), &config))
 
-		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(144000000))
-		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(96000000))
-		c.Assert(int(config.GetRegionMaxSize()), Equals, 15*1024)
-		c.Assert(config.GetRegionSplitSize(), Equals, uint64(10*1024))
+		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
+		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
+		re.Equal(15*1024, int(config.GetRegionMaxSize()))
+		re.Equal(uint64(10*1024), config.GetRegionSplitSize())
 	}
 	//case2: empty config.
 	{
 		body := `{}`
 		var config StoreConfig
-		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
+		re.NoError(json.Unmarshal([]byte(body), &config))
 
-		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(1440000))
-		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(960000))
-		c.Assert(int(config.GetRegionMaxSize()), Equals, 144)
-		c.Assert(config.GetRegionSplitSize(), Equals, uint64(96))
+		re.Equal(uint64(1440000), config.GetRegionMaxKeys())
+		re.Equal(uint64(960000), config.GetRegionSplitKeys())
+		re.Equal(144, int(config.GetRegionMaxSize()))
+		re.Equal(uint64(96), config.GetRegionSplitSize())
 	}
 }
 
-func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
+func TestUpdateConfig(t *testing.T) {
+	re := require.New(t)
 	manager := NewTestStoreConfigManager([]string{"tidb.com"})
 	manager.ObserveConfig("tikv.com")
-	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
 	manager.ObserveConfig("tidb.com")
-	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10))
+	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -74,10 +73,36 @@ func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 		},
 	}
 	manager = NewStoreConfigManager(client)
-	c.Assert(manager.source.(*TiKVConfigSource).schema, Equals, "http")
+	re.Equal("http", manager.source.(*TiKVConfigSource).schema)
 }
 
-func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
+func TestParseConfig(t *testing.T) {
+	re := require.New(t)
+	body := `
+{
+"coprocessor":{
+"split-region-on-table":false,
+"batch-split-limit":10,
+"region-max-size":"384MiB",
+"region-split-size":"256MiB",
+"region-max-keys":3840000,
+"region-split-keys":2560000,
+"consistency-check-method":"mvcc",
+"enable-region-bucket":true,
+"region-bucket-size":"96MiB",
+"region-size-threshold-for-approximate":"384MiB",
+"region-bucket-merge-size-ratio":0.33
+}
+}
+`
+
+	var config StoreConfig
+	re.NoError(json.Unmarshal([]byte(body), &config))
+	re.Equal(uint64(96), config.GetRegionBucketSize())
+}
+
+func TestMergeCheck(t *testing.T) {
+	re := require.New(t)
 	testdata := []struct {
 		size      uint64
 		mergeSize uint64
@@ -116,11 +141,11 @@ func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 	config := &StoreConfig{}
 	for _, v := range testdata {
 		if v.pass {
-			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), IsNil)
-			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), IsNil)
+			re.NoError(config.CheckRegionSize(v.size, v.mergeSize))
+			re.NoError(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		} else {
-			c.Assert(config.CheckRegionSize(v.size, v.mergeSize), NotNil)
-			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), NotNil)
+			re.Error(config.CheckRegionSize(v.size, v.mergeSize))
+			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		}
 	}
 }

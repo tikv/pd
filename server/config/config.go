@@ -245,9 +245,8 @@ const (
 
 	defaultDashboardAddress = "auto"
 
-	defaultDRWaitStoreTimeout = time.Minute
-	defaultDRWaitSyncTimeout  = time.Minute
-	defaultDRWaitAsyncTimeout = 2 * time.Minute
+	defaultDRWaitStoreTimeout    = time.Minute
+	defaultDRTiKVSyncTimeoutHint = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -1017,6 +1016,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
+	{Type: "split-bucket"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
@@ -1388,26 +1388,22 @@ func NormalizeReplicationMode(m string) string {
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
 type DRAutoSyncReplicationConfig struct {
-	LabelKey         string            `toml:"label-key" json:"label-key"`
-	Primary          string            `toml:"primary" json:"primary"`
-	DR               string            `toml:"dr" json:"dr"`
-	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
-	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
-	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
-	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
-	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
-	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
+	LabelKey            string            `toml:"label-key" json:"label-key"`
+	Primary             string            `toml:"primary" json:"primary"`
+	DR                  string            `toml:"dr" json:"dr"`
+	PrimaryReplicas     int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas          int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout    typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	TiKVSyncTimeoutHint typeutil.Duration `toml:"tikv-sync-timeout-hint" json:"tikv-sync-timeout-hint"`
+	PauseRegionSplit    bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
-	if !meta.IsDefined("wait-sync-timeout") {
-		c.WaitSyncTimeout = typeutil.NewDuration(defaultDRWaitSyncTimeout)
-	}
-	if !meta.IsDefined("wait-async-timeout") {
-		c.WaitAsyncTimeout = typeutil.NewDuration(defaultDRWaitAsyncTimeout)
+	if !meta.IsDefined("tikv-sync-timeout-hint") {
+		c.TiKVSyncTimeoutHint = typeutil.NewDuration(defaultDRTiKVSyncTimeoutHint)
 	}
 }
 
