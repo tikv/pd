@@ -128,7 +128,7 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 	go func() {
 		// update safepoint of gc_worker's service with ttl not infinity should be failed.
 		_, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, 10000, 10, time.Now())
-		re.NotNil(err)
+		re.Error(err)
 		re.False(updated)
 		wg.Done()
 	}()
