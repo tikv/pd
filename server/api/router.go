@@ -107,12 +107,17 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
 
-	setRateLimit := func(opts ...ratelimit.Option) createRouteOption {
+	setRateLimit := func(config ratelimit.DimensionConfig) createRouteOption {
 		return func(route *mux.Route) {
 			svr.UpdateServiceRateLimiter(route.GetName(), opts...)
 		}
 	}
 	allowList := ratelimit.AddLabelAllowList()
+	setRateLimitAllowList := func() createRouteOption {
+		return func(route *mux.Route) {
+			svr.UpdateServiceRateLimiter(route.GetName(), ratelimit.AddLabelAllowList())
+		}
+	}
 
 	rd := createIndentRender()
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
@@ -293,7 +298,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/service-middleware/rate-limit/config", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimit(allowList))
+	registerFunc(apiRouter, "/service-middleware/rate-limit/config", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog), setRateLimitAllowList())
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))
