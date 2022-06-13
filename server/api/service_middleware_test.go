@@ -21,6 +21,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/ratelimit"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -167,4 +168,23 @@ func (s *testRateLimitConfigSuite) TestConfigRateLimitSwitch(c *C) {
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "config item rate-limit not found")), IsNil)
+}
+
+func (s *testRateLimitConfigSuite) TestConfigLimiterConifgByOriginAPI(c *C) {
+	// this test case is used to test updating `limiter-config` by origin API simply
+	addr := fmt.Sprintf("%s/service-middleware/config", s.urlPrefix)
+	dimensionConfig := ratelimit.DimensionConfig{QPS: 1}
+	limiterConfig := map[string]interface{}{
+		"CreateOperator": dimensionConfig,
+	}
+	ms := map[string]interface{}{
+		"enable-rate-limit": "true",
+		"limiter-config":    limiterConfig,
+	}
+	postData, err := json.Marshal(ms)
+	c.Assert(err, IsNil)
+	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c)), IsNil)
+	sc := &config.ServiceMiddlewareConfig{}
+	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
+	c.Assert(sc.RateLimitConfig.LimiterConfig["CreateOperator"].QPS, Equals, 1.)
 }
