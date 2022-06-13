@@ -51,13 +51,18 @@ func (s *testAuditMiddlewareSuite) TearDownSuite(c *C) {
 
 func (s *testAuditMiddlewareSuite) TestConfigAuditSwitch(c *C) {
 	addr := fmt.Sprintf("%s/service-middleware/config", s.urlPrefix)
+
+	sc := &config.ServiceMiddlewareConfig{}
+	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
+	c.Assert(sc.EnableAudit, Equals, false)
+
 	ms := map[string]interface{}{
 		"enable-audit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c)), IsNil)
-	sc := &config.ServiceMiddlewareConfig{}
+	sc = &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableAudit, Equals, true)
 	ms = map[string]interface{}{
@@ -121,13 +126,18 @@ func (s *testRateLimitConfigSuite) TearDownSuite(c *C) {
 
 func (s *testRateLimitConfigSuite) TestConfigRateLimitSwitch(c *C) {
 	addr := fmt.Sprintf("%s/service-middleware/config", s.urlPrefix)
+
+	sc := &config.ServiceMiddlewareConfig{}
+	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
+	c.Assert(sc.EnableRateLimit, Equals, false)
+
 	ms := map[string]interface{}{
 		"enable-rate-limit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	c.Assert(err, IsNil)
 	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(c)), IsNil)
-	sc := &config.ServiceMiddlewareConfig{}
+	sc = &config.ServiceMiddlewareConfig{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, addr, sc), IsNil)
 	c.Assert(sc.EnableRateLimit, Equals, true)
 	ms = map[string]interface{}{
