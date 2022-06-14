@@ -992,12 +992,12 @@ func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.Dimens
 		rateLimitCfg[label] = item
 	}
 	rateLimitCfg[label] = value
-	return s.UpdateRateLimit(cfg, key, &rateLimitCfg)
+	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
 }
 
 // UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
-func (s *Server) UpdateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.RateLimitConfig, key, value)
+func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(&cfg, key, value)
 	if err != nil {
 		return err
 	}
@@ -1007,7 +1007,7 @@ func (s *Server) UpdateRateLimit(config *config.ServiceMiddlewareConfig, key str
 	}
 
 	if updated {
-		err = s.SetRateLimitConfig(config.RateLimitConfig)
+		err = s.SetRateLimitConfig(*cfg)
 	}
 	return err
 }

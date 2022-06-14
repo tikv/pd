@@ -110,7 +110,7 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 	case "audit":
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
 	case "rate-limit":
-		return h.svr.UpdateRateLimit(cfg, kp[len(kp)-1], value)
+		return h.svr.UpdateRateLimit(&cfg.RateLimitConfig, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
