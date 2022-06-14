@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"time"
 
@@ -59,13 +60,13 @@ func (s *testStorageGCSuite) TearDownTest(c *C) {
 	c.Assert(cleanConfig(s.cfg), IsNil)
 }
 
-func testGCSafePoints() ([]string, []uint64) {
-	spaceIDs := []string{
-		"keySpace1",
-		"keySpace2",
-		"keySpace3",
-		"keySpace4",
-		"keySpace5",
+func testGCSafePoints() ([]uint32, []uint64) {
+	spaceIDs := []uint32{
+		100,
+		200,
+		300,
+		400,
+		500,
 	}
 	safePoints := []uint64{
 		0,
@@ -77,17 +78,17 @@ func testGCSafePoints() ([]string, []uint64) {
 	return spaceIDs, safePoints
 }
 
-func testServiceSafePoints() ([]string, []*endpoint.ServiceSafePoint, []int64) {
-	spaceIDs := []string{
-		"keySpace1",
-		"keySpace1",
-		"keySpace1",
-		"keySpace2",
-		"keySpace2",
-		"keySpace2",
-		"keySpace3",
-		"keySpace3",
-		"keySpace3",
+func testServiceSafePoints() ([]uint32, []*endpoint.ServiceSafePoint, []int64) {
+	spaceIDs := []uint32{
+		100,
+		100,
+		100,
+		200,
+		200,
+		200,
+		300,
+		300,
+		300,
 	}
 	serviceSafePoints := []*endpoint.ServiceSafePoint{
 		{ServiceID: "service1", SafePoint: 1},
@@ -127,7 +128,7 @@ func (s *testStorageGCSuite) TestLoadMinServiceSafePoint(c *C) {
 		{ServiceID: "0", SafePoint: 100},
 		{ServiceID: "1", SafePoint: 200},
 	}
-	testKeySpace := "test"
+	testKeySpace := uint32(100)
 	for i := range serviceSafePoints {
 		c.Assert(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoints[i], testTTLs[i]), IsNil)
 	}
@@ -197,6 +198,9 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	}
 	loadedSafePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
+	sort.Slice(loadedSafePoints, func(a, b int) bool {
+		return loadedSafePoints[a].SpaceID < loadedSafePoints[b].SpaceID
+	})
 	for i := range loadedSafePoints {
 		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
 		c.Assert(loadedSafePoints[i].SafePoint, Equals, testSafePoints[i])
@@ -211,6 +215,9 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	// verify that service safe points do not interfere with gc safe points.
 	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(true)
 	c.Assert(err, IsNil)
+	sort.Slice(loadedSafePoints, func(a, b int) bool {
+		return loadedSafePoints[a].SpaceID < loadedSafePoints[b].SpaceID
+	})
 	for i := range loadedSafePoints {
 		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
 		c.Assert(loadedSafePoints[i].SafePoint, Equals, testSafePoints[i])
@@ -219,6 +226,9 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 	// verify that when withGCSafePoint set to false, returned safePoints is 0
 	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(false)
 	c.Assert(err, IsNil)
+	sort.Slice(loadedSafePoints, func(a, b int) bool {
+		return loadedSafePoints[a].SpaceID < loadedSafePoints[b].SpaceID
+	})
 	for i := range loadedSafePoints {
 		c.Assert(loadedSafePoints[i].SpaceID, Equals, testSpaceIDs[i])
 		c.Assert(loadedSafePoints[i].SafePoint, Equals, uint64(0))
@@ -226,32 +236,34 @@ func (s *testStorageGCSuite) TestLoadAllKeySpaceGCSafePoints(c *C) {
 }
 func (s *testStorageGCSuite) TestRevision(c *C) {
 	storage := s.storage
-	// Touching KeySpace2 should not change revision of KeySpace1
-	c.Assert(storage.TouchKeySpaceRevision("KeySpace1"), IsNil)
-	oldRevision, err := storage.LoadKeySpaceRevision("KeySpace1")
+	keySpace1 := uint32(100)
+	keySpace2 := uint32(200)
+	// Touching key space 200 should not change revision of key space 100
+	c.Assert(storage.TouchKeySpaceRevision(keySpace1), IsNil)
+	oldRevision, err := storage.LoadKeySpaceRevision(keySpace1)
 	c.Assert(err, IsNil)
-	c.Assert(storage.TouchKeySpaceRevision("KeySpace2"), IsNil)
-	newRevision, err := storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(storage.TouchKeySpaceRevision(keySpace2), IsNil)
+	newRevision, err := storage.LoadKeySpaceRevision(keySpace1)
 	c.Assert(err, IsNil)
 	c.Assert(oldRevision, Equals, newRevision)
 
 	// Touching the same key space should change revision
-	c.Assert(storage.TouchKeySpaceRevision("KeySpace1"), IsNil)
-	newRevision, err = storage.LoadKeySpaceRevision("KeySpace1")
+	c.Assert(storage.TouchKeySpaceRevision(keySpace1), IsNil)
+	newRevision, err = storage.LoadKeySpaceRevision(keySpace1)
 	c.Assert(err, IsNil)
 	c.Assert(oldRevision, Not(Equals), newRevision)
 }
 
 func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	storage := s.storage
-
+	testKeySpace := uint32(100)
 	// loading non-existing GC safepoint should return 0
-	gcSafePoint, err := storage.LoadKeySpaceGCSafePoint("testKeySpace")
+	gcSafePoint, err := storage.LoadKeySpaceGCSafePoint(testKeySpace)
 	c.Assert(err, IsNil)
 	c.Assert(gcSafePoint, Equals, uint64(0))
 
 	// loading non-existing service safepoint should return nil
-	serviceSafePoint, err := storage.LoadServiceSafePoint("testKeySpace", "testService")
+	serviceSafePoint, err := storage.LoadServiceSafePoint(testKeySpace, "testService")
 	c.Assert(err, IsNil)
 	c.Assert(serviceSafePoint, IsNil)
 
@@ -261,7 +273,7 @@ func (s *testStorageGCSuite) TestLoadEmpty(c *C) {
 	c.Assert(safePoints, HasLen, 0)
 
 	// Loading untouched key spaces should return unavailable revision
-	revision, err := storage.LoadKeySpaceRevision("testKeySpace")
+	revision, err := storage.LoadKeySpaceRevision(testKeySpace)
 	c.Assert(err, IsNil)
 	c.Assert(revision, Equals, kv.RevisionUnavailable)
 }
