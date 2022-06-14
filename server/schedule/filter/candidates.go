@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 )
 
 // StoreCandidates wraps store list and provide utilities to select source or
@@ -42,6 +43,12 @@ func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, filters ...Fi
 // FilterTarget keeps stores that can pass all target filters.
 func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStores(c.Stores, filters, opt)
+	return c
+}
+
+// FilterTarget keeps stores that can pass all target filters.
+func (c *StoreCandidates) FilterTargetWithDiagnosis(opt *config.PersistOptions, diagnosisController *diagnosis.DiagnosisController, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectTargetStoresWithDiagnosis(c.Stores, filters, opt, diagnosisController)
 	return c
 }
 

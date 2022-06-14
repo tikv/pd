@@ -16,71 +16,155 @@ package diagnosis
 
 import (
 	"context"
-	"time"
 
-	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 type DiagnosisController struct {
-	enable       bool
-	ctx          context.Context
-	ctxCancel    context.CancelFunc
-	cache        *cache.TTLUint64
-	storeReaders map[uint64]*DiagnosisAnalyzer
+	mu syncutil.RWMutex
+	//enable    bool
+	ctx       context.Context
+	ctxCancel context.CancelFunc
+	//cache        *cache.TTLUint64
+	storeReaders  map[uint64]*DiagnosisAnalyzer
+	historyRecord map[uint64]*DiagnosisAnalyzer
 	// currentReader  *DiagnosisStoreRecoder
-	// currentStoreId uint64
+	currentStep   int
+	currentSource uint64
+	currentRegion uint64
+	currentTarget uint64
 }
 
 func NewDiagnosisController(ctx context.Context) *DiagnosisController {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	return &DiagnosisController{
-		enable:       false,
-		ctx:          ctx,
-		ctxCancel:    ctxCancel,
-		cache:        cache.NewIDTTL(ctx, time.Minute, 5*time.Minute),
+		//enable:    false,
+		ctx:       ctx,
+		ctxCancel: ctxCancel,
+		//cache:        cache.NewIDTTL(ctx, time.Minute, 5*time.Minute),
 		storeReaders: make(map[uint64]*DiagnosisAnalyzer),
 	}
 }
 
-func (c *DiagnosisController) Diagnose(objectID uint64, step int, reason string) {
+func (c *DiagnosisController) InitSchedule() {
+	c.currentStep = 0
+}
+
+func (c *DiagnosisController) CleanUpSchedule(success bool) {
+	if c.currentSource != 0 {
+		if record, ok := c.storeReaders[c.currentSource]; ok {
+			record.schedulable = success
+			c.historyRecord[c.currentSource] = record
+			delete(c.storeReaders, c.currentSource)
+		}
+	}
+	c.currentSource = 0
+}
+
+func (c *DiagnosisController) DiagnoseStore(storeID uint64) {
+	stepRecorders := make([]DiagnoseStepRecoder, 4)
+	for i := 0; i < 4; i++ {
+		stepRecorders[i] = NewDiagnosisRecoder()
+	}
+	c.storeReaders[storeID] = &DiagnosisAnalyzer{
+		stepRecorders: stepRecorders,
+	}
+}
+
+func (c *DiagnosisController) SetObject(objectID uint64) {
+	switch c.currentStep {
+	case 1:
+		c.currentSource = objectID
+	case 2:
+		c.currentRegion = objectID
+	case 3:
+		c.currentTarget = objectID
+	}
+}
+
+func (c *DiagnosisController) NextStep() {
+	c.currentStep++
+}
+
+func (c *DiagnosisController) LastStep() {
+	c.currentStep--
+}
+
+func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
 	if !c.ShouldDiagnose(objectID) {
 		return
 	}
-
+	reader := c.storeReaders[c.currentSource]
+	reader.GenerateStoreRecord(c.currentStep, objectID, reason)
 }
 
-// func (c *DiagnosisController) SelectSourceStores(stores []*core.StoreInfo, filters []filter.Filter, opt *config.PersistOptions) []*core.StoreInfo {
+// func (c *DiagnosisController) SelectSourceStores(stores []*core.StoreInfo, filtxers []filter.Filter, opt *config.PersistOptions) []*core.StoreInfo {
 // 	return nil
 // }
 
-func (c *DiagnosisController) ShouldDiagnose(storeID uint64) bool {
-	if !c.enable {
-		return false
+func (c *DiagnosisController) ShouldDiagnose(objectID uint64) bool {
+	if c.currentStep == 0 {
+		c.currentSource = objectID
 	}
-	return c.cache.Exists(storeID)
-}
-
-type DiagnoseRecoder interface {
-	Add(reason string, id uint64)
-	GetMostReason() *ReasonReader
-	GetAllReasons() map[string]*ReasonReader
-}
-
-type ReasonReader struct {
-	ratio    float32
-	sampleId uint64
+	// if !c.enable {
+	// 	return false
+	// }
+	//return c.cache.Exists(storeID)
+	_, ok := c.storeReaders[c.currentSource]
+	return ok
 }
 
 type DiagnosisAnalyzer struct {
-	stepRecoder []*DiagnosisStoreRecoder
+	stepRecorders []DiagnoseStepRecoder
+	// schedulable is true when scheduler can create operator for specific store
+	schedulable bool
 }
 
-type DiagnosisStoreRecoder struct {
+func (a *DiagnosisAnalyzer) GenerateStoreRecord(step int, objectID uint64, reason string) {
+	a.stepRecorders[step].Add(reason, objectID)
+}
+
+type DiagnoseStepRecoder interface {
+	Add(reason string, id uint64)
+	GetMostReason() (string, *ReasonReader)
+	GetAllReasons() map[string]*ReasonReader
+}
+
+type DiagnosisRecoder struct {
 	reasonCounter  map[string]int
 	reasonSampleId map[string]uint64
+	count          int
 }
 
-type DiagnosisEventTracker struct {
-	controller *DiagnosisController
-	step       int
+func NewDiagnosisRecoder() *DiagnosisRecoder {
+	return &DiagnosisRecoder{
+		reasonCounter:  make(map[string]int),
+		reasonSampleId: make(map[string]uint64),
+	}
+}
+
+func (r *DiagnosisRecoder) Add(reason string, id uint64) {
+	r.reasonCounter[reason]++
+	r.count++
+	r.reasonSampleId[reason] = id
+}
+
+func (r *DiagnosisRecoder) GetMostReason() (reason string, reader *ReasonReader) {
+	reader = &ReasonReader{}
+	for rs, count := range r.reasonCounter {
+		if float64(count)/float64(r.count) > reader.ratio {
+			reader.ratio = float64(count) / float64(r.count)
+			reason = rs
+		}
+	}
+	return
+}
+
+func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonReader {
+	return nil
+}
+
+type ReasonReader struct {
+	ratio    float64
+	sampleId uint64
 }

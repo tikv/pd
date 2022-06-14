@@ -141,6 +141,9 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+	s.DiagnosisController.InitSchedule()
+	// **step = 0
+	defer s.DiagnosisController.CleanUpSchedule(true)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	opts := cluster.GetOpts()
 
@@ -148,9 +151,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	stores := cluster.GetStores()
 
 	// source filter
-	stores = filter.SelectSourceStores(stores, s.filters, opts)
+	stores = filter.SelectSourceStoresWithDiagnosis(stores, s.filters, opts, s.DiagnosisController)
 
-	//
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
@@ -165,6 +167,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
 	downFilter := filter.NewRegionDownFilter(s.GetName())
 	replicaFilter := filter.NewRegionReplicatedFilter(s.GetName(), cluster)
+	hotFilter := filter.NewRegionHotFilter(s.GetName(), cluster)
+	leaderFilter := filter.NewRegionNoLeaderFilter(s.GetName())
 	var allowBalanceEmptyRegion filter.RegionFilter
 	switch cluster.(type) {
 	case *schedule.RangeCluster:
@@ -174,28 +178,31 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 		allowBalanceEmptyRegion = filter.NewRegionEmptyFilter(s.GetName(), cluster)
 	}
 
+	s.DiagnosisController.NextStep()
+	// ** step = 1
 	for _, plan.source = range stores {
+		s.DiagnosisController.SetObject(plan.SourceStoreID())
 		retryLimit := s.retryQuota.GetLimit(plan.source)
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = filter.SelectOneRegion(cluster.RandPendingRegions(plan.SourceStoreID(), s.conf.Ranges),
-				downFilter, replicaFilter, allowBalanceEmptyRegion)
+			plan.region = filter.SelectOneRegionWithDiagnosis(cluster.RandPendingRegions(plan.SourceStoreID(), s.conf.Ranges), s.DiagnosisController,
+				downFilter, replicaFilter, allowBalanceEmptyRegion, hotFilter, leaderFilter)
 			if plan.region == nil {
 				// Then pick the region that has a follower in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.SourceStoreID(), s.conf.Ranges),
-					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegionWithDiagnosis(cluster.RandFollowerRegions(plan.SourceStoreID(), s.conf.Ranges), s.DiagnosisController,
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion, hotFilter, leaderFilter)
 			}
 			if plan.region == nil {
 				// Then pick the region has the leader in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.SourceStoreID(), s.conf.Ranges),
-					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegionWithDiagnosis(cluster.RandLeaderRegions(plan.SourceStoreID(), s.conf.Ranges), s.DiagnosisController,
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion, hotFilter, leaderFilter)
 			}
 			if plan.region == nil {
 				// Finally pick learner.
-				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.SourceStoreID(), s.conf.Ranges),
-					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion)
+				plan.region = filter.SelectOneRegionWithDiagnosis(cluster.RandLearnerRegions(plan.SourceStoreID(), s.conf.Ranges), s.DiagnosisController,
+					pendingFilter, downFilter, replicaFilter, allowBalanceEmptyRegion, hotFilter, leaderFilter)
 			}
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
@@ -203,26 +210,19 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 
-			// Skip hot regions.
-			if cluster.IsRegionHot(plan.region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
-				continue
-			}
-			// Check region whether have leader
-			if plan.region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-				continue
-			}
-
+			s.DiagnosisController.NextStep()
+			// ** step = 2
+			s.DiagnosisController.SetObject(plan.region.GetID())
 			if op := s.transferPeer(plan); op != nil {
 				s.retryQuota.ResetLimit(plan.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}
 			}
+			// ** step = 1
+			s.DiagnosisController.LastStep()
 		}
 		s.retryQuota.Attenuate(plan.source)
+		s.DiagnosisController.CleanUpSchedule(false)
 	}
 	s.retryQuota.GC(stores)
 	return nil
@@ -240,16 +240,20 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 	}
 
 	candidates := filter.NewCandidates(plan.GetStores()).
-		FilterTarget(plan.GetOpts(), filters...).
+		FilterTargetWithDiagnosis(plan.GetOpts(), s.DiagnosisController, filters...).
 		Sort(filter.RegionScoreComparer(plan.GetOpts()))
 
+	s.DiagnosisController.NextStep()
+	// **step = 3
 	for _, plan.target = range candidates.Stores {
 		regionID := plan.region.GetID()
 		sourceID := plan.source.GetID()
 		targetID := plan.target.GetID()
+		s.DiagnosisController.SetObject(targetID)
 		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !plan.shouldBalance(s.GetName()) {
+			s.DiagnosisController.Diagnose(targetID, "should-not-balance")
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 			continue
 		}
@@ -274,5 +278,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
+	s.DiagnosisController.LastStep()
+	// **step=2
 	return nil
 }

@@ -18,7 +18,9 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 )
 
 // SelectRegions selects regions that be selected from the list.
@@ -43,6 +45,23 @@ func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo)
 func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
 		if slice.AllOf(filters, func(i int) bool { return filters[i].Select(r) }) {
+			return r
+		}
+	}
+	return nil
+}
+
+// SelectOneRegion selects one region that be selected from the list.
+func SelectOneRegionWithDiagnosis(regions []*core.RegionInfo,
+	diagnosisController *diagnosis.DiagnosisController, filters ...RegionFilter) *core.RegionInfo {
+	for _, r := range regions {
+		if slice.AllOf(filters, func(i int) bool {
+			if !filters[i].Select(r) {
+				diagnosisController.Diagnose(r.GetID(), filters[i].Reason())
+				return false
+			}
+			return true
+		}) {
 			return r
 		}
 	}
@@ -155,6 +174,55 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) bool {
 	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == f.cluster.GetOpts().GetMaxReplicas()
 }
 
+type RegionHotFilter struct {
+	scope   string
+	cluster Cluster
+}
+
+func NewRegionHotFilter(scope string, cluster Cluster) RegionFilter {
+	return &RegionHotFilter{scope: scope, cluster: cluster}
+}
+
+func (f *RegionHotFilter) Scope() string {
+	return f.scope
+}
+
+func (f *RegionHotFilter) Type() string {
+	return "hot-region"
+}
+
+func (f *RegionHotFilter) Reason() string {
+	return "This region is hot"
+}
+
+func (f *RegionHotFilter) Select(region *core.RegionInfo) bool {
+	return !f.cluster.IsRegionHot(region)
+}
+
+type RegionNoLeaderFilter struct {
+	scope string
+}
+
+func NewRegionNoLeaderFilter(scope string) RegionFilter {
+	return &RegionHotFilter{scope: scope}
+}
+
+func (f *RegionNoLeaderFilter) Scope() string {
+	return f.scope
+}
+
+func (f *RegionNoLeaderFilter) Type() string {
+	return "temporary-state"
+}
+
+func (f *RegionNoLeaderFilter) Reason() string {
+	return "no-leader"
+}
+
+func (f *RegionNoLeaderFilter) Select(region *core.RegionInfo) bool {
+	return region.GetLeader() != nil
+}
+
 type RegionEmptyFilter struct {
 	scope   string
 	cluster Cluster
@@ -212,6 +280,7 @@ type Cluster interface {
 	core.StoreSetInformer
 	core.StoreSetController
 	core.RegionSetInformer
+	statistics.RegionStatInformer
 	GetOpts() *config.PersistOptions
 	GetRuleManager() *placement.RuleManager
 }

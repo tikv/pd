@@ -47,7 +47,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	})
 }
 
-// SelectSourceStores selects stores that be selected as source store from the list.
+// SelectSourceStoresWithDiagnosis selects stores that be selected as source store from the list.
 func SelectSourceStoresWithDiagnosis(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions,
 	diagnosisController *diagnosis.DiagnosisController) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
@@ -57,6 +57,7 @@ func SelectSourceStoresWithDiagnosis(stores []*core.StoreInfo, filters []Filter,
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
+				diagnosisController.Diagnose(s.GetID(), filters[i].Reason())
 				return false
 			}
 			return true
@@ -78,6 +79,29 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
+				return false
+			}
+			return true
+		})
+	})
+}
+
+// SelectTargetStoresWithDiagnosis selects stores that be selected as target store from the list.
+func SelectTargetStoresWithDiagnosis(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions,
+	diagnosisController *diagnosis.DiagnosisController) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AllOf(filters, func(i int) bool {
+			filter := filters[i]
+			if !filter.Target(opt, s) {
+				cfilter, ok := filter.(comparingFilter)
+				targetID := strconv.FormatUint(s.GetID(), 10)
+				sourceID := ""
+				if ok {
+					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+				}
+				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+					targetID, filters[i].Scope(), filters[i].Metrics(), sourceID, targetID).Inc()
+				diagnosisController.Diagnose(s.GetID(), filters[i].Reason())
 				return false
 			}
 			return true
@@ -483,7 +507,7 @@ func (f *LongTermStateFilter) Reason() string {
 }
 
 func (f *LongTermStateFilter) Metrics() string {
-	return fmt.Sprintf("store-state-%s-filter", f.Reason)
+	return fmt.Sprintf("store-state-%s-filter", f.reason)
 }
 
 func (f *LongTermStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
