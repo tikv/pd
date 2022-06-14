@@ -792,6 +792,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
 	if !saveKV && !saveCache && !isNew {
+		// Due to some config changes need to update the region stats as well,
+		// so we do some extra checks here.
+		if c.regionStats != nil && c.regionStats.RegionStatsNeedUpdate(region) {
+			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
+		}
 		return nil
 	}
 

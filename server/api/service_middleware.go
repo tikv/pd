@@ -103,8 +103,11 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 
 func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.ServiceMiddlewareConfig, key string, value interface{}) error {
 	kp := strings.Split(key, ".")
-	if kp[0] == "audit" {
+	switch kp[0] {
+	case "audit":
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
+	case "rate-limit":
+		return h.updateRateLimit(cfg, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
@@ -126,6 +129,27 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 
 	if updated {
 		err = h.svr.SetAuditConfig(config.AuditConfig)
+	}
+	return err
+}
+
+func (h *serviceMiddlewareHandler) updateRateLimit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
+	data, err := json.Marshal(map[string]interface{}{key: value})
+	if err != nil {
+		return err
+	}
+
+	updated, found, err := mergeConfig(&config.RateLimitConfig, data)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = h.svr.SetRateLimitConfig(config.RateLimitConfig)
 	}
 	return err
 }
