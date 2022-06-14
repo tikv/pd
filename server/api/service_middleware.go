@@ -223,9 +223,14 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			config, _ := json.Marshal(h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig)
-			h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s\n%s\nCurrent Rate-limit Config:\n%s",
-				concurrencyUpdatedFlag, qpsRateUpdatedFlag, string(config)))
+			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
+			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
+}
+
+type rateLimitResult struct {
+	ConcurrencyUpdatedFlag string                               `json:"Concurrency"`
+	QpsRateUpdatedFlag     string                               `json:"qps"`
+	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"new-config"`
 }
