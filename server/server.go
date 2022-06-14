@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -156,6 +157,7 @@ type Server struct {
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
 
+	serviceRateLimiter *ratelimit.Limiter
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
@@ -258,6 +260,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
@@ -806,7 +809,8 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 // GetServiceMiddlewareConfig gets the service middleware config information.
 func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg := s.serviceMiddlewareCfg.Clone()
-	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
+	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
 	return cfg
 }
 
@@ -975,6 +979,27 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 		return err
 	}
 	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetRateLimitConfig gets the rate limit config information.
+func (s *Server) GetRateLimitConfig() *config.RateLimitConfig {
+	return s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
+}
+
+// SetRateLimitConfig sets the rate limit config.
+func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetRateLimitConfig()
+	s.serviceMiddlewarePersistOptions.SetRateLimitConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetRateLimitConfig(old)
+		log.Error("failed to update Rate Limit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Rate Limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1193,6 +1218,11 @@ func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.Backen
 // SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
 func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
 	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
+}
+
+// GetServiceRateLimiter is used to get rate limiter
+func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+	return s.serviceRateLimiter
 }
 
 // GetClusterStatus gets cluster status.
@@ -1450,6 +1480,7 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
+	s.loadRateLimitConfig()
 	switchableStorage, ok := s.storage.(interface {
 		SwitchToRegionStorage()
 		SwitchToDefaultStorage()
@@ -1465,6 +1496,14 @@ func (s *Server) reloadConfigFromKV() error {
 		log.Info("server disable region storage")
 	}
 	return nil
+}
+
+func (s *Server) loadRateLimitConfig() {
+	cfg := s.serviceMiddlewarePersistOptions.GetRateLimitConfig().LimiterConfig
+	for key := range cfg {
+		value := cfg[key]
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
+	}
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.
