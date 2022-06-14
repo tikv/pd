@@ -231,6 +231,6 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 
 type rateLimitResult struct {
 	ConcurrencyUpdatedFlag string                               `json:"Concurrency"`
-	QPSRateUpdatedFlag     string                               `json:"qps"`
+	QPSRateUpdatedFlag     string                               `json:"QPS"`
 	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"new-config"`
 }
