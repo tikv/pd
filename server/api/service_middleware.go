@@ -194,7 +194,6 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 	qps, okq := input["qps"].(float64)
 	if okq {
 		brust := 0
-
 		if int(qps) > 1 {
 			brust = int(qps)
 		} else if qps > 0 {
