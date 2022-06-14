@@ -25,32 +25,37 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+const (
+	spaceIDBase   = 16
+	safePointBase = 16
+)
+
 // KeySpaceGCSafePoint is gcWorker's safepoint for specific key-space
 type KeySpaceGCSafePoint struct {
-	SpaceID   string `json:"space_id"`
+	SpaceID   uint32 `json:"space_id"`
 	SafePoint uint64 `json:"safe_point,omitempty"`
 }
 
 // KeySpaceGCSafePointStorage defines the storage operations on KeySpaces' safe points
 type KeySpaceGCSafePointStorage interface {
 	// Service safe point interfaces.
-	SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint, ttl int64) error
-	LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error)
-	LoadMinServiceSafePoint(spaceID string) (*ServiceSafePoint, error)
-	RemoveServiceSafePoint(spaceID, serviceID string) error
+	SaveServiceSafePoint(spaceID uint32, ssp *ServiceSafePoint, ttl int64) error
+	LoadServiceSafePoint(spaceID uint32, serviceID string) (*ServiceSafePoint, error)
+	LoadMinServiceSafePoint(spaceID uint32) (*ServiceSafePoint, error)
+	RemoveServiceSafePoint(spaceID uint32, serviceID string) error
 	// GC safe point interfaces.
-	SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error
-	LoadKeySpaceGCSafePoint(spaceID string) (uint64, error)
+	SaveKeySpaceGCSafePoint(spaceID uint32, safePoint uint64) error
+	LoadKeySpaceGCSafePoint(spaceID uint32) (uint64, error)
 	LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]*KeySpaceGCSafePoint, error)
 	// Revision interfaces.
-	TouchKeySpaceRevision(spaceID string) error
-	LoadKeySpaceRevision(spaceID string) (int64, error)
+	TouchKeySpaceRevision(spaceID uint32) error
+	LoadKeySpaceRevision(spaceID uint32) (int64, error)
 }
 
 var _ KeySpaceGCSafePointStorage = (*StorageEndpoint)(nil)
 
 // SaveServiceSafePoint saves service safe point under given key-space.
-func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafePoint, ttl int64) error {
+func (se *StorageEndpoint) SaveServiceSafePoint(spaceID uint32, ssp *ServiceSafePoint, ttl int64) error {
 	if ssp.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
@@ -72,7 +77,7 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID string, ssp *ServiceSafe
 
 // LoadServiceSafePoint reads ServiceSafePoint for the given key-space ID and service name.
 // Return nil if no safepoint exist for given service.
-func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) LoadServiceSafePoint(spaceID uint32, serviceID string) (*ServiceSafePoint, error) {
 	key := KeySpaceServiceSafePointPath(spaceID, serviceID)
 	value, err := se.Load(key)
 	if err != nil || value == "" {
@@ -88,7 +93,7 @@ func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*Ser
 // LoadMinServiceSafePoint returns the minimum safepoint for the given key-space.
 // Note that gc worker safe point are store separately.
 // If no service safe point exist for the given key-space or all the service safe points just expired, return nil.
-func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID uint32) (*ServiceSafePoint, error) {
 	prefix := KeySpaceServiceSafePointPrefix(spaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	_, values, err := se.LoadRange(prefix, prefixEnd, 0)
@@ -115,25 +120,25 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string) (*ServiceSafe
 }
 
 // RemoveServiceSafePoint removes target ServiceSafePoint
-func (se *StorageEndpoint) RemoveServiceSafePoint(spaceID, serviceID string) error {
+func (se *StorageEndpoint) RemoveServiceSafePoint(spaceID uint32, serviceID string) error {
 	key := KeySpaceServiceSafePointPath(spaceID, serviceID)
 	return se.Remove(key)
 }
 
 // SaveKeySpaceGCSafePoint saves GCSafePoint to the given key-space.
-func (se *StorageEndpoint) SaveKeySpaceGCSafePoint(spaceID string, safePoint uint64) error {
-	value := strconv.FormatUint(safePoint, 16)
+func (se *StorageEndpoint) SaveKeySpaceGCSafePoint(spaceID uint32, safePoint uint64) error {
+	value := strconv.FormatUint(safePoint, safePointBase)
 	return se.Save(KeySpaceGCSafePointPath(spaceID), value)
 }
 
 // LoadKeySpaceGCSafePoint reads GCSafePoint for the given key-space.
 // Returns 0 if target safepoint not exist.
-func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID string) (uint64, error) {
+func (se *StorageEndpoint) LoadKeySpaceGCSafePoint(spaceID uint32) (uint64, error) {
 	value, err := se.Load(KeySpaceGCSafePointPath(spaceID))
 	if err != nil || value == "" {
 		return 0, err
 	}
-	safePoint, err := strconv.ParseUint(value, 16, 64)
+	safePoint, err := strconv.ParseUint(value, safePointBase, 64)
 	if err != nil {
 		return 0, err
 	}
@@ -157,11 +162,15 @@ func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]
 			continue
 		}
 		safePoint := &KeySpaceGCSafePoint{}
-		spaceID := strings.TrimPrefix(keys[i], prefix)
-		spaceID = strings.TrimSuffix(spaceID, suffix)
-		safePoint.SpaceID = spaceID
+		spaceIDStr := strings.TrimPrefix(keys[i], prefix)
+		spaceIDStr = strings.TrimSuffix(spaceIDStr, suffix)
+		spaceID, err := strconv.ParseUint(spaceIDStr, spaceIDBase, 32)
+		if err != nil {
+			return nil, err
+		}
+		safePoint.SpaceID = uint32(spaceID)
 		if withGCSafePoint {
-			value, err := strconv.ParseUint(values[i], 16, 64)
+			value, err := strconv.ParseUint(values[i], safePointBase, 64)
 			if err != nil {
 				return nil, err
 			}
@@ -174,13 +183,13 @@ func (se *StorageEndpoint) LoadAllKeySpaceGCSafePoints(withGCSafePoint bool) ([]
 
 // TouchKeySpaceRevision advances revision of the given key space.
 // It's used when new service safe point is saved.
-func (se *StorageEndpoint) TouchKeySpaceRevision(spaceID string) error {
+func (se *StorageEndpoint) TouchKeySpaceRevision(spaceID uint32) error {
 	path := KeySpacePath(spaceID)
 	return se.Save(path, "")
 }
 
 // LoadKeySpaceRevision loads the revision of the given key space.
-func (se *StorageEndpoint) LoadKeySpaceRevision(spaceID string) (int64, error) {
+func (se *StorageEndpoint) LoadKeySpaceRevision(spaceID uint32) (int64, error) {
 	etcdEndpoint, err := se.getEtcdBase()
 	if err != nil {
 		return 0, err

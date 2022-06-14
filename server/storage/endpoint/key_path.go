@@ -17,6 +17,7 @@ package endpoint
 import (
 	"fmt"
 	"path"
+	"strconv"
 )
 
 const (
@@ -109,25 +110,26 @@ func MinResolvedTSPath() string {
 
 // KeySpacePath returns path to given key space
 // Path: /key_space/gc_safepoint/{space_id}
-func KeySpacePath(spaceID string) string {
-	return path.Join(keySpaceSafePointPrefix, spaceID)
+func KeySpacePath(spaceID uint32) string {
+	spaceIDStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	return path.Join(keySpaceSafePointPrefix, spaceIDStr)
 }
 
 // KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
 // Prefix: /key_space/gc_safepoint/{space_id}/service/
-func KeySpaceServiceSafePointPrefix(spaceID string) string {
-	return path.Join(keySpaceSafePointPrefix, spaceID, "service") + "/"
+func KeySpaceServiceSafePointPrefix(spaceID uint32) string {
+	return path.Join(KeySpacePath(spaceID), "service") + "/"
 }
 
 // KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
 // Path: /key_space/gc_safepoint/{space_id}/gc
-func KeySpaceGCSafePointPath(spaceID string) string {
-	return path.Join(keySpaceSafePointPrefix, spaceID, keySpaceGCSafePointSuffix)
+func KeySpaceGCSafePointPath(spaceID uint32) string {
+	return path.Join(KeySpacePath(spaceID), keySpaceGCSafePointSuffix)
 }
 
 // KeySpaceServiceSafePointPath returns the path of given service's service safe point.
 // Path: /key_space/gc_safepoint/{space_id}/service/{service_id}
-func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
+func KeySpaceServiceSafePointPath(spaceID uint32, serviceID string) string {
 	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
