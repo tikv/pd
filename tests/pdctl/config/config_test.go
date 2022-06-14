@@ -97,7 +97,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	scheduleConfig.EnableRemoveExtraReplica = false
 	scheduleConfig.EnableLocationReplacement = false
 	scheduleConfig.StoreLimitMode = ""
-
+	c.Assert(scheduleConfig.MaxMergeRegionKeys, Equals, uint64(0))
+	// The result of config show doesn't be 0.
+	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
 	c.Assert(&cfg.Schedule, DeepEquals, scheduleConfig)
 	c.Assert(&cfg.Replication, DeepEquals, svr.GetReplicationConfig())
 
@@ -122,7 +124,9 @@ func (s *configTestSuite) TestConfig(c *C) {
 	c.Assert(err, IsNil)
 	scheduleCfg := config.ScheduleConfig{}
 	c.Assert(json.Unmarshal(output, &scheduleCfg), IsNil)
-	c.Assert(&scheduleCfg, DeepEquals, svr.GetScheduleConfig())
+	scheduleConfig = svr.GetScheduleConfig()
+	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
+	c.Assert(&scheduleCfg, DeepEquals, scheduleConfig)
 
 	c.Assert(int(svr.GetScheduleConfig().MaxMergeRegionSize), Equals, 20)
 	c.Assert(int(svr.GetScheduleConfig().MaxMergeRegionKeys), Equals, 0)
