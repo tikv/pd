@@ -312,7 +312,7 @@ func (s *testRateLimitConfigSuite) TestConfigRateLimitSwitch(c *C) {
 	}
 	postData, err = json.Marshal(ms)
 	c.Assert(err, IsNil)
-	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(c, http.StatusInternalServerError), tu.StringEqual(c, "config item rate-limit not found")), IsNil)
+	c.Assert(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(c, http.StatusBadRequest), tu.StringEqual(c, "config item rate-limit not found")), IsNil)
 
 	c.Assert(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"), IsNil)
 	ms = map[string]interface{}{
