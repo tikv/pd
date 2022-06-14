@@ -285,7 +285,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/service-middleware/rate-limit/config", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/service-middleware/config/rate-limit", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

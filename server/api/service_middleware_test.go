@@ -129,7 +129,7 @@ func (s *testRateLimitConfigSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/rate-limit/config", s.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", s.svr.GetAddr(), apiPrefix)
 
 	// test empty type
 	input := make(map[string]interface{})
