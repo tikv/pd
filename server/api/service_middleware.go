@@ -137,6 +137,7 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 // @Produce json
 // @Success 200 {string} string ""
 // @Failure 400 {string} string ""
+// @Failure 500 {string} string "config item not found"
 // @Router /service-middleware/rate-limit/config [POST]
 func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
@@ -193,12 +194,11 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 	qps, okq := input["qps"].(float64)
 	if okq {
 		brust := 0
-		if qps > 0 {
-			if int(qps) > 1 {
-				brust = int(qps)
-			} else {
-				brust = 1
-			}
+
+		if int(qps) > 1 {
+			brust = int(qps)
+		} else if qps > 0 {
+			brust = 1
 		}
 		cfg.QPS = qps
 		cfg.QPSBurst = brust
