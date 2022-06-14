@@ -349,7 +349,7 @@ func (bs *balanceSolver) getPendingLoad(source, target *core.StoreInfo, dim int)
 }
 
 // getPeerRate returns the load of the peer.
-func (bs *balanceSolver) getPeerRate(srcPeerStat *statistics.HotPeerStat, rw statistics.RWType, dim int) float64 {
+func getPeerRate(srcPeerStat *statistics.HotPeerStat, rw statistics.RWType, dim int) float64 {
 	return srcPeerStat.GetLoad(statistics.GetRegionStatKind(rw, dim))
 }
 
@@ -466,8 +466,8 @@ func (bs *balanceSolver) isValid() bool {
 	return true
 }
 
-// solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
-// The comparing between solutions is based on calcProgressiveRank.
+// solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling plan.
+// The comparing between plans is based on calcScore.
 func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() {
 		return nil
@@ -798,7 +798,6 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 }
 
 // calcScore calculates `bs.cur.score`.
-// See the comments of `solution.progressiveRank` for more about progressive rank.
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
 // |   isBetter                         | -4       | -3            | -1 / 0   |
 // |   isNotWorsened                    | -2       | 1             | 1        |
@@ -860,7 +859,7 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (bool, float64) {
 		return a - b
 	}
 	srcRate, dstRate := bs.getExtremeLoad(bs.cur.source, bs.cur.target, dim)
-	peerRate := bs.getPeerRate(bs.cur.srcPeerStat, bs.rwTy, dim)
+	peerRate := getPeerRate(bs.cur.srcPeerStat, bs.rwTy, dim)
 	isHot := peerRate >= bs.getMinRate(dim)
 	decRatio := (dstRate + peerRate) / getSrcDecRate(srcRate, peerRate)
 	return isHot, decRatio
@@ -868,7 +867,7 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (bool, float64) {
 
 func (bs *balanceSolver) isBetterForWriteLeader() bool {
 	srcRate, dstRate := bs.getExtremeLoad(bs.cur.source, bs.cur.target, bs.firstPriority)
-	peerRate := bs.getPeerRate(bs.cur.srcPeerStat, bs.rwTy, bs.firstPriority)
+	peerRate := getPeerRate(bs.cur.srcPeerStat, bs.rwTy, bs.firstPriority)
 	return srcRate-peerRate >= dstRate+peerRate && bs.isTolerance(bs.firstPriority)
 }
 

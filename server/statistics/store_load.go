@@ -117,7 +117,6 @@ func GetRegionStatKind(rwTy RWType, dim int) RegionStatKind {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
 	PendingSum *Influence
 }
 
@@ -133,7 +132,6 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -156,11 +154,6 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 		s.PendingSum.Loads[i] += load * w
 	}
 	s.PendingSum.Count += infl.Count * w
-}
-
-// IsTiFlash returns true if the store is TiFlash.
-func (s *StoreSummaryInfo) IsTiFlash() bool {
-	return s.isTiFlash
 }
 
 // GetPendingInfluence returns the current pending influence.
