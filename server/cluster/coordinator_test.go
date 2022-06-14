@@ -189,9 +189,8 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.prepared = true }, nil, c)
 	defer cleanup()
-
 	// Transfer peer from store 4 to store 1.
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addRegionStore(3, 30), IsNil)
@@ -284,7 +283,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setCfg(cfg)
 	}
 	tc := newTestCluster(ctx, opt)
-	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.meta.GetId(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}
