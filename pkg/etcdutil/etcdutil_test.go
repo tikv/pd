@@ -30,11 +30,10 @@ import (
 func TestMemberHelpers(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	cfg1 := NewTestSingleConfig()
+	cfg1 := NewTestSingleConfig(t)
 	etcd1, err := embed.StartEtcd(cfg1)
 	defer func() {
 		etcd1.Close()
-		CleanConfig(cfg1)
 	}()
 	re.NoError(err)
 
@@ -55,7 +54,7 @@ func TestMemberHelpers(t *testing.T) {
 
 	// Test AddEtcdMember
 	// Make a new etcd config.
-	cfg2 := NewTestSingleConfig()
+	cfg2 := NewTestSingleConfig(t)
 	cfg2.Name = "etcd2"
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
@@ -68,7 +67,6 @@ func TestMemberHelpers(t *testing.T) {
 	etcd2, err := embed.StartEtcd(cfg2)
 	defer func() {
 		etcd2.Close()
-		CleanConfig(cfg2)
 	}()
 	re.NoError(err)
 	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
@@ -113,11 +111,10 @@ func TestMemberHelpers(t *testing.T) {
 func TestEtcdKVGet(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	cfg := NewTestSingleConfig()
+	cfg := NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
 	defer func() {
 		etcd.Close()
-		CleanConfig(cfg)
 	}()
 	re.NoError(err)
 
@@ -165,11 +162,10 @@ func TestEtcdKVGet(t *testing.T) {
 func TestEtcdKVPutWithTTL(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	cfg := NewTestSingleConfig()
+	cfg := NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
 	defer func() {
 		etcd.Close()
-		CleanConfig(cfg)
 	}()
 	re.NoError(err)
 
