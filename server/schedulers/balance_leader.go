@@ -128,8 +128,9 @@ func (conf *balanceLeaderSchedulerConfig) validate() bool {
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	var ranges []core.KeyRange
 	return &balanceLeaderSchedulerConfig{
-		Ranges: conf.Ranges,
+		Ranges: append(ranges, conf.Ranges...),
 		Batch:  conf.Batch,
 	}
 }
