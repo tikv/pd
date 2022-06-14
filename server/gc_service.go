@@ -65,32 +65,30 @@ func (s *GcServer) safePointRollbackHeader(requestSafePoint, requiredSafePoint u
 	})
 }
 
-// ListKeySpaces returns all key spaces that has gc safe point.
-// If withGCSafePoint set to true, it will also return their corresponding gc safe points, otherwise they will be 0.
-func (s *GcServer) ListKeySpaces(ctx context.Context, request *gcpb.ListKeySpacesRequest) (*gcpb.ListKeySpacesResponse, error) {
+func (s *GcServer) ListKeySpaces(request *gcpb.ListKeySpacesRequest, stream gcpb.GC_ListKeySpacesServer) error {
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &gcpb.ListKeySpacesResponse{Header: s.notBootstrappedHeader()}, nil
+		return stream.Send(&gcpb.ListKeySpacesResponse{Header: s.notBootstrappedHeader()})
 	}
 
 	var storage endpoint.KeySpaceGCSafePointStorage = s.storage
 	keySpaces, err := storage.LoadAllKeySpaceGCSafePoints(request.WithGcSafePoint)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	returnKeySpaces := make([]*gcpb.KeySpace, 0, len(keySpaces))
 	for _, keySpace := range keySpaces {
-		returnKeySpaces = append(returnKeySpaces, &gcpb.KeySpace{
-			SpaceId:     []byte(keySpace.SpaceID),
-			GcSafePoint: keySpace.SafePoint,
+		err = stream.Send(&gcpb.ListKeySpacesResponse{
+			Header: s.header(),
+			KeySpace: &gcpb.KeySpace{
+				SpaceId:     keySpace.SpaceID,
+				GcSafePoint: keySpace.SafePoint,
+			},
 		})
+		if err != nil {
+			return err
+		}
 	}
-
-	return &gcpb.ListKeySpacesResponse{
-		Header:    s.header(),
-		KeySpaces: returnKeySpaces,
-	}, nil
+	return nil
 }
 
 func (s *GcServer) getNow() (time.Time, error) {
@@ -115,7 +113,7 @@ func (s *GcServer) GetMinServiceSafePoint(ctx context.Context, request *gcpb.Get
 	}
 
 	var storage endpoint.KeySpaceGCSafePointStorage = s.storage
-	requestSpaceID := string(request.GetSpaceId())
+	requestSpaceID := request.GetSpaceId()
 
 	min, err := storage.LoadMinServiceSafePoint(requestSpaceID)
 	if err != nil {
@@ -148,7 +146,7 @@ func (s *GcServer) UpdateGCSafePoint(ctx context.Context, request *gcpb.UpdateGC
 	}
 
 	var storage endpoint.KeySpaceGCSafePointStorage = s.storage
-	requestSpaceID := string(request.GetSpaceId())
+	requestSpaceID := request.GetSpaceId()
 	requestSafePoint := request.GetSafePoint()
 	requestRevision := request.GetRevision()
 
@@ -173,7 +171,7 @@ func (s *GcServer) UpdateGCSafePoint(ctx context.Context, request *gcpb.UpdateGC
 	// fail to store due to safe point rollback.
 	if requestSafePoint < oldSafePoint {
 		log.Warn("trying to update gc_worker safe point",
-			zap.String("key-space", requestSpaceID),
+			zap.Uint32("key-space", requestSpaceID),
 			zap.Uint64("old-safe-point", oldSafePoint),
 			zap.Uint64("new-safe-point", requestSafePoint))
 		response.Header = s.safePointRollbackHeader(requestSafePoint, oldSafePoint)
@@ -188,7 +186,7 @@ func (s *GcServer) UpdateGCSafePoint(ctx context.Context, request *gcpb.UpdateGC
 	response.Header = s.header()
 	response.Succeeded = true
 	log.Info("updated gc_worker safe point",
-		zap.String("key-space", requestSpaceID),
+		zap.Uint32("key-space", requestSpaceID),
 		zap.Uint64("old-safe-point", oldSafePoint),
 		zap.Uint64("new-safe-point", requestSafePoint))
 	return response, nil
@@ -205,7 +203,7 @@ func (s *GcServer) UpdateServiceSafePoint(ctx context.Context, request *gcpb.Upd
 	}
 
 	var storage endpoint.KeySpaceGCSafePointStorage = s.storage
-	requestSpaceID := string(request.GetSpaceId())
+	requestSpaceID := request.GetSpaceId()
 	requestServiceID := string(request.GetServiceId())
 	requestTTL := request.GetTimeToLive()
 	requestSafePoint := request.GetSafePoint()
@@ -279,7 +277,7 @@ func (s *GcServer) UpdateServiceSafePoint(ctx context.Context, request *gcpb.Upd
 		return nil, err
 	}
 	log.Info("updated service safe point",
-		zap.String("key-space", requestSpaceID),
+		zap.Uint32("key-space", requestSpaceID),
 		zap.String("service-id", ssp.ServiceID),
 		zap.Int64("expire-at", ssp.ExpiredAt),
 		zap.Uint64("safepoint", ssp.SafePoint))
