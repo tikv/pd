@@ -65,6 +65,7 @@ func (s *GcServer) safePointRollbackHeader(requestSafePoint, requiredSafePoint u
 	})
 }
 
+// ListKeySpaces sends key spaces that have gc safe point to a grpc client.
 func (s *GcServer) ListKeySpaces(request *gcpb.ListKeySpacesRequest, stream gcpb.GC_ListKeySpacesServer) error {
 	rc := s.GetRaftCluster()
 	if rc == nil {
