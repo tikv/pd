@@ -67,7 +67,7 @@ func (c *StoreCandidates) KeepTheTopStores(cmp StoreComparer, asc bool) *StoreCa
 		compare := cmp(c.Stores[topIdx], c.Stores[idx])
 		if compare == 0 {
 			topIdx++
-		} else if compare > 0 && asc || (!asc && compare < 0) {
+		} else if (compare > 0 && asc) || (!asc && compare < 0) {
 			topIdx = 0
 		} else {
 			continue
@@ -87,7 +87,7 @@ func (c *StoreCandidates) PickTheTopStore(cmp StoreComparer, asc bool) *core.Sto
 	topIdx := 0
 	for idx := 1; idx < len(c.Stores); idx++ {
 		compare := cmp(c.Stores[topIdx], c.Stores[idx])
-		if compare > 0 && asc || (!asc && compare < 0) {
+		if (compare > 0 && asc) || (!asc && compare < 0) {
 			topIdx = idx
 		}
 	}
