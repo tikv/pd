@@ -17,6 +17,7 @@ package gc_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"sync"
 	"testing"
@@ -85,12 +86,21 @@ func (c *testClient) mustListKeySpaces(withGCSafePoint bool) []*gcpb.KeySpace {
 		Header:          newRequestHeader(c.clusterID),
 		WithGcSafePoint: withGCSafePoint,
 	}
-	resp, err := c.cli.ListKeySpaces(c.ctx, req)
+	respStream, err := c.cli.ListKeySpaces(c.ctx, req)
 	c.c.Assert(err, IsNil)
-	return resp.KeySpaces
+	keySpaces := make([]*gcpb.KeySpace, 0, 5)
+	for {
+		resp, err := respStream.Recv()
+		if err == io.EOF {
+			break
+		}
+		c.c.Assert(err, IsNil)
+		keySpaces = append(keySpaces, resp.KeySpace)
+	}
+	return keySpaces
 }
 
-func (c *testClient) mustUpdateServiceSafePoint(spaceID []byte, serviceID []byte, ttl int64, safepoint uint64) *gcpb.UpdateServiceSafePointResponse {
+func (c *testClient) mustUpdateServiceSafePoint(spaceID uint32, serviceID []byte, ttl int64, safepoint uint64) *gcpb.UpdateServiceSafePointResponse {
 	req := &gcpb.UpdateServiceSafePointRequest{
 		Header:     newRequestHeader(c.clusterID),
 		SpaceId:    spaceID,
@@ -103,7 +113,7 @@ func (c *testClient) mustUpdateServiceSafePoint(spaceID []byte, serviceID []byte
 	return resp
 }
 
-func (c *testClient) mustGetMinServiceSafePoint(spaceID []byte) (safepoint uint64, revision int64) {
+func (c *testClient) mustGetMinServiceSafePoint(spaceID uint32) (safepoint uint64, revision int64) {
 	req := &gcpb.GetMinServiceSafePointRequest{
 		Header:  newRequestHeader(c.clusterID),
 		SpaceId: spaceID,
@@ -113,7 +123,7 @@ func (c *testClient) mustGetMinServiceSafePoint(spaceID []byte) (safepoint uint6
 	return resp.GetSafePoint(), resp.GetRevision()
 }
 
-func (c *testClient) mustUpdateGCSafePoint(spaceID []byte, safepoint uint64, revision int64) *gcpb.UpdateGCSafePointResponse {
+func (c *testClient) mustUpdateGCSafePoint(spaceID uint32, safepoint uint64, revision int64) *gcpb.UpdateGCSafePointResponse {
 	req := &gcpb.UpdateGCSafePointRequest{
 		Header:    newRequestHeader(c.clusterID),
 		SpaceId:   spaceID,
@@ -136,8 +146,8 @@ func (s *testGCSuite) TestGCService(c *C) {
 		ctx:       s.ctx,
 	}
 
-	keySpaceRawKV := []byte("default_rawkv")
-	keySpaceTxnKV := []byte("default_txnkv")
+	keySpaceRawKV := uint32(1)
+	keySpaceTxnKV := uint32(2)
 	serviceID1 := []byte("svc1")
 	serviceID2 := []byte("svc2")
 
@@ -269,7 +279,7 @@ func (s *testGCSuite) TestConcurrency(c *C) {
 		}
 	}
 
-	spaceID := []byte("default_rawkv")
+	spaceID := uint32(100)
 	closeCh := make(chan struct{})
 
 	{ // Initialize GC safe point to make sure that tikv thread will get a valid safe point.

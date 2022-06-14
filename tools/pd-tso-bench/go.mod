@@ -2,6 +2,8 @@ module github.com/tools/pd-tso-bench
 
 go 1.16
 
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220613090613-a36599a07f24
+
 require (
 	github.com/influxdata/tdigest v0.0.1
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
@@ -12,5 +14,3 @@ require (
 )
 
 replace github.com/tikv/pd/client => ../../client
-
-replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220604043941-cbd9fb76600c

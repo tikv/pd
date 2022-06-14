@@ -2,7 +2,7 @@ module github.com/tikv/pd/tests/client
 
 go 1.16
 
-replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220604043941-cbd9fb76600c
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220613090613-a36599a07f24
 
 require (
 	github.com/gogo/protobuf v1.3.2
