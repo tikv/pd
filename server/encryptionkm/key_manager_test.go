@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -48,10 +49,10 @@ func getTestDataKey() []byte {
 	return key
 }
 
-func newTestEtcd(re *require.Assertions) (client *clientv3.Client, cleanup func()) {
+func newTestEtcd(t *testing.T, re *require.Assertions) (client *clientv3.Client) {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
+	cfg.Dir = t.TempDir()
 	cfg.Logger = "zap"
 	pu, err := url.Parse(tempurl.Alloc())
 	re.NoError(err)
@@ -72,31 +73,25 @@ func newTestEtcd(re *require.Assertions) (client *clientv3.Client, cleanup func(
 	})
 	re.NoError(err)
 
-	cleanup = func() {
+	t.Cleanup(func() {
 		client.Close()
 		server.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	})
 
-	return client, cleanup
+	return client
 }
 
-func newTestKeyFile(re *require.Assertions, key ...string) (keyFilePath string, cleanup func()) {
+func newTestKeyFile(t *testing.T, re *require.Assertions, key ...string) (keyFilePath string) {
 	testKey := testMasterKey
 	for _, k := range key {
 		testKey = k
 	}
-	tempDir, err := os.MkdirTemp("/tmp", "test_key_file")
-	re.NoError(err)
-	keyFilePath = tempDir + "/key"
-	err = os.WriteFile(keyFilePath, []byte(testKey), 0600)
+
+	keyFilePath = filepath.Join(t.TempDir(), "key")
+	err := os.WriteFile(keyFilePath, []byte(testKey), 0600)
 	re.NoError(err)
 
-	cleanup = func() {
-		os.RemoveAll(tempDir)
-	}
-
-	return keyFilePath, cleanup
+	return keyFilePath
 }
 
 func newTestLeader(re *require.Assertions, client *clientv3.Client) *election.Leadership {
@@ -118,8 +113,7 @@ func checkMasterKeyMeta(re *require.Assertions, value []byte, meta *encryptionpb
 func TestNewKeyManagerBasic(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
+	client := newTestEtcd(t, re)
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
@@ -141,10 +135,8 @@ func TestNewKeyManagerBasic(t *testing.T) {
 func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	// Custom config
 	rotatePeriod, err := time.ParseDuration("100h")
 	re.NoError(err)
@@ -181,10 +173,8 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 func TestNewKeyManagerLoadKeys(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Use default config.
 	config := &encryption.Config{}
@@ -224,8 +214,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 func TestGetCurrentKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
+	client := newTestEtcd(t, re)
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
@@ -268,10 +257,8 @@ func TestGetCurrentKey(t *testing.T) {
 func TestGetKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
 	masterKeyMeta := newMasterKey(keyFile)
@@ -324,10 +311,8 @@ func TestGetKey(t *testing.T) {
 func TestLoadKeyEmpty(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
 	masterKeyMeta := newMasterKey(keyFile)
@@ -362,10 +347,8 @@ func TestWatcher(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -440,8 +423,7 @@ func TestWatcher(t *testing.T) {
 func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
+	client := newTestEtcd(t, re)
 	// Use default config.
 	config := &encryption.Config{}
 	err := config.Adjust()
@@ -466,10 +448,8 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -521,10 +501,8 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -599,10 +577,8 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -672,10 +648,8 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -749,12 +723,9 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
-	keyFile2, cleanupKeyFile2 := newTestKeyFile(re, testMasterKey2)
-	defer cleanupKeyFile2()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
+	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -817,10 +788,8 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -897,10 +866,8 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -955,10 +922,8 @@ func TestKeyRotation(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
@@ -1053,10 +1018,8 @@ func TestKeyRotationConflict(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client, cleanupEtcd := newTestEtcd(re)
-	defer cleanupEtcd()
-	keyFile, cleanupKeyFile := newTestKeyFile(re)
-	defer cleanupKeyFile()
+	client := newTestEtcd(t, re)
+	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
