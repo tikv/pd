@@ -42,7 +42,8 @@ func NewDiagnosisController(ctx context.Context) *DiagnosisController {
 		ctx:       ctx,
 		ctxCancel: ctxCancel,
 		//cache:        cache.NewIDTTL(ctx, time.Minute, 5*time.Minute),
-		storeReaders: make(map[uint64]*DiagnosisAnalyzer),
+		storeReaders:  make(map[uint64]*DiagnosisAnalyzer),
+		historyRecord: make(map[uint64]*DiagnosisAnalyzer),
 	}
 }
 
@@ -71,6 +72,10 @@ func (c *DiagnosisController) DiagnoseStore(storeID uint64) {
 	}
 }
 
+func (c *DiagnosisController) GetDiagnosisAnalyzer(storeID uint64) *DiagnosisAnalyzer {
+	return c.historyRecord[storeID]
+}
+
 func (c *DiagnosisController) SetObject(objectID uint64) {
 	switch c.currentStep {
 	case 1:
@@ -96,6 +101,9 @@ func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
 	}
 	reader := c.storeReaders[c.currentSource]
 	reader.GenerateStoreRecord(c.currentStep, objectID, reason)
+	if c.currentStep == 0 {
+		c.CleanUpSchedule(false)
+	}
 }
 
 // func (c *DiagnosisController) SelectSourceStores(stores []*core.StoreInfo, filtxers []filter.Filter, opt *config.PersistOptions) []*core.StoreInfo {
@@ -124,47 +132,52 @@ func (a *DiagnosisAnalyzer) GenerateStoreRecord(step int, objectID uint64, reaso
 	a.stepRecorders[step].Add(reason, objectID)
 }
 
+func (a *DiagnosisAnalyzer) GetReasonRecord() []DiagnoseStepRecoder {
+	return a.stepRecorders
+}
+
 type DiagnoseStepRecoder interface {
 	Add(reason string, id uint64)
-	GetMostReason() (string, *ReasonReader)
-	GetAllReasons() map[string]*ReasonReader
+	GetMostReason() *ReasonRecorder
+	GetAllReasons() map[string]*ReasonRecorder
 }
 
 type DiagnosisRecoder struct {
-	reasonCounter  map[string]int
-	reasonSampleId map[string]uint64
-	count          int
+	reasonCounter map[string]*ReasonRecorder
+	count         int
 }
 
 func NewDiagnosisRecoder() *DiagnosisRecoder {
 	return &DiagnosisRecoder{
-		reasonCounter:  make(map[string]int),
-		reasonSampleId: make(map[string]uint64),
+		reasonCounter: make(map[string]*ReasonRecorder),
 	}
 }
 
 func (r *DiagnosisRecoder) Add(reason string, id uint64) {
-	r.reasonCounter[reason]++
+	if _, ok := r.reasonCounter[reason]; !ok {
+		r.reasonCounter[reason] = &ReasonRecorder{Reason: reason}
+	}
+	reader := r.reasonCounter[reason]
+	reader.Count++
+	reader.SampleId = id
 	r.count++
-	r.reasonSampleId[reason] = id
 }
 
-func (r *DiagnosisRecoder) GetMostReason() (reason string, reader *ReasonReader) {
-	reader = &ReasonReader{}
-	for rs, count := range r.reasonCounter {
-		if float64(count)/float64(r.count) > reader.ratio {
-			reader.ratio = float64(count) / float64(r.count)
-			reason = rs
+func (r *DiagnosisRecoder) GetMostReason() (most *ReasonRecorder) {
+	for _, recorder := range r.reasonCounter {
+		if most == nil || most.Count < recorder.Count {
+			most = recorder
 		}
 	}
 	return
 }
 
-func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonReader {
+func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonRecorder {
 	return nil
 }
 
-type ReasonReader struct {
-	ratio    float64
-	sampleId uint64
+type ReasonRecorder struct {
+	Reason   string
+	Count    int
+	SampleId uint64
 }

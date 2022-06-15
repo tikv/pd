@@ -15,6 +15,8 @@
 package filter
 
 import (
+	"fmt"
+
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -196,6 +198,7 @@ func (f *RegionHotFilter) Reason() string {
 }
 
 func (f *RegionHotFilter) Select(region *core.RegionInfo) bool {
+	fmt.Println(f == nil, f.cluster == nil)
 	return !f.cluster.IsRegionHot(region)
 }
 
@@ -204,7 +207,7 @@ type RegionNoLeaderFilter struct {
 }
 
 func NewRegionNoLeaderFilter(scope string) RegionFilter {
-	return &RegionHotFilter{scope: scope}
+	return &RegionNoLeaderFilter{scope: scope}
 }
 
 func (f *RegionNoLeaderFilter) Scope() string {

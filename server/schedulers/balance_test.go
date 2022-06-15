@@ -703,8 +703,16 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	// When store 1 is offline, it will be filtered,
 	// store 2 becomes the store with least regions.
 	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 4, 2)
+
+	// region 1 will be filter because of replica
+	scheduler := sb.(*balanceRegionScheduler)
+	scheduler.DiagnosisController.DiagnoseStore(4)
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc), HasLen, 0)
+	recorder := scheduler.DiagnosisController.GetDiagnosisAnalyzer(uint64(4)).GetReasonRecord()[1].GetMostReason()
+	fmt.Println(recorder)
+	c.Assert(recorder.Reason, Equals, "This region is not replicated")
+	c.Assert(recorder.SampleId, Equals, uint64(1))
 
 	opt.SetMaxReplicas(1)
 	c.Assert(len(sb.Schedule(tc)), Greater, 0)
