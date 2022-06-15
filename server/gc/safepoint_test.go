@@ -92,55 +92,53 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 	brSafePoint := uint64(15)
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(5)
 	// update the safepoint for cdc to 10 should success
 	go func() {
+		defer wg.Done()
 		min, updated, err := manager.UpdateServiceGCSafePoint(cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
 		re.Equal(gcworkerServiceID, min.ServiceID)
-		wg.Done()
 	}()
 
-	wg.Add(1)
 	// update the safepoint for br to 15 should success
 	go func() {
+		defer wg.Done()
 		min, updated, err := manager.UpdateServiceGCSafePoint(brServiceID, brSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
 		re.Equal(gcworkerServiceID, min.ServiceID)
-		wg.Done()
 	}()
-	wg.Add(1)
+
 	// update safepoint to 8 for gc_woker should be success
 	go func() {
+		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
 		min, updated, _ := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)
 		re.Equal(gcworkerServiceID, min.ServiceID)
-		wg.Done()
 	}()
-	wg.Add(1)
+
 	go func() {
+		defer wg.Done()
 		// update safepoint of gc_worker's service with ttl not infinity should be failed.
 		_, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, 10000, 10, time.Now())
 		re.Error(err)
 		re.False(updated)
-		wg.Done()
 	}()
 
-	wg.Add(1)
 	// update safepoint with negative ttl should be failed.
 	go func() {
+		defer wg.Done()
 		brTTL := int64(-100)
 		_, updated, err := manager.UpdateServiceGCSafePoint(brServiceID, uint64(10000), brTTL, time.Now())
 		re.NoError(err)
 		re.False(updated)
-		wg.Done()
 	}()
 
 	wg.Wait()

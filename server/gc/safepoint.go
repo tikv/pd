@@ -22,14 +22,14 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-// SafePointManager is the manager for safePoint of GC and services
+// SafePointManager is the manager for safePoint of GC and services.
 type SafePointManager struct {
 	gcLock        syncutil.Mutex
 	serviceGCLock syncutil.Mutex
 	store         endpoint.GCSafePointStorage
 }
 
-// NewSafePointManager creates a SafePointManager of GC and services
+// NewSafePointManager creates a SafePointManager of GC and services.
 func NewSafePointManager(store endpoint.GCSafePointStorage) *SafePointManager {
 	return &SafePointManager{store: store}
 }
@@ -56,7 +56,7 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 	return
 }
 
-// UpdateServiceGCSafePoint update the safepoint for a specific service
+// UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	manager.serviceGCLock.Lock()
 	defer manager.serviceGCLock.Unlock()
@@ -77,7 +77,7 @@ func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newS
 		return nil, false, err
 	}
 
-	// If the min safepoint is updated, load the next one
+	// If the min safePoint is updated, load the next one.
 	if serviceID == minServiceSafePoint.ServiceID {
 		minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
 	}
