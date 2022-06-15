@@ -400,7 +400,6 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 // @Summary Get label property config.
 // @Produce json
 // @Success 200 {object} config.LabelPropertyConfig
-// @Failure 400 {string} string "The input is invalid."
 // @Router /config/label-property [get]
 func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
