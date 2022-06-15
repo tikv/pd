@@ -79,7 +79,7 @@ func (c *StoreCandidates) KeepTheTopStores(cmp StoreComparer, asc bool) *StoreCa
 }
 
 // PickTheTopStore returns the first store order by asc.
-// it returns the min item when asc is true, return the max item when asc is false.
+// It returns the min item when asc is true, return the max item when asc is false.
 func (c *StoreCandidates) PickTheTopStore(cmp StoreComparer, asc bool) *core.StoreInfo {
 	if len(c.Stores) == 0 {
 		return nil

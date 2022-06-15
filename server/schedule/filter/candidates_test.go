@@ -19,7 +19,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
@@ -93,6 +92,10 @@ func TestCandidates(t *testing.T) {
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
 	cs.KeepTheTopStores(idComparer2, false)
 	check(re, cs, 33, 32, 31)
+
+	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
+	cs.KeepTheTopStores(idComparer2, true)
+	check(re, cs, 10, 15)
 }
 
 func newTestCandidates(ids ...uint64) *StoreCandidates {
