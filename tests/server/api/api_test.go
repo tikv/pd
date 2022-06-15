@@ -703,12 +703,12 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	}
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leader.GetServer(), store)
+		pdctl.MustPutStoreWithCheck(c, leader.GetServer(), store)
 	}
-	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
-	pdctl.MustPutRegion(c, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
-	pdctl.MustPutRegion(c, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
 
 	// no store removing
 	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusNotFound)
@@ -730,8 +730,8 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
 
 	// update size
-	pdctl.MustPutRegion(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
-	pdctl.MustPutRegion(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
 	// is not prepared
 	time.Sleep(2 * time.Second)
@@ -836,10 +836,10 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	}
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leader.GetServer(), store)
+		pdctl.MustPutStoreWithCheck(c, leader.GetServer(), store)
 	}
 	for i := 0; i < 100; i++ {
-		pdctl.MustPutRegion(c, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
+		pdctl.MustPutRegionWithCheck(c, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
 	}
 	// no store preparing
 	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
@@ -866,8 +866,8 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
 
 	// update size
-	pdctl.MustPutRegion(c, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
-	pdctl.MustPutRegion(c, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
 	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)

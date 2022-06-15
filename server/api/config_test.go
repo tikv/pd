@@ -370,6 +370,19 @@ func (s *testConfigSuite) TestConfigTTL(c *C) {
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData,
 		tu.StatusNotOK(c), tu.StringEqual(c, "\"unsupported ttl config schedule.invalid-ttl-config\"\n"))
 	c.Assert(err, IsNil)
+
+	// only set max-merge-region-size
+	mergeConfig := map[string]interface{}{
+		"schedule.max-merge-region-size": 999,
+	}
+	postData, err = json.Marshal(mergeConfig)
+	c.Assert(err, IsNil)
+
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(s.urlPrefix, 1), postData, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionSize(), Equals, uint64(999))
+	// max-merge-region-keys should keep consistence with max-merge-region-size.
+	c.Assert(s.svr.GetPersistOptions().GetMaxMergeRegionKeys(), Equals, uint64(999*10000))
 }
 
 func (s *testConfigSuite) TestTTLConflict(c *C) {

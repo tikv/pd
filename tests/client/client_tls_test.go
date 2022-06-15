@@ -62,28 +62,22 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tmpDir, err := os.MkdirTemp(os.TempDir(), "cert-tmp")
-	re.NoError(err)
+	tmpDir := t.TempDir()
 	os.RemoveAll(tmpDir)
-	defer os.RemoveAll(tmpDir)
 
-	certsDir, err := os.MkdirTemp(os.TempDir(), "cert-to-load")
-	re.NoError(err)
-	defer os.RemoveAll(certsDir)
+	certsDir := t.TempDir()
 
-	certsDirExp, err := os.MkdirTemp(os.TempDir(), "cert-expired")
-	re.NoError(err)
-	defer os.RemoveAll(certsDirExp)
+	certsDirExp := t.TempDir()
 
 	cloneFunc := func() transport.TLSInfo {
 		tlsInfo, terr := copyTLSFiles(testTLSInfo, certsDir)
 		re.NoError(terr)
-		_, err = copyTLSFiles(testTLSInfoExpired, certsDirExp)
+		_, err := copyTLSFiles(testTLSInfoExpired, certsDirExp)
 		re.NoError(err)
 		return tlsInfo
 	}
 	replaceFunc := func() {
-		err = os.Rename(certsDir, tmpDir)
+		err := os.Rename(certsDir, tmpDir)
 		re.NoError(err)
 		err = os.Rename(certsDirExp, certsDir)
 		re.NoError(err)
@@ -93,7 +87,7 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		// 'certsDirExp' does not exist
 	}
 	revertFunc := func() {
-		err = os.Rename(tmpDir, certsDirExp)
+		err := os.Rename(tmpDir, certsDirExp)
 		re.NoError(err)
 
 		err = os.Rename(certsDir, tmpDir)
