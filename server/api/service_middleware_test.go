@@ -129,7 +129,7 @@ func (s *testRateLimitConfigSuite) TearDownSuite(c *C) {
 }
 
 func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/rate-limit/config", s.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", s.svr.GetAddr(), apiPrefix)
 
 	// test empty type
 	input := make(map[string]interface{})
@@ -207,13 +207,13 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "Concurrency limiter is changed."))
+		tu.StatusOK(c), tu.StringContain(c, "Concurrency limiter is changed."))
 	c.Assert(err, IsNil)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "Concurrency limiter is deleted."))
+		tu.StatusOK(c), tu.StringContain(c, "Concurrency limiter is deleted."))
 	c.Assert(err, IsNil)
 
 	// change qps
@@ -225,7 +225,7 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is changed."))
+		tu.StatusOK(c), tu.StringContain(c, "QPS rate limiter is changed."))
 	c.Assert(err, IsNil)
 
 	input = make(map[string]interface{})
@@ -236,7 +236,7 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is changed."))
+		tu.StatusOK(c), tu.StringContain(c, "QPS rate limiter is changed."))
 	c.Assert(err, IsNil)
 	c.Assert(s.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].QPSBurst, Equals, 1)
 
@@ -244,7 +244,7 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "QPS rate limiter is deleted."))
+		tu.StatusOK(c), tu.StringContain(c, "QPS rate limiter is deleted."))
 	c.Assert(err, IsNil)
 
 	// change both
@@ -255,8 +255,15 @@ func (s *testRateLimitConfigSuite) TestUpdateRateLimitConfig(c *C) {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	c.Assert(err, IsNil)
+	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(c), tu.StringEqual(c, "\"Concurrency limiter is changed. QPS rate limiter is changed.\"\n"))
+		tu.StatusOK(c), tu.StringContain(c, "Concurrency limiter is changed."),
+		tu.StringContain(c, "QPS rate limiter is changed."),
+		tu.ExtractJSON(c, &result),
+	)
+	c.Assert(result.LimiterConfig["Profile"].QPS, Equals, 100.)
+	c.Assert(result.LimiterConfig["Profile"].QPSBurst, Equals, 100)
+	c.Assert(result.LimiterConfig["Profile"].ConcurrencyLimit, Equals, uint64(100))
 	c.Assert(err, IsNil)
 
 	limiter := s.svr.GetServiceRateLimiter()

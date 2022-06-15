@@ -110,7 +110,7 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 	case "audit":
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
 	case "rate-limit":
-		return h.svr.UpdateRateLimit(cfg, kp[len(kp)-1], value)
+		return h.svr.UpdateRateLimit(&cfg.RateLimitConfig, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
@@ -135,9 +135,10 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 // @Summary update ratelimit config
 // @Param body body object string "json params"
 // @Produce json
-// @Success 200 {string} string ""
-// @Failure 400 {string} string ""
-// @Router /service-middleware/rate-limit/config [POST]
+// @Success 200 {string} string
+// @Failure 400 {string} string "The input is invalid."
+// @Failure 500 {string} string "config item not found"
+// @Router /service-middleware/config/rate-limit [POST]
 func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -185,20 +186,17 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
-		concurrency := uint64(concurrencyFloat)
-		cfg.ConcurrencyLimit = concurrency
+		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
 	}
 	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
 	qps, okq := input["qps"].(float64)
 	if okq {
 		brust := 0
-		if qps > 0 {
-			if int(qps) > 1 {
-				brust = int(qps)
-			} else {
-				brust = 1
-			}
+		if int(qps) > 1 {
+			brust = int(qps)
+		} else if qps > 0 {
+			brust = 1
 		}
 		cfg.QPS = qps
 		cfg.QPSBurst = brust
@@ -223,7 +221,14 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			h.rd.JSON(w, http.StatusOK, fmt.Sprintf("%s %s", concurrencyUpdatedFlag, qpsRateUpdatedFlag))
+			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
+			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
+}
+
+type rateLimitResult struct {
+	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
+	QPSRateUpdatedFlag     string                               `json:"qps"`
+	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }
