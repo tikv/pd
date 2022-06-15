@@ -293,7 +293,7 @@ func newTestHotRegionStorage(pullInterval time.Duration,
 	}
 	packHotRegionInfo.pullInterval = pullInterval
 	packHotRegionInfo.reservedDays = reservedDays
-	// delete data in between today and tomrrow
+	// delete data in between today and tomorrow
 	hotRegionStorage, err = NewHotRegionsStorage(ctx,
 		writePath, nil, packHotRegionInfo)
 	if err != nil {
