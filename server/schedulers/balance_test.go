@@ -674,7 +674,7 @@ func (s *testBalanceRegionSchedulerSuite) TearDownSuite(c *C) {
 	s.cancel()
 }
 
-func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
+func (s *testBalanceRegionSchedulerSuite) TestBalanceQQQ(c *C) {
 	opt := config.NewTestOptions()
 	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
@@ -709,13 +709,29 @@ func (s *testBalanceRegionSchedulerSuite) TestBalance(c *C) {
 	scheduler.DiagnosisController.DiagnoseStore(4)
 	opt.SetMaxReplicas(3)
 	c.Assert(sb.Schedule(tc), HasLen, 0)
-	recorder := scheduler.DiagnosisController.GetDiagnosisAnalyzer(uint64(4)).GetReasonRecord()[1].GetMostReason()
-	fmt.Println(recorder)
+	analyzer := scheduler.DiagnosisController.GetDiagnosisAnalyzer(uint64(4))
+	c.Assert(analyzer.Schedulable(), Equals, false)
+	recorder := analyzer.GetReasonRecord()[1].GetMostReason()
 	c.Assert(recorder.Reason, Equals, "This region is not replicated")
 	c.Assert(recorder.SampleId, Equals, uint64(1))
 
 	opt.SetMaxReplicas(1)
+	scheduler.DiagnosisController.DiagnoseStore(4)
 	c.Assert(len(sb.Schedule(tc)), Greater, 0)
+	analyzer = scheduler.DiagnosisController.GetDiagnosisAnalyzer(uint64(4))
+	c.Assert(analyzer.Schedulable(), Equals, true)
+
+	tc.UpdateRegionCount(1, 16)
+	tc.UpdateRegionCount(2, 16)
+	tc.UpdateRegionCount(3, 16)
+	scheduler.DiagnosisController.DiagnoseStore(4)
+	c.Assert(len(sb.Schedule(tc)), Equals, 0)
+	analyzer = scheduler.DiagnosisController.GetDiagnosisAnalyzer(uint64(4))
+	c.Assert(analyzer.Schedulable(), Equals, false)
+	recorder = analyzer.GetReasonRecord()[2].GetMostReason()
+	c.Assert(recorder.Reason, Equals, "offline")
+	recorder = analyzer.GetReasonRecord()[3].GetMostReason()
+	c.Assert(recorder.Reason, Equals, "should-not-balance")
 }
 
 func (s *testBalanceRegionSchedulerSuite) TestReplicas3(c *C) {

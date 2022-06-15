@@ -136,6 +136,10 @@ func (a *DiagnosisAnalyzer) GetReasonRecord() []DiagnoseStepRecoder {
 	return a.stepRecorders
 }
 
+func (a *DiagnosisAnalyzer) Schedulable() bool {
+	return a.schedulable
+}
+
 type DiagnoseStepRecoder interface {
 	Add(reason string, id uint64)
 	GetMostReason() *ReasonRecorder
@@ -173,7 +177,7 @@ func (r *DiagnosisRecoder) GetMostReason() (most *ReasonRecorder) {
 }
 
 func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonRecorder {
-	return nil
+	return r.reasonCounter
 }
 
 type ReasonRecorder struct {
