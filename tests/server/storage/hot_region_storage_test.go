@@ -69,14 +69,14 @@ func (s *hotRegionHistorySuite) TestHotRegionStorage(c *C) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStoreWithCheck(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(c, cluster, 3, 1, []byte("e"), []byte("f"))
-	pdctl.MustPutRegion(c, cluster, 4, 2, []byte("g"), []byte("h"))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 3, 1, []byte("e"), []byte("f"))
+	pdctl.MustPutRegionWithCheck(c, cluster, 4, 2, []byte("g"), []byte("h"))
 	storeStats := []*pdpb.StoreStats{
 		{
 			StoreId:  1,
@@ -172,11 +172,11 @@ func (s *hotRegionHistorySuite) TestHotRegionStorageReservedDayConfigChange(c *C
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStoreWithCheck(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	// wait hot scheduler starts
 	time.Sleep(5000 * time.Millisecond)
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
@@ -196,7 +196,7 @@ func (s *hotRegionHistorySuite) TestHotRegionStorageReservedDayConfigChange(c *C
 	schedule.HotRegionsReservedDays = 0
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	time.Sleep(10 * interval)
 	endTime = time.Now().UnixNano() / int64(time.Millisecond)
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
@@ -263,11 +263,11 @@ func (s *hotRegionHistorySuite) TestHotRegionStorageWriteIntervalConfigChange(c 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStoreWithCheck(c, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	// wait hot scheduler starts
 	time.Sleep(5000 * time.Millisecond)
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
@@ -287,7 +287,7 @@ func (s *hotRegionHistorySuite) TestHotRegionStorageWriteIntervalConfigChange(c 
 	schedule.HotRegionsWriteInterval.Duration = 20 * interval
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegionWithCheck(c, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	time.Sleep(10 * interval)
 	endTime = time.Now().UnixNano() / int64(time.Millisecond)
 	// it cant get new hot region because wait time smaller than hot region write interval

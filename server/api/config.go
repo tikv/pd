@@ -54,7 +54,9 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Success 200 {object} config.Config
 // @Router /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
+	cfg := h.svr.GetConfig()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
+	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
 // @Tags config
@@ -309,7 +311,9 @@ func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err erro
 // @Success 200 {object} config.ScheduleConfig
 // @Router /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
+	cfg := h.svr.GetScheduleConfig()
+	cfg.MaxMergeRegionKeys = cfg.GetMaxMergeRegionKeys()
+	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
 // @Tags config

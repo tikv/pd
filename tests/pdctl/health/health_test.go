@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
@@ -27,31 +27,24 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&healthTestSuite{})
-
-type healthTestSuite struct{}
-
-func (s *healthTestSuite) TestHealth(c *C) {
+func TestHealth(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 3)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = tc.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 	defer tc.Destroy()
 
 	client := tc.GetEtcdClient()
 	members, err := cluster.GetMembers(client)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	healthMembers := cluster.CheckHealth(tc.GetHTTPClient(), members)
 	healths := []api.Health{}
 	for _, member := range members {
@@ -70,9 +63,8 @@ func (s *healthTestSuite) TestHealth(c *C) {
 	// health command
 	args := []string{"-u", pdAddr, "health"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	h := make([]api.Health, len(healths))
-	c.Assert(json.Unmarshal(output, &h), IsNil)
-	c.Assert(err, IsNil)
-	c.Assert(h, DeepEquals, healths)
+	re.NoError(json.Unmarshal(output, &h))
+	re.Equal(healths, h)
 }

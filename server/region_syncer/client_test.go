@@ -16,7 +16,6 @@ package syncer
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -34,9 +33,7 @@ import (
 // For issue https://github.com/tikv/pd/issues/3936
 func TestLoadRegion(t *testing.T) {
 	re := require.New(t)
-	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_load_region")
-	re.NoError(err)
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 
@@ -64,9 +61,7 @@ func TestLoadRegion(t *testing.T) {
 
 func TestErrorCode(t *testing.T) {
 	re := require.New(t)
-	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_err")
-	re.NoError(err)
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 	server := &mockServer{
