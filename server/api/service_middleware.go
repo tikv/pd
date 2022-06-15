@@ -186,8 +186,7 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
-		concurrency := uint64(concurrencyFloat)
-		cfg.ConcurrencyLimit = concurrency
+		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
 	}
 	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
