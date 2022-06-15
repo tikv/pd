@@ -135,8 +135,8 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 // @Summary update ratelimit config
 // @Param body body object string "json params"
 // @Produce json
-// @Success 200 {string} string ""
-// @Failure 400 {string} string ""
+// @Success 200 {string} string
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "config item not found"
 // @Router /service-middleware/config/rate-limit [POST]
 func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *http.Request) {
@@ -231,5 +231,5 @@ func (h *serviceMiddlewareHandler) SetRatelimitConfig(w http.ResponseWriter, r *
 type rateLimitResult struct {
 	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
 	QPSRateUpdatedFlag     string                               `json:"qps"`
-	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"new-config"`
+	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }
