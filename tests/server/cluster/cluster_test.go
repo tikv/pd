@@ -59,8 +59,6 @@ func TestBootstrap(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -101,8 +99,6 @@ func TestDamagedRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -182,8 +178,6 @@ func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -404,8 +398,6 @@ func TestRaftClusterRestart(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -436,8 +428,6 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -481,8 +471,6 @@ func TestGetPDMembers(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -505,8 +493,6 @@ func TestNotLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -528,8 +514,6 @@ func TestStoreVersionChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -568,15 +552,12 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
-
 	err = tc.RunInitialServers()
 	re.NoError(err)
-
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
@@ -685,8 +666,6 @@ func TestSetScheduleOpt(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	// TODO: enable placementrules
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, svr string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
@@ -759,8 +738,6 @@ func TestLoadClusterInfo(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -852,8 +829,6 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, name string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
@@ -901,8 +876,6 @@ func TestReplicationModeStatus(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
 		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
@@ -1003,7 +976,6 @@ func TestOfflineStoreLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1018,7 +990,6 @@ func TestOfflineStoreLimit(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-
 	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -1097,7 +1068,6 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1157,15 +1127,12 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
 	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()
-
 	err = tc.RunInitialServers()
 	re.NoError(err)
-
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
@@ -1279,8 +1246,6 @@ func TestMinResolvedTS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1393,8 +1358,6 @@ func TestTransferLeaderBack(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// to prevent GetStorage
-	dashboard.SetCheckInterval(30 * time.Minute)
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
 	re.NoError(err)
