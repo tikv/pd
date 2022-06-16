@@ -235,7 +235,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	var (
 		testServers  = cluster.GetServers()
@@ -347,7 +347,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NoError(err)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
