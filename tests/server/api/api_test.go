@@ -581,7 +581,6 @@ func TestRemovingProgress(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
-
 	re.Equal("removing", p.Action)
 	// store 1: (60-20)/(60+50) ~= 0.36
 	// store 2: (30-10)/(30+40) ~= 0.28
@@ -598,7 +597,6 @@ func TestRemovingProgress(t *testing.T) {
 
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
-
 	re.Equal("removing", p.Action)
 	// store 2: (30-10)/(30+40) ~= 0.285
 	re.Equal("0.29", fmt.Sprintf("%.2f", p.Progress))
@@ -698,7 +696,6 @@ func TestPreparingProgress(t *testing.T) {
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	var p api.Progress
 	re.NoError(json.Unmarshal(output, &p))
-
 	re.Equal("preparing", p.Action)
 	re.Equal(0.0, p.Progress)
 	re.Equal(0.0, p.CurrentSpeed)
@@ -710,7 +707,6 @@ func TestPreparingProgress(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
-
 	re.Equal("preparing", p.Action)
 	// store 4: 10/(210*0.9) ~= 0.05
 	// store 5: 40/(210*0.9) ~= 0.21
@@ -727,12 +723,10 @@ func TestPreparingProgress(t *testing.T) {
 
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
-
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
 	re.Equal(1.0, p.CurrentSpeed)
 	re.Equal(179.0, p.LeftSeconds)
-
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 

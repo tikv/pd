@@ -61,7 +61,6 @@ func TestHotRegionStorage(t *testing.T) {
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
-
 	for _, store := range stores {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
@@ -258,7 +257,6 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
-
 	for _, store := range stores {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
