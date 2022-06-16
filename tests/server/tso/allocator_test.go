@@ -141,9 +141,8 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
 	testutil.Eventually(re, func() bool {
-		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return leaderName != ""
-	})
+		return cluster.WaitAllocatorLeader("dc-4") != ""
+	}, testutil.WithWaitFor(time.Minute), testutil.WithSleepInterval(time.Second))
 
 	// Scatter the Local TSO Allocators to different servers
 	waitAllocatorPriorityCheck(cluster)

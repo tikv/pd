@@ -339,7 +339,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	cluster.CheckClusterDCLocation()
 	testutil.Eventually(re, func() bool {
 		return cluster.WaitAllocatorLeader("dc-4") != ""
-	})
+	}, testutil.WithWaitFor(time.Minute), testutil.WithSleepInterval(time.Second))
 	suite.testTSO(cluster, dcLocationConfig, previousTS)
 
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow"))

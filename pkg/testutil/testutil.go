@@ -26,8 +26,9 @@ import (
 )
 
 const (
-	waitMaxRetry   = 200
-	waitRetrySleep = time.Millisecond * 100
+	defaultWaitRetryTimes = 200
+	defaultSleepInterval  = time.Millisecond * 100
+	defaultWaitFor        = time.Duration(time.Second * 20)
 )
 
 // CheckFunc is a condition checker that passed to WaitUntil. Its implementation
@@ -38,6 +39,7 @@ type CheckFunc func() bool
 type WaitOp struct {
 	retryTimes    int
 	sleepInterval time.Duration
+	waitFor       time.Duration
 }
 
 // WaitOption configures WaitOp
@@ -53,13 +55,18 @@ func WithSleepInterval(sleep time.Duration) WaitOption {
 	return func(op *WaitOp) { op.sleepInterval = sleep }
 }
 
+// WithWaitFor specify the max wait for duration
+func WithWaitFor(waitFor time.Duration) WaitOption {
+	return func(op *WaitOp) { op.waitFor = waitFor }
+}
+
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
 // NOTICE: this function will be removed soon, please use `Eventually` instead.
 func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 	c.Log("wait start")
 	option := &WaitOp{
-		retryTimes:    waitMaxRetry,
-		sleepInterval: waitRetrySleep,
+		retryTimes:    defaultWaitRetryTimes,
+		sleepInterval: defaultSleepInterval,
 	}
 	for _, opt := range opts {
 		opt(option)
@@ -76,15 +83,15 @@ func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
 // Eventually asserts that given condition will be met in a period of time.
 func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
 	option := &WaitOp{
-		retryTimes:    waitMaxRetry,
-		sleepInterval: waitRetrySleep,
+		waitFor:       defaultWaitFor,
+		sleepInterval: defaultSleepInterval,
 	}
 	for _, opt := range opts {
 		opt(option)
 	}
 	re.Eventually(
 		condition,
-		option.sleepInterval*time.Duration(option.retryTimes),
+		option.waitFor,
 		option.sleepInterval,
 	)
 }
