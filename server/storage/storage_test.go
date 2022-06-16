@@ -285,7 +285,7 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 
 const (
 	keyChars = "abcdefghijklmnopqrstuvwxyz"
-	keyLen   = 10
+	keyLen   = 20
 )
 
 func generateKeys(size int) []string {
@@ -335,7 +335,7 @@ func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 		var region *metapb.Region
 		if i == 0 {
 			region = &metapb.Region{
-				StartKey: []byte("aaaaaaaaaa"),
+				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
 				EndKey: []byte(keys[i]),
 			}
 		} else {
