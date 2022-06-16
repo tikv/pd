@@ -1332,12 +1332,14 @@ func TestMinResolvedTS(t *testing.T) {
 	// case2: add leader peer to store1 but no run job
 	// min resolved ts should be zero
 	putRegionWithLeader(re, rc, id, store1)
+	time.Sleep(time.Millisecond)
 	ts := rc.GetMinResolvedTS()
 	re.Equal(uint64(0), ts)
 
 	// case3: add leader peer to store1 and run job
 	// min resolved ts should be store1TS
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	time.Sleep(time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	re.Equal(store1TS, ts)
 	checkMinResolvedTSFromStorage(re, rc, ts)
@@ -1355,6 +1357,7 @@ func TestMinResolvedTS(t *testing.T) {
 	// case6: set store1 to tombstone
 	// min resolved ts should change to store 3
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
+	time.Sleep(time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	re.Equal(store3TS, ts)
 
@@ -1363,6 +1366,7 @@ func TestMinResolvedTS(t *testing.T) {
 	checkMinResolvedTSFromStorage(re, rc, store3TS)
 	store4 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, 0, store3TS)
 	putRegionWithLeader(re, rc, id, store4)
+	time.Sleep(time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	re.Equal(store3TS, ts)
 	checkMinResolvedTSFromStorage(re, rc, store3TS)
@@ -1375,9 +1379,11 @@ func TestMinResolvedTS(t *testing.T) {
 	store5 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store5TS, store3TS)
 	resetStoreState(re, rc, store3, metapb.StoreState_Tombstone)
 	putRegionWithLeader(re, rc, id, store5)
+	time.Sleep(time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	re.Equal(store3TS, ts)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	time.Sleep(time.Millisecond)
 	ts = rc.GetMinResolvedTS()
 	re.Equal(store5TS, ts)
 }
