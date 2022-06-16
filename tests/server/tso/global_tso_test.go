@@ -183,5 +183,5 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
-	re.Error(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
 }
