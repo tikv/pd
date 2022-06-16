@@ -28,7 +28,7 @@ import (
 const (
 	defaultWaitRetryTimes = 200
 	defaultSleepInterval  = time.Millisecond * 100
-	defaultWaitFor        = time.Duration(time.Second * 20)
+	defaultWaitFor        = time.Second * 20
 )
 
 // CheckFunc is a condition checker that passed to WaitUntil. Its implementation
