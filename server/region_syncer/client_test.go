@@ -16,7 +16,6 @@ package syncer
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -27,14 +26,14 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // For issue https://github.com/tikv/pd/issues/3936
 func TestLoadRegion(t *testing.T) {
 	re := require.New(t)
-	tempDir, err := os.MkdirTemp(os.TempDir(), "region_syncer_load_region")
-	re.NoError(err)
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 
@@ -58,6 +57,27 @@ func TestLoadRegion(t *testing.T) {
 	rc.StopSyncWithLeader()
 	re.Greater(time.Since(start), time.Second) // make sure failpoint is injected
 	re.Less(time.Since(start), time.Second*2)
+}
+
+func TestErrorCode(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	server := &mockServer{
+		ctx:     context.Background(),
+		storage: storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		bc:      core.NewBasicCluster(),
+	}
+	ctx, cancel := context.WithCancel(context.TODO())
+	rc := NewRegionSyncer(server)
+	conn, err := grpcutil.GetClientConn(ctx, "127.0.0.1", nil)
+	re.NoError(err)
+	cancel()
+	_, err = rc.syncRegion(ctx, conn)
+	ev, ok := status.FromError(err)
+	re.True(ok)
+	re.Equal(codes.Canceled, ev.Code())
 }
 
 type mockServer struct {

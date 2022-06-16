@@ -29,11 +29,10 @@ const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
 	defer func() {
 		etcd.Close()
-		etcdutil.CleanConfig(cfg)
 	}()
 	re.NoError(err)
 

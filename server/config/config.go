@@ -785,7 +785,6 @@ const (
 	defaultMaxSnapshotCount          = 64
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
-	defaultMaxMergeRegionKeys        = 200000
 	defaultSplitMergeInterval        = 1 * time.Hour
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
@@ -821,9 +820,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("max-merge-region-size") {
 		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	}
-	if !meta.IsDefined("max-merge-region-keys") {
-		adjustUint64(&c.MaxMergeRegionKeys, defaultMaxMergeRegionKeys)
 	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
@@ -908,6 +904,15 @@ func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
 		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
 		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
 	}
+}
+
+// GetMaxMergeRegionKeys returns the max merge keys.
+// it should keep consistent with tikv: https://github.com/tikv/tikv/pull/12484
+func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
+	if keys := c.MaxMergeRegionKeys; keys != 0 {
+		return keys
+	}
+	return c.MaxMergeRegionSize * 10000
 }
 
 func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
