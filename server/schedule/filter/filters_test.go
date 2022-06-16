@@ -186,6 +186,61 @@ func TestStoreStateFilter(t *testing.T) {
 	check(store, testCases)
 }
 
+func TestStoreStateFilterReason(t *testing.T) {
+	re := require.New(t)
+	filters := []Filter{
+		&StoreStateFilter{TransferLeader: true},
+		&StoreStateFilter{MoveRegion: true},
+		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
+		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+	}
+	opt := config.NewTestOptions()
+	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+
+	type testCase struct {
+		filterIdx    int
+		sourceReason string
+		targetReason string
+	}
+
+	check := func(store *core.StoreInfo, testCases []testCase) {
+		for _, tc := range testCases {
+			filters[tc.filterIdx].Source(opt, store)
+			re.Equal(tc.sourceReason, filters[tc.filterIdx].(*StoreStateFilter).Reason)
+			filters[tc.filterIdx].Source(opt, store)
+			re.Equal(tc.targetReason, filters[tc.filterIdx].(*StoreStateFilter).Reason)
+		}
+	}
+
+	// No reason catched
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	testCases := []testCase{
+		{2, "", ""},
+	}
+	check(store, testCases)
+
+	// Disconn
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	testCases = []testCase{
+		{0, "disconnected", "disconnected"},
+		{1, "", ""},
+		{2, "disconnected", "disconnected"},
+		{3, "", ""},
+	}
+	check(store, testCases)
+
+	// Busy
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	testCases = []testCase{
+		{0, "", ""},
+		{1, "busy", "busy"},
+		{2, "busy", "busy"},
+		{3, "", ""},
+	}
+	check(store, testCases)
+}
+
 func TestIsolationFilter(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
