@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -362,7 +361,8 @@ func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 
 func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
 	ctx := context.Background()
-	lb, err := newLevelDBBackend(ctx, "./tmp", nil)
+	dir := b.TempDir()
+	lb, err := newLevelDBBackend(ctx, dir, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -373,10 +373,6 @@ func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
 	cluster := core.NewBasicCluster()
 	defer func() {
 		err = lb.Close()
-		if err != nil {
-			b.Fatal(err)
-		}
-		err = os.RemoveAll("./tmp")
 		if err != nil {
 			b.Fatal(err)
 		}
