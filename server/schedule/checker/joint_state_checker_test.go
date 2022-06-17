@@ -135,7 +135,7 @@ func checkSteps(re *require.Assertions, op *operator.Operator, steps []operator.
 			re.Equal(len(expect.PromoteLearners), len(obtain.PromoteLearners))
 			re.Equal(len(expect.DemoteVoters), len(obtain.DemoteVoters))
 			for j, p := range expect.PromoteLearners {
-				re.Equal(p.ToStore, expect.PromoteLearners[j].ToStore)
+				re.Equal(p.ToStore, obtain.PromoteLearners[j].ToStore)
 			}
 			for j, d := range expect.DemoteVoters {
 				re.Equal(d.ToStore, obtain.DemoteVoters[j].ToStore)
