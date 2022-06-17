@@ -330,15 +330,17 @@ func randomMerge(regions []*metapb.Region, n int) {
 func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 	keys := generateKeys(n)
 	regions := make([]*metapb.Region, 0, n)
-	for i := 0; i < n; i++ {
+	for i := uint64(0); i < uint64(n); i++ {
 		var region *metapb.Region
 		if i == 0 {
 			region = &metapb.Region{
+				Id: i,
 				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
 				EndKey: []byte(keys[i]),
 			}
 		} else {
 			region = &metapb.Region{
+				Id: i,
 				StartKey: []byte(keys[i-1]),
 				EndKey: []byte(keys[i]),
 			}
@@ -356,6 +358,9 @@ func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 		}
 	}
 
+	if err := lb.Flush(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -370,7 +375,6 @@ func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	cluster := core.NewBasicCluster()
 	defer func() {
 		err = lb.Close()
 		if err != nil {
@@ -378,10 +382,14 @@ func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
 		}
 	}()
 
-	b.StartTimer()
-	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
-	if err != nil {
-		b.Fatal(err)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cluster := core.NewBasicCluster()
+		err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
+		if err != nil {
+			b.Fatal(err)
+		}
+		// b.Log("The region number is: ", cluster.GetRegionCount())
 	}
 }
 
@@ -396,7 +404,6 @@ var volumes = []struct {
 func BenchmarkLoadRegionsByVolume(b *testing.B) {
 	for _, v := range volumes {
 		b.Run(fmt.Sprintf("input_size_%d", v.input), func(b *testing.B) {
-			b.StopTimer()
 			benchmarkLoadRegions(v.input, b, false)
 		})
 	}
