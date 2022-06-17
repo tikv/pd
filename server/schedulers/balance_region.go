@@ -90,7 +90,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		conf:                conf,
 		opController:        opController,
 		counter:             balanceRegionCounter,
-		DiagnosisController: diagnosis.NewDiagnosisController(opController.Ctx()),
+		DiagnosisController: diagnosis.NewDiagnosisController(opController.Ctx(), conf.Name),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -130,6 +130,15 @@ func (s *balanceRegionScheduler) GetType() string {
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
+}
+
+func (s *balanceRegionScheduler) Diagnose(storeID uint64) error {
+	s.DiagnosisController.DiagnoseStore(storeID)
+	return nil
+}
+
+func (s *balanceRegionScheduler) DiagnosisResult(storeID uint64) *diagnosis.DiagnosisResult {
+	return s.DiagnosisController.GetAnalysisResult(storeID)
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {

@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 )
 
 // options for interval of schedulers
@@ -65,6 +66,14 @@ type BaseScheduler struct {
 // NewBaseScheduler returns a basic scheduler
 func NewBaseScheduler(opController *schedule.OperatorController) *BaseScheduler {
 	return &BaseScheduler{OpController: opController}
+}
+
+func (s *BaseScheduler) Diagnose(storeID uint64) error {
+	return nil
+}
+
+func (s *BaseScheduler) DiagnosisResult(storeID uint64) *diagnosis.DiagnosisResult {
+	return nil
 }
 
 func (s *BaseScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

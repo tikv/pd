@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -541,6 +542,16 @@ func (c *RaftCluster) RemoveScheduler(name string) error {
 // PauseOrResumeScheduler pauses or resumes a scheduler.
 func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.pauseOrResumeScheduler(name, t)
+}
+
+// DiagnoseScheduler disgnoses a scheduler.
+func (c *RaftCluster) DiagnoseScheduler(name string, storeID uint64) error {
+	return c.coordinator.diagnoseScheduler(name, storeID)
+}
+
+// GetSchedulerDiagnosisResult pauses or resumes a scheduler.
+func (c *RaftCluster) GetSchedulerDiagnosisResult(name string, storeID uint64) *diagnosis.DiagnosisResult {
+	return c.coordinator.getSchedulerDiagnosisResult(name, storeID)
 }
 
 // IsSchedulerPaused checks if a scheduler is paused.

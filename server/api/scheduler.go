@@ -17,6 +17,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -343,6 +344,57 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 		return
 	}
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
+}
+
+// @Tags scheduler
+// @Summary disgnose a scheduler for a store.
+// @Accept json
+// @Param name path string true "The name of the scheduler."
+// @Param store path string true "The id of the store."
+// @Produce json
+// @Success 200 {string} string "Disgnosethe scheduler successfully."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers/{name}/diagnose/{store_id} [post]
+func (h *schedulerHandler) DiagnoseScheduler(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	store := mux.Vars(r)["store_id"]
+	storeID, err := strconv.ParseUint(store, 10, 64)
+	if err != nil {
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.Handler.DisgnoseScheduler(name, storeID); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.r.JSON(w, http.StatusOK, "Diagnose scheduler successfully.")
+}
+
+// @Tags scheduler
+// @Summary get the scheduler diagnosis result for a store.
+// @Accept json
+// @Param name path string true "The name of the scheduler."
+// @Param store path string true "The id of the store."
+// @Produce json
+// @Success 200 {string} string "Get diagnosis successfully."
+// @Failure 400 {string} string "Bad format request."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /schedulers/{name}/diagnose/{store_id} [get]
+func (h *schedulerHandler) GetDiagnosisReuslt(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	store := mux.Vars(r)["store_id"]
+	storeID, err := strconv.ParseUint(store, 10, 64)
+	if err != nil {
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	result := h.Handler.GetDiagnosisReuslt(name, storeID)
+	if result == nil {
+		h.r.JSON(w, http.StatusInternalServerError, "")
+		return
+	}
+	h.r.JSON(w, http.StatusOK, result)
 }
 
 type schedulerConfigHandler struct {

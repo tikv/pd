@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
@@ -42,6 +43,8 @@ type Scheduler interface {
 	Cleanup(cluster Cluster)
 	Schedule(cluster Cluster) []*operator.Operator
 	IsScheduleAllowed(cluster Cluster) bool
+	Diagnose(storeID uint64) error
+	DiagnosisResult(storeID uint64) *diagnosis.DiagnosisResult
 }
 
 // EncodeConfig encode the custom config for each scheduler.

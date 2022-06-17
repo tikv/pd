@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
@@ -273,6 +274,24 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 		}
 	}
 	return err
+}
+
+// DisgnoseScheduler disgnoses scheduler for the specific
+func (h *Handler) DisgnoseScheduler(name string, storeID uint64) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+	return c.DiagnoseScheduler(name, storeID)
+}
+
+// DisgnoseScheduler disgnoses scheduler for the specific
+func (h *Handler) GetDiagnosisReuslt(name string, storeID uint64) *diagnosis.DiagnosisResult {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil
+	}
+	return c.GetSchedulerDiagnosisResult(name, storeID)
 }
 
 // PauseOrResumeChecker pauses checker for delay seconds or resume checker

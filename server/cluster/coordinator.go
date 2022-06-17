@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
+	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
@@ -700,6 +701,32 @@ func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 		}
 	}
 	return nil
+}
+
+func (c *coordinator) diagnoseScheduler(name string, storeID uint64) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return sc.Diagnose(uint64(storeID))
+}
+
+func (c *coordinator) getSchedulerDiagnosisResult(name string, storeID uint64) *diagnosis.DiagnosisResult {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return nil
+	}
+	sc, ok := c.schedulers[name]
+	if !ok {
+		return nil
+	}
+	return sc.DiagnosisResult(uint64(storeID))
 }
 
 func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
