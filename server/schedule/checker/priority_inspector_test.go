@@ -16,31 +16,20 @@ package checker
 
 import (
 	"context"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 )
 
-var _ = Suite(&testPriorityInspectorSuite{})
-
-type testPriorityInspectorSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testPriorityInspectorSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testPriorityInspectorSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *testPriorityInspectorSuite) TestCheckPriorityRegions(c *C) {
+func TestCheckPriorityRegions(t *testing.T) {
+	re := require.New(t)
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 0)
 	tc.AddRegionStore(3, 0)
@@ -49,42 +38,42 @@ func (s *testPriorityInspectorSuite) TestCheckPriorityRegions(c *C) {
 	tc.AddLeaderRegion(3, 2)
 
 	pc := NewPriorityInspector(tc)
-	checkPriorityRegionTest(pc, tc, c)
+	checkPriorityRegionTest(re, pc, tc)
 	opt.SetPlacementRuleEnabled(true)
-	c.Assert(opt.IsPlacementRulesEnabled(), IsTrue)
-	checkPriorityRegionTest(pc, tc, c)
+	re.True(opt.IsPlacementRulesEnabled())
+	checkPriorityRegionTest(re, pc, tc)
 }
 
-func checkPriorityRegionTest(pc *PriorityInspector, tc *mockcluster.Cluster, c *C) {
+func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *mockcluster.Cluster) {
 	// case1: inspect region 1, it doesn't lack replica
 	region := tc.GetRegion(1)
 	opt := tc.GetOpts()
 	pc.Inspect(region)
-	c.Assert(0, Equals, pc.queue.Len())
+	re.Equal(pc.queue.Len(), 0)
 
 	// case2: inspect region 2, it lacks one replica
 	region = tc.GetRegion(2)
 	pc.Inspect(region)
-	c.Assert(1, Equals, pc.queue.Len())
+	re.Equal(pc.queue.Len(), 1)
 	// the region will not rerun after it checks
-	c.Assert(0, Equals, len(pc.GetPriorityRegions()))
+	re.Equal(len(pc.GetPriorityRegions()), 0)
 
 	// case3: inspect region 3, it will has high priority
 	region = tc.GetRegion(3)
 	pc.Inspect(region)
-	c.Assert(2, Equals, pc.queue.Len())
+	re.Equal(pc.queue.Len(), 2)
 	time.Sleep(opt.GetPatrolRegionInterval() * 10)
 	// region 3 has higher priority
 	ids := pc.GetPriorityRegions()
-	c.Assert(2, Equals, len(ids))
-	c.Assert(uint64(3), Equals, ids[0])
-	c.Assert(uint64(2), Equals, ids[1])
+	re.Equal(len(ids), 2)
+	re.Equal(ids[0], uint64(3))
+	re.Equal(ids[1], uint64(2))
 
 	// case4: inspect region 2 again after it fixup replicas
 	tc.AddLeaderRegion(2, 2, 3, 1)
 	region = tc.GetRegion(2)
 	pc.Inspect(region)
-	c.Assert(1, Equals, pc.queue.Len())
+	re.Equal(pc.queue.Len(), 1)
 
 	// recover
 	tc.AddLeaderRegion(2, 2, 3)

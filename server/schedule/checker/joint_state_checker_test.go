@@ -16,42 +16,25 @@ package checker
 
 import (
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
-var _ = Suite(&testJointStateCheckerSuite{})
-
-type testJointStateCheckerSuite struct {
-	cluster *mockcluster.Cluster
-	jsc     *JointStateChecker
-	ctx     context.Context
-	cancel  context.CancelFunc
-}
-
-func (s *testJointStateCheckerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testJointStateCheckerSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *testJointStateCheckerSuite) SetUpTest(c *C) {
-	s.cluster = mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	s.jsc = NewJointStateChecker(s.cluster)
+func TestLeaveJointState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	jsc := NewJointStateChecker(cluster)
 	for id := uint64(1); id <= 10; id++ {
-		s.cluster.PutStoreWithLabels(id)
+		cluster.PutStoreWithLabels(id)
 	}
-}
-
-func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
-	jsc := s.jsc
 	type testCase struct {
 		Peers   []*metapb.Peer // first is leader
 		OpSteps []operator.OpStep
@@ -131,38 +114,38 @@ func (s *testJointStateCheckerSuite) TestLeaveJointState(c *C) {
 	for _, tc := range cases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		op := jsc.Check(region)
-		s.checkSteps(c, op, tc.OpSteps)
+		checkSteps(re, op, tc.OpSteps)
 	}
 }
 
-func (s *testJointStateCheckerSuite) checkSteps(c *C, op *operator.Operator, steps []operator.OpStep) {
+func checkSteps(re *require.Assertions, op *operator.Operator, steps []operator.OpStep) {
 	if len(steps) == 0 {
-		c.Assert(op, IsNil)
+		re.Nil(op)
 		return
 	}
 
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "leave-joint-state")
+	re.NotNil(op)
+	re.Equal("leave-joint-state", op.Desc())
 
-	c.Assert(op.Len(), Equals, len(steps))
+	re.Equal(len(steps), op.Len())
 	for i := range steps {
 		switch obtain := op.Step(i).(type) {
 		case operator.ChangePeerV2Leave:
 			expect := steps[i].(operator.ChangePeerV2Leave)
-			c.Assert(len(obtain.PromoteLearners), Equals, len(expect.PromoteLearners))
-			c.Assert(len(obtain.DemoteVoters), Equals, len(expect.DemoteVoters))
+			re.Equal(len(expect.PromoteLearners), len(obtain.PromoteLearners))
+			re.Equal(len(expect.DemoteVoters), len(obtain.DemoteVoters))
 			for j, p := range expect.PromoteLearners {
-				c.Assert(expect.PromoteLearners[j].ToStore, Equals, p.ToStore)
+				re.Equal(p.ToStore, expect.PromoteLearners[j].ToStore)
 			}
 			for j, d := range expect.DemoteVoters {
-				c.Assert(obtain.DemoteVoters[j].ToStore, Equals, d.ToStore)
+				re.Equal(d.ToStore, obtain.DemoteVoters[j].ToStore)
 			}
 		case operator.TransferLeader:
 			expect := steps[i].(operator.TransferLeader)
-			c.Assert(obtain.FromStore, Equals, expect.FromStore)
-			c.Assert(obtain.ToStore, Equals, expect.ToStore)
+			re.Equal(expect.FromStore, obtain.FromStore)
+			re.Equal(expect.ToStore, obtain.ToStore)
 		default:
-			c.Fatal("unknown operator step type")
+			re.FailNow("unknown operator step type")
 		}
 	}
 }
