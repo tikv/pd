@@ -123,8 +123,10 @@ func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDs := make([]uint64, len(conf.StoreIDs))
+	copy(newStoreIDs, conf.StoreIDs)
 	return &grantHotRegionSchedulerConfig{
-		StoreIDs:      conf.StoreIDs,
+		StoreIDs:      newStoreIDs,
 		StoreLeaderID: conf.StoreLeaderID,
 	}
 }
