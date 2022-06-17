@@ -19,7 +19,10 @@ import (
 	"fmt"
 
 	. "github.com/pingcap/check"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var _ = Suite(&testUnsafeAPISuite{})
@@ -38,6 +41,7 @@ func (s *testUnsafeAPISuite) SetUpSuite(c *C) {
 	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
 
 	mustBootstrapCluster(c, s.svr)
+	mustPutStore(c, s.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
 }
 
 func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
@@ -45,16 +49,31 @@ func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
 }
 
 func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
-	input := map[uint64]string{1: ""}
-	data, err := json.Marshal(input)
+	input := map[string]interface{}{"stores": []uint64{}}
+	data, _ := json.Marshal(input)
+	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
+		tu.StringEqual(c, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data)
+
+	input = map[string]interface{}{"stores": []string{"abc", "def"}}
+	data, _ = json.Marshal(input)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
+		tu.StringEqual(c, "\"Store ids are invalid\"\n"))
 	c.Assert(err, IsNil)
+
+	input = map[string]interface{}{"stores": []uint64{1, 2}}
+	data, _ = json.Marshal(input)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
+		tu.StringEqual(c, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
+	c.Assert(err, IsNil)
+
+	input = map[string]interface{}{"stores": []uint64{1}}
+	data, _ = json.Marshal(input)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(c))
+	c.Assert(err, IsNil)
+
 	// Test show
-	var output []string
-	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
-	c.Assert(err, IsNil)
-	// Test history
-	err = readJSON(testDialClient, s.urlPrefix+"/remove-failed-stores/history", &output)
+	var output []cluster.StageOutput
+	err = tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
 	c.Assert(err, IsNil)
 }

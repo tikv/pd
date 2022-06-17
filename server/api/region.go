@@ -280,13 +280,10 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	for _, region := range regions {
 		if !schedule.IsRegionReplicated(rc, region) {
 			state = "INPROGRESS"
-			for _, item := range rc.GetCoordinator().GetWaitingRegions() {
-				if item.Key == region.GetID() {
-					state = "PENDING"
-					break
-				}
+			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
+				state = "PENDING"
+				break
 			}
-			break
 		}
 	}
 	failpoint.Inject("mockPending", func(val failpoint.Value) {
@@ -759,6 +756,19 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 }
 
 // @Tags region
+// @Summary List regions with the largest keys.
+// @Param limit query integer false "Limit count" default(16)
+// @Produce json
+// @Success 200 {object} RegionsInfo
+// @Failure 400 {string} string "The input is invalid."
+// @Router /regions/keys [get]
+func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetApproximateKeys() < b.GetApproximateKeys()
+	})
+}
+
+// @Tags region
 // @Summary Accelerate regions scheduling a in given range, only receive hex format for keys
 // @Accept json
 // @Param body body object true "json params"
@@ -773,13 +783,13 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	startKey, rawStartKey, err := parseKey("start_key", input)
+	startKey, rawStartKey, err := apiutil.ParseKey("start_key", input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	endKey, rawEndKey, err := parseKey("end_key", input)
+	endKey, rawEndKey, err := apiutil.ParseKey("end_key", input)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -856,12 +866,12 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	var failures map[uint64]error
 	var err error
 	if ok1 && ok2 {
-		startKey, _, err := parseKey("start_key", input)
+		startKey, _, err := apiutil.ParseKey("start_key", input)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		endKey, _, err := parseKey("end_key", input)
+		endKey, _, err := apiutil.ParseKey("end_key", input)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
@@ -885,6 +895,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}

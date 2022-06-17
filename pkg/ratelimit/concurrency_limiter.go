@@ -14,10 +14,10 @@
 
 package ratelimit
 
-import "sync"
+import "github.com/tikv/pd/pkg/syncutil"
 
 type concurrencyLimiter struct {
-	mu      sync.RWMutex
+	mu      syncutil.RWMutex
 	current uint64
 	limit   uint64
 }

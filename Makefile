@@ -23,7 +23,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -60,7 +60,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
@@ -137,14 +137,14 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.43.0
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.46.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
 
 #### Static checks ####
 
-check: install-tools static tidy check-plugin errdoc check-testing-t
+check: install-tools static tidy generate-errdoc check-plugin check-test
 
 static: install-tools
 	@ echo "gofmt ..."
@@ -158,48 +158,29 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
+	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
-	
+
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
 
+generate-errdoc: install-tools
+	@echo "generating errors.toml..."
+	./scripts/generate-errdoc.sh
+
 check-plugin:
-	@echo "checking plugin"
+	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-errdoc: install-tools
-	@echo "generator errors.toml"
-	./scripts/check-errdoc.sh
+check-test:
+	@echo "checking test..."
+	./scripts/check-test.sh
 
-check-testing-t:
-	./scripts/check-testing-t.sh
-
-.PHONY: check static tidy check-plugin errdoc docker-build-test check-testing-t
+.PHONY: check static tidy generate-errdoc check-plugin check-test
 
 #### Test utils ####
 
 FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
 FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
-
-DEADLOCK_ENABLE := $$(\
-						find . -name "*.go" \
-						| xargs -n 1 sed -i.bak 's/sync\.RWMutex/deadlock.RWMutex/;s/sync\.Mutex/deadlock.Mutex/' && \
-						find . -name "*.go" | xargs grep -lE "(deadlock\.RWMutex|deadlock\.Mutex)" \
-						| xargs goimports -w)
-DEADLOCK_DISABLE := $$(\
-						find . -name "*.go" \
-						| xargs -n 1 sed -i.bak 's/deadlock\.RWMutex/sync.RWMutex/;s/deadlock\.Mutex/sync.Mutex/' && \
-						find . -name "*.go" | xargs grep -lE "(sync\.RWMutex|sync\.Mutex)" \
-						| xargs goimports -w && \
-						find . -name "*.bak" | xargs rm && \
-						go mod tidy)
-
-deadlock-enable: install-tools
-	# Enabling deadlock...
-	@$(DEADLOCK_ENABLE)
-
-deadlock-disable: install-tools
-	# Disabling deadlock...
-	@$(DEADLOCK_DISABLE)
 
 failpoint-enable: install-tools
 	# Converting failpoints...
@@ -209,7 +190,7 @@ failpoint-disable: install-tools
 	# Restoring failpoints...
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: deadlock-enable deadlock-disable failpoint-enable failpoint-disable
+.PHONY: failpoint-enable failpoint-disable
 
 #### Test ####
 
@@ -223,11 +204,9 @@ SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 
 test: install-tools
 	# testing all pkgs...
-	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -tags tso_function_test -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -tags tso_function_test,deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
-	@$(DEADLOCK_DISABLE)
 
 basic-test: install-tools
 	# testing basic pkgs...
@@ -236,36 +215,28 @@ basic-test: install-tools
 	@$(FAILPOINT_DISABLE)
 
 ci-test-job: install-tools dashboard-ui
-	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
+	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
 	@$(FAILPOINT_DISABLE)
-	@$(DEADLOCK_DISABLE)
 
 ci-test-job-submod: install-tools dashboard-ui
-	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd - > /dev/null && cat $$mod/covprofile >> covprofile; done
 	@$(FAILPOINT_DISABLE)
-	@$(DEADLOCK_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
 test-tso-function: install-tools
 	# testing TSO function...
-	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_function_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_function_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
-	@$(DEADLOCK_DISABLE)
 
 test-tso-consistency: install-tools
 	# testing TSO consistency...
-	@$(DEADLOCK_ENABLE)
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); $(DEADLOCK_DISABLE); exit 1; }
+	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
-	@$(DEADLOCK_DISABLE)
 
 .PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
 
@@ -292,7 +263,7 @@ split:
 
 #### Clean up ####
 
-clean: failpoint-disable deadlock-disable clean-test clean-build
+clean: failpoint-disable clean-test clean-build
 
 clean-test:
 	# Cleaning test tmp...

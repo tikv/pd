@@ -22,6 +22,7 @@ import (
 const (
 	clusterPath                = "raft"
 	configPath                 = "config"
+	serviceMiddlewarePath      = "service_middleware"
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
@@ -31,6 +32,8 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
+	keySpaceSafePointPrefix    = "key_space/gc_safepoint"
+	keySpaceGCSafePointSuffix  = "gc"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -102,4 +105,34 @@ func gcSafePointServicePath(serviceID string) string {
 // MinResolvedTSPath returns the min resolved ts path
 func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
+}
+
+// KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
+// Prefix: /key_space/gc_safepoint/{space_id}/service/
+func KeySpaceServiceSafePointPrefix(spaceID string) string {
+	return path.Join(keySpaceSafePointPrefix, spaceID, "service") + "/"
+}
+
+// KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
+// Path: /key_space/gc_safepoint/{space_id}/gc
+func KeySpaceGCSafePointPath(spaceID string) string {
+	return path.Join(keySpaceSafePointPrefix, spaceID, keySpaceGCSafePointSuffix)
+}
+
+// KeySpaceServiceSafePointPath returns the path of given service's service safe point.
+// Path: /key_space/gc_safepoint/{space_id}/service/{service_id}
+func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
+	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
+}
+
+// KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
+// Path: /key_space/gc_safepoint/
+func KeySpaceSafePointPrefix() string {
+	return keySpaceSafePointPrefix + "/"
+}
+
+// KeySpaceGCSafePointSuffix returns the suffix for any gc safepoint.
+// Postfix: /gc
+func KeySpaceGCSafePointSuffix() string {
+	return "/" + keySpaceGCSafePointSuffix
 }

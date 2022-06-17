@@ -5,7 +5,6 @@ go 1.16
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/axw/gocov v1.0.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
@@ -20,6 +19,7 @@ require (
 	github.com/gorilla/mux v1.7.4
 	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
+	github.com/joho/godotenv v1.4.0
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/montanaflynn/stats v0.5.0
@@ -29,15 +29,16 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20220330070404-8c4cd3f93748
+	github.com/pingcap/kvproto v0.0.0-20220510035547-0e2f26c0a46a
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
-	github.com/pingcap/tidb-dashboard v0.0.0-20220331105802-5ac69661755c
+	github.com/pingcap/tidb-dashboard v0.0.0-20220613053259-1b8920062bd3
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.7.0
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba
 	github.com/swaggo/swag v1.6.6-0.20200529100950-7c765ddd0476
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
@@ -49,6 +50,7 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.19.1
+	golang.org/x/text v0.3.3
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 	golang.org/x/tools v0.1.5
 	google.golang.org/grpc v1.26.0

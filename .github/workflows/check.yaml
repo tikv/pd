@@ -6,10 +6,11 @@ concurrency:
 jobs:
   statics:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.17
+          go-version: 1.18
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache
@@ -18,7 +19,6 @@ jobs:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
-            **/.tools
             **/.dashboard_download_cache
           key: ${{ runner.os }}-golang-${{ hashFiles('**/go.sum') }}
           restore-keys: |

@@ -18,20 +18,13 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/typeutil"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testMetricsSuite{})
-
-type testMetricsSuite struct {
-}
-
-func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
+func TestCamelCaseToSnakeCase(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	inputs := []struct {
 		name    string
 		newName string
@@ -59,11 +52,11 @@ func (s *testMetricsSuite) TestCamelCaseToSnakeCase(c *C) {
 	}
 
 	for _, input := range inputs {
-		c.Assert(camelCaseToSnakeCase(input.name), Equals, input.newName)
+		re.Equal(input.newName, camelCaseToSnakeCase(input.name))
 	}
 }
 
-func (s *testMetricsSuite) TestCoverage(c *C) {
+func TestCoverage(t *testing.T) {
 	cfgs := []*MetricConfig{
 		{
 			PushJob:     "j1",

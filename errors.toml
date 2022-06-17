@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -39,6 +44,11 @@ unsupported component type %v
 ["PD:autoscaling:ErrUnsupportedMetricsType"]
 error = '''
 unsupported metrics type %v
+'''
+
+["PD:checker:ErrCheckerMergeAgain"]
+error = '''
+region will be merged again, %s
 '''
 
 ["PD:checker:ErrCheckerNotFound"]
@@ -103,7 +113,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -119,6 +129,11 @@ store %v not found
 ["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
+'''
+
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
 '''
 
 ["PD:core:ErrStoreUnhealthy"]
@@ -486,6 +501,16 @@ error = '''
 failed to lookup plugin function
 '''
 
+["PD:progress:ErrProgressNotFound"]
+error = '''
+no progress found for %s
+'''
+
+["PD:progress:ErrProgressWrongStatus"]
+error = '''
+progress status is wrong
+'''
+
 ["PD:prometheus:ErrPrometheusCreateClient"]
 error = '''
 create client error
@@ -684,6 +709,16 @@ sync max ts failed, %s
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
 '''
 
 ["PD:url:ErrQueryUnescape"]

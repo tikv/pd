@@ -84,7 +84,7 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
-// NewStoreInfoWithAvailable is create with available and capacity
+// NewStoreInfoWithAvailable is created with available and capacity
 func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity

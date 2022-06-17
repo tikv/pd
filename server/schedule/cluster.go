@@ -18,6 +18,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 )
 
 // Cluster provides an overview of a cluster's regions distribution.
@@ -28,6 +29,7 @@ type Cluster interface {
 
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
+	buckets.BucketStatInformer
 
 	operator.ClusterInformer
 

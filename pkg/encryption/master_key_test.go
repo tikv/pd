@@ -17,69 +17,74 @@ package encryption
 import (
 	"encoding/hex"
 	"os"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/stretchr/testify/require"
 )
 
-type testMasterKeySuite struct{}
-
-var _ = Suite(&testMasterKeySuite{})
-
-func (s *testMasterKeySuite) TestPlaintextMasterKey(c *C) {
+func TestPlaintextMasterKey(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_Plaintext{
 			Plaintext: &encryptionpb.MasterKeyPlaintext{},
 		},
 	}
 	masterKey, err := NewMasterKey(config, nil)
-	c.Assert(err, IsNil)
-	c.Assert(masterKey, Not(IsNil))
-	c.Assert(masterKey.key, HasLen, 0)
+	re.NoError(err)
+	re.NotNil(masterKey)
+	re.Len(masterKey.key, 0)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
-	c.Assert(err, IsNil)
-	c.Assert(iv, HasLen, 0)
-	c.Assert(string(ciphertext), Equals, plaintext)
+	re.NoError(err)
+	re.Len(iv, 0)
+	re.Equal(plaintext, string(ciphertext))
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
-	c.Assert(err, IsNil)
-	c.Assert(string(plaintext2), Equals, plaintext)
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 
-	c.Assert(masterKey.IsPlaintext(), IsTrue)
+	re.True(masterKey.IsPlaintext())
 }
 
-func (s *testMasterKeySuite) TestEncrypt(c *C) {
+func TestEncrypt(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
 	key, err := hex.DecodeString(keyHex)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	masterKey := &MasterKey{key: key}
 	plaintext := "this-is-a-plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
-	c.Assert(err, IsNil)
-	c.Assert(iv, HasLen, ivLengthGCM)
+	re.NoError(err)
+	re.Len(iv, ivLengthGCM)
 	plaintext2, err := AesGcmDecrypt(key, ciphertext, iv)
-	c.Assert(err, IsNil)
-	c.Assert(string(plaintext2), Equals, plaintext)
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 }
 
-func (s *testMasterKeySuite) TestDecrypt(c *C) {
+func TestDecrypt(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
 	key, err := hex.DecodeString(keyHex)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	plaintext := "this-is-a-plaintext"
 	iv, err := hex.DecodeString("ba432b70336c40c39ba14c1b")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	ciphertext, err := aesGcmEncryptImpl(key, []byte(plaintext), iv)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	masterKey := &MasterKey{key: key}
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
-	c.Assert(err, IsNil)
-	c.Assert(string(plaintext2), Equals, plaintext)
+	re.NoError(err)
+	re.Equal(plaintext, string(plaintext2))
 }
 
-func (s *testMasterKeySuite) TestNewFileMasterKeyMissingPath(c *C) {
+func TestNewFileMasterKeyMissingPath(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -88,12 +93,13 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingPath(c *C) {
 		},
 	}
 	_, err := NewMasterKey(config, nil)
-	c.Assert(err, Not(IsNil))
+	re.Error(err)
 }
 
-func (s *testMasterKeySuite) TestNewFileMasterKeyMissingFile(c *C) {
-	dir, err := os.MkdirTemp("", "test_key_files")
-	c.Assert(err, IsNil)
+func TestNewFileMasterKeyMissingFile(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	dir := t.TempDir()
 	path := dir + "/key"
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -102,13 +108,14 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyMissingFile(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
-	c.Assert(err, Not(IsNil))
+	_, err := NewMasterKey(config, nil)
+	re.Error(err)
 }
 
-func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
-	dir, err := os.MkdirTemp("", "test_key_files")
-	c.Assert(err, IsNil)
+func TestNewFileMasterKeyNotHexString(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -118,13 +125,14 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyNotHexString(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
-	c.Assert(err, Not(IsNil))
+	_, err := NewMasterKey(config, nil)
+	re.Error(err)
 }
 
-func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
-	dir, err := os.MkdirTemp("", "test_key_files")
-	c.Assert(err, IsNil)
+func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -134,14 +142,15 @@ func (s *testMasterKeySuite) TestNewFileMasterKeyLengthMismatch(c *C) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
-	c.Assert(err, Not(IsNil))
+	_, err := NewMasterKey(config, nil)
+	re.Error(err)
 }
 
-func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
+func TestNewFileMasterKey(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
-	dir, err := os.MkdirTemp("", "test_key_files")
-	c.Assert(err, IsNil)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte(key), 0600)
 	config := &encryptionpb.MasterKey{
@@ -152,6 +161,6 @@ func (s *testMasterKeySuite) TestNewFileMasterKey(c *C) {
 		},
 	}
 	masterKey, err := NewMasterKey(config, nil)
-	c.Assert(err, IsNil)
-	c.Assert(hex.EncodeToString(masterKey.key), Equals, key)
+	re.NoError(err)
+	re.Equal(key, hex.EncodeToString(masterKey.key))
 }

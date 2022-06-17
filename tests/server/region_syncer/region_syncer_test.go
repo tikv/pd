@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -48,7 +47,6 @@ type regionSyncerTestSuite struct {
 
 func (s *regionSyncerTestSuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
 }
 
 func (s *regionSyncerTestSuite) TearDownSuite(c *C) {
@@ -208,6 +206,51 @@ func (s *regionSyncerTestSuite) TestFullSyncWithAddMember(c *C) {
 	c.Assert(cluster.WaitLeader(), Equals, "pd2")
 	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
 	c.Assert(loadRegions, HasLen, regionLen)
+}
+
+func (s *regionSyncerTestSuite) TestPrepareChecker(c *C) {
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`), IsNil)
+	defer failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker")
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+	regionLen := 110
+	regions := initRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+
+	// ensure flush to region storage
+	time.Sleep(3 * time.Second)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
+
+	// join new PD
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
+	err = pd2.Run()
+	c.Assert(err, IsNil)
+	// waiting for synchronization to complete
+	time.Sleep(3 * time.Second)
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd2")
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	rc = leaderServer.GetServer().GetRaftCluster()
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+	time.Sleep(time.Second)
+	c.Assert(rc.IsPrepared(), IsTrue)
 }
 
 func initRegions(regionLen int) []*core.RegionInfo {

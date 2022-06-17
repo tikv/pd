@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -34,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -49,8 +48,6 @@ import (
 
 const (
 	heartbeatSendTimeout = 5 * time.Second
-	// store config
-	storeReadyWaitTime = 5 * time.Second
 
 	// tso
 	maxMergeTSORequests    = 10000
@@ -105,9 +102,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
-	leadID := s.member.GetEtcdLeader()
+	leaderID := s.member.GetEtcdLeader()
 	for _, m := range members {
-		if m.MemberId == leadID {
+		if m.MemberId == leaderID {
 			etcdLeader = m
 			break
 		}
@@ -527,19 +524,6 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	log.Info("put store ok", zap.Stringer("store", store))
 	CheckPDVersion(s.persistOptions)
-	if !core.IsStoreContainLabel(request.GetStore(), core.EngineKey, core.EngineTiFlash) {
-		go func(ctx context.Context, url string) {
-			select {
-			// tikv may not ready to serve.
-			case <-time.After(storeReadyWaitTime):
-				if err := s.storeConfigManager.Load(url); err != nil {
-					log.Warn("load store config failed", zap.String("url", url), zap.Error(err))
-				}
-			case <-ctx.Done():
-				return
-			}
-		}(s.Server.LoopContext(), store.GetStatusAddress())
-	}
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),
@@ -600,20 +584,19 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
+	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
+		return &pdpb.StoreHeartbeatResponse{
+			Header: s.errorHeader(pberr),
+		}, nil
+	}
+	storeID := request.GetStats().GetStoreId()
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return nil, errors.Errorf("store %v not found", storeID)
+	}
+
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
-		if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
-			return &pdpb.StoreHeartbeatResponse{
-				Header: s.errorHeader(pberr),
-			}, nil
-		}
-
-		storeID := request.GetStats().GetStoreId()
-		store := rc.GetStore(storeID)
-		if store == nil {
-			return nil, errors.Errorf("store %v not found", storeID)
-		}
-
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
@@ -622,10 +605,9 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if err != nil {
 			return nil, status.Errorf(codes.Unknown, err.Error())
 		}
-		err = s.handleDamagedStore(request.GetStats())
-		if err != nil {
-			return nil, errors.Errorf("store damaged but failed to add evict leader scheduler %v", err)
-		}
+
+		s.handleDamagedStore(request.GetStats())
+
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
@@ -638,9 +620,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 		ClusterVersion:    rc.GetClusterVersion(),
 	}
-	if rc.GetUnsafeRecoveryController() != nil {
-		rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
-	}
+	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 	return resp, nil
 }
 
@@ -798,6 +778,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
 			continue
 		}
+		bucketReportInterval.WithLabelValues(storeAddress, storeLabel).Observe(float64(buckets.GetPeriodInMs() / 1000))
 		bucketReportLatency.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
@@ -893,7 +874,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, flowRoundOption)
+		region := core.RegionFromHeartbeat(request, flowRoundOption, core.SetFromHeartbeat(true))
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -951,7 +932,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -985,7 +966,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1018,7 +999,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if request.GetNeedBuckets() {
+	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1089,7 +1070,12 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 	}
 	split, err := rc.HandleAskSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskSplitResponse{
@@ -1127,7 +1113,12 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	}
 	split, err := rc.HandleAskBatchSplit(req)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.AskBatchSplitResponse{
+			Header: s.errorHeader(&pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			}),
+		}, nil
 	}
 
 	return &pdpb.AskBatchSplitResponse{
@@ -1277,6 +1268,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 	if op != nil {
+		op.AttachKind(operator.OpAdmin)
 		rc.GetOperatorController().AddOperator(op)
 	}
 
@@ -1302,8 +1294,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	safePoint, err := storage.LoadGCSafePoint()
+	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -1342,19 +1333,13 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	oldSafePoint, err := storage.LoadGCSafePoint()
+	newSafePoint := request.GetSafePoint()
+	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
 	if err != nil {
 		return nil, err
 	}
 
-	newSafePoint := request.SafePoint
-
-	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := storage.SaveGCSafePoint(newSafePoint); err != nil {
-			return nil, err
-		}
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {
@@ -1372,8 +1357,6 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 
 // UpdateServiceGCSafePoint update the safepoint for specific service
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
-	s.serviceSafePointLock.Lock()
-	defer s.serviceSafePointLock.Unlock()
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
 	}
@@ -1399,36 +1382,17 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		return nil, err
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
-	min, err := storage.LoadMinServiceGCSafePoint(now)
+	serviceID := string(request.ServiceId)
+	min, updated, err := s.gcSafePointManager.UpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
 		return nil, err
 	}
-
-	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
-		ssp := &endpoint.ServiceSafePoint{
-			ServiceID: string(request.ServiceId),
-			ExpiredAt: now.Unix() + request.TTL,
-			SafePoint: request.SafePoint,
-		}
-		if math.MaxInt64-now.Unix() <= request.TTL {
-			ssp.ExpiredAt = math.MaxInt64
-		}
-		if err := storage.SaveServiceGCSafePoint(ssp); err != nil {
-			return nil, err
-		}
+	if updated {
 		log.Info("update service GC safe point",
-			zap.String("service-id", ssp.ServiceID),
-			zap.Int64("expire-at", ssp.ExpiredAt),
-			zap.Uint64("safepoint", ssp.SafePoint))
-		// If the min safepoint is updated, load the next one
-		if string(request.ServiceId) == min.ServiceID {
-			min, err = storage.LoadMinServiceGCSafePoint(now)
-			if err != nil {
-				return nil, err
-			}
-		}
+			zap.String("service-id", serviceID),
+			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
+			zap.Uint64("safepoint", request.GetSafePoint()))
 	}
-
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       s.header(),
 		ServiceId:    []byte(min.ServiceID),
@@ -1608,7 +1572,11 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
-	finishedPercentage, newRegionIDs := s.cluster.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),
 		RegionsId:          newRegionIDs,
@@ -1649,6 +1617,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 		return 0, err
 	}
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
@@ -1911,20 +1880,25 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
 // and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
-func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) error {
+func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 	// TODO: regions have no special process for the time being
 	// and need to be removed in the future
 	damagedRegions := stats.GetDamagedRegionsId()
 	if len(damagedRegions) == 0 {
-		return nil
+		return
 	}
 
-	log.Error("store damaged and leaders will be evicted, you might fix the store and remove evict-leader-scheduler manually",
-		zap.Uint64("store-id", stats.GetStoreId()),
-		zap.Uint64s("region-ids", damagedRegions))
-
-	// TODO: reimplement add scheduler logic to avoid repeating the introduction HTTP requests inside `server/api`.
-	return s.GetHandler().AddEvictOrGrant(float64(stats.GetStoreId()), schedulers.EvictLeaderName)
+	for _, regionID := range stats.GetDamagedRegionsId() {
+		// Remove peers to make sst recovery physically delete files in TiKV.
+		err := s.GetHandler().AddRemovePeerOperator(regionID, stats.GetStoreId())
+		if err != nil {
+			log.Error("store damaged but can't add remove peer operator",
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()), zap.String("error", err.Error()))
+		} else {
+			log.Info("added remove peer operator due to damaged region",
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", stats.GetStoreId()))
+		}
+	}
 }
 
 // ReportMinResolvedTS implements gRPC PDServer.

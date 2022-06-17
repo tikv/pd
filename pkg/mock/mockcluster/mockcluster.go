@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -54,6 +55,8 @@ type Cluster struct {
 	ID             uint64
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
+	*buckets.HotBucketCache
+	ctx context.Context
 }
 
 // NewCluster creates a new Cluster
@@ -62,9 +65,11 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
 		HotStat:            statistics.NewHotStat(ctx),
+		HotBucketCache:     buckets.NewBucketsCache(ctx),
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
-		StoreConfigManager: config.NewStoreConfigManager(nil),
+		StoreConfigManager: config.NewTestStoreConfigManager(nil),
+		ctx:                ctx,
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -128,6 +133,15 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.Read, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (mc *Cluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree)
+	if !mc.HotBucketCache.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(mc.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.
@@ -651,7 +665,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if store := mc.GetStore(storeID); store != nil && store.IsTiFlash() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
 		} else {
 			followerStoreIDs = append(followerStoreIDs, storeID)

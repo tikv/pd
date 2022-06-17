@@ -135,6 +135,13 @@ func (o *PersistOptions) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
+// SetLocationLabels sets the location labels.
+func (o *PersistOptions) SetLocationLabels(labels []string) {
+	v := o.GetReplicationConfig().Clone()
+	v.LocationLabels = labels
+	o.SetReplicationConfig(v)
+}
+
 // GetIsolationLevel returns the isolation label for each region.
 func (o *PersistOptions) GetIsolationLevel() string {
 	return o.GetReplicationConfig().IsolationLevel
@@ -237,8 +244,17 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
+// It returns size * 10000 if the key of max-merge-region-Keys doesn't exist.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().MaxMergeRegionKeys)
+	keys, exist, err := o.getTTLUint(maxMergeRegionKeysKey)
+	if exist && err == nil {
+		return keys
+	}
+	size, exist, err := o.getTTLUint(maxMergeRegionSizeKey)
+	if exist && err == nil {
+		return size * 10000
+	}
+	return o.GetScheduleConfig().GetMaxMergeRegionKeys()
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
@@ -250,6 +266,20 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	v := o.GetScheduleConfig().Clone()
 	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxMergeRegionSize sets the max merge region size.
+func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxMergeRegionKeys sets the max merge region keys.
+func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionKeys = maxMergeRegionKeys
 	o.SetScheduleConfig(v)
 }
 
@@ -317,6 +347,11 @@ func (o *PersistOptions) GetPatrolRegionInterval() time.Duration {
 // GetMaxStoreDownTime returns the max down time of a store.
 func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
+}
+
+// GetMaxStorePreparingTime returns the max preparing time of a store.
+func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
+	return o.GetScheduleConfig().MaxStorePreparingTime.Duration
 }
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
@@ -444,11 +479,6 @@ func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
 	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
 }
 
-// IsAuditEnabled returns whether audit middleware is enabled
-func (o *PersistOptions) IsAuditEnabled() bool {
-	return o.GetPDServerConfig().EnableAudit
-}
-
 // GetKeyType is to get key type.
 func (o *PersistOptions) GetKeyType() core.KeyType {
 	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
@@ -499,6 +529,15 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
 	}
 	return o.GetScheduleConfig().EnableLocationReplacement
+}
+
+// GetMaxMovableHotPeerSize returns the max movable hot peer size.
+func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
+	size := o.GetScheduleConfig().MaxMovableHotPeerSize
+	if size <= 0 {
+		size = defaultMaxMovableHotPeerSize
+	}
+	return size
 }
 
 // IsDebugMetricsEnabled returns if debug metrics is enabled.

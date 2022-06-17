@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
 )
 
 // createRouteOption is used to register service for mux.Route
@@ -47,6 +46,14 @@ func setQueries(pairs ...string) createRouteOption {
 	}
 }
 
+// routeCreateFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
+func routeCreateFunc(route *mux.Route, handler http.Handler, name string, opts ...createRouteOption) {
+	route = route.Handler(handler).Name(name)
+	for _, opt := range opts {
+		opt(route)
+	}
+}
+
 func createStreamingRender() *render.Render {
 	return render.New(render.Options{
 		StreamingJSON: true,
@@ -57,54 +64,6 @@ func createIndentRender() *render.Render {
 	return render.New(render.Options{
 		IndentJSON: true,
 	})
-}
-
-// middlewareBuilder is used to build service middleware for HTTP api
-type serviceMiddlewareBuilder struct {
-	svr     *server.Server
-	handler http.Handler
-}
-
-func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
-	return &serviceMiddlewareBuilder{
-		svr: s,
-		handler: negroni.New(
-			newRequestInfoMiddleware(s),
-			newAuditMiddleware(s),
-			// todo: add rate limit middleware
-		),
-	}
-}
-
-// registerRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path
-func (s *serviceMiddlewareBuilder) registerRouteHandleFunc(router *mux.Router, path string,
-	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.HandleFunc(path, s.middlewareFunc(handleFunc))
-	handleFuncName := getFunctionName(handleFunc)
-	route = route.Name(handleFuncName)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
-}
-
-// registerPathPrefixRouteHandleFunc is used to registers a new route which will be registered matcher or service by opts for the URL path prefix.
-func (s *serviceMiddlewareBuilder) registerPathPrefixRouteHandleFunc(router *mux.Router, prefix string,
-	handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) *mux.Route {
-	route := router.PathPrefix(prefix).HandlerFunc(s.middlewareFunc(handleFunc))
-	handleFuncName := getFunctionName(handleFunc)
-	route = route.Name(handleFuncName)
-	for _, opt := range opts {
-		opt(route)
-	}
-	return route
-}
-
-func (s *serviceMiddlewareBuilder) middlewareFunc(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.handler.ServeHTTP(w, r)
-		next(w, r)
-	}
 }
 
 func getFunctionName(f interface{}) string {
@@ -123,10 +82,23 @@ func getFunctionName(f interface{}) string {
 // @license.url http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
-	rd := createIndentRender()
+	serviceMiddle := newServiceMiddlewareBuilder(svr)
+	registerPrefix := func(router *mux.Router, prefixPath string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.PathPrefix(prefixPath), serviceMiddle.createHandler(handleFunc),
+			getFunctionName(handleFunc), opts...)
+	}
+	registerFunc := func(router *mux.Router, path string,
+		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
+		routeCreateFunc(router.Path(path), serviceMiddle.createHandler(handleFunc),
+			getFunctionName(handleFunc), opts...)
+	}
+
 	setAuditBackend := func(labels ...string) createRouteOption {
 		return func(route *mux.Route) {
-			svr.SetServiceAuditBackendForHTTP(route, labels...)
+			if len(labels) > 0 {
+				svr.SetServiceAuditBackendLabels(route.GetName(), labels)
+			}
 		}
 	}
 
@@ -134,6 +106,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Please don't use PrometheusHistogram in the hot path.
 	prometheus := audit.PrometheusHistogram
 
+	rd := createIndentRender()
 	rootRouter := mux.NewRouter().PathPrefix(prefix).Subrouter()
 	handler := svr.GetHandler()
 
@@ -144,10 +117,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
-
-	serviceBuilder := newServiceMiddlewareBuilder(svr)
-	registerPrefix := serviceBuilder.registerPathPrefixRouteHandleFunc
-	registerFunc := serviceBuilder.registerRouteHandleFunc
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods("GET"))
@@ -200,17 +169,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/config/rule", rulesHandler.SetRule, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/config/rule/{group}/{id}", rulesHandler.DeleteRuleByGroup, setMethods("DELETE"), setAuditBackend(localLog))
 
-	regionLabelHandler := newRegionLabelHandler(svr, rd)
-	registerFunc(clusterRouter, "/config/region-label/rules", regionLabelHandler.GetAllRegionLabelRules, setMethods("GET"))
-	registerFunc(clusterRouter, "/config/region-label/rules/ids", regionLabelHandler.GetRegionLabelRulesByIDs, setMethods("GET"))
-	// {id} can be a string with special characters, we should enable path encode to support it.
-	registerFunc(escapeRouter, "/config/region-label/rule/{id}", regionLabelHandler.GetRegionLabelRuleByID, setMethods("GET"))
-	registerFunc(escapeRouter, "/config/region-label/rule/{id}", regionLabelHandler.DeleteRegionLabelRule, setMethods("DELETE"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/config/region-label/rule", regionLabelHandler.SetRegionLabelRule, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/config/region-label/rules", regionLabelHandler.PatchRegionLabelRules, setMethods("PATCH"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/region/id/{id}/label/{key}", regionLabelHandler.GetRegionLabelByKey, setMethods("GET"))
-	registerFunc(clusterRouter, "/region/id/{id}/labels", regionLabelHandler.GetRegionLabels, setMethods("GET"))
-
 	registerFunc(clusterRouter, "/config/rule_group/{id}", rulesHandler.GetGroupConfig, setMethods("GET"))
 	registerFunc(clusterRouter, "/config/rule_group", rulesHandler.SetGroupConfig, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/config/rule_group/{id}", rulesHandler.DeleteGroupConfig, setMethods("DELETE"), setAuditBackend(localLog))
@@ -223,6 +181,17 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/config/placement-rule/{group}", rulesHandler.GetPlacementRuleByGroup, setMethods("GET"))
 	registerFunc(clusterRouter, "/config/placement-rule/{group}", rulesHandler.SetPlacementRuleByGroup, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(escapeRouter, "/config/placement-rule/{group}", rulesHandler.DeletePlacementRuleByGroup, setMethods("DELETE"), setAuditBackend(localLog))
+
+	regionLabelHandler := newRegionLabelHandler(svr, rd)
+	registerFunc(clusterRouter, "/config/region-label/rules", regionLabelHandler.GetAllRegionLabelRules, setMethods("GET"))
+	registerFunc(clusterRouter, "/config/region-label/rules/ids", regionLabelHandler.GetRegionLabelRulesByIDs, setMethods("GET"))
+	// {id} can be a string with special characters, we should enable path encode to support it.
+	registerFunc(escapeRouter, "/config/region-label/rule/{id}", regionLabelHandler.GetRegionLabelRuleByID, setMethods("GET"))
+	registerFunc(escapeRouter, "/config/region-label/rule/{id}", regionLabelHandler.DeleteRegionLabelRule, setMethods("DELETE"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "/config/region-label/rule", regionLabelHandler.SetRegionLabelRule, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "/config/region-label/rules", regionLabelHandler.PatchRegionLabelRules, setMethods("PATCH"), setAuditBackend(localLog))
+	registerFunc(clusterRouter, "/region/id/{id}/label/{key}", regionLabelHandler.GetRegionLabelByKey, setMethods("GET"))
+	registerFunc(clusterRouter, "/region/id/{id}/labels", regionLabelHandler.GetRegionLabels, setMethods("GET"))
 
 	storeHandler := newStoreHandler(handler, rd)
 	registerFunc(clusterRouter, "/store/{id}", storeHandler.GetStore, setMethods("GET"))
@@ -268,6 +237,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/confver", regionsHandler.GetTopConfVerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/version", regionsHandler.GetTopVersionRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/size", regionsHandler.GetTopSizeRegions, setMethods("GET"))
+	registerFunc(clusterRouter, "/regions/keys", regionsHandler.GetTopKeysRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/miss-peer", regionsHandler.GetMissPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/extra-peer", regionsHandler.GetExtraPeerRegions, setMethods("GET"))
 	registerFunc(clusterRouter, "/regions/check/pending-peer", regionsHandler.GetPendingPeerRegions, setMethods("GET"))
@@ -311,7 +281,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods("DELETE"), setAuditBackend(localLog))
 	registerFunc(clusterRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods("POST"), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods("POST"), setAuditBackend(localLog))
-	registerFunc(clusterRouter, "/admin/replication_mode/wait-async", adminHandler.UpdateWaitAsyncTime, setMethods("POST"), setAuditBackend(localLog))
+
+	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
+	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
+	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/service-middleware/config/rate-limit", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))
@@ -362,8 +336,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 		unsafeOperationHandler.RemoveFailedStores, setMethods("POST"))
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods("GET"))
-	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/history",
-		unsafeOperationHandler.GetFailedStoresRemovalHistory, setMethods("GET"))
 
 	// API to set or unset failpoints
 	failpoint.Inject("enableFailpointAPI", func() {

@@ -20,6 +20,7 @@ import (
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -59,7 +60,7 @@ func (s *testClusterSuite) TestCluster(c *C) {
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", s.urlPrefix)
 	c1 := &metapb.Cluster{}
-	err := readJSON(testDialClient, url, c1)
+	err := tu.ReadGetJSON(c, testDialClient, url, c1)
 	c.Assert(err, IsNil)
 
 	c2 := &metapb.Cluster{}
@@ -68,7 +69,7 @@ func (s *testClusterSuite) TestCluster(c *C) {
 		EnablePlacementRules: true,
 	}
 	c.Assert(s.svr.SetReplicationConfig(r), IsNil)
-	err = readJSON(testDialClient, url, c2)
+	err = tu.ReadGetJSON(c, testDialClient, url, c2)
 	c.Assert(err, IsNil)
 
 	c1.MaxPeerCount = 6
@@ -79,18 +80,18 @@ func (s *testClusterSuite) TestCluster(c *C) {
 func (s *testClusterSuite) testGetClusterStatus(c *C) {
 	url := fmt.Sprintf("%s/cluster/status", s.urlPrefix)
 	status := cluster.Status{}
-	err := readJSON(testDialClient, url, &status)
+	err := tu.ReadGetJSON(c, testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.IsZero(), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	now := time.Now()
 	mustBootstrapCluster(c, s.svr)
-	err = readJSON(testDialClient, url, &status)
+	err = tu.ReadGetJSON(c, testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsFalse)
 	s.svr.SetReplicationConfig(config.ReplicationConfig{MaxReplicas: 1})
-	err = readJSON(testDialClient, url, &status)
+	err = tu.ReadGetJSON(c, testDialClient, url, &status)
 	c.Assert(err, IsNil)
 	c.Assert(status.RaftBootstrapTime.After(now), IsTrue)
 	c.Assert(status.IsInitialized, IsTrue)

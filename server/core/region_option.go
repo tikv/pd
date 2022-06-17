@@ -185,6 +185,13 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	}
 }
 
+// SetBuckets sets the buckets for the region, only use test.
+func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.UpdateBuckets(buckets, region.GetBuckets())
+	}
+}
+
 // SetReadBytes sets the read bytes for the region.
 func SetReadBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -313,5 +320,12 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.interval = interval
+	}
+}
+
+// SetFromHeartbeat sets if the region info comes from the region heartbeat.
+func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.fromHeartbeat = fromHeartbeat
 	}
 }

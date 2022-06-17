@@ -1,4 +1,4 @@
-// Copyright 2016 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api
+package apiutil
 
 import (
 	"bytes"
 	"io"
 	"net/http/httptest"
+	"testing"
 
-	. "github.com/pingcap/check"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/stretchr/testify/require"
 	"github.com/unrolled/render"
 )
 
-var _ = Suite(&testUtilSuite{})
-
-type testUtilSuite struct{}
-
-func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
+func TestJsonRespondErrorOk(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
@@ -36,37 +34,37 @@ func (s *testUtilSuite) TestJsonRespondErrorOk(c *C) {
 	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input map[string]string
 	output := map[string]string{"zone": "cn", "host": "local"}
-	err := apiutil.ReadJSONRespondError(rd, response, body, &input)
-	c.Assert(err, IsNil)
-	c.Assert(input["zone"], Equals, output["zone"])
-	c.Assert(input["host"], Equals, output["host"])
+	err := ReadJSONRespondError(rd, response, body, &input)
+	re.NoError(err)
+	re.Equal(output["zone"], input["zone"])
+	re.Equal(output["host"], input["host"])
 	result := response.Result()
 	defer result.Body.Close()
-	c.Assert(result.StatusCode, Equals, 200)
+	re.Equal(200, result.StatusCode)
 }
 
-func (s *testUtilSuite) TestJsonRespondErrorBadInput(c *C) {
+func TestJsonRespondErrorBadInput(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
 	})
 	response := httptest.NewRecorder()
 	body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\", \"host\":\"local\"}"))
 	var input []string
-	err := apiutil.ReadJSONRespondError(rd, response, body, &input)
-	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "json: cannot unmarshal object into Go value of type []string")
+	err := ReadJSONRespondError(rd, response, body, &input)
+	re.EqualError(err, "json: cannot unmarshal object into Go value of type []string")
 	result := response.Result()
 	defer result.Body.Close()
-	c.Assert(result.StatusCode, Equals, 400)
+	re.Equal(400, result.StatusCode)
 
 	{
 		body := io.NopCloser(bytes.NewBufferString("{\"zone\":\"cn\","))
 		var input []string
-		err := apiutil.ReadJSONRespondError(rd, response, body, &input)
-		c.Assert(err, NotNil)
-		c.Assert(err.Error(), Equals, "unexpected end of JSON input")
+		err := ReadJSONRespondError(rd, response, body, &input)
+		re.EqualError(err, "unexpected end of JSON input")
 		result := response.Result()
 		defer result.Body.Close()
-		c.Assert(result.StatusCode, Equals, 400)
+		re.Equal(400, result.StatusCode)
 	}
 }

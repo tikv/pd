@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -57,7 +57,7 @@ func init() {
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			leadID, err := strconv.ParseUint(args[0], 10, 64)
+			leaderID, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
 				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
 			}
@@ -70,7 +70,7 @@ func init() {
 				}
 				storeIDs = append(storeIDs, storeID)
 			}
-			if !conf.setStore(leadID, storeIDs) {
+			if !conf.setStore(leaderID, storeIDs) {
 				return errs.ErrSchedulerConfig
 			}
 			return nil
@@ -88,11 +88,11 @@ func init() {
 }
 
 type grantHotRegionSchedulerConfig struct {
-	mu          sync.RWMutex
-	storage     endpoint.ConfigStorage
-	cluster     schedule.Cluster
-	StoreIDs    []uint64 `json:"store-id"`
-	StoreLeadID uint64   `json:"store-leader-id"`
+	mu            syncutil.RWMutex
+	storage       endpoint.ConfigStorage
+	cluster       schedule.Cluster
+	StoreIDs      []uint64 `json:"store-id"`
+	StoreLeaderID uint64   `json:"store-leader-id"`
 }
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
@@ -102,30 +102,30 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 		return leaderID == peers[i]
 	})
 	if ret {
-		conf.StoreLeadID = leaderID
+		conf.StoreLeaderID = leaderID
 		conf.StoreIDs = peers
 	}
 	return ret
 }
 
-func (conf *grantHotRegionSchedulerConfig) GetStoreLeadID() uint64 {
+func (conf *grantHotRegionSchedulerConfig) GetStoreLeaderID() uint64 {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	return conf.StoreLeadID
+	return conf.StoreLeaderID
 }
 
-func (conf *grantHotRegionSchedulerConfig) SetStoreLeadID(id uint64) {
+func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
-	conf.StoreLeadID = id
+	conf.StoreLeaderID = id
 }
 
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	return &grantHotRegionSchedulerConfig{
-		StoreIDs:    conf.StoreIDs,
-		StoreLeadID: conf.StoreLeadID,
+		StoreIDs:      conf.StoreIDs,
+		StoreLeaderID: conf.StoreLeaderID,
 	}
 }
 
@@ -192,7 +192,7 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 }
 
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
-// TODO it should check if there is any scheduelr such as evict or hot region scheduler
+// TODO it should check if there is any scheduler such as evict or hot region scheduler
 func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
@@ -244,7 +244,7 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 
 	if err = handler.config.Persist(); err != nil {
-		handler.config.SetStoreLeadID(0)
+		handler.config.SetStoreLeaderID(0)
 		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -308,15 +308,15 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedu
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
-	isleader := s.r.Int()%2 == 1
+	isLeader := s.r.Int()%2 == 1
 	for _, srcStore := range srcStores {
 		srcStoreID := srcStore.GetID()
-		if isleader {
+		if isLeader {
 			if s.conf.has(srcStoreID) || len(srcStore.HotPeers) < 1 {
 				continue
 			}
 		} else {
-			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.GetStoreLeadID() {
+			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.GetStoreLeaderID() {
 				continue
 			}
 		}
@@ -325,7 +325,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcSt
 			if s.OpController.GetOperator(peer.RegionID) != nil {
 				continue
 			}
-			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, isleader)
+			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, isLeader)
 			if err != nil {
 				log.Debug("fail to create grant hot region operator", zap.Uint64("region-id", peer.RegionID),
 					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
@@ -356,7 +356,7 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 	var candidate []uint64
 	if isLeader {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true})
-		candidate = []uint64{s.conf.GetStoreLeadID()}
+		candidate = []uint64{s.conf.GetStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))

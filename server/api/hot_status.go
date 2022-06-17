@@ -22,7 +22,6 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/unrolled/render"
@@ -154,7 +153,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 	for _, store := range stores {
 		id := store.GetID()
 		if loads, ok := storesLoads[id]; ok {
-			if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+			if store.IsTiFlash() {
 				stats.BytesWriteStats[id] = loads[statistics.StoreRegionsWriteBytes]
 				stats.KeysWriteStats[id] = loads[statistics.StoreRegionsWriteKeys]
 			} else {

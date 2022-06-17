@@ -32,6 +32,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/storage/kv"
@@ -53,7 +54,7 @@ type HotRegionStorage struct {
 
 	curReservedDays uint64
 	curInterval     time.Duration
-	mu              sync.RWMutex
+	mu              syncutil.RWMutex
 }
 
 // HistoryHotRegions wraps historyHotRegion
@@ -143,13 +144,13 @@ func NewHotRegionsStorage(
 	if err != nil {
 		return nil, err
 	}
-	hotRegionInfoCtx, hotRegionInfoCancle := context.WithCancel(ctx)
+	hotRegionInfoCtx, hotRegionInfoCancel := context.WithCancel(ctx)
 	h := HotRegionStorage{
 		LevelDBKV:               levelDB,
 		ekm:                     ekm,
 		batchHotInfo:            make(map[string]*HistoryHotRegion),
 		hotRegionInfoCtx:        hotRegionInfoCtx,
-		hotRegionInfoCancel:     hotRegionInfoCancle,
+		hotRegionInfoCancel:     hotRegionInfoCancel,
 		hotRegionStorageHandler: hotRegionStorageHandler,
 		curReservedDays:         hotRegionStorageHandler.GetHotRegionsReservedDays(),
 		curInterval:             hotRegionStorageHandler.GetHotRegionsWriteInterval(),

@@ -15,17 +15,16 @@
 package config
 
 import (
+	"crypto/tls"
 	"encoding/json"
-	"fmt"
+	"net/http"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testTiKVConfigSuite{})
-
-type testTiKVConfigSuite struct{}
-
-func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
+func TestTiKVConfig(t *testing.T) {
+	re := require.New(t)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -39,44 +38,114 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
         "perf-level": 2
     	}}`
 		var config StoreConfig
-		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
+		re.NoError(json.Unmarshal([]byte(body), &config))
 
-		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(144000000))
-		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(96000000))
-		c.Assert(int(config.GetRegionMaxSize()), Equals, 15*1024)
-		c.Assert(config.GetRegionSplitSize(), Equals, uint64(10*1024))
+		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
+		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
+		re.Equal(15*1024, int(config.GetRegionMaxSize()))
+		re.Equal(uint64(10*1024), config.GetRegionSplitSize())
 	}
 	//case2: empty config.
 	{
 		body := `{}`
 		var config StoreConfig
-		c.Assert(json.Unmarshal([]byte(body), &config), IsNil)
-		fmt.Println(config.Coprocessor)
+		re.NoError(json.Unmarshal([]byte(body), &config))
 
-		c.Assert(config.GetRegionMaxKeys(), Equals, uint64(1440000))
-		c.Assert(config.GetRegionSplitKeys(), Equals, uint64(960000))
-		c.Assert(int(config.GetRegionMaxSize()), Equals, 144)
-		c.Assert(config.GetRegionSplitSize(), Equals, uint64(96))
+		re.Equal(uint64(1440000), config.GetRegionMaxKeys())
+		re.Equal(uint64(960000), config.GetRegionSplitKeys())
+		re.Equal(144, int(config.GetRegionMaxSize()))
+		re.Equal(uint64(96), config.GetRegionSplitSize())
 	}
 }
 
-func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
-	manager := NewStoreConfigManager(nil)
-	c.Assert(manager.schema, Equals, "http")
-	var tlsConfig *SecurityConfig
-	manager = NewStoreConfigManager(tlsConfig)
-	c.Assert(manager.schema, Equals, "http")
-	config := &StoreConfig{
-		Coprocessor{
-			RegionMaxSize: "15GiB",
+func TestUpdateConfig(t *testing.T) {
+	re := require.New(t)
+	manager := NewTestStoreConfigManager([]string{"tidb.com"})
+	manager.ObserveConfig("tikv.com")
+	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
+	manager.ObserveConfig("tidb.com")
+	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   &tls.Config{},
 		},
 	}
-	manager.UpdateConfig(nil)
-	c.Assert(manager.GetStoreConfig(), IsNil)
-	manager.UpdateConfig(config)
-	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(15*1024))
-	var m StoreConfigManager
-	m.UpdateConfig(nil)
-	c.Assert(m.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
+	manager = NewStoreConfigManager(client)
+	re.Equal("http", manager.source.(*TiKVConfigSource).schema)
+}
+
+func TestParseConfig(t *testing.T) {
+	re := require.New(t)
+	body := `
+{
+"coprocessor":{
+"split-region-on-table":false,
+"batch-split-limit":10,
+"region-max-size":"384MiB",
+"region-split-size":"256MiB",
+"region-max-keys":3840000,
+"region-split-keys":2560000,
+"consistency-check-method":"mvcc",
+"enable-region-bucket":true,
+"region-bucket-size":"96MiB",
+"region-size-threshold-for-approximate":"384MiB",
+"region-bucket-merge-size-ratio":0.33
+}
+}
+`
+
+	var config StoreConfig
+	re.NoError(json.Unmarshal([]byte(body), &config))
+	re.Equal(uint64(96), config.GetRegionBucketSize())
+}
+
+func TestMergeCheck(t *testing.T) {
+	re := require.New(t)
+	testdata := []struct {
+		size      uint64
+		mergeSize uint64
+		keys      uint64
+		mergeKeys uint64
+		pass      bool
+	}{{
+		// case 1: the merged region size is smaller than the max region size
+		size:      96 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 2: the smallest region is 68MiB，it can't be merged again.
+		size:      144 + 20,
+		mergeSize: 20,
+		keys:      1440000 + 200000,
+		mergeKeys: 200000,
+		pass:      true,
+	}, {
+		// case 3: the smallest region is 50MiB，it can be merged again.
+		size:      144 + 2,
+		mergeSize: 50,
+		keys:      1440000 + 20000,
+		mergeKeys: 500000,
+		pass:      false,
+	}, {
+		// case4: the smallest region is 51MiB，it can't be merged again.
+		size:      144 + 3,
+		mergeSize: 50,
+		keys:      1440000 + 30000,
+		mergeKeys: 500000,
+		pass:      true,
+	}}
+	config := &StoreConfig{}
+	for _, v := range testdata {
+		if v.pass {
+			re.NoError(config.CheckRegionSize(v.size, v.mergeSize))
+			re.NoError(config.CheckRegionKeys(v.keys, v.mergeKeys))
+		} else {
+			re.Error(config.CheckRegionSize(v.size, v.mergeSize))
+			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
+		}
+	}
 }

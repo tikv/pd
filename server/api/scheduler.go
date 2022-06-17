@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
@@ -44,6 +45,12 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
+type schedulerPausedPeriod struct {
+	Name     string    `json:"name"`
+	PausedAt time.Time `json:"paused_at"`
+	ResumeAt time.Time `json:"resume_at"`
+}
+
 // @Tags scheduler
 // @Summary List all created schedulers by status.
 // @Produce json
@@ -58,9 +65,11 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 	}
 
 	status := r.URL.Query().Get("status")
+	_, tsFlag := r.URL.Query()["timestamp"]
 	switch status {
 	case "paused":
 		var pausedSchedulers []string
+		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := h.Handler.IsSchedulerPaused(scheduler)
 			if err != nil {
@@ -69,10 +78,35 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 			}
 
 			if paused {
-				pausedSchedulers = append(pausedSchedulers, scheduler)
+				if tsFlag {
+					s := schedulerPausedPeriod{
+						Name:     scheduler,
+						PausedAt: time.Time{},
+						ResumeAt: time.Time{},
+					}
+					pausedAt, err := h.Handler.GetPausedSchedulerDelayAt(scheduler)
+					if err != nil {
+						h.r.JSON(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					s.PausedAt = time.Unix(pausedAt, 0)
+					resumeAt, err := h.Handler.GetPausedSchedulerDelayUntil(scheduler)
+					if err != nil {
+						h.r.JSON(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					s.ResumeAt = time.Unix(resumeAt, 0)
+					pausedPeriods = append(pausedPeriods, s)
+				} else {
+					pausedSchedulers = append(pausedSchedulers, scheduler)
+				}
 			}
 		}
-		h.r.JSON(w, http.StatusOK, pausedSchedulers)
+		if tsFlag {
+			h.r.JSON(w, http.StatusOK, pausedPeriods)
+		} else {
+			h.r.JSON(w, http.StatusOK, pausedSchedulers)
+		}
 		return
 	case "disabled":
 		var disabledSchedulers []string
@@ -142,17 +176,17 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		collector := func(v string) {
 			args = append(args, v)
 		}
-		if err := collectEscapeStringOption("start_key", input, collector); err != nil {
+		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		if err := collectEscapeStringOption("end_key", input, collector); err != nil {
+		if err := apiutil.CollectEscapeStringOption("end_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		if err := collectStringOption("range_name", input, collector); err != nil {
+		if err := apiutil.CollectStringOption("range_name", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -192,6 +226,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 	case schedulers.EvictSlowStoreName:
 		if err := h.AddEvictSlowStoreScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case schedulers.SplitBucketName:
+		if err := h.AddSplitBucketScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -268,7 +307,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
 	url := fmt.Sprintf("%s/%s/%s/delete/%s", h.GetAddr(), schedulerConfigPrefix, schedulerName, args[0])
-	statusCode, err := doDelete(h.svr.GetHTTPClient(), url)
+	statusCode, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		h.r.JSON(w, statusCode, err.Error())
 		return
@@ -320,10 +359,10 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 
 func (h *schedulerConfigHandler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
-	sh := handler.GetSchedulerConfigHandler()
-	if sh != nil {
+	sh, err := handler.GetSchedulerConfigHandler()
+	if err == nil && sh != nil {
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, errNoImplement.Error())
+	h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
 }

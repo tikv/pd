@@ -23,27 +23,28 @@ static: install-tools
 
 tidy:
 	@ go mod tidy
+	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
 test: enable-codegen dashboard-ui
-	CGO_ENABLED=1 go test -race -cover || { $(MAKE) disable-codegen && exit 1; }
+	CGO_ENABLED=1 go test -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
 	$(MAKE) disable-codegen
 
 basic-test:
 	# skip
 
 ci-test-job: enable-codegen
-	CGO_ENABLED=1 go test -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/client
+	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/client
 
 install-tools:
 	cd ../../ && $(MAKE) install-tools
 
 enable-codegen:
-	cd ../../ && $(MAKE) failpoint-enable && $(MAKE) deadlock-enable
+	cd ../../ && $(MAKE) failpoint-enable
 	go mod tidy
 
 disable-codegen:
-	cd ../../ && $(MAKE) failpoint-disable && $(MAKE) deadlock-disable
+	cd ../../ && $(MAKE) failpoint-disable
 	go mod tidy
 
 dashboard-ui:

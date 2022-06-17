@@ -18,11 +18,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
@@ -91,10 +91,10 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 
 func (s *testAdminSuite) TestPersistFile(c *C) {
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data)
-	c.Assert(err, NotNil)
+	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(c))
+	c.Assert(err, IsNil)
 	data = []byte(`{"foo":"bar"}`)
-	err = postJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data)
+	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(c))
 	c.Assert(err, IsNil)
 }
 
@@ -132,63 +132,41 @@ func (s *testTSOSuite) TestResetTS(c *C) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(res []byte, code int) {
-			c.Assert(string(res), Equals, "\"Reset ts successfully.\"\n")
-			c.Assert(code, Equals, http.StatusOK)
-		})
-
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.StatusOK(c),
+		tu.StringEqual(c, "\"Reset ts successfully.\"\n"))
 	c.Assert(err, IsNil)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "too large"), IsTrue)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "too large"))
+	c.Assert(err, IsNil)
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusForbidden) })
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "small"), IsTrue)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusForbidden),
+		tu.StringContain(c, "small"))
+	c.Assert(err, IsNil)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
-	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
+	c.Assert(err, IsNil)
 
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, values,
-		func(_ []byte, code int) { c.Assert(code, Equals, http.StatusBadRequest) })
-	c.Assert(err, NotNil)
-	c.Assert(err.Error(), Equals, "\"invalid tso value\"\n")
-}
-
-var _ = Suite(&testServiceSuite{})
-
-type testServiceSuite struct {
-	svr     *server.Server
-	cleanup cleanUpFunc
-}
-
-func (s *testServiceSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (s *testServiceSuite) TearDownSuite(c *C) {
-	s.cleanup()
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(c, http.StatusBadRequest),
+		tu.StringEqual(c, "\"invalid tso value\"\n"))
+	c.Assert(err, IsNil)
 }

@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/tsoutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
@@ -51,7 +50,6 @@ func (s *testTSOConsistencySuite) SetUpSuite(c *C) {
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.dcClientMap = make(map[string]pdpb.PDClient)
 	s.tsPool = make(map[uint64]struct{})
-	server.EnableZap = true
 }
 
 func (s *testTSOConsistencySuite) TearDownSuite(c *C) {

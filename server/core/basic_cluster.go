@@ -16,19 +16,19 @@ package core
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	Stores  *StoresInfo
 	Regions *RegionsInfo
 }
@@ -338,6 +338,13 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
+// ResetStores resets the store cache.
+func (bc *BasicCluster) ResetStores() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores = NewStoresInfo()
+}
+
 // DeleteStore deletes a store.
 func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Lock()
@@ -358,7 +365,7 @@ func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionIn
 func isRegionRecreated(region *RegionInfo) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
-	// range) from reporting stale info, we execlude regions that covers the entire key range
+	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
@@ -397,6 +404,13 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.SetRegion(region)
 }
 
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
+}
+
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, err := bc.PreCheckPutRegion(region)
@@ -412,9 +426,16 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
 	bc.Lock()
 	defer bc.Unlock()
-	if region := bc.Regions.GetRegion(id); region != nil {
-		bc.Regions.RemoveRegion(region)
+	if r := bc.Regions.GetRegion(id); r != nil {
+		bc.Regions.RemoveRegion(r)
 	}
+}
+
+// ResetRegionCache drops all region cache.
+func (bc *BasicCluster) ResetRegionCache() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Regions = NewRegionsInfo()
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap.

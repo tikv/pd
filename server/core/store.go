@@ -151,6 +151,16 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	return true
 }
 
+// IsTiFlash returns true if the store is tiflash.
+func (s *StoreInfo) IsTiFlash() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
+}
+
+// IsUp returns true if store is serving or preparing.
+func (s *StoreInfo) IsUp() bool {
+	return s.IsServing() || s.IsPreparing()
+}
+
 // IsPreparing checks if the store's state is preparing.
 func (s *StoreInfo) IsPreparing() bool {
 	return s.GetNodeState() == metapb.NodeState_Preparing
@@ -208,6 +218,11 @@ func (s *StoreInfo) GetState() metapb.StoreState {
 // GetNodeState returns the state of the node.
 func (s *StoreInfo) GetNodeState() metapb.NodeState {
 	return s.meta.GetNodeState()
+}
+
+// GetStatusAddress returns the http address of the store.
+func (s *StoreInfo) GetStatusAddress() string {
+	return s.meta.GetStatusAddress()
 }
 
 // GetAddress returns the address of the store.
@@ -374,7 +389,7 @@ func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	var (
 		K, M float64 = 1, 256 // Experience value to control the weight of the available influence on score
 		F    float64 = 50     // Experience value to prevent some nodes from running out of disk space prematurely.
-		B            = 1e7
+		B            = 1e10
 	)
 	F = math.Max(F, C*(1-lowSpaceRatio))
 	var score float64
@@ -737,5 +752,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash) && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
 }
