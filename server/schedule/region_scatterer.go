@@ -344,14 +344,24 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		scatterCounter.WithLabelValues("fail", "").Inc()
 
 		switch err.(type) {
-		case *operator.BuilderNilPeerError:
+		case *operator.NilPeerError:
 			scatterCounter.WithLabelValues("fail", "nil-peer").Inc()
-		case *operator.BuilderNoLeaderError:
+		case *operator.NoLeaderError:
 			scatterCounter.WithLabelValues("fail", "no-leader").Inc()
-		case *operator.BuilderNoPlacementRuleError:
+		case *operator.NoPlacementRuleError:
 			scatterCounter.WithLabelValues("fail", "no-placement-rule").Inc()
-		case *operator.BuilderRegionInJointStateError:
-			scatterCounter.WithLabelValues("fail", "in-joint-state").Inc()
+		case *operator.RegionInJointStateError:
+			scatterCounter.WithLabelValues("fail", "region-in-joint-state").Inc()
+		case *operator.MismatchPeersError:
+			scatterCounter.WithLabelValues("fail", "mismatch-peers").Inc()
+		case *operator.NoVoterError:
+			scatterCounter.WithLabelValues("fail", "no-voter").Inc()
+		case *operator.LeaderNotAllowedError:
+			scatterCounter.WithLabelValues("fail", "leader-not-allowed").Inc()
+		case *operator.NoValidLeaderError:
+			scatterCounter.WithLabelValues("fail", "no-valid-leader").Inc()
+		case *operator.EmptyPlanError:
+			scatterCounter.WithLabelValues("fail", "empty-plan").Inc()
 		default:
 			scatterCounter.WithLabelValues("fail", "unknown").Inc()
 		}

@@ -87,28 +87,60 @@ type Builder struct {
 // BuilderOption is used to create operator builder.
 type BuilderOption func(*Builder)
 
-type BuilderNilPeerError struct{}
+type NilPeerError struct{}
 
-func (b *BuilderNilPeerError) Error() string {
+func (b *NilPeerError) Error() string {
 	return "cannot build operator for region with nil peer"
 }
 
-type BuilderNoLeaderError struct{}
+type NoLeaderError struct{}
 
-func (b *BuilderNoLeaderError) Error() string {
+func (b *NoLeaderError) Error() string {
 	return "cannot build operator for region with no leader"
 }
 
-type BuilderNoPlacementRuleError struct{}
+type NoPlacementRuleError struct{}
 
-func (b *BuilderNoPlacementRuleError) Error() string {
+func (b *NoPlacementRuleError) Error() string {
 	return "cannot build operator for region match no placement rule"
 }
 
-type BuilderRegionInJointStateError struct{}
+type RegionInJointStateError struct{}
 
-func (b *BuilderRegionInJointStateError) Error() string {
+func (b *RegionInJointStateError) Error() string {
 	return "cannot build operator for region which is in joint state"
+}
+
+type MismatchPeersError struct {
+	Peers map[uint64]*metapb.Peer
+}
+
+func (b *MismatchPeersError) Error() string {
+	return fmt.Sprintf("setPeers with mismatch peers: %v", b.Peers)
+}
+
+type NoVoterError struct{}
+
+func (b *NoVoterError) Error() string {
+	return "cannot create operator: target peers have no voter"
+}
+
+type LeaderNotAllowedError struct{}
+
+func (b *LeaderNotAllowedError) Error() string {
+	return "cannot create operator: target leader is not allowed"
+}
+
+type NoValidLeaderError struct{}
+
+func (b *NoValidLeaderError) Error() string {
+	return "cannot build steps with joint consensus: no valid leader"
+}
+
+type EmptyPlanError struct{}
+
+func (b *EmptyPlanError) Error() string {
+	return "cannot build steps without joint consensus: plan is empty, maybe no valid leader"
 }
 
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
@@ -138,8 +170,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 
 	for _, p := range region.GetPeers() {
 		if p == nil || p.GetStoreId() == 0 {
-			//			err = errors.Errorf("cannot build operator for region with nil peer")
-			err = &BuilderNilPeerError{}
+			err = &NilPeerError{}
 			break
 		}
 		originPeers.Set(p)
@@ -156,7 +187,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 	// origin leader
 	originLeaderStoreID := region.GetLeader().GetStoreId()
 	if _, ok := originPeers[originLeaderStoreID]; err == nil && !ok {
-		err = &BuilderNoLeaderError{}
+		err = &NoLeaderError{}
 	}
 
 	// placement rules
@@ -167,13 +198,13 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 			rules = append(rules, rf.Rule)
 		}
 		if len(rules) == 0 {
-			err = &BuilderNoPlacementRuleError{}
+			err = &NoPlacementRuleError{}
 		}
 	}
 
 	// joint state check
 	if err == nil && !b.skipOriginJointStateCheck && core.IsInJointState(region.GetPeers()...) {
-		err = &BuilderNoPlacementRuleError{}
+		err = &RegionInJointStateError{}
 	}
 
 	// build flags
@@ -309,7 +340,9 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 
 	for key, peer := range peers {
 		if peer == nil || key == 0 || peer.GetStoreId() != key || core.IsInJointState(peer) {
-			b.err = errors.Errorf("setPeers with mismatch peers: %v", peers)
+			b.err = &MismatchPeersError{
+				Peers: peers,
+			}
 			return b
 		}
 	}
@@ -405,7 +438,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 	if voterCount == 0 {
-		return "", errors.New("cannot create operator: target peers have no voter")
+		return "", &NoVoterError{}
 	}
 
 	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`.
@@ -473,7 +506,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
 		if !b.allowLeader(targetLeader, b.forceTargetLeader) {
-			return "", errors.New("cannot create operator: target leader is not allowed")
+			return "", &LeaderNotAllowedError{}
 		}
 	}
 
@@ -535,7 +568,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 
 	b.setTargetLeaderIfNotExist()
 	if b.targetLeaderStoreID == 0 {
-		return kind, errors.New("no valid leader")
+		return kind, &NoValidLeaderError{}
 	}
 
 	// Split `Remove Voter` to `Demote + Remove Learner`
@@ -647,7 +680,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 	for len(b.toAdd) > 0 || len(b.toRemove) > 0 || len(b.toPromote) > 0 || len(b.toDemote) > 0 {
 		plan := b.peerPlan()
 		if plan.IsEmpty() {
-			return kind, errors.New("fail to build operator: plan is empty, maybe no valid leader")
+			return kind, &EmptyPlanError{}
 		}
 		if plan.leaderBeforeAdd != 0 && plan.leaderBeforeAdd != b.currentLeaderStoreID {
 			b.execTransferLeader(plan.leaderBeforeAdd, b.targetLeaderStoreIDs)
