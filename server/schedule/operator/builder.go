@@ -87,6 +87,30 @@ type Builder struct {
 // BuilderOption is used to create operator builder.
 type BuilderOption func(*Builder)
 
+type BuilderNilPeerError struct{}
+
+func (b *BuilderNilPeerError) Error() string {
+	return "cannot build operator for region with nil peer"
+}
+
+type BuilderNoLeaderError struct{}
+
+func (b *BuilderNoLeaderError) Error() string {
+	return "cannot build operator for region with no leader"
+}
+
+type BuilderNoPlacementRuleError struct{}
+
+func (b *BuilderNoPlacementRuleError) Error() string {
+	return "cannot build operator for region match no placement rule"
+}
+
+type BuilderRegionInJointStateError struct{}
+
+func (b *BuilderRegionInJointStateError) Error() string {
+	return "cannot build operator for region which is in joint state"
+}
+
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
@@ -114,7 +138,8 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 
 	for _, p := range region.GetPeers() {
 		if p == nil || p.GetStoreId() == 0 {
-			err = errors.Errorf("cannot build operator for region with nil peer")
+			//			err = errors.Errorf("cannot build operator for region with nil peer")
+			err = &BuilderNilPeerError{}
 			break
 		}
 		originPeers.Set(p)
@@ -131,7 +156,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 	// origin leader
 	originLeaderStoreID := region.GetLeader().GetStoreId()
 	if _, ok := originPeers[originLeaderStoreID]; err == nil && !ok {
-		err = errors.Errorf("cannot build operator for region with no leader")
+		err = &BuilderNoLeaderError{}
 	}
 
 	// placement rules
@@ -142,13 +167,13 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 			rules = append(rules, rf.Rule)
 		}
 		if len(rules) == 0 {
-			err = errors.Errorf("cannot build operator for region match no placement rule")
+			err = &BuilderNoPlacementRuleError{}
 		}
 	}
 
 	// joint state check
 	if err == nil && !b.skipOriginJointStateCheck && core.IsInJointState(region.GetPeers()...) {
-		err = errors.Errorf("cannot build operator for region which is in joint state")
+		err = &BuilderNoPlacementRuleError{}
 	}
 
 	// build flags

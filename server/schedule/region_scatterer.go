@@ -342,6 +342,20 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
 		scatterCounter.WithLabelValues("fail", "").Inc()
+
+		switch err.(type) {
+		case *operator.BuilderNilPeerError:
+			scatterCounter.WithLabelValues("fail", "nil-peer").Inc()
+		case *operator.BuilderNoLeaderError:
+			scatterCounter.WithLabelValues("fail", "no-leader").Inc()
+		case *operator.BuilderNoPlacementRuleError:
+			scatterCounter.WithLabelValues("fail", "no-placement-rule").Inc()
+		case *operator.BuilderRegionInJointStateError:
+			scatterCounter.WithLabelValues("fail", "in-joint-state").Inc()
+		default:
+			scatterCounter.WithLabelValues("fail", "unknown").Inc()
+		}
+
 		for _, peer := range region.GetPeers() {
 			targetPeers[peer.GetStoreId()] = peer
 		}
