@@ -209,12 +209,8 @@ func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old 
 		if err != nil {
 			return false
 		}
-		if leader == old {
-			// Priority check could be slow. So we sleep longer here.
-			time.Sleep(5 * time.Second)
-		}
 		return leader != old
-	})
+	}, testutil.WithWaitFor(time.Second*90), testutil.WithSleepInterval(time.Second))
 	return leader
 }
 
