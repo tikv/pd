@@ -17,44 +17,33 @@ package cluster_test
 import (
 	"context"
 	"sort"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 )
 
-var _ = Suite(&clusterWorkerTestSuite{})
-
-type clusterWorkerTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *clusterWorkerTestSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *clusterWorkerTestSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *clusterWorkerTestSuite) TestValidRequestRegion(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1)
+func TestValidRequestRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient)
+	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 
 	r1 := core.NewRegionInfo(&metapb.Region{
@@ -71,31 +60,34 @@ func (s *clusterWorkerTestSuite) TestValidRequestRegion(c *C) {
 		StoreId: 1,
 	})
 	err = rc.HandleRegionHeartbeat(r1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	r2 := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")}
-	c.Assert(rc.ValidRequestRegion(r2), NotNil)
+	re.Error(rc.ValidRequestRegion(r2))
 	r3 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}}
-	c.Assert(rc.ValidRequestRegion(r3), NotNil)
+	re.Error(rc.ValidRequestRegion(r3))
 	r4 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
-	c.Assert(rc.ValidRequestRegion(r4), NotNil)
+	re.Error(rc.ValidRequestRegion(r4))
 	r5 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
-	c.Assert(rc.ValidRequestRegion(r5), IsNil)
+	re.NoError(rc.ValidRequestRegion(r5))
 	rc.Stop()
 }
 
-func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1)
+func TestAskSplit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient)
+	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()
 	opt.SetSplitMergeInterval(time.Hour)
@@ -109,7 +101,7 @@ func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 	}
 
 	_, err = rc.HandleAskSplit(req)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	req1 := &pdpb.AskBatchSplitRequest{
 		Header: &pdpb.RequestHeader{
@@ -120,27 +112,30 @@ func (s *clusterWorkerTestSuite) TestAskSplit(c *C) {
 	}
 
 	_, err = rc.HandleAskBatchSplit(req1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	// test region id whether valid
 	opt.SetSplitMergeInterval(time.Duration(0))
 	mergeChecker := rc.GetMergeChecker()
 	mergeChecker.Check(regions[0])
-	c.Assert(err, IsNil)
+	re.NoError(err)
 }
 
-func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1)
+func TestSuspectRegions(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(c, clusterID, grpcPDClient)
+	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()
 	opt.SetSplitMergeInterval(time.Hour)
@@ -154,10 +149,10 @@ func (s *clusterWorkerTestSuite) TestSuspectRegions(c *C) {
 		SplitCount: 2,
 	}
 	res, err := rc.HandleAskBatchSplit(req)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	suspects := rc.GetSuspectRegions()
 	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
-	c.Assert(suspects, DeepEquals, ids)
+	re.Equal(ids, suspects)
 }
