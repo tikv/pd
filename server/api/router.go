@@ -273,6 +273,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods("GET"))
+	registerFunc(clusterRouter, "/stats/regions", statsHandler.GetRegionStatusWithTables, setMethods("POST"))
 
 	trendHandler := newTrendHandler(svr, rd)
 	registerFunc(apiRouter, "/trend", trendHandler.GetTrend, setMethods("GET"), setAuditBackend(prometheus))

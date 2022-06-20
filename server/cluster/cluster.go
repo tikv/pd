@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
@@ -1919,6 +1920,20 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
 	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
+}
+
+func (c *RaftCluster) GetRegionStatsWithTables(tableIDs []int64) *map[int64]int {
+	regionsStats := make(map[int64]int)
+
+	for _, tableID := range tableIDs {
+		startKey := codec.GenTableRecordPrefix(tableID)
+		endKey := codec.GenerateTableKey(tableID + 1)
+		count := statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1)).Count
+
+		regionsStats[tableID] = count
+	}
+
+	return &regionsStats
 }
 
 // GetStoresStats returns stores' statistics from cluster.

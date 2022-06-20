@@ -15,12 +15,16 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
@@ -178,4 +182,104 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	err = apiutil.ReadJSON(res.Body, stats)
 	c.Assert(err, IsNil)
 	c.Assert(stats, DeepEquals, stats23)
+}
+
+func (s *testStatsSuite) TestRegionsStats(c *C) {
+	statsURL := s.urlPrefix + "/stats/regions"
+	epoch := &metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          1,
+				StartKey:    append(codec.GenTableRecordPrefix(1), "a"...),
+				EndKey:      append(codec.GenTableRecordPrefix(1), "b"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 101, StoreId: 1},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          2,
+				StartKey:    append(codec.GenTableRecordPrefix(1), "b"...),
+				EndKey:      append(codec.GenTableRecordPrefix(1), "c"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 105, StoreId: 4},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          3,
+				StartKey:    append(codec.GenTableRecordPrefix(1), "c"...),
+				EndKey:      append(codec.GenTableRecordPrefix(1), "d"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 107, StoreId: 5},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          4,
+				StartKey:    append(codec.GenTableRecordPrefix(1), "e"...),
+				EndKey:      append(codec.GenTableRecordPrefix(1), "f"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 108, StoreId: 4},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          5,
+				StartKey:    codec.GenTableRecordPrefix(30),
+				EndKey:      append(codec.GenTableRecordPrefix(30), "g"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 108, StoreId: 4},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          6,
+				StartKey:    codec.GenTableIndexPrefix(30),
+				EndKey:      append(codec.GenTableIndexPrefix(30), "g"...),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 108, StoreId: 4},
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:          7,
+				StartKey:    append(codec.GenTableRecordPrefix(30), "g"...),
+				EndKey:      codec.GenerateTableKey(30),
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 108, StoreId: 4},
+		),
+	}
+
+	for _, r := range regions {
+		mustRegionHeartbeat(c, s.svr, r)
+	}
+
+	input := map[string]interface{}{
+		"table-ids": "1 30 31",
+	}
+	data, err := json.Marshal(input)
+	c.Assert(err, IsNil)
+
+	resp, err := testDialClient.Post(statsURL, "", bytes.NewBuffer(data))
+	defer resp.Body.Close()
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+
+	statsAll := &map[int64]int{
+		1:  4,
+		30: 2,
+		31: 0,
+	}
+
+	stats := &map[int64]int{}
+	err = apiutil.ReadJSON(resp.Body, stats)
+	c.Assert(err, IsNil)
+	c.Assert(statsAll, DeepEquals, stats)
+
 }

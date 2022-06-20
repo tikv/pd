@@ -16,7 +16,10 @@ package api
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -44,5 +47,42 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	stats := rc.GetRegionStats([]byte(startKey), []byte(endKey))
+	h.rd.JSON(w, http.StatusOK, stats)
+}
+
+// @Tags stats
+// @Summary Get region statistics of a specified range.
+// @Param table IDs {string} string true
+// @Produce json
+// @Success 200 {object} map[int64]int
+// @Failure 400 {string} string "Bad format request."
+// @Router /stats/regions [post]
+func (h *statsHandler) GetRegionStatusWithTables(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+
+	tableString, ok := input["table-ids"].(string)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "missing table-ids")
+		return
+	}
+
+	tableStrings := strings.Fields(tableString)
+	var tableIDs []int64
+
+	for _, tableStr := range tableStrings {
+		tableID, err := strconv.ParseInt(tableStr, 10, 64)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, "invalid table-ids")
+			return
+		}
+		tableIDs = append(tableIDs, tableID)
+	}
+
+	stats := rc.GetRegionStatsWithTables(tableIDs)
 	h.rd.JSON(w, http.StatusOK, stats)
 }
