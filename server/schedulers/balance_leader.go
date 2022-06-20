@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -249,18 +250,41 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
+// candidateStores for balance_leader, order by `getStore` `asc``
 type candidateStores struct {
-	stores        []*core.StoreInfo
-	storeIndexMap map[uint64]int
-	index         int
-	compareOption func([]*core.StoreInfo) func(int, int) bool
+	stores   []*core.StoreInfo
+	getScore func(*core.StoreInfo) float64
+	index    int
+	asc      bool
 }
 
-func newCandidateStores(stores []*core.StoreInfo, compareOption func([]*core.StoreInfo) func(int, int) bool) *candidateStores {
-	cs := &candidateStores{stores: stores, compareOption: compareOption}
-	cs.storeIndexMap = map[uint64]int{}
-	cs.initSort()
+func newCandidateStores(stores []*core.StoreInfo, asc bool, getScore func(*core.StoreInfo) float64) *candidateStores {
+	cs := &candidateStores{stores: stores, getScore: getScore, asc: asc}
+	sort.Slice(cs.stores, cs.sortFunc())
 	return cs
+}
+
+func (cs *candidateStores) sortFunc() (less func(int, int) bool) {
+	less = func(i, j int) bool {
+		storei, storej := cs.stores[i], cs.stores[j]
+		return cs.sortFuncWithStores()(storei, storej)
+	}
+	return less
+}
+
+func (cs *candidateStores) sortFuncWithStores() (less func(*core.StoreInfo, *core.StoreInfo) bool) {
+	less = func(storei, storej *core.StoreInfo) bool {
+		scorei := cs.getScore(storei)
+		scorej := cs.getScore(storej)
+		if math.Abs(scorei-scorej) <= 1e-10 {
+			return storei.GetID() > storej.GetID()
+		}
+		if cs.asc {
+			return scorei < scorej
+		}
+		return scorei > scorej
+	}
+	return less
 }
 
 // hasStore returns returns true when there are leftover stores.
@@ -276,23 +300,43 @@ func (cs *candidateStores) next() {
 	cs.index++
 }
 
-func (cs *candidateStores) initSort() {
-	sort.Slice(cs.stores, cs.compareOption(cs.stores))
-	for i := 0; i < len(cs.stores); i++ {
-		cs.storeIndexMap[cs.stores[i].GetID()] = i
+func (cs *candidateStores) binarySearch(store *core.StoreInfo) (index int) {
+	less := cs.sortFuncWithStores()
+	left, right := 0, len(cs.stores)-1
+	for left < right {
+		mid := (left + right) >> 1
+		if less(cs.stores[mid], store) {
+			left = mid + 1
+		} else {
+			right = mid
+		}
 	}
+	return left
 }
 
-func (cs *candidateStores) reSort(stores ...*core.StoreInfo) {
+// return the slice of index for the searched stores.
+func (cs *candidateStores) binarySearchStores(stores ...*core.StoreInfo) (offsets []int) {
 	if !cs.hasStore() {
 		return
 	}
 	for _, store := range stores {
-		index, ok := cs.storeIndexMap[store.GetID()]
-		if !ok {
-			continue
-		}
-		resortStores(cs.stores, cs.storeIndexMap, index, cs.compareOption(cs.stores))
+		index := cs.binarySearch(store)
+		offsets = append(offsets, index)
+	}
+	return offsets
+}
+
+// resortStoreWithPos is used to sort stores again after creating an operator.
+// It will repeatedly swap the specific store and next store if they are in wrong order.
+// In general, it has very few swaps. In the worst case, the time complexity is O(n).
+func (cs *candidateStores) resortStoreWithPos(pos int) {
+	swapper := func(i, j int) { cs.stores[i], cs.stores[j] = cs.stores[j], cs.stores[i] }
+	less := cs.sortFunc()
+	for ; pos+1 < len(cs.stores) && !less(pos, pos+1); pos++ {
+		swapper(pos, pos+1)
+	}
+	for ; pos > 1 && less(pos, pos-1); pos-- {
+		swapper(pos, pos-1)
 	}
 }
 
@@ -308,24 +352,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	plan := newBalancePlan(kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
-	greaterOption := func(stores []*core.StoreInfo) func(int, int) bool {
-		return func(i, j int) bool {
-			iOp := plan.GetOpInfluence(stores[i].GetID())
-			jOp := plan.GetOpInfluence(stores[j].GetID())
-			return stores[i].LeaderScore(plan.kind.Policy, iOp) >
-				stores[j].LeaderScore(plan.kind.Policy, jOp)
-		}
+	scoreFunc := func(store *core.StoreInfo) float64 {
+		return store.LeaderScore(plan.kind.Policy, plan.GetOpInfluence(store.GetID()))
 	}
-	lessOption := func(stores []*core.StoreInfo) func(int, int) bool {
-		return func(i, j int) bool {
-			iOp := plan.GetOpInfluence(stores[i].GetID())
-			jOp := plan.GetOpInfluence(stores[j].GetID())
-			return stores[i].LeaderScore(plan.kind.Policy, iOp) <
-				stores[j].LeaderScore(plan.kind.Policy, jOp)
-		}
-	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), greaterOption)
-	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), lessOption)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), false, scoreFunc)
+	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), true, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -395,26 +426,17 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 
 func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uint64]struct{}, candidates ...*candidateStores) {
 	usedRegions[op.RegionID()] = struct{}{}
+	candidateUpdateStores := make([][]int, len(candidates))
+	for id, candidate := range candidates {
+		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
+		candidateUpdateStores[id] = storesIDs
+	}
 	schedule.AddOpInfluence(op, plan.opInfluence, plan.Cluster)
-	for _, candidate := range candidates {
-		candidate.reSort(plan.source, plan.target)
+	for id, candidate := range candidates {
+		for _, pos := range candidateUpdateStores[id] {
+			candidate.resortStoreWithPos(pos)
+		}
 	}
-}
-
-// resortStores is used to sort stores again after creating an operator.
-// It will repeatedly swap the specific store and next store if they are in wrong order.
-// In general, it has very few swaps. In the worst case, the time complexity is O(n).
-func resortStores(stores []*core.StoreInfo, index map[uint64]int, pos int, less func(i, j int) bool) {
-	swapper := func(i, j int) { stores[i], stores[j] = stores[j], stores[i] }
-	for ; pos+1 < len(stores) && !less(pos, pos+1); pos++ {
-		swapper(pos, pos+1)
-		index[stores[pos].GetID()] = pos
-	}
-	for ; pos > 1 && less(pos, pos-1); pos-- {
-		swapper(pos, pos-1)
-		index[stores[pos].GetID()] = pos
-	}
-	index[stores[pos].GetID()] = pos
 }
 
 // transferLeaderOut transfers leader from the source store.
