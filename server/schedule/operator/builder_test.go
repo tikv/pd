@@ -38,7 +38,7 @@ func TestOperatorBuilderTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorBuilderTestSuite))
 }
 
-func (suite *operatorBuilderTestSuite) SetUpTest() {
+func (suite *operatorBuilderTestSuite) SetupTest() {
 	opts := config.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, opts)
