@@ -112,10 +112,8 @@ docker-image:
 #### Build utils ###
 
 swagger-spec: install-tools
-	go mod vendor
-	swag init --parseVendor --generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
-	go mod tidy
-	rm -rf vendor
+	swag init --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
+	swag fmt --dir server
 
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
