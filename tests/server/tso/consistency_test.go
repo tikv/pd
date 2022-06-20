@@ -339,7 +339,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	cluster.CheckClusterDCLocation()
 	re.NotEqual("", cluster.WaitAllocatorLeader(
 		"dc-4",
-		tests.WithRetryTimes(180), tests.WithWaitInterval(time.Second),
+		tests.WithRetryTimes(90), tests.WithWaitInterval(time.Second),
 	))
 	suite.testTSO(cluster, dcLocationConfig, previousTS)
 
