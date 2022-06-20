@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -278,4 +280,136 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 		re.Equal(regions[region.GetId()], region)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"))
+}
+
+const (
+	keyChars = "abcdefghijklmnopqrstuvwxyz"
+	keyLen   = 20
+)
+
+func generateKeys(size int) []string {
+	m := make(map[string]struct{}, size)
+	for len(m) < size {
+		k := make([]byte, keyLen)
+		for i := range k {
+			k[i] = keyChars[rand.Intn(len(keyChars))]
+		}
+		m[string(k)] = struct{}{}
+	}
+
+	v := make([]string, 0, size)
+	for k := range m {
+		v = append(v, k)
+	}
+	sort.Strings(v)
+	return v
+}
+
+func randomMerge(regions []*metapb.Region, n int) {
+	rand.Seed(6)
+	note := make(map[int]bool)
+	for i := 0; i < n; i++ {
+		if _, ok := note[i]; ok {
+			continue
+		}
+		note[i] = true
+		mergeIndex := rand.Intn(n - i) + i
+		for {
+			if _, ok := note[mergeIndex]; !ok {
+				if !ok {
+					break
+				}
+			}
+			mergeIndex = rand.Intn(n - i) + i
+		}
+		note[mergeIndex] = true
+		regions[i].EndKey = regions[mergeIndex].EndKey
+	}
+}
+
+func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
+	keys := generateKeys(n)
+	regions := make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(n); i++ {
+		var region *metapb.Region
+		if i == 0 {
+			region = &metapb.Region{
+				Id: i,
+				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
+				EndKey: []byte(keys[i]),
+			}
+		} else {
+			region = &metapb.Region{
+				Id: i,
+				StartKey: []byte(keys[i-1]),
+				EndKey: []byte(keys[i]),
+			}
+		}
+		regions = append(regions, region)
+	}
+	if merge {
+		randomMerge(regions, n)
+	}
+
+	for _, region := range regions {
+		err := lb.SaveRegion(region)
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := lb.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
+	ctx := context.Background()
+	dir := b.TempDir()
+	lb, err := newLevelDBBackend(ctx, dir, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	err = anotherSaveRegions(lb, n, merge)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		err = lb.Close()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cluster := core.NewBasicCluster()
+		err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+var volumes = []struct {
+	input int
+} {
+	{input: 10000},
+	{input: 100000},
+	{input: 1000000},
+}
+
+func BenchmarkLoadRegionsByVolume(b *testing.B) {
+	for _, v := range volumes {
+		b.Run(fmt.Sprintf("input size: %d", v.input), func(b *testing.B) {
+			benchmarkLoadRegions(v.input, b, false)
+		})
+	}
+}
+
+func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
+	b.Run(fmt.Sprintf("random merge"), func(b *testing.B) {
+		benchmarkLoadRegions(1000000, b, true)
+	})
 }
