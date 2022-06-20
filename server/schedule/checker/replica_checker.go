@@ -35,6 +35,7 @@ const (
 const (
 	offlineStatus = "offline"
 	downStatus    = "down"
+	orphanStatus  = "orphan"
 )
 
 // ReplicaChecker ensures region has the best replicas.
