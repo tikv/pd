@@ -104,7 +104,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	// The server should not successfully start.
 	res := cluster.RunServer(pd3)
-	re.NotNil(<-res)
+	re.Error(<-res)
 
 	members, err := etcdutil.ListEtcdMembers(client)
 	re.NoError(err)
@@ -136,7 +136,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	// The server should not successfully start.
 	res := cluster.RunServer(pd3)
-	re.NotNil(<-res)
+	re.Error(<-res)
 
 	members, err := etcdutil.ListEtcdMembers(client)
 	re.NoError(err)
@@ -160,5 +160,5 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(pd2.Run())
 	re.NoError(pd2.Stop())
 	re.NoError(pd2.Destroy())
-	re.NotNil(join.PrepareJoinCluster(pd2.GetConfig()))
+	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
 }
