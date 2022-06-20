@@ -182,7 +182,7 @@ func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator,
 func CheckSteps(re *require.Assertions, op *operator.Operator, steps []operator.OpStep) {
 	re.NotEqual(0, op.Kind()&operator.OpMerge)
 	re.NotNil(steps)
-	re.Equal(len(steps), op.Len())
+	re.Len(steps, op.Len())
 	for i := range steps {
 		switch op.Step(i).(type) {
 		case operator.AddLearner:

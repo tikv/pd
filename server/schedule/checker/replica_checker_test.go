@@ -44,7 +44,7 @@ type replicaCheckerTestSuite struct {
 	cancel  context.CancelFunc
 }
 
-func TestReplicaCheckerSuite(t *testing.T) {
+func TestReplicaCheckerTestSuite(t *testing.T) {
 	suite.Run(t, new(replicaCheckerTestSuite))
 }
 

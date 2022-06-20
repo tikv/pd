@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-func TestRuleCheckerSuite(t *testing.T) {
+func TestRuleCheckerTestSuite(t *testing.T) {
 	suite.Run(t, new(ruleCheckerTestSuite))
 }
 

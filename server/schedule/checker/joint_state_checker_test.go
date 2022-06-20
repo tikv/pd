@@ -127,7 +127,7 @@ func checkSteps(re *require.Assertions, op *operator.Operator, steps []operator.
 	re.NotNil(op)
 	re.Equal("leave-joint-state", op.Desc())
 
-	re.Equal(len(steps), op.Len())
+	re.Len(steps, op.Len())
 	for i := range steps {
 		switch obtain := op.Step(i).(type) {
 		case operator.ChangePeerV2Leave:

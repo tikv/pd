@@ -49,7 +49,7 @@ type mergeCheckerTestSuite struct {
 	regions []*core.RegionInfo
 }
 
-func TestMergeCheckerSuite(t *testing.T) {
+func TestMergeCheckerTestSuite(t *testing.T) {
 	suite.Run(t, new(mergeCheckerTestSuite))
 }
 
