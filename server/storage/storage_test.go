@@ -305,29 +305,52 @@ func generateKeys(size int) []string {
 	return v
 }
 
-func randomMerge(regions []*metapb.Region, n int) {
+func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	rand.Seed(6)
 	note := make(map[int]bool)
-	for i := 0; i < n; i++ {
-		if _, ok := note[i]; ok {
-			continue
-		}
-		note[i] = true
-		mergeIndex := rand.Intn(n - i) + i
+	for i := 0; i < n * ratio / 100; i++ {
+		pos := rand.Intn(n)
 		for {
-			if _, ok := note[mergeIndex]; !ok {
-				if !ok {
+			if _, ok := note[pos]; !ok {
+				break
+			}
+			pos = rand.Intn(n)
+		}
+		note[pos] = true
+
+		mergeIndex := pos
+		if mergeIndex == 0 {
+			for {
+				mergeIndex++
+				if _, ok := note[mergeIndex]; !ok {
 					break
 				}
 			}
-			mergeIndex = rand.Intn(n - i) + i
+			regions[mergeIndex].StartKey = regions[pos].StartKey
+		} else {
+			for {
+				mergeIndex--
+				if _, ok := note[mergeIndex]; !ok {
+					break
+				}
+			}
+			if mergeIndex!= -1 {
+				regions[pos].StartKey = regions[mergeIndex].StartKey
+				continue
+			}
+			mergeIndex = pos
+			for {
+				mergeIndex++
+				if _, ok := note[mergeIndex]; !ok {
+					break
+				}
+			}
+			regions[mergeIndex].StartKey = regions[pos].StartKey
 		}
-		note[mergeIndex] = true
-		regions[i].EndKey = regions[mergeIndex].EndKey
 	}
 }
 
-func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
+func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 	keys := generateKeys(n)
 	regions := make([]*metapb.Region, 0, n)
 	for i := uint64(0); i < uint64(n); i++ {
@@ -347,8 +370,8 @@ func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 		}
 		regions = append(regions, region)
 	}
-	if merge {
-		randomMerge(regions, n)
+	if ratio != 0 {
+		randomMerge(regions, n, ratio)
 	}
 
 	for _, region := range regions {
@@ -364,14 +387,15 @@ func anotherSaveRegions(lb *levelDBBackend, n int, merge bool) error {
 	return nil
 }
 
-func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
+func benchmarkLoadRegions(n int, b *testing.B, ratio int) {
 	ctx := context.Background()
 	dir := b.TempDir()
 	lb, err := newLevelDBBackend(ctx, dir, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
-	err = anotherSaveRegions(lb, n, merge)
+	cluster := core.NewBasicCluster()
+	err = saveRegions(lb, n, ratio)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -383,13 +407,12 @@ func benchmarkLoadRegions(n int, b *testing.B, merge bool) {
 	}()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cluster := core.NewBasicCluster()
-		err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
-		if err != nil {
-			b.Fatal(err)
-		}
+	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
+	b.Log("region number is: ", cluster.GetRegionCount())
+	if err != nil {
+		b.Fatal(err)
 	}
+
 }
 
 var volumes = []struct {
@@ -402,14 +425,26 @@ var volumes = []struct {
 
 func BenchmarkLoadRegionsByVolume(b *testing.B) {
 	for _, v := range volumes {
-		b.Run(fmt.Sprintf("input size: %d", v.input), func(b *testing.B) {
-			benchmarkLoadRegions(v.input, b, false)
+		b.Run(fmt.Sprintf("input size %d", v.input), func(b *testing.B) {
+			benchmarkLoadRegions(v.input, b, 0)
 		})
 	}
 }
 
+var ratios = []struct {
+	ratio int
+} {
+	{ratio: 0},
+	{ratio: 20},
+	{ratio: 40},
+	{ratio: 60},
+	{ratio: 80},
+}
+
 func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
-	b.Run(fmt.Sprintf("random merge"), func(b *testing.B) {
-		benchmarkLoadRegions(1000000, b, true)
-	})
+	for _, r := range ratios {
+		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
+			benchmarkLoadRegions(1000000, b, r.ratio)
+		})
+	}
 }
