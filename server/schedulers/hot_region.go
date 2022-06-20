@@ -19,7 +19,6 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -35,6 +34,7 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 func init() {
@@ -624,15 +624,15 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (
 func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
-	sort.Slice(firstSort, func(i, j int) bool {
+	slices.SortFunc(firstSort, func(i, j *statistics.HotPeerStat) bool {
 		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
-		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
+		return i.GetLoad(k) > j.GetLoad(k)
 	})
 	secondSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondSort, ret)
-	sort.Slice(secondSort, func(i, j int) bool {
+	slices.SortFunc(secondSort, func(i, j *statistics.HotPeerStat) bool {
 		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
-		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
+		return i.GetLoad(k) > j.GetLoad(k)
 	})
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {

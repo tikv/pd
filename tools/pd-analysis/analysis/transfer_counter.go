@@ -18,12 +18,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/tikv/pd/pkg/syncutil"
+	"golang.org/x/exp/slices"
 )
 
 // TransferCounter is to count transfer schedule for judging whether redundant
@@ -117,7 +117,7 @@ func (c *TransferCounter) prepare() {
 	for storeID := range set {
 		c.indexArray = append(c.indexArray, storeID)
 	}
-	sort.Slice(c.indexArray, func(i, j int) bool { return c.indexArray[i] < c.indexArray[j] })
+	slices.Sort(c.indexArray)
 
 	for index, storeID := range c.indexArray {
 		c.unIndexMap[storeID] = index

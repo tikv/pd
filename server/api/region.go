@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -38,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 // MetaPeer is api compatible with *metapb.Peer.
@@ -552,20 +552,6 @@ type histItem struct {
 	Count int64 `json:"count"`
 }
 
-type histSlice []*histItem
-
-func (hist histSlice) Len() int {
-	return len(hist)
-}
-
-func (hist histSlice) Swap(i, j int) {
-	hist[i], hist[j] = hist[j], hist[i]
-}
-
-func (hist histSlice) Less(i, j int) bool {
-	return hist[i].Start < hist[j].Start
-}
-
 // @Tags region
 // @Summary Get size of histogram.
 // @Param bound query integer false "Size bound of region histogram" minimum(1)
@@ -645,7 +631,9 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 		histInfo.Count = int64(count)
 		histItems = append(histItems, histInfo)
 	}
-	sort.Sort(histSlice(histItems))
+	slices.SortFunc(histItems, func(i, j *histItem) bool {
+		return i.Start < j.Start
+	})
 	return &histItems
 }
 

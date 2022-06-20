@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -519,7 +519,7 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 		}
 	}
 	for i := range stores {
-		sort.Slice(stores[i], func(a, b int) bool { return stores[i][a] < stores[i][b] })
+		slices.Sort(stores[i])
 	}
 	return stores
 }
