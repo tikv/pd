@@ -16,6 +16,7 @@ package operator
 
 import (
 	"context"
+	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
@@ -30,11 +31,15 @@ type operatorStepTestSuite struct {
 	cluster *mockcluster.Cluster
 }
 
+func TestOperatorStepTestSuite(t *testing.T) {
+	suite.Run(t, new(operatorStepTestSuite))
+}
+
 type testCase struct {
-	Peers           []*metapb.Peer // first is leader
-	ConfVerChanged  uint64
-	IsFinish        bool
-	CheckInProgress bool
+	Peers                  []*metapb.Peer // first is leader
+	ConfVerChanged         uint64
+	IsFinish               bool
+	CheckInProgressNoError bool
 }
 
 func (suite *operatorStepTestSuite) SetUpTest() {
@@ -420,6 +425,7 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, cases []test
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
 		suite.Equal(tc.ConfVerChanged, step.ConfVerChanged(region))
 		suite.Equal(tc.IsFinish, step.IsFinish(region))
-		suite.Equal(tc.CheckInProgress, step.CheckInProgress(suite.cluster, region))
+		err := step.CheckInProgress(suite.cluster, region)
+		suite.Equal(tc.CheckInProgressNoError, err == nil)
 	}
 }

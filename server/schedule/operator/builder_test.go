@@ -16,6 +16,7 @@ package operator
 
 import (
 	"context"
+	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -31,6 +32,10 @@ type operatorBuilderTestSuite struct {
 	cluster *mockcluster.Cluster
 	ctx     context.Context
 	cancel  context.CancelFunc
+}
+
+func TestOperatorBuilderTestSuite(t *testing.T) {
+	suite.Run(t, new(operatorBuilderTestSuite))
 }
 
 func (suite *operatorBuilderTestSuite) SetUpTest() {
@@ -62,7 +67,6 @@ func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", suite.cluster, region)
 	suite.NoError(builder.err)
-	suite.Nil(builder.err)
 	suite.Len(builder.originPeers, 2)
 	suite.Equal(peers[0], builder.originPeers[1])
 	suite.Equal(peers[1], builder.originPeers[2])
@@ -74,7 +78,6 @@ func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", suite.cluster, region)
 	suite.Error(builder.err)
-	suite.NotNil(builder.err)
 }
 
 func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
@@ -89,29 +92,17 @@ func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
 
 func (suite *operatorBuilderTestSuite) TestRecord() {
 	suite.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
-	suite.NotNil(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
 	suite.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
-	suite.Nil(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
 	suite.Error(suite.newBuilder().PromoteLearner(1).err)
-	suite.NotNil(suite.newBuilder().PromoteLearner(1).err)
 	suite.NoError(suite.newBuilder().PromoteLearner(3).err)
-	suite.Nil(suite.newBuilder().PromoteLearner(3).err)
 	suite.NoError(suite.newBuilder().SetLeader(1).SetLeader(2).err)
-	suite.Nil(suite.newBuilder().SetLeader(1).SetLeader(2).err)
 	suite.Error(suite.newBuilder().SetLeader(3).err)
-	suite.NotNil(suite.newBuilder().SetLeader(3).err)
 	suite.Error(suite.newBuilder().RemovePeer(4).err)
-	suite.NotNil(suite.newBuilder().RemovePeer(4).err)
 	suite.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Learner}).RemovePeer(4).err)
-	suite.Nil(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Learner}).RemovePeer(4).err)
 	suite.Error(suite.newBuilder().SetLeader(2).RemovePeer(2).err)
-	suite.NotNil(suite.newBuilder().SetLeader(2).RemovePeer(2).err)
 	suite.Error(suite.newBuilder().PromoteLearner(4).err)
-	suite.NotNil(suite.newBuilder().PromoteLearner(4).err)
 	suite.Error(suite.newBuilder().SetLeader(4).err)
-	suite.NotNil(suite.newBuilder().SetLeader(4).err)
 	suite.Error(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err)
-	suite.NotNil(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err)
 
 	m := map[uint64]*metapb.Peer{
 		2: {StoreId: 2},
