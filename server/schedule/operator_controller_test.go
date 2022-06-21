@@ -57,7 +57,7 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
