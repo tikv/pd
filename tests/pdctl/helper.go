@@ -70,7 +70,7 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 
 // CheckRegionInfo is used to check the test results.
 func CheckRegionInfo(re *require.Assertions, output *api.RegionInfo, expected *core.RegionInfo) {
-	region := api.NewRegionInfo(expected)
+	region := api.NewAPIRegionInfo(expected)
 	output.Adjust()
 	re.Equal(region, output)
 }
