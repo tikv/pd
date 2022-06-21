@@ -16,9 +16,10 @@ package checker
 
 import (
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -26,31 +27,16 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-var _ = Suite(&testLearnerCheckerSuite{})
-
-type testLearnerCheckerSuite struct {
-	cluster *mockcluster.Cluster
-	lc      *LearnerChecker
-	ctx     context.Context
-	cancel  context.CancelFunc
-}
-
-func (s *testLearnerCheckerSuite) SetUpTest(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	s.cluster = mockcluster.NewCluster(s.ctx, config.NewTestOptions())
-	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	s.lc = NewLearnerChecker(s.cluster)
+func TestPromoteLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	lc := NewLearnerChecker(cluster)
 	for id := uint64(1); id <= 10; id++ {
-		s.cluster.PutStoreWithLabels(id)
+		cluster.PutStoreWithLabels(id)
 	}
-}
-
-func (s *testLearnerCheckerSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {
-	lc := s.lc
 
 	region := core.NewRegionInfo(
 		&metapb.Region{
@@ -62,12 +48,12 @@ func (s *testLearnerCheckerSuite) TestPromoteLearner(c *C) {
 			},
 		}, &metapb.Peer{Id: 101, StoreId: 1})
 	op := lc.Check(region)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "promote-learner")
-	c.Assert(op.Step(0), FitsTypeOf, operator.PromoteLearner{})
-	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(3))
+	re.NotNil(op)
+	re.Equal("promote-learner", op.Desc())
+	re.IsType(operator.PromoteLearner{}, op.Step(0))
+	re.Equal(uint64(3), op.Step(0).(operator.PromoteLearner).ToStore)
 
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeer(103)}))
 	op = lc.Check(region)
-	c.Assert(op, IsNil)
+	re.Nil(op)
 }
