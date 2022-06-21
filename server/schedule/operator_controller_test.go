@@ -56,6 +56,7 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 	suite.cancel()
 }
 
+// issue #1338
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()

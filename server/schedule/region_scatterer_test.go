@@ -24,7 +24,6 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -256,7 +255,7 @@ func TestScatterCheck(t *testing.T) {
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name        string
 		checkRegion *core.RegionInfo
 		needFix     bool
@@ -277,11 +276,10 @@ func TestScatterCheck(t *testing.T) {
 			needFix:     true,
 		},
 	}
-	for _, testcase := range testcases {
-		log.Info(testcase.name)
+	for _, testCase := range testCases {
 		scatterer := NewRegionScatterer(ctx, tc)
-		_, err := scatterer.Scatter(testcase.checkRegion, "")
-		if testcase.needFix {
+		_, err := scatterer.Scatter(testCase.checkRegion, "")
+		if testCase.needFix {
 			re.Error(err)
 			re.True(tc.CheckRegionUnderSuspect(1))
 		} else {
@@ -305,7 +303,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
-	testcases := []struct {
+	testCases := []struct {
 		name       string
 		groupCount int
 	}{
@@ -324,12 +322,11 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	}
 
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
-	for _, testcase := range testcases {
-		log.Info(testcase.name)
+	for _, testCase := range testCases {
 		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
-			for j := 0; j < testcase.groupCount; j++ {
+			for j := 0; j < testCase.groupCount; j++ {
 				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
 				regionID++
@@ -337,7 +334,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 		}
 
 		checker := func(ss *selectedStores, expected uint64, delta float64) {
-			for i := 0; i < testcase.groupCount; i++ {
+			for i := 0; i < testCase.groupCount; i++ {
 				// comparing the leader distribution
 				group := fmt.Sprintf("group-%v", i)
 				max := uint64(0)
@@ -372,7 +369,7 @@ func TestScattersGroup(t *testing.T) {
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name    string
 		failure bool
 	}{
@@ -386,15 +383,14 @@ func TestScattersGroup(t *testing.T) {
 		},
 	}
 	group := "group"
-	for _, testcase := range testcases {
+	for _, testCase := range testCases {
 		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 		}
-		log.Info(testcase.name)
 		failures := map[uint64]error{}
-		if testcase.failure {
+		if testCase.failure {
 			re.Nil(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))
 		}
 
@@ -415,7 +411,7 @@ func TestScattersGroup(t *testing.T) {
 		re.LessOrEqual(min, uint64(20))
 		re.GreaterOrEqual(max, uint64(20))
 		re.LessOrEqual(max-min, uint64(3))
-		if testcase.failure {
+		if testCase.failure {
 			re.Len(failures, 1)
 			_, ok := failures[1]
 			re.True(ok)
@@ -445,6 +441,8 @@ func TestSelectedStoreGC(t *testing.T) {
 	re.False(ok)
 }
 
+// TestRegionFromDifferentGroups test the multi regions. each region have its own group.
+// After scatter, the distribution for the whole cluster should be well.
 func TestRegionFromDifferentGroups(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
