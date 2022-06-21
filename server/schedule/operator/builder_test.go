@@ -551,7 +551,7 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		}
 		suite.NoError(err)
 		suite.Equal(tc.kind, op.Kind())
-		suite.Equal(len(tc.steps), op.Len())
+		suite.Len(tc.steps, op.Len())
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
 			case TransferLeader:
@@ -566,8 +566,8 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			case PromoteLearner:
 				suite.Equal(tc.steps[i].(PromoteLearner).ToStore, step.ToStore)
 			case ChangePeerV2Enter:
-				suite.Equal(len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners), len(step.PromoteLearners))
-				suite.Equal(len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters), len(step.DemoteVoters))
+				suite.Len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners, len(step.PromoteLearners))
+				suite.Len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters, len(step.DemoteVoters))
 				for j, p := range tc.steps[i].(ChangePeerV2Enter).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
@@ -595,24 +595,20 @@ func (suite *operatorBuilderTestSuite) TestTargetUnhealthyPeer() {
 	builder := NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
 	suite.Error(builder.err)
-	suite.NotNil(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
 	suite.Error(builder.err)
-	suite.NotNil(builder.err)
 	p = &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
 	suite.Error(builder.err)
-	suite.NotNil(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
 	suite.Error(builder.err)
-	suite.NotNil(builder.err)
 }
