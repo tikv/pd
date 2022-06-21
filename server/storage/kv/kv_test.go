@@ -17,7 +17,6 @@ package kv
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -31,8 +30,7 @@ import (
 
 func TestEtcd(t *testing.T) {
 	re := require.New(t)
-	cfg := newTestSingleConfig()
-	defer cleanConfig(cfg)
+	cfg := newTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	defer etcd.Close()
@@ -51,9 +49,7 @@ func TestEtcd(t *testing.T) {
 
 func TestLevelDB(t *testing.T) {
 	re := require.New(t)
-	dir, err := os.MkdirTemp("/tmp", "leveldb_kv")
-	re.NoError(err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	kv, err := NewLevelDBKV(dir)
 	re.NoError(err)
 
@@ -121,10 +117,10 @@ func testRange(re *require.Assertions, kv Base) {
 	}
 }
 
-func newTestSingleConfig() *embed.Config {
+func newTestSingleConfig(t *testing.T) *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
+	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}
@@ -140,9 +136,4 @@ func newTestSingleConfig() *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
-}
-
-func cleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.Dir)
 }

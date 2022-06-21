@@ -1,4 +1,4 @@
-// Copyright 2019 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package operator
+package schedulers
 
 import (
 	"testing"
@@ -20,15 +20,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestIsEndStatus(t *testing.T) {
+func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
-	for st := OpStatus(0); st < firstEndStatus; st++ {
-		re.False(IsEndStatus(st))
+	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
+	conf := &balanceLeaderSchedulerConfig{
+		Ranges: keyRanges1,
+		Batch:  10,
 	}
-	for st := firstEndStatus; st < statusCount; st++ {
-		re.True(IsEndStatus(st))
-	}
-	for st := statusCount; st < statusCount+100; st++ {
-		re.False(IsEndStatus(st))
-	}
+	conf2 := conf.Clone()
+	re.Equal(conf.Batch, conf2.Batch)
+	re.Equal(conf.Ranges, conf2.Ranges)
+
+	keyRanges2, _ := getKeyRanges([]string{"e", "f", "g", "h"})
+	// update conf2
+	conf2.Ranges[1] = keyRanges2[1]
+	re.NotEqual(conf.Ranges, conf2.Ranges)
 }

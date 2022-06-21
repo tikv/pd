@@ -67,7 +67,7 @@ func TestNeedMerge(t *testing.T) {
 
 func TestSortedEqual(t *testing.T) {
 	re := require.New(t)
-	testcases := []struct {
+	testCases := []struct {
 		idsA    []int
 		idsB    []int
 		isEqual bool
@@ -146,7 +146,7 @@ func TestSortedEqual(t *testing.T) {
 		return peers
 	}
 	// test NewRegionInfo
-	for _, test := range testcases {
+	for _, test := range testCases {
 		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(test.idsA)}, nil)
 		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(test.idsB)}, nil)
 		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
@@ -154,7 +154,7 @@ func TestSortedEqual(t *testing.T) {
 	}
 
 	// test RegionFromHeartbeat
-	for _, test := range testcases {
+	for _, test := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(test.idsA)},
 			DownPeers:    pickPeerStats(test.idsA),
@@ -173,7 +173,7 @@ func TestSortedEqual(t *testing.T) {
 
 	// test Clone
 	region := NewRegionInfo(meta, meta.Peers[0])
-	for _, test := range testcases {
+	for _, test := range testCases {
 		downPeersA := pickPeerStats(test.idsA)
 		downPeersB := pickPeerStats(test.idsB)
 		pendingPeersA := pickPeers(test.idsA)
@@ -190,7 +190,7 @@ func TestInherit(t *testing.T) {
 	re := require.New(t)
 	// size in MB
 	// case for approximateSize
-	testcases := []struct {
+	testCases := []struct {
 		originExists bool
 		originSize   uint64
 		size         uint64
@@ -202,7 +202,7 @@ func TestInherit(t *testing.T) {
 		{true, 1, 2, 2},
 		{true, 2, 0, 2},
 	}
-	for _, test := range testcases {
+	for _, test := range testCases {
 		var origin *RegionInfo
 		if test.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
@@ -240,7 +240,7 @@ func TestInherit(t *testing.T) {
 
 func TestRegionRoundingFlow(t *testing.T) {
 	re := require.New(t)
-	testcases := []struct {
+	testCases := []struct {
 		flow   uint64
 		digit  int
 		expect uint64
@@ -254,7 +254,7 @@ func TestRegionRoundingFlow(t *testing.T) {
 		{252623, math.MaxInt64, 0},
 		{252623, math.MinInt64, 252623},
 	}
-	for _, test := range testcases {
+	for _, test := range testCases {
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, WithFlowRoundByDigit(test.digit))
 		r.readBytes = test.flow
 		r.writtenBytes = test.flow
@@ -264,7 +264,7 @@ func TestRegionRoundingFlow(t *testing.T) {
 
 func TestRegionWriteRate(t *testing.T) {
 	re := require.New(t)
-	testcases := []struct {
+	testCases := []struct {
 		bytes           uint64
 		keys            uint64
 		interval        uint64
@@ -280,7 +280,7 @@ func TestRegionWriteRate(t *testing.T) {
 		{0, 0, 500, 0, 0},
 		{10, 3, 500, 0, 0},
 	}
-	for _, test := range testcases {
+	for _, test := range testCases {
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(test.bytes), SetWrittenKeys(test.keys), SetReportInterval(test.interval))
 		bytesRate, keysRate := r.GetWriteRate()
 		re.Equal(test.expectBytesRate, bytesRate)
@@ -304,7 +304,7 @@ func TestNeedSync(t *testing.T) {
 	}
 	region := NewRegionInfo(meta, meta.Peers[0])
 
-	testcases := []struct {
+	testCases := []struct {
 		optionsA []RegionCreateOption
 		optionsB []RegionCreateOption
 		needSync bool
@@ -357,7 +357,7 @@ func TestNeedSync(t *testing.T) {
 		},
 	}
 
-	for _, test := range testcases {
+	for _, test := range testCases {
 		regionA := region.Clone(test.optionsA...)
 		regionB := region.Clone(test.optionsB...)
 		_, _, _, needSync := RegionGuide(regionA, regionB)

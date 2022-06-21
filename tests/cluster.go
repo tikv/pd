@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -614,27 +613,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 }
 
 // WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]string) {
-	c.WaitLeader()
-	c.CheckClusterDCLocation()
-	// Wait for each DC's Local TSO Allocator leader
-	wg := sync.WaitGroup{}
-	for _, dcLocation := range dcLocations {
-		wg.Add(1)
-		go func(dc string) {
-			testutil.WaitUntil(testC, func() bool {
-				leaderName := c.WaitAllocatorLeader(dc)
-				return leaderName != ""
-			})
-			wg.Done()
-		}(dcLocation)
-	}
-	wg.Wait()
-}
-
-// WaitAllLeadersWithTestify will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-// NOTICE: this is a temporary function that we will be used to replace `WaitAllLeaders` later.
-func (c *TestCluster) WaitAllLeadersWithTestify(re *require.Assertions, dcLocations map[string]string) {
+func (c *TestCluster) WaitAllLeaders(re *require.Assertions, dcLocations map[string]string) {
 	c.WaitLeader()
 	c.CheckClusterDCLocation()
 	// Wait for each DC's Local TSO Allocator leader
@@ -643,8 +622,7 @@ func (c *TestCluster) WaitAllLeadersWithTestify(re *require.Assertions, dcLocati
 		wg.Add(1)
 		go func(dc string) {
 			testutil.Eventually(re, func() bool {
-				leaderName := c.WaitAllocatorLeader(dc)
-				return leaderName != ""
+				return c.WaitAllocatorLeader(dc) != ""
 			})
 			wg.Done()
 		}(dcLocation)

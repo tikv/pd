@@ -17,13 +17,12 @@ package region_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -31,21 +30,14 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&regionTestSuite{})
-
-type regionTestSuite struct{}
-
-func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
+func TestRegionKeyFormat(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	url := cluster.GetConfig().GetClientURL()
 	store := &metapb.Store{
@@ -54,22 +46,23 @@ func (s *regionTestSuite) TestRegionKeyFormat(c *C) {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	re.NoError(leaderServer.BootstrapCluster())
+	pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 
 	cmd := pdctlCmd.GetRootCmd()
-	output, e := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
-	c.Assert(e, IsNil)
-	c.Assert(strings.Contains(string(output), "unknown flag"), IsFalse)
+	output, err := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
+	re.NoError(err)
+	re.NotContains(string(output), "unknown flag")
 }
 
-func (s *regionTestSuite) TestRegion(c *C) {
+func TestRegion(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
@@ -80,11 +73,11 @@ func (s *regionTestSuite) TestRegion(c *C) {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
-	pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	re.NoError(leaderServer.BootstrapCluster())
+	pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
-	r1 := pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"),
+	r1 := pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
 		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
 		core.SetPeers([]*metapb.Peer{
@@ -93,16 +86,16 @@ func (s *regionTestSuite) TestRegion(c *C) {
 			{Id: 6, StoreId: 3},
 			{Id: 7, StoreId: 4},
 		}))
-	r2 := pdctl.MustPutRegion(c, cluster, 2, 1, []byte("b"), []byte("c"),
+	r2 := pdctl.MustPutRegion(re, cluster, 2, 1, []byte("b"), []byte("c"),
 		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2),
 		core.SetRegionVersion(3), core.SetApproximateSize(144), core.SetApproximateKeys(14400),
 	)
-	r3 := pdctl.MustPutRegion(c, cluster, 3, 1, []byte("c"), []byte("d"),
+	r3 := pdctl.MustPutRegion(re, cluster, 3, 1, []byte("c"), []byte("d"),
 		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3),
 		core.SetRegionVersion(2), core.SetApproximateSize(30), core.SetApproximateKeys(3000),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
 		core.WithPendingPeers([]*metapb.Peer{downPeer}), core.WithLearners([]*metapb.Peer{{Id: 3, StoreId: 1}}))
-	r4 := pdctl.MustPutRegion(c, cluster, 4, 1, []byte("d"), []byte("e"),
+	r4 := pdctl.MustPutRegion(re, cluster, 4, 1, []byte("d"), []byte("e"),
 		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1),
 		core.SetRegionVersion(1), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
 	)
@@ -173,11 +166,11 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	for _, testCase := range testRegionsCases {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
-		output, e := pdctl.ExecuteCommand(cmd, args...)
-		c.Assert(e, IsNil)
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
 		regions := &api.RegionsInfo{}
-		c.Assert(json.Unmarshal(output, regions), IsNil)
-		pdctl.CheckRegionsInfo(c, regions, testCase.expect)
+		re.NoError(json.Unmarshal(output, regions))
+		pdctl.CheckRegionsInfo(re, regions, testCase.expect)
 	}
 
 	var testRegionCases = []struct {
@@ -196,22 +189,22 @@ func (s *regionTestSuite) TestRegion(c *C) {
 
 	for _, testCase := range testRegionCases {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
-		output, e := pdctl.ExecuteCommand(cmd, args...)
-		c.Assert(e, IsNil)
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
 		region := &api.RegionInfo{}
-		c.Assert(json.Unmarshal(output, region), IsNil)
-		pdctl.CheckRegionInfo(c, region, testCase.expect)
+		re.NoError(json.Unmarshal(output, region))
+		pdctl.CheckRegionInfo(re, region, testCase.expect)
 	}
 
 	// Test region range-holes.
-	r5 := pdctl.MustPutRegion(c, cluster, 5, 1, []byte("x"), []byte("z"))
-	output, e := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
-	c.Assert(e, IsNil)
+	r5 := pdctl.MustPutRegion(re, cluster, 5, 1, []byte("x"), []byte("z"))
+	output, err := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
+	re.NoError(err)
 	rangeHoles := new([][]string)
-	c.Assert(json.Unmarshal(output, rangeHoles), IsNil)
-	c.Assert(*rangeHoles, DeepEquals, [][]string{
+	re.NoError(json.Unmarshal(output, rangeHoles))
+	re.Equal([][]string{
 		{"", core.HexRegionKeyStr(r1.GetStartKey())},
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r5.GetStartKey())},
 		{core.HexRegionKeyStr(r5.GetEndKey()), ""},
-	})
+	}, *rangeHoles)
 }

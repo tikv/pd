@@ -471,7 +471,7 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 	// Leaders:    16   0    0
 	// Region1:    L    F    F
 	s.tc.UpdateLeaderCount(1, 16)
-	testcases := []struct {
+	testCases := []struct {
 		name     string
 		rule     *placement.Rule
 		schedule bool
@@ -534,10 +534,10 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithCo
 		},
 	}
 
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
-		c.Check(s.tc.SetRule(testcase.rule), IsNil)
-		if testcase.schedule {
+	for _, testCase := range testCases {
+		c.Logf(testCase.name)
+		c.Check(s.tc.SetRule(testCase.rule), IsNil)
+		if testCase.schedule {
 			c.Check(len(s.schedule()), Equals, 1)
 		} else {
 			c.Assert(s.schedule(), HasLen, 0)
