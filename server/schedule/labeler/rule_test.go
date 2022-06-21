@@ -42,7 +42,7 @@ func TestRegionLabelTTL(t *testing.T) {
 	label.TTL = "10h10m10s10ms"
 	err = label.checkAndAdjustExpire()
 	re.NoError(err)
-	re.True(len(label.StartAt) > 0)
+	re.Greater(len(label.StartAt), 0)
 	re.False(label.expireBefore(time.Now().Add(time.Hour)))
 	re.True(label.expireBefore(time.Now().Add(24 * time.Hour)))
 
