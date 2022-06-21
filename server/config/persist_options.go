@@ -244,8 +244,17 @@ func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
+// It returns size * 10000 if the key of max-merge-region-Keys doesn't exist.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	return o.getTTLUintOr(maxMergeRegionKeysKey, o.GetScheduleConfig().MaxMergeRegionKeys)
+	keys, exist, err := o.getTTLUint(maxMergeRegionKeysKey)
+	if exist && err == nil {
+		return keys
+	}
+	size, exist, err := o.getTTLUint(maxMergeRegionSizeKey)
+	if exist && err == nil {
+		return size * 10000
+	}
+	return o.GetScheduleConfig().GetMaxMergeRegionKeys()
 }
 
 // GetSplitMergeInterval returns the interval between finishing split and starting to merge.
@@ -257,6 +266,20 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	v := o.GetScheduleConfig().Clone()
 	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxMergeRegionSize sets the max merge region size.
+func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxMergeRegionKeys sets the max merge region keys.
+func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionKeys = maxMergeRegionKeys
 	o.SetScheduleConfig(v)
 }
 

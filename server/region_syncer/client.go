@@ -90,7 +90,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 	cli := pdpb.NewPDClient(conn)
 	syncStream, err := cli.SyncRegions(ctx)
 	if err != nil {
-		return nil, errs.ErrGRPCCreateStream.Wrap(err).FastGenWithCause()
+		return nil, err
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
@@ -98,7 +98,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 		StartIndex: s.history.GetNextIndex(),
 	})
 	if err != nil {
-		return nil, errs.ErrGRPCSend.Wrap(err).FastGenWithCause()
+		return nil, err
 	}
 
 	return syncStream, nil

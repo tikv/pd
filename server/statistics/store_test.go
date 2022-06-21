@@ -15,26 +15,24 @@
 package statistics
 
 import (
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testStoreSuite{})
-
-type testStoreSuite struct{}
-
-func (s *testStoreSuite) TestFilterUnhealtyStore(c *C) {
+func TestFilterUnhealtyStore(t *testing.T) {
+	re := require.New(t)
 	stats := NewStoresStats()
 	cluster := core.NewBasicCluster()
 	for i := uint64(1); i <= 5; i++ {
 		cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: i}, core.SetLastHeartbeatTS(time.Now())))
 		stats.Observe(i, &pdpb.StoreStats{})
 	}
-	c.Assert(stats.GetStoresLoads(), HasLen, 5)
+	re.Len(stats.GetStoresLoads(), 5)
 
 	cluster.PutStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-24 * time.Hour))))
 	cluster.PutStore(cluster.GetStore(2).Clone(core.TombstoneStore()))
@@ -42,7 +40,7 @@ func (s *testStoreSuite) TestFilterUnhealtyStore(c *C) {
 
 	stats.FilterUnhealthyStore(cluster)
 	loads := stats.GetStoresLoads()
-	c.Assert(loads, HasLen, 2)
-	c.Assert(loads[4], NotNil)
-	c.Assert(loads[5], NotNil)
+	re.Len(loads, 2)
+	re.NotNil(loads[4])
+	re.NotNil(loads[5])
 }

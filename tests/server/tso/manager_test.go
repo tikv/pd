@@ -20,38 +20,25 @@ package tso_test
 import (
 	"context"
 	"strconv"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
 )
 
-var _ = Suite(&testManagerSuite{})
-
-type testManagerSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testManagerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
-}
-
-func (s *testManagerSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
 // TestClusterDCLocations will write different dc-locations to each server
 // and test whether we can get the whole dc-location config from each server.
-func (s *testManagerSuite) TestClusterDCLocations(c *C) {
+func TestClusterDCLocations(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	testCase := struct {
 		dcLocationNumber int
 		dcLocationConfig map[string]string
@@ -67,17 +54,15 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 		},
 	}
 	serverNumber := len(testCase.dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, serverNumber, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = testCase.dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-
-	cluster.WaitAllLeaders(c, testCase.dcLocationConfig)
+	cluster.WaitAllLeaders(re, testCase.dcLocationConfig)
 	serverNameMap := make(map[uint64]string)
 	for _, server := range cluster.GetServers() {
 		serverNameMap[server.GetServerID()] = server.GetServer().Name()
@@ -88,21 +73,24 @@ func (s *testManagerSuite) TestClusterDCLocations(c *C) {
 	for _, server := range cluster.GetServers() {
 		obtainedServerNumber := 0
 		dcLocationMap := server.GetTSOAllocatorManager().GetClusterDCLocations()
-		c.Assert(err, IsNil)
-		c.Assert(dcLocationMap, HasLen, testCase.dcLocationNumber)
+		re.NoError(err)
+		re.Len(dcLocationMap, testCase.dcLocationNumber)
 		for obtainedDCLocation, info := range dcLocationMap {
 			obtainedServerNumber += len(info.ServerIDs)
 			for _, serverID := range info.ServerIDs {
 				expectedDCLocation, exist := testCase.dcLocationConfig[serverNameMap[serverID]]
-				c.Assert(exist, IsTrue)
-				c.Assert(obtainedDCLocation, Equals, expectedDCLocation)
+				re.True(exist)
+				re.Equal(expectedDCLocation, obtainedDCLocation)
 			}
 		}
-		c.Assert(obtainedServerNumber, Equals, serverNumber)
+		re.Equal(serverNumber, obtainedServerNumber)
 	}
 }
 
-func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
+func TestLocalTSOSuffix(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	testCase := struct {
 		dcLocations      []string
 		dcLocationConfig map[string]string
@@ -118,44 +106,45 @@ func (s *testManagerSuite) TestLocalTSOSuffix(c *C) {
 		},
 	}
 	serverNumber := len(testCase.dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, serverNumber, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, serverNumber, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = testCase.dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-
-	cluster.WaitAllLeaders(c, testCase.dcLocationConfig)
+	cluster.WaitAllLeaders(re, testCase.dcLocationConfig)
 
 	tsoAllocatorManager := cluster.GetServer("pd1").GetTSOAllocatorManager()
 	for _, dcLocation := range testCase.dcLocations {
 		suffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),
 			tsoAllocatorManager.GetLocalTSOSuffixPath(dcLocation))
-		c.Assert(err, IsNil)
-		c.Assert(suffixResp.Kvs, HasLen, 1)
+		re.NoError(err)
+		re.Len(suffixResp.Kvs, 1)
 		// Test the increment of the suffix
 		allSuffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),
 			tsoAllocatorManager.GetLocalTSOSuffixPathPrefix(),
 			clientv3.WithPrefix(),
 			clientv3.WithSort(clientv3.SortByValue, clientv3.SortAscend))
-		c.Assert(err, IsNil)
-		c.Assert(len(allSuffixResp.Kvs), Equals, len(testCase.dcLocations))
+		re.NoError(err)
+		re.Equal(len(testCase.dcLocations), len(allSuffixResp.Kvs))
 		var lastSuffixNum int64
 		for _, kv := range allSuffixResp.Kvs {
 			suffixNum, err := strconv.ParseInt(string(kv.Value), 10, 64)
-			c.Assert(err, IsNil)
-			c.Assert(suffixNum, Greater, lastSuffixNum)
+			re.NoError(err)
+			re.Greater(suffixNum, lastSuffixNum)
 			lastSuffixNum = suffixNum
 		}
 	}
 }
 
-func (s *testManagerSuite) TestNextLeaderKey(c *C) {
+func TestNextLeaderKey(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	tso.PriorityCheck = 5 * time.Second
 	defer func() {
 		tso.PriorityCheck = 1 * time.Minute
@@ -165,32 +154,31 @@ func (s *testManagerSuite) TestNextLeaderKey(c *C) {
 		"pd2": "dc-1",
 	}
 	serverNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, serverNum, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, serverNum, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/injectNextLeaderKey", "return(true)"), IsNil)
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/injectNextLeaderKey", "return(true)"))
+	re.NoError(cluster.RunInitialServers())
 
 	cluster.WaitLeader(tests.WithWaitInterval(5*time.Second), tests.WithRetryTimes(3))
 	// To speed up the test, we force to do the check
 	cluster.CheckClusterDCLocation()
 	originName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(5), tests.WithWaitInterval(5*time.Second))
-	c.Assert(originName, Equals, "")
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"), IsNil)
+	re.Equal("", originName)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"))
 	cluster.CheckClusterDCLocation()
 	originName = cluster.WaitAllocatorLeader("dc-1")
-	c.Assert(originName, Not(Equals), "")
+	re.NotEqual("", originName)
 	for name, server := range cluster.GetServers() {
 		if name == originName {
 			continue
 		}
 		err := server.GetTSOAllocatorManager().TransferAllocatorForDCLocation("dc-1", server.GetServer().GetMember().ID())
-		c.Assert(err, IsNil)
-		testutil.WaitUntil(c, func() bool {
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
 			cluster.CheckClusterDCLocation()
 			currName := cluster.WaitAllocatorLeader("dc-1")
 			return currName == name

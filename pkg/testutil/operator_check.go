@@ -16,6 +16,7 @@ package testutil
 
 import (
 	"github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
@@ -140,4 +141,63 @@ func CheckTransferPeerWithLeaderTransferFrom(c *check.C, op *operator.Operator, 
 	c.Assert(lastLeader, check.Not(check.Equals), sourceID)
 	kind |= operator.OpRegion | operator.OpLeader
 	c.Assert(op.Kind()&kind, check.Equals, kind)
+}
+
+// CheckAddPeerWithTestify checks if the operator is to add peer on specified store.
+func CheckAddPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, storeID uint64) {
+	re.NotNil(op)
+	re.Equal(2, op.Len())
+	re.Equal(storeID, op.Step(0).(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, op.Step(1))
+	kind |= operator.OpRegion
+	re.Equal(kind, op.Kind()&kind)
+}
+
+// CheckRemovePeerWithTestify checks if the operator is to remove peer on specified store.
+func CheckRemovePeerWithTestify(re *require.Assertions, op *operator.Operator, storeID uint64) {
+	re.NotNil(op)
+	if op.Len() == 1 {
+		re.Equal(storeID, op.Step(0).(operator.RemovePeer).FromStore)
+	} else {
+		re.Equal(2, op.Len())
+		re.Equal(storeID, op.Step(0).(operator.TransferLeader).FromStore)
+		re.Equal(storeID, op.Step(1).(operator.RemovePeer).FromStore)
+	}
+}
+
+// CheckTransferPeerWithTestify checks if the operator is to transfer peer between the specified source and target stores.
+func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
+
+	steps, _ := trimTransferLeaders(op)
+	re.Len(steps, 3)
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, steps[1])
+	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	kind |= operator.OpRegion
+	re.Equal(kind, op.Kind()&kind)
+}
+
+// CheckSteps checks if the operator matches the given steps.
+func CheckSteps(re *require.Assertions, op *operator.Operator, steps []operator.OpStep) {
+	re.NotEqual(0, op.Kind()&operator.OpMerge)
+	re.NotNil(steps)
+	re.Len(steps, op.Len())
+	for i := range steps {
+		switch op.Step(i).(type) {
+		case operator.AddLearner:
+			re.Equal(steps[i].(operator.AddLearner).ToStore, op.Step(i).(operator.AddLearner).ToStore)
+		case operator.PromoteLearner:
+			re.Equal(steps[i].(operator.PromoteLearner).ToStore, op.Step(i).(operator.PromoteLearner).ToStore)
+		case operator.TransferLeader:
+			re.Equal(steps[i].(operator.TransferLeader).FromStore, op.Step(i).(operator.TransferLeader).FromStore)
+			re.Equal(steps[i].(operator.TransferLeader).ToStore, op.Step(i).(operator.TransferLeader).ToStore)
+		case operator.RemovePeer:
+			re.Equal(steps[i].(operator.RemovePeer).FromStore, op.Step(i).(operator.RemovePeer).FromStore)
+		case operator.MergeRegion:
+			re.Equal(steps[i].(operator.MergeRegion).IsPassive, op.Step(i).(operator.MergeRegion).IsPassive)
+		default:
+			re.FailNow("unknown operator step type")
+		}
+	}
 }
