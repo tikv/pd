@@ -57,9 +57,11 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(suite.ctx, opt)
-	oc := NewOperatorController(suite.ctx, tc, nil)
+	tc := mockcluster.NewCluster(ctx, opt)
+	oc := NewOperatorController(ctx, tc, nil)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
@@ -82,7 +84,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				suite.False(oc.RemoveOperator(op1))
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	go func(ctx context.Context) {
 		for {
 			select {
@@ -92,7 +94,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 				oc.GetOpInfluence(tc)
 			}
 		}
-	}(suite.ctx)
+	}(ctx)
 	time.Sleep(1 * time.Second)
 	suite.NotNil(oc.GetOperator(2))
 }
