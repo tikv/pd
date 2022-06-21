@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/etcdutil"
@@ -31,10 +30,6 @@ import (
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/goleak"
 )
-
-func TestServer(t *testing.T) {
-	TestingT(t)
-}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -57,12 +52,15 @@ func mustWaitLeader(c *C, svrs []*Server) *Server {
 func checkerWithNilAssert(c *C) *assertutil.Checker {
 	checker := assertutil.NewChecker(c.FailNow)
 	checker.IsNil = func(obtained interface{}) {
-		c.Assert(obtained, IsNil)
+		COMMENT_ONE_OF_BELOW
+re.NoError(obtained)
+re.Nil(obtained)
+
 	}
 	return checker
 }
 
-var _ = Suite(&testLeaderServerSuite{})
+
 
 type testLeaderServerSuite struct {
 	ctx        context.Context
@@ -71,8 +69,9 @@ type testLeaderServerSuite struct {
 	leaderPath string
 }
 
-func (s *testLeaderServerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+func SetUpSuite(t *testing.T) {
+    re := require.New(t)
+    s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.svrs = make(map[string]*Server)
 
 	cfgs := NewTestMultiConfig(checkerWithNilAssert(c), 3)
@@ -83,9 +82,9 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 
 		go func() {
 			svr, err := CreateServer(s.ctx, cfg)
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			err = svr.Run()
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			ch <- svr
 		}()
 	}
@@ -97,17 +96,18 @@ func (s *testLeaderServerSuite) SetUpSuite(c *C) {
 	}
 }
 
-func (s *testLeaderServerSuite) TearDownSuite(c *C) {
-	s.cancel()
+func TearDownSuite(t *testing.T) {
+    re := require.New(t)
+    s.cancel()
 	for _, svr := range s.svrs {
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}
 }
 
-var _ = Suite(&testServerSuite{})
 
-type testServerSuite struct{}
+
+
 
 func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([]*Server, CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
@@ -125,16 +125,19 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 					ch <- svr
 				}
 			}()
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			err = svr.Run()
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			failed = false
 		}(cfg)
 	}
 
 	for i := 0; i < len(cfgs); i++ {
 		svr := <-ch
-		c.Assert(svr, NotNil)
+		COMMENT_ONE_OF_BELOW
+re.Error(svr)
+re.NotNil(svr)
+
 		svrs = append(svrs, svr)
 	}
 	mustWaitLeader(c, svrs)
@@ -151,8 +154,9 @@ func newTestServersWithCfgs(ctx context.Context, c *C, cfgs []*config.Config) ([
 	return svrs, cleanup
 }
 
-func (s *testServerSuite) TestCheckClusterID(c *C) {
-	ctx, cancel := context.WithCancel(context.Background())
+func TestCheckClusterID(t *testing.T) {
+    re := require.New(t)
+    ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfgs := NewTestMultiConfig(checkerWithNilAssert(c), 2)
 	for i, cfg := range cfgs {
@@ -181,32 +185,33 @@ func (s *testServerSuite) TestCheckClusterID(c *C) {
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	svr, err := CreateServer(ctx, cfgA)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
-	c.Assert(err, NotNil)
+	re.Error(err)
 	etcd.Close()
 	testutil.CleanServer(cfgA.DataDir)
 }
 
-var _ = Suite(&testServerHandlerSuite{})
 
-type testServerHandlerSuite struct{}
 
-func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+
+
+func TestRegisterServerHandler(t *testing.T) {
+    re := require.New(t)
+    mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			c.Assert(clientIP, Equals, "127.0.0.1")
+			re.Equal("127.0.0.1", clientIP)
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -217,35 +222,36 @@ func (s *testServerHandlerSuite) TestRegisterServerHandler(c *C) {
 	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
 	// Repeat register.
-	c.Assert(err, NotNil)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()))
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Hello World\n")
+	re.Equal("Hello World\n", bodyString)
 }
 
-func (s *testServerHandlerSuite) TestSourceIpForHeaderForwarded(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+func TestSourceIpForHeaderForwarded(t *testing.T) {
+    re := require.New(t)
+    mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			c.Assert(clientIP, Equals, "127.0.0.2")
+			re.Equal("127.0.0.2", clientIP)
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -256,39 +262,40 @@ func (s *testServerHandlerSuite) TestSourceIpForHeaderForwarded(c *C) {
 	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
 	// Repeat register.
-	c.Assert(err, NotNil)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	req.Header.Add("X-Forwarded-For", "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Hello World\n")
+	re.Equal("Hello World\n", bodyString)
 }
 
-func (s *testServerHandlerSuite) TestSourceIpForHeaderXReal(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+func TestSourceIpForHeaderXReal(t *testing.T) {
+    re := require.New(t)
+    mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			c.Assert(clientIP, Equals, "127.0.0.2")
+			re.Equal("127.0.0.2", clientIP)
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -299,39 +306,40 @@ func (s *testServerHandlerSuite) TestSourceIpForHeaderXReal(c *C) {
 	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
 	// Repeat register.
-	c.Assert(err, NotNil)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	req.Header.Add("X-Real-Ip", "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Hello World\n")
+	re.Equal("Hello World\n", bodyString)
 }
 
-func (s *testServerHandlerSuite) TestSourceIpForHeaderBoth(c *C) {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+func TestSourceIpForHeaderBoth(t *testing.T) {
+    re := require.New(t)
+    mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			c.Assert(clientIP, Equals, "127.0.0.2")
+			re.Equal("127.0.0.2", clientIP)
 		})
 		info := ServiceGroup{
 			Name:    "mok",
@@ -342,28 +350,29 @@ func (s *testServerHandlerSuite) TestSourceIpForHeaderBoth(c *C) {
 	cfg := NewTestSingleConfig(checkerWithNilAssert(c))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
 	// Repeat register.
-	c.Assert(err, NotNil)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	req.Header.Add("X-Forwarded-For", "127.0.0.2")
 	req.Header.Add("X-Real-Ip", "127.0.0.3")
 	resp, err := http.DefaultClient.Do(req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.StatusCode, Equals, http.StatusOK)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	c.Assert(bodyString, Equals, "Hello World\n")
+	re.Equal("Hello World\n", bodyString)
 }
+
