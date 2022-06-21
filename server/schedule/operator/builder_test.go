@@ -575,8 +575,8 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			case ChangePeerV2Leave:
-				suite.Equal(len(tc.steps[i].(ChangePeerV2Leave).PromoteLearners), len(step.PromoteLearners))
-				suite.Equal(len(tc.steps[i].(ChangePeerV2Leave).DemoteVoters), len(step.DemoteVoters))
+				suite.Len(tc.steps[i].(ChangePeerV2Leave).PromoteLearners, len(step.PromoteLearners))
+				suite.Len(tc.steps[i].(ChangePeerV2Leave).DemoteVoters, len(step.DemoteVoters))
 				for j, p := range tc.steps[i].(ChangePeerV2Leave).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
