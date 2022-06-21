@@ -150,7 +150,7 @@ func TestSuspectRegions(t *testing.T) {
 	}
 	res, err := rc.HandleAskBatchSplit(req)
 	re.NoError(err)
-	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
+	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionID, res.Ids[1].NewRegionID}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	suspects := rc.GetSuspectRegions()
 	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
