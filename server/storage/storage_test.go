@@ -308,7 +308,7 @@ func generateKeys(size int) []string {
 func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	rand.Seed(6)
 	note := make(map[int]bool)
-	for i := 0; i < n * ratio / 100; i++ {
+	for i := 0; i < n*ratio/100; i++ {
 		pos := rand.Intn(n)
 		for {
 			if _, ok := note[pos]; !ok {
@@ -334,7 +334,7 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 					break
 				}
 			}
-			if mergeIndex!= -1 {
+			if mergeIndex != -1 {
 				regions[pos].StartKey = regions[mergeIndex].StartKey
 				continue
 			}
@@ -357,15 +357,15 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 		var region *metapb.Region
 		if i == 0 {
 			region = &metapb.Region{
-				Id: i,
+				Id:       i,
 				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
-				EndKey: []byte(keys[i]),
+				EndKey:   []byte(keys[i]),
 			}
 		} else {
 			region = &metapb.Region{
-				Id: i,
+				Id:       i,
 				StartKey: []byte(keys[i-1]),
-				EndKey: []byte(keys[i]),
+				EndKey:   []byte(keys[i]),
 			}
 		}
 		regions = append(regions, region)
@@ -412,12 +412,11 @@ func benchmarkLoadRegions(n int, b *testing.B, ratio int) {
 	if err != nil {
 		b.Fatal(err)
 	}
-
 }
 
 var volumes = []struct {
 	input int
-} {
+}{
 	{input: 10000},
 	{input: 100000},
 	{input: 1000000},
@@ -433,7 +432,7 @@ func BenchmarkLoadRegionsByVolume(b *testing.B) {
 
 var ratios = []struct {
 	ratio int
-} {
+}{
 	{ratio: 0},
 	{ratio: 20},
 	{ratio: 40},
