@@ -2113,6 +2113,37 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 	})
 }
 
+func (s *testHotSchedulerSuite) TestConfigValidation(c *C) {
+	// priority should be one of byte/query/key
+	hc := initHotRegionScheduleConfig()
+	hc.ReadPriorities = []string{"byte", "error"}
+	err := hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// priorities should have at least 2 dimensions
+	hc = initHotRegionScheduleConfig()
+	hc.WriteLeaderPriorities = []string{"byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// qps is not allowed to be set in priorities for write-peer-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"query", "byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// priorities shouldn't be repeated
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"byte", "byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"byte", "key"}
+	err = hc.validPriority()
+	c.Assert(err, IsNil)
+}
+
 func checkPriority(c *C, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {
 	readSolver := newBalanceSolver(hb, tc, statistics.Read, transferLeader)
 	writeLeaderSolver := newBalanceSolver(hb, tc, statistics.Write, transferLeader)
