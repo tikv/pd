@@ -25,9 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type testHotBucketTaskCache struct {
-}
-
 func getAllBucketStats(ctx context.Context, hotCache *HotBucketCache) map[uint64][]*BucketStat {
 	task := NewCollectBucketStatsTask(minHotDegree)
 	hotCache.CheckAsync(task)

@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type testHotBucketCache struct{}
 
 func TestPutItem(t *testing.T) {
 	re := require.New(t)
