@@ -124,9 +124,10 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 }
 
 func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {
 		re.FailNow("should be nil")
-	})
+	}
 	checker.IsNil = func(obtained interface{}) {
 		re.Nil(obtained)
 	}
