@@ -42,7 +42,7 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re.NotEqual(conf.Ranges, conf2.Ranges)
 }
 
-func BenchmarkBlanceLeaderCandidate(b *testing.B) {
+func BenchmarkCandidateStores(b *testing.B) {
 	ctx := context.Background()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
