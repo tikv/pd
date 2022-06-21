@@ -18,13 +18,12 @@ import (
 	"context"
 	"math"
 	"strconv"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 )
-
-var _ = Suite(&testHotBucketTaskCache{})
 
 type testHotBucketTaskCache struct {
 }
@@ -35,7 +34,8 @@ func getAllBucketStats(ctx context.Context, hotCache *HotBucketCache) map[uint64
 	return task.WaitRet(ctx)
 }
 
-func (s *testHotBucketTaskCache) TestColdHot(c *C) {
+func TestColdHot(t *testing.T) {
+	re := require.New(t)
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	hotCache := NewBucketsCache(ctx)
@@ -52,60 +52,63 @@ func (s *testHotBucketTaskCache) TestColdHot(c *C) {
 	for _, v := range testdata {
 		for i := 0; i < 20; i++ {
 			task := NewCheckPeerTask(v.buckets)
-			c.Assert(hotCache.CheckAsync(task), IsTrue)
+			re.True(hotCache.CheckAsync(task))
 			hotBuckets := getAllBucketStats(ctx, hotCache)
 			time.Sleep(time.Millisecond * 10)
 			item := hotBuckets[v.buckets.RegionId]
-			c.Assert(item, NotNil)
+			re.NotNil(item)
 			if v.isHot {
-				c.Assert(item[0].HotDegree, Equals, i+1)
+				re.Equal(i+1, item[0].HotDegree)
 			} else {
-				c.Assert(item[0].HotDegree, Equals, -i-1)
+				re.Equal(-i-1, item[0].HotDegree)
 			}
 		}
 	}
 }
 
-func (s *testHotBucketTaskCache) TestCheckBucketsTask(c *C) {
+func TestCheckBucketsTask(t *testing.T) {
+	re := require.New(t)
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	hotCache := NewBucketsCache(ctx)
 	// case1： add bucket successfully
 	buckets := newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20"), []byte("30")}, 0)
 	task := NewCheckPeerTask(buckets)
-	c.Assert(hotCache.CheckAsync(task), IsTrue)
+	re.True(hotCache.CheckAsync(task))
 	time.Sleep(time.Millisecond * 10)
 
 	hotBuckets := getAllBucketStats(ctx, hotCache)
-	c.Assert(hotBuckets, HasLen, 1)
+	re.Len(hotBuckets, 1)
 	item := hotBuckets[uint64(1)]
-	c.Assert(item, NotNil)
-	c.Assert(item, HasLen, 2)
-	c.Assert(item[0].HotDegree, Equals, -1)
-	c.Assert(item[1].HotDegree, Equals, -1)
+	re.NotNil(item)
+
+	re.Len(item, 2)
+	re.Equal(-1, item[0].HotDegree)
+	re.Equal(-1, item[1].HotDegree)
 
 	// case2: add bucket successful and the hot degree should inherit from the old one.
 	buckets = newTestBuckets(2, 1, [][]byte{[]byte("20"), []byte("30")}, 0)
 	task = NewCheckPeerTask(buckets)
-	c.Assert(hotCache.CheckAsync(task), IsTrue)
+	re.True(hotCache.CheckAsync(task))
 	hotBuckets = getAllBucketStats(ctx, hotCache)
 	time.Sleep(time.Millisecond * 10)
 	item = hotBuckets[uint64(2)]
-	c.Assert(item, HasLen, 1)
-	c.Assert(item[0].HotDegree, Equals, -2)
+	re.Len(item, 1)
+	re.Equal(-2, item[0].HotDegree)
 
 	// case3：add bucket successful and the hot degree should inherit from the old one.
 	buckets = newTestBuckets(1, 1, [][]byte{[]byte("10"), []byte("20")}, 0)
 	task = NewCheckPeerTask(buckets)
-	c.Assert(hotCache.CheckAsync(task), IsTrue)
+	re.True(hotCache.CheckAsync(task))
 	hotBuckets = getAllBucketStats(ctx, hotCache)
 	time.Sleep(time.Millisecond * 10)
 	item = hotBuckets[uint64(1)]
-	c.Assert(item, HasLen, 1)
-	c.Assert(item[0].HotDegree, Equals, -2)
+	re.Len(item, 1)
+	re.Equal(-2, item[0].HotDegree)
 }
 
-func (s *testHotBucketTaskCache) TestCollectBucketStatsTask(c *C) {
+func TestCollectBucketStatsTask(t *testing.T) {
+	re := require.New(t)
 	ctx, cancelFn := context.WithCancel(context.Background())
 	defer cancelFn()
 	hotCache := NewBucketsCache(ctx)
@@ -117,11 +120,11 @@ func (s *testHotBucketTaskCache) TestCollectBucketStatsTask(c *C) {
 	}
 	time.Sleep(time.Millisecond * 10)
 	task := NewCollectBucketStatsTask(-100)
-	c.Assert(hotCache.CheckAsync(task), IsTrue)
+	re.True(hotCache.CheckAsync(task))
 	stats := task.WaitRet(ctx)
-	c.Assert(stats, HasLen, 10)
+	re.Len(stats, 10)
 	task = NewCollectBucketStatsTask(1)
-	c.Assert(hotCache.CheckAsync(task), IsTrue)
+	re.True(hotCache.CheckAsync(task))
 	stats = task.WaitRet(ctx)
-	c.Assert(stats, HasLen, 0)
+	re.Len(stats, 0)
 }
