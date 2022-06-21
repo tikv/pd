@@ -237,7 +237,7 @@ func (suite *regionTestSuite) TestRegions() {
 	RegionsInfo := &RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, RegionsInfo)
 	suite.NoError(err)
-	suite.Equal(len(regions), RegionsInfo.Count)
+	suite.Len(regions, RegionsInfo.Count)
 	sort.Slice(RegionsInfo.Regions, func(i, j int) bool {
 		return RegionsInfo.Regions[i].ID < RegionsInfo.Regions[j].ID
 	})
@@ -262,7 +262,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	r4 := &RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, r4)
 	suite.NoError(err)
-	suite.Equal(len(regionIDs), r4.Count)
+	suite.Len(regionIDs, r4.Count)
 	sort.Slice(r4.Regions, func(i, j int) bool { return r4.Regions[i].ID < r4.Regions[j].ID })
 	for i, r := range r4.Regions {
 		suite.Equal(regionIDs[i], r.ID)
@@ -273,7 +273,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	r5 := &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r5)
 	suite.NoError(err)
-	suite.Equal(len(regionIDs), r5.Count)
+	suite.Len(regionIDs, r5.Count)
 	for i, r := range r5.Regions {
 		suite.Equal(regionIDs[i], r.ID)
 	}
@@ -283,7 +283,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	r6 := &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r6)
 	suite.NoError(err)
-	suite.Equal(len(regionIDs), r6.Count)
+	suite.Len(regionIDs, r6.Count)
 }
 
 func (suite *regionTestSuite) TestTopFlow() {
@@ -396,7 +396,7 @@ func (suite *regionTestSuite) checkTopRegions(url string, regionIDs []uint64) {
 	regions := &RegionsInfo{}
 	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(len(regionIDs), regions.Count)
+	suite.Len(regionIDs, regions.Count)
 	for i, r := range regions.Regions {
 		suite.Equal(regionIDs[i], r.ID)
 	}
@@ -413,7 +413,7 @@ func (suite *regionTestSuite) TestTopN() {
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
-			suite.Equal(len(writtenBytes), len(topN))
+			suite.Len(writtenBytes, len(topN))
 		} else {
 			suite.Len(topN, n)
 		}

@@ -167,7 +167,7 @@ func (suite *ruleTestSuite) TestSet() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Equal(len(testCase.popKeyRange), len(popKeyRangeMap))
+			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)
@@ -541,7 +541,7 @@ func (suite *ruleTestSuite) TestDelete() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Equal(len(testCase.popKeyRange), len(popKeyRangeMap))
+			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)
@@ -837,7 +837,7 @@ func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) {
 	suite.Equal(b2.ID, b1.ID)
 	suite.Equal(b2.Index, b1.Index)
 	suite.Equal(b2.Override, b1.Override)
-	suite.Equal(len(b2.Rules), len(b1.Rules))
+	suite.Len(b2.Rules, len(b1.Rules))
 	for i := range b1.Rules {
 		suite.compareRule(b1.Rules[i], b2.Rules[i])
 	}

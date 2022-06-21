@@ -69,7 +69,7 @@ func relaxEqualStings(re *require.Assertions, a, b []string) {
 func (suite *memberTestSuite) checkListResponse(body []byte, cfgs []*config.Config) {
 	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
-	suite.Equal(len(cfgs), len(got["members"]))
+	suite.Len(cfgs, len(got["members"]))
 	re := suite.Require()
 	for _, member := range got["members"] {
 		for _, cfg := range cfgs {

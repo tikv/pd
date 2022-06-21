@@ -82,7 +82,7 @@ func (suite *clusterTestSuite) TestCluster() {
 
 	c1.MaxPeerCount = 6
 	suite.Equal(c2, c1)
-	suite.Equal(suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").Count, int(r.MaxReplicas))
+	suite.Equal(int(r.MaxReplicas), suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").Count)
 }
 
 func (suite *clusterTestSuite) testGetClusterStatus() {

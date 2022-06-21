@@ -461,7 +461,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 		info := make(map[uint64]interface{}, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		suite.NoError(err)
-		suite.Equal(len(testCase.expectedStores), len(info))
+		suite.Len(testCase.expectedStores, len(info))
 		for id := range testCase.expectedStores {
 			_, ok := info[id]
 			suite.True(ok)

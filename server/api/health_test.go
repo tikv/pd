@@ -28,8 +28,7 @@ import (
 func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
 	got := []Health{}
 	re.NoError(json.Unmarshal(body, &got))
-	re.Nil(json.Unmarshal(body, &got))
-	re.Equal(len(cfgs), len(got))
+	re.Len(cfgs, len(got))
 
 	for _, h := range got {
 		for _, cfg := range cfgs {
