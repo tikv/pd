@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
 func TestPutItem(t *testing.T) {
 	re := require.New(t)
 	cache := NewBucketsCache(context.Background())
