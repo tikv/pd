@@ -116,7 +116,7 @@ func (suite *storeTestSuite) TearDownSuite() {
 }
 
 func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Store) {
-	re.Equal(len(want), len(ss))
+	re.Len(ss, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
 		if _, ok := mapWant[s.Id]; !ok {
@@ -231,7 +231,7 @@ func (suite *storeTestSuite) TestStoreLabel() {
 	suite.NoError(err)
 	suite.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		suite.Equal(l.Value, expectLabel[l.Key])
+		suite.Equal(expectLabel[l.Key], l.Value)
 	}
 
 	// delete label
@@ -244,7 +244,7 @@ func (suite *storeTestSuite) TestStoreLabel() {
 	delete(expectLabel, "host")
 	suite.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		suite.Equal(l.Value, expectLabel[l.Key])
+		suite.Equal(expectLabel[l.Key], l.Value)
 	}
 
 	suite.stores[0].Labels = info.Store.Labels
