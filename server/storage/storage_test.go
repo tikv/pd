@@ -408,7 +408,7 @@ func benchmarkLoadRegions(n int, b *testing.B, ratio int) {
 
 	b.ResetTimer()
 	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
-	//b.Log("region number is: ", cluster.GetRegionCount())
+	// b.Log("region number is: ", cluster.GetRegionCount())
 	if err != nil {
 		b.Fatal(err)
 	}
