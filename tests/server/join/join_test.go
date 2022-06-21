@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
 )
@@ -56,7 +57,7 @@ func TestSimpleJoin(t *testing.T) {
 	err = pd2.Run()
 	re.NoError(err)
 	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
-	re.True(os.IsNotExist(err))
+	re.False(os.IsNotExist(err))
 	members, err = etcdutil.ListEtcdMembers(client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
@@ -84,6 +85,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -116,6 +118,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	server.EtcdStartTimeout = 10 * time.Second
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
