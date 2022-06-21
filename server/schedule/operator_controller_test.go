@@ -74,6 +74,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	oc.SetOperator(op1)
 	suite.True(op2.Start())
 	oc.SetOperator(op2)
+	re := suite.Require()
 	go func(ctx context.Context) {
 		suite.checkRemoveOperatorSuccess(oc, op1)
 		for {
@@ -81,7 +82,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 			case <-ctx.Done():
 				return
 			default:
-				suite.False(oc.RemoveOperator(op1))
+				re.False(oc.RemoveOperator(op1))
 			}
 		}
 	}(ctx)
