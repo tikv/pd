@@ -174,7 +174,6 @@ func CheckTransferLeaderWithTestify(re *require.Assertions, op *operator.Operato
 	re.Equal(kind, op.Kind()&kind)
 }
 
-
 // CheckTransferPeerWithTestify checks if the operator is to transfer peer between the specified source and target stores.
 func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
