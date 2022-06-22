@@ -200,10 +200,10 @@ func TestDispatch(t *testing.T) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	testutil.CheckTransferPeerWithTestify(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	waitOperator(re, co, 2)
-	testutil.CheckTransferLeader(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
+	testutil.CheckTransferLeaderWithTestify(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -540,7 +540,7 @@ func TestPeerState(t *testing.T) {
 
 	// Wait for schedule.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	testutil.CheckTransferPeerWithTestify(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
 	region := tc.GetRegion(1).Clone()
 
@@ -982,7 +982,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 }
 
 func waitOperator(re *require.Assertions, co *coordinator, regionID uint64) {
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		return co.opController.GetOperator(regionID) != nil
 	})
 }
@@ -1274,7 +1274,7 @@ func TestInterval(t *testing.T) {
 
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
@@ -1290,7 +1290,7 @@ func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 
 func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
@@ -1307,7 +1307,7 @@ func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStr
 
 func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
@@ -1323,7 +1323,7 @@ func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 
 func waitTransferLeader(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
@@ -1341,7 +1341,7 @@ func waitTransferLeader(re *require.Assertions, stream mockhbstream.HeartbeatStr
 }
 
 func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream) {
-	testutil.WaitUntil(re, func() bool {
+	testutil.Eventually(re, func() bool {
 		res := stream.Recv()
 		return res == nil
 	})

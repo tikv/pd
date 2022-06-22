@@ -62,7 +62,8 @@ func WithWaitFor(waitFor time.Duration) WaitOption {
 
 // WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
 // NOTICE: this function will be removed soon, please use `Eventually` instead.
-func WaitUntil(re *require.Assertions, condition func() bool, opts ...WaitOption) {
+func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
+	c.Log("wait start")
 	option := &WaitOp{
 		retryTimes:    defaultWaitRetryTimes,
 		sleepInterval: defaultSleepInterval,
@@ -70,11 +71,13 @@ func WaitUntil(re *require.Assertions, condition func() bool, opts ...WaitOption
 	for _, opt := range opts {
 		opt(option)
 	}
-	re.Eventually(
-		condition,
-		option.sleepInterval*time.Duration(option.retryTimes),
-		option.sleepInterval,
-	)
+	for i := 0; i < option.retryTimes; i++ {
+		if f() {
+			return
+		}
+		time.Sleep(option.sleepInterval)
+	}
+	c.Fatal("wait timeout")
 }
 
 // Eventually asserts that given condition will be met in a period of time.
