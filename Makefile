@@ -112,10 +112,8 @@ docker-image:
 #### Build utils ###
 
 swagger-spec: install-tools
-	go mod vendor
-	swag init --parseVendor --generalInfo server/api/router.go --exclude vendor/github.com/pingcap/tidb-dashboard --output docs/swagger
-	go mod tidy
-	rm -rf vendor
+	swag init --parseDependency --parseInternal --parseDepth 1 --dir server --generalInfo api/router.go --output docs/swagger
+	swag fmt --dir server
 
 dashboard-ui:
 	./scripts/embed-dashboard-ui.sh
@@ -150,7 +148,7 @@ static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
-	@ golangci-lint run $(PACKAGE_DIRECTORIES)
+	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES)
 	@ echo "revive ..."
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 

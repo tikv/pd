@@ -282,7 +282,7 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
 func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
-	regionStoreIDs := region.GetStoreIds()
+	regionStoreIDs := region.GetStoreIDs()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()
 		store := cluster.GetStore(storeID)

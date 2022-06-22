@@ -30,7 +30,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 	originRules := addExtraRules(0)
 	originStores := mockStores(3)
 	cache := mockRegionRuleFitCache(originRegion, originRules, originStores)
-	testcases := []struct {
+	testCases := []struct {
 		name      string
 		region    *core.RegionInfo
 		rules     []*Rule
@@ -175,13 +175,13 @@ func TestRegionRuleFitCache(t *testing.T) {
 			unchanged: false,
 		},
 	}
-	for _, testcase := range testcases {
-		t.Log(testcase.name)
-		re.Equal(testcase.unchanged, cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)))
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		re.Equal(testCase.unchanged, cache.IsUnchanged(testCase.region, testCase.rules, mockStores(3)))
 	}
-	for _, testcase := range testcases {
-		t.Log(testcase.name)
-		re.Equal(false, cache.IsUnchanged(testcase.region, testcase.rules, mockStoresNoHeartbeat(3)))
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		re.Equal(false, cache.IsUnchanged(testCase.region, testCase.rules, mockStoresNoHeartbeat(3)))
 	}
 	// Invalid Input4
 	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil))

@@ -18,19 +18,12 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testHotBucketCache{})
-
-type testHotBucketCache struct{}
-
-func (t *testHotBucketCache) TestPutItem(c *C) {
+func TestPutItem(t *testing.T) {
+	re := require.New(t)
 	cache := NewBucketsCache(context.Background())
 	testdata := []struct {
 		regionID    uint64
@@ -90,17 +83,18 @@ func (t *testHotBucketCache) TestPutItem(c *C) {
 	}}
 	for _, v := range testdata {
 		bucket := convertToBucketTreeItem(newTestBuckets(v.regionID, v.version, v.keys, 10))
-		c.Assert(bucket.GetStartKey(), BytesEquals, v.keys[0])
-		c.Assert(bucket.GetEndKey(), BytesEquals, v.keys[len(v.keys)-1])
+		re.Equal(v.keys[0], bucket.GetStartKey())
+		re.Equal(v.keys[len(v.keys)-1], bucket.GetEndKey())
 		cache.putItem(bucket, cache.getBucketsByKeyRange(bucket.GetStartKey(), bucket.GetEndKey()))
-		c.Assert(cache.bucketsOfRegion, HasLen, v.regionCount)
-		c.Assert(cache.tree.Len(), Equals, v.treeLen)
-		c.Assert(cache.bucketsOfRegion[v.regionID], NotNil)
-		c.Assert(cache.getBucketsByKeyRange([]byte("10"), nil), NotNil)
+		re.Len(cache.bucketsOfRegion, v.regionCount)
+		re.Equal(v.treeLen, cache.tree.Len())
+		re.NotNil(cache.bucketsOfRegion[v.regionID])
+		re.NotNil(cache.getBucketsByKeyRange([]byte("10"), nil))
 	}
 }
 
-func (t *testHotBucketCache) TestConvertToBucketTreeStat(c *C) {
+func TestConvertToBucketTreeStat(t *testing.T) {
+	re := require.New(t)
 	buckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  0,
@@ -116,14 +110,15 @@ func (t *testHotBucketCache) TestConvertToBucketTreeStat(c *C) {
 		PeriodInMs: 1000,
 	}
 	item := convertToBucketTreeItem(buckets)
-	c.Assert(item.startKey, BytesEquals, []byte{'1'})
-	c.Assert(item.endKey, BytesEquals, []byte{'5'})
-	c.Assert(item.regionID, Equals, uint64(1))
-	c.Assert(item.version, Equals, uint64(0))
-	c.Assert(item.stats, HasLen, 4)
+	re.Equal([]byte{'1'}, item.startKey)
+	re.Equal([]byte{'5'}, item.endKey)
+	re.Equal(uint64(1), item.regionID)
+	re.Equal(uint64(0), item.version)
+	re.Len(item.stats, 4)
 }
 
-func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
+func TestGetBucketsByKeyRange(t *testing.T) {
+	re := require.New(t)
 	cache := NewBucketsCache(context.Background())
 	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0)
 	bucket2 := newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0)
@@ -131,15 +126,16 @@ func (t *testHotBucketCache) TestGetBucketsByKeyRange(c *C) {
 	cache.putItem(cache.checkBucketsFlow(bucket1))
 	cache.putItem(cache.checkBucketsFlow(bucket2))
 	cache.putItem(cache.checkBucketsFlow(bucket3))
-	c.Assert(cache.getBucketsByKeyRange([]byte(""), []byte("100")), HasLen, 3)
-	c.Assert(cache.getBucketsByKeyRange([]byte("030"), []byte("100")), HasLen, 1)
-	c.Assert(cache.getBucketsByKeyRange([]byte("010"), []byte("030")), HasLen, 3)
-	c.Assert(cache.getBucketsByKeyRange([]byte("015"), []byte("020")), HasLen, 1)
-	c.Assert(cache.getBucketsByKeyRange([]byte("001"), []byte("")), HasLen, 3)
-	c.Assert(cache.bucketsOfRegion, HasLen, 3)
+	re.Len(cache.getBucketsByKeyRange([]byte(""), []byte("100")), 3)
+	re.Len(cache.getBucketsByKeyRange([]byte("030"), []byte("100")), 1)
+	re.Len(cache.getBucketsByKeyRange([]byte("010"), []byte("030")), 3)
+	re.Len(cache.getBucketsByKeyRange([]byte("015"), []byte("020")), 1)
+	re.Len(cache.getBucketsByKeyRange([]byte("001"), []byte("")), 3)
+	re.Len(cache.bucketsOfRegion, 3)
 }
 
-func (t *testHotBucketCache) TestInherit(c *C) {
+func TestInherit(t *testing.T) {
+	re := require.New(t)
 	originBucketItem := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("50"), []byte("")}, 0))
 	originBucketItem.stats[0].HotDegree = 3
 	originBucketItem.stats[1].HotDegree = 2
@@ -173,15 +169,15 @@ func (t *testHotBucketCache) TestInherit(c *C) {
 	for _, v := range testdata {
 		buckets := convertToBucketTreeItem(v.buckets)
 		buckets.inherit([]*BucketTreeItem{originBucketItem})
-		c.Assert(buckets.stats, HasLen, len(v.expect))
+		re.Len(buckets.stats, len(v.expect))
 		for k, v := range v.expect {
-			c.Assert(buckets.stats[k].HotDegree, Equals, v)
+			re.Equal(v, buckets.stats[k].HotDegree)
 		}
 	}
 }
 
-func (t *testHotBucketCache) TestBucketTreeItemClone(c *C) {
-	// bucket range: [010,020][020,100]
+func TestBucketTreeItemClone(t *testing.T) {
+	re := require.New(t)
 	origin := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("010"), []byte("020"), []byte("100")}, uint64(0)))
 	testdata := []struct {
 		startKey []byte
@@ -221,30 +217,31 @@ func (t *testHotBucketCache) TestBucketTreeItemClone(c *C) {
 	}}
 	for _, v := range testdata {
 		copy := origin.cloneBucketItemByRange(v.startKey, v.endKey)
-		c.Assert(copy.startKey, BytesEquals, v.startKey)
-		c.Assert(copy.endKey, BytesEquals, v.endKey)
-		c.Assert(copy.stats, HasLen, v.count)
+		re.Equal(v.startKey, copy.startKey)
+		re.Equal(v.endKey, copy.endKey)
+		re.Len(copy.stats, v.count)
 		if v.count > 0 && v.strict {
-			c.Assert(copy.stats[0].StartKey, BytesEquals, v.startKey)
-			c.Assert(copy.stats[len(copy.stats)-1].EndKey, BytesEquals, v.endKey)
+			re.Equal(v.startKey, copy.stats[0].StartKey)
+			re.Equal(v.endKey, copy.stats[len(copy.stats)-1].EndKey)
 		}
 	}
 }
 
-func (t *testHotBucketCache) TestCalculateHotDegree(c *C) {
+func TestCalculateHotDegree(t *testing.T) {
+	re := require.New(t)
 	origin := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte("010"), []byte("100")}, uint64(0)))
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].HotDegree, Equals, -1)
+	re.Equal(-1, origin.stats[0].HotDegree)
 
 	// case1: the dimension of read will be hot
 	origin.stats[0].Loads = []uint64{minHotThresholds[0] + 1, minHotThresholds[1] + 1, 0, 0, 0, 0}
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].HotDegree, Equals, 0)
+	re.Equal(0, origin.stats[0].HotDegree)
 
 	// case1: the dimension of write will be hot
 	origin.stats[0].Loads = []uint64{0, 0, 0, minHotThresholds[3] + 1, minHotThresholds[4] + 1, 0}
 	origin.calculateHotDegree()
-	c.Assert(origin.stats[0].HotDegree, Equals, 1)
+	re.Equal(1, origin.stats[0].HotDegree)
 }
 
 func newTestBuckets(regionID uint64, version uint64, keys [][]byte, flow uint64) *metapb.Buckets {
