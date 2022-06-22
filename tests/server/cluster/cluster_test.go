@@ -708,7 +708,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Equal("testKey", persistOptions.GetLabelPropertyConfig()[typ][0].Key)
 	re.Equal("testValue", persistOptions.GetLabelPropertyConfig()[typ][0].Value)
 	re.NoError(svr.DeleteLabelProperty(typ, labelKey, labelValue))
-	re.Len(persistOptions.GetLabelPropertyConfig()[typ], 0)
+	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// PUT GET failed
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`))
@@ -722,7 +722,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Equal(5, persistOptions.GetMaxReplicas())
 	re.Equal(uint64(10), persistOptions.GetMaxSnapshotCount())
 	re.True(persistOptions.GetPDServerConfig().UseRegionStorage)
-	re.Len(persistOptions.GetLabelPropertyConfig()[typ], 0)
+	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// DELETE failed
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"))

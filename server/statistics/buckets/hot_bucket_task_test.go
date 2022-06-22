@@ -123,5 +123,5 @@ func TestCollectBucketStatsTask(t *testing.T) {
 	task = NewCollectBucketStatsTask(1)
 	re.True(hotCache.CheckAsync(task))
 	stats = task.WaitRet(ctx)
-	re.Len(stats, 0)
+	re.Empty(stats)
 }

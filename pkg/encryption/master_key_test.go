@@ -34,12 +34,12 @@ func TestPlaintextMasterKey(t *testing.T) {
 	masterKey, err := NewMasterKey(config, nil)
 	re.NoError(err)
 	re.NotNil(masterKey)
-	re.Len(masterKey.key, 0)
+	re.Empty(masterKey.key)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	re.NoError(err)
-	re.Len(iv, 0)
+	re.Empty(iv)
 	re.Equal(plaintext, string(ciphertext))
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
