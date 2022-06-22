@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -34,38 +35,36 @@ var dialClient = &http.Client{
 	},
 }
 
+type configPersistTestSuite struct {
+	suite.Suite
 
-
-type testConfigPresistSuite struct {
 	cleanup func()
 	cluster *tests.TestCluster
 }
 
-func SetUpSuite(t *testing.T) {
-    re := require.New(t)
-    ctx, cancel := context.WithCancel(context.Background())
-	s.cleanup = cancel
+func TestConfigPersistTestSuite(t *testing.T) {
+	suite.Run(t, new(configPersistTestSuite))
+}
+
+func (suite *configPersistTestSuite) SetupSuite() {
+	ctx, cancel := context.WithCancel(context.Background())
+	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	COMMENT_ONE_OF_BELOW
-re.NoError(cluster.RunInitialServers())
-re.Nil(cluster.RunInitialServers())
-
-	c.Assert(cluster.WaitLeader(), Not(HasLen), 0)
-	s.cluster = cluster
+	suite.NoError(err)
+	suite.NoError(cluster.RunInitialServers())
+	suite.NotEmpty(cluster.WaitLeader())
+	suite.cluster = cluster
 }
 
-func TearDownSuite(t *testing.T) {
-    re := require.New(t)
-    s.cleanup()
-	s.cluster.Destroy()
+func (suite *configPersistTestSuite) TearDownSuite() {
+	suite.cleanup()
+	suite.cluster.Destroy()
 }
 
-func TestRateLimitConfigReload(t *testing.T) {
-    re := require.New(t)
-    leader := s.cluster.GetServer(s.cluster.GetLeader())
+func (suite *configPersistTestSuite) TestRateLimitConfigReload() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 
-	re.Len(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig, 0)
+	suite.Len(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig, 0)
 	limitCfg := make(map[string]ratelimit.DimensionConfig)
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
 
@@ -74,26 +73,27 @@ func TestRateLimitConfigReload(t *testing.T) {
 		"limiter-config":    limitCfg,
 	}
 	data, err := json.Marshal(input)
-	re.NoError(err)
+	suite.NoError(err)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
-	re.NoError(err)
+	suite.NoError(err)
 	resp.Body.Close()
-	re.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
-	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+	suite.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
+	suite.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 
 	oldLeaderName := leader.GetServer().Name()
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
-	mustWaitLeader(c, s.cluster.GetServers())
-	leader = s.cluster.GetServer(s.cluster.GetLeader())
+	suite.mustWaitLeader(suite.cluster.GetServers())
+	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 
-	re.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
-	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+	suite.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
+	suite.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 }
 
-func mustWaitLeader(c *C, svrs map[string]*tests.TestServer) *server.Server {
+func (suite *configPersistTestSuite) mustWaitLeader(svrs map[string]*tests.TestServer) *server.Server {
 	var leader *server.Server
-	testutil.WaitUntil(c, func() bool {
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
 		for _, s := range svrs {
 			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
 				leader = s.GetServer()
