@@ -75,7 +75,6 @@ func (suite *clusterTestSuite) TestCluster() {
 		EnablePlacementRules: true,
 	}
 	suite.NoError(suite.svr.SetReplicationConfig(r))
-	suite.Nil(suite.svr.SetReplicationConfig(r))
 
 	err = tu.ReadGetJSON(re, testDialClient, url, c2)
 	suite.NoError(err)
