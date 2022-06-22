@@ -64,7 +64,7 @@ func TestProgress(t *testing.T) {
 	ps = m.GetProgresses(func(p string) bool {
 		return strings.Contains(p, "a")
 	})
-	re.Len(ps, 0)
+	re.Empty(ps)
 	re.True(m.RemoveProgress(n))
 	re.False(m.RemoveProgress(n))
 }

@@ -255,7 +255,7 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name        string
 		checkRegion *core.RegionInfo
 		needFix     bool
@@ -276,11 +276,11 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 			needFix:     true,
 		},
 	}
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
+	for _, testCase := range testCases {
+		c.Logf(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
-		_, err := scatterer.Scatter(testcase.checkRegion, "")
-		if testcase.needFix {
+		_, err := scatterer.Scatter(testCase.checkRegion, "")
+		if testCase.needFix {
 			c.Assert(err, NotNil)
 			c.Assert(tc.CheckRegionUnderSuspect(1), IsTrue)
 		} else {
@@ -303,7 +303,7 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
-	testcases := []struct {
+	testCases := []struct {
 		name       string
 		groupCount int
 	}{
@@ -322,12 +322,12 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	}
 
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
+	for _, testCase := range testCases {
+		c.Logf(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
-			for j := 0; j < testcase.groupCount; j++ {
+			for j := 0; j < testCase.groupCount; j++ {
 				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
 				regionID++
@@ -335,7 +335,7 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		}
 
 		checker := func(ss *selectedStores, expected uint64, delta float64) {
-			for i := 0; i < testcase.groupCount; i++ {
+			for i := 0; i < testCase.groupCount; i++ {
 				// comparing the leader distribution
 				group := fmt.Sprintf("group-%v", i)
 				max := uint64(0)
@@ -369,7 +369,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name    string
 		failure bool
 	}{
@@ -383,15 +383,15 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		},
 	}
 	group := "group"
-	for _, testcase := range testcases {
+	for _, testCase := range testCases {
 		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 		}
-		c.Log(testcase.name)
+		c.Log(testCase.name)
 		failures := map[uint64]error{}
-		if testcase.failure {
+		if testCase.failure {
 			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
 		}
 
@@ -412,7 +412,7 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 		c.Assert(min, LessEqual, uint64(20))
 		c.Assert(max, GreaterEqual, uint64(20))
 		c.Assert(max-min, LessEqual, uint64(3))
-		if testcase.failure {
+		if testCase.failure {
 			c.Assert(failures, HasLen, 1)
 			_, ok := failures[1]
 			c.Assert(ok, IsTrue)
