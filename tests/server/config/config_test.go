@@ -47,7 +47,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 
 	leader := cluster.GetServer(cluster.GetLeader())
 
-	re.Len(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig, 0)
+	re.Empty(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig)
 	limitCfg := make(map[string]ratelimit.DimensionConfig)
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
 
