@@ -165,6 +165,16 @@ func CheckRemovePeerWithTestify(re *require.Assertions, op *operator.Operator, s
 	}
 }
 
+// CheckTransferLeaderWithTestify checks if the operator is to transfer leader between the specified source and target stores.
+func CheckTransferLeaderWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
+	re.Equal(1, op.Len())
+	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
+	kind |= operator.OpLeader
+	re.Equal(kind, op.Kind()&kind)
+}
+
+
 // CheckTransferPeerWithTestify checks if the operator is to transfer peer between the specified source and target stores.
 func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
