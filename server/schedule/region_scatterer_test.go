@@ -391,7 +391,7 @@ func TestScattersGroup(t *testing.T) {
 		}
 		failures := map[uint64]error{}
 		if testCase.failure {
-			re.Nil(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))
+			re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))
 		}
 
 		scatterer.scatterRegions(regions, failures, group, 3)
@@ -415,7 +415,7 @@ func TestScattersGroup(t *testing.T) {
 			re.Len(failures, 1)
 			_, ok := failures[1]
 			re.True(ok)
-			re.Nil(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"))
+			re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"))
 		} else {
 			re.Empty(failures)
 		}
