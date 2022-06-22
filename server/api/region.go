@@ -137,12 +137,12 @@ func fromPBReplicationStatus(s *replication_modepb.RegionReplicationStatus) *Rep
 	}
 }
 
-// NewRegionInfo create a new api RegionInfo.
-func NewRegionInfo(r *core.RegionInfo) *RegionInfo {
+// NewAPIRegionInfo create a new API RegionInfo.
+func NewAPIRegionInfo(r *core.RegionInfo) *RegionInfo {
 	return InitRegion(r, &RegionInfo{})
 }
 
-// InitRegion init a new api RegionInfo from the core.RegionInfo.
+// InitRegion init a new API RegionInfo from the core.RegionInfo.
 func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	if r == nil {
 		return nil
@@ -228,7 +228,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
-	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
+	h.rd.JSON(w, http.StatusOK, NewAPIRegionInfo(regionInfo))
 }
 
 // @Tags     region
@@ -247,7 +247,7 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	regionInfo := rc.GetRegionByKey([]byte(key))
-	h.rd.JSON(w, http.StatusOK, NewRegionInfo(regionInfo))
+	h.rd.JSON(w, http.StatusOK, NewAPIRegionInfo(regionInfo))
 }
 
 // @Tags     region

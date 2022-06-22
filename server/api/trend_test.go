@@ -16,76 +16,73 @@ package api
 
 import (
 	"fmt"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
-var _ = Suite(&testTrendSuite{})
-
-type testTrendSuite struct{}
-
-func (s *testTrendSuite) TestTrend(c *C) {
-	svr, cleanup := mustNewServer(c)
+func TestTrend(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
 	defer cleanup()
-	mustWaitLeader(c, []*server.Server{svr})
+	mustWaitLeader(re, []*server.Server{svr})
 
-	mustBootstrapCluster(c, svr)
+	mustBootstrapCluster(re, svr)
 	for i := 1; i <= 3; i++ {
-		mustPutStore(c, svr, uint64(i), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+		mustPutStore(re, svr, uint64(i), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	}
 
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
-	region4 := s.newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1)
-	region5 := s.newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1)
-	region6 := s.newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1)
-	mustRegionHeartbeat(c, svr, region4)
-	mustRegionHeartbeat(c, svr, region5)
-	mustRegionHeartbeat(c, svr, region6)
+	region4 := newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1)
+	region5 := newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1)
+	region6 := newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1)
+	mustRegionHeartbeat(re, svr, region4)
+	mustRegionHeartbeat(re, svr, region5)
+	mustRegionHeartbeat(re, svr, region6)
 
 	// Create 3 operators that transfers leader, moves follower, moves leader.
-	c.Assert(svr.GetHandler().AddTransferLeaderOperator(4, 2), IsNil)
-	c.Assert(svr.GetHandler().AddTransferPeerOperator(5, 2, 3), IsNil)
+	re.NoError(svr.GetHandler().AddTransferLeaderOperator(4, 2))
+	re.NoError(svr.GetHandler().AddTransferPeerOperator(5, 2, 3))
 	time.Sleep(1 * time.Second)
-	c.Assert(svr.GetHandler().AddTransferPeerOperator(6, 1, 3), IsNil)
-
+	re.NoError(svr.GetHandler().AddTransferPeerOperator(6, 1, 3))
 	// Complete the operators.
-	mustRegionHeartbeat(c, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))
+	mustRegionHeartbeat(re, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))
 
 	op, err := svr.GetHandler().GetOperator(5)
-	c.Assert(err, IsNil)
-	c.Assert(op, NotNil)
+	re.NoError(err)
+	re.NotNil(op)
 	newPeerID := op.Step(0).(operator.AddLearner).PeerID
 	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
-	mustRegionHeartbeat(c, svr, region5)
+	mustRegionHeartbeat(re, svr, region5)
 	region5 = region5.Clone(core.WithPromoteLearner(newPeerID), core.WithRemoveStorePeer(2), core.WithIncConfVer())
-	mustRegionHeartbeat(c, svr, region5)
+	mustRegionHeartbeat(re, svr, region5)
 
 	op, err = svr.GetHandler().GetOperator(6)
-	c.Assert(err, IsNil)
-	c.Assert(op, NotNil)
+	re.NoError(err)
+	re.NotNil(op)
 	newPeerID = op.Step(0).(operator.AddLearner).PeerID
 	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
-	mustRegionHeartbeat(c, svr, region6)
+	mustRegionHeartbeat(re, svr, region6)
 	region6 = region6.Clone(core.WithPromoteLearner(newPeerID), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
-	mustRegionHeartbeat(c, svr, region6)
+	mustRegionHeartbeat(re, svr, region6)
 
 	var trend Trend
-	err = tu.ReadGetJSON(c, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
-	c.Assert(err, IsNil)
+	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
+	re.NoError(err)
 
 	// Check store states.
 	expectLeaderCount := map[uint64]int{1: 1, 2: 2, 3: 0}
 	expectRegionCount := map[uint64]int{1: 2, 2: 2, 3: 2}
-	c.Assert(trend.Stores, HasLen, 3)
+	re.Len(trend.Stores, 3)
 	for _, store := range trend.Stores {
-		c.Assert(store.LeaderCount, Equals, expectLeaderCount[store.ID])
-		c.Assert(store.RegionCount, Equals, expectRegionCount[store.ID])
+		re.Equal(expectLeaderCount[store.ID], store.LeaderCount)
+		re.Equal(expectRegionCount[store.ID], store.RegionCount)
 	}
 
 	// Check history.
@@ -94,13 +91,13 @@ func (s *testTrendSuite) TestTrend(c *C) {
 		{From: 1, To: 3, Kind: "region"}: 1,
 		{From: 2, To: 3, Kind: "region"}: 1,
 	}
-	c.Assert(trend.History.Entries, HasLen, 3)
+	re.Len(trend.History.Entries, 3)
 	for _, history := range trend.History.Entries {
-		c.Assert(history.Count, Equals, expectHistory[trendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}])
+		re.Equal(expectHistory[trendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}], history.Count)
 	}
 }
 
-func (s *testTrendSuite) newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, leaderStore uint64) *core.RegionInfo {
+func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, leaderStore uint64) *core.RegionInfo {
 	var (
 		peers  = make([]*metapb.Peer, 0, len(voters)+len(learners))
 		leader *metapb.Peer

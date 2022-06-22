@@ -21,10 +21,11 @@ import (
 	"sync"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -61,33 +62,29 @@ var (
 	}
 )
 
-func TestAPIServer(t *testing.T) {
-	TestingT(t)
-}
-
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 type cleanUpFunc func()
 
-func mustNewServer(c *C, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
-	_, svrs, cleanup := mustNewCluster(c, 1, opts...)
+func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
+	_, svrs, cleanup := mustNewCluster(re, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(checkerWithNilAssert(c), num)
+	cfgs := server.NewTestMultiConfig(checkerWithNilAssert(re), num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
 			err := cfg.SetupLogger()
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			zapLogOnce.Do(func() {
 				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 			})
@@ -95,9 +92,9 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 				opt(cfg)
 			}
 			s, err := server.CreateServer(ctx, cfg, NewHandler)
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			err = s.Run()
-			c.Assert(err, IsNil)
+			re.NoError(err)
 			ch <- s
 		}(cfg)
 	}
@@ -108,7 +105,7 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 	}
 	close(ch)
 	// wait etcd and http servers
-	mustWaitLeader(c, svrs)
+	mustWaitLeader(re, svrs)
 
 	// clean up
 	clean := func() {
@@ -124,8 +121,8 @@ func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.
 	return cfgs, svrs, clean
 }
 
-func mustWaitLeader(c *C, svrs []*server.Server) {
-	testutil.WaitUntil(c, func() bool {
+func mustWaitLeader(re *require.Assertions, svrs []*server.Server) {
+	testutil.Eventually(re, func() bool {
 		var leader *pdpb.Member
 		for _, svr := range svrs {
 			l := svr.GetLeader()
@@ -141,88 +138,92 @@ func mustWaitLeader(c *C, svrs []*server.Server) {
 	})
 }
 
-func mustBootstrapCluster(c *C, s *server.Server) {
-	grpcPDClient := testutil.MustNewGrpcClient(c, s.GetAddr())
+func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
+	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.ClusterID()),
 		Store:  store,
 		Region: region,
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
-	c.Assert(err, IsNil)
-	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
-var _ = Suite(&testServiceSuite{})
-
-type testServiceSuite struct {
+type serviceTestSuite struct {
+	suite.Suite
 	svr     *server.Server
 	cleanup cleanUpFunc
 }
 
-func (s *testServiceSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+func TestServiceTestSuite(t *testing.T) {
+	suite.Run(t, new(serviceTestSuite))
 }
 
-func (s *testServiceSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *serviceTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	mustWaitLeader(re, []*server.Server{suite.svr})
+
+	mustBootstrapCluster(re, suite.svr)
+	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
-func (s *testServiceSuite) TestServiceLabels(c *C) {
-	accessPaths := s.svr.GetServiceLabels("Profile")
-	c.Assert(accessPaths, HasLen, 1)
-	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/debug/pprof/profile")
-	c.Assert(accessPaths[0].Method, Equals, "")
-	serviceLabel := s.svr.GetAPIAccessServiceLabel(
+func (suite *serviceTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *serviceTestSuite) TestServiceLabels() {
+	accessPaths := suite.svr.GetServiceLabels("Profile")
+	suite.Len(accessPaths, 1)
+	suite.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
+	suite.Equal("", accessPaths[0].Method)
+	serviceLabel := suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
-	c.Assert(serviceLabel, Equals, "Profile")
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	suite.Equal("Profile", serviceLabel)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
-	c.Assert(serviceLabel, Equals, "Profile")
+	suite.Equal("Profile", serviceLabel)
 
-	accessPaths = s.svr.GetServiceLabels("GetSchedulerConfig")
-	c.Assert(accessPaths, HasLen, 1)
-	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/scheduler-config")
-	c.Assert(accessPaths[0].Method, Equals, "")
+	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
+	suite.Len(accessPaths, 1)
+	suite.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
+	suite.Equal("", accessPaths[0].Method)
 
-	accessPaths = s.svr.GetServiceLabels("ResignLeader")
-	c.Assert(accessPaths, HasLen, 1)
-	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/leader/resign")
-	c.Assert(accessPaths[0].Method, Equals, http.MethodPost)
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
+	suite.Len(accessPaths, 1)
+	suite.Equal("/pd/api/v1/leader/resign", accessPaths[0].Path)
+	suite.Equal(http.MethodPost, accessPaths[0].Method)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
-	c.Assert(serviceLabel, Equals, "ResignLeader")
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	suite.Equal("ResignLeader", serviceLabel)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
-	c.Assert(serviceLabel, Equals, "")
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	suite.Equal("", serviceLabel)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
-	c.Assert(serviceLabel, Equals, "")
+	suite.Equal("", serviceLabel)
 
-	accessPaths = s.svr.GetServiceLabels("QueryMetric")
-	c.Assert(accessPaths, HasLen, 4)
+	accessPaths = suite.svr.GetServiceLabels("QueryMetric")
+	suite.Len(accessPaths, 4)
 	sort.Slice(accessPaths, func(i, j int) bool {
 		if accessPaths[i].Path == accessPaths[j].Path {
 			return accessPaths[i].Method < accessPaths[j].Method
 		}
 		return accessPaths[i].Path < accessPaths[j].Path
 	})
-	c.Assert(accessPaths[0].Path, Equals, "/pd/api/v1/metric/query")
-	c.Assert(accessPaths[0].Method, Equals, http.MethodGet)
-	c.Assert(accessPaths[1].Path, Equals, "/pd/api/v1/metric/query")
-	c.Assert(accessPaths[1].Method, Equals, http.MethodPost)
-	c.Assert(accessPaths[2].Path, Equals, "/pd/api/v1/metric/query_range")
-	c.Assert(accessPaths[2].Method, Equals, http.MethodGet)
-	c.Assert(accessPaths[3].Path, Equals, "/pd/api/v1/metric/query_range")
-	c.Assert(accessPaths[3].Method, Equals, http.MethodPost)
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	suite.Equal("/pd/api/v1/metric/query", accessPaths[0].Path)
+	suite.Equal(http.MethodGet, accessPaths[0].Method)
+	suite.Equal("/pd/api/v1/metric/query", accessPaths[1].Path)
+	suite.Equal(http.MethodPost, accessPaths[1].Method)
+	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[2].Path)
+	suite.Equal(http.MethodGet, accessPaths[2].Method)
+	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[3].Path)
+	suite.Equal(http.MethodPost, accessPaths[3].Method)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
-	c.Assert(serviceLabel, Equals, "QueryMetric")
-	serviceLabel = s.svr.GetAPIAccessServiceLabel(
+	suite.Equal("QueryMetric", serviceLabel)
+	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
-	c.Assert(serviceLabel, Equals, "QueryMetric")
+	suite.Equal("QueryMetric", serviceLabel)
 }

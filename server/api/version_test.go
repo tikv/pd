@@ -19,70 +19,67 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
 
-var _ = Suite(&testVersionSuite{})
-
-func checkerWithNilAssert(c *C) *assertutil.Checker {
+func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {
-		c.FailNow()
+		re.FailNow("should be nil")
 	}
 	checker.IsNil = func(obtained interface{}) {
-		c.Assert(obtained, IsNil)
+		re.Nil(obtained)
 	}
 	return checker
 }
 
-type testVersionSuite struct{}
-
-func (s *testVersionSuite) TestGetVersion(c *C) {
+func TestGetVersion(t *testing.T) {
 	// TODO: enable it.
-	c.Skip("Temporary disable. See issue: https://github.com/tikv/pd/issues/1893")
+	t.Skip("Temporary disable. See issue: https://github.com/tikv/pd/issues/1893")
+	re := require.New(t)
 
 	fname := filepath.Join(os.TempDir(), "stdout")
 	old := os.Stdout
 	temp, _ := os.Create(fname)
 	os.Stdout = temp
 
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(c))
+	cfg := server.NewTestSingleConfig(checkerWithNilAssert(re))
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh
 		time.Sleep(200 * time.Millisecond)
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/version"
 		resp, err := testDialClient.Get(addr)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		defer resp.Body.Close()
 		_, err = io.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan *server.Server)
 	go func(cfg *config.Config) {
 		s, err := server.CreateServer(ctx, cfg, NewHandler)
-		c.Assert(err, IsNil)
-		c.Assert(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`), IsNil)
+		re.NoError(err)
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
 		reqCh <- struct{}{}
 		err = s.Run()
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		ch <- s
 	}(cfg)
 
 	svr := <-ch
 	close(ch)
 	out, _ := os.ReadFile(fname)
-	c.Assert(strings.Contains(string(out), "PANIC"), IsFalse)
+	re.NotContains(string(out), "PANIC")
 
 	// clean up
 	func() {
@@ -93,5 +90,5 @@ func (s *testVersionSuite) TestGetVersion(c *C) {
 		cancel()
 		testutil.CleanServer(cfg.DataDir)
 	}()
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/memberNil"), IsNil)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/memberNil"))
 }
