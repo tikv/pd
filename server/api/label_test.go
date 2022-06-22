@@ -206,7 +206,7 @@ func (s *testStrictlyLabelsStoreSuite) SetUpSuite(c *C) {
 }
 
 func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
-	cases := []struct {
+	testCases := []struct {
 		store       *metapb.Store
 		valid       bool
 		expectError string
@@ -267,41 +267,41 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 		},
 	}
 
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
-				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
-				State:   t.store.State,
-				Labels:  t.store.Labels,
-				Version: t.store.Version,
+				Id:      testCase.store.Id,
+				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				State:   testCase.store.State,
+				Labels:  testCase.store.Labels,
+				Version: testCase.store.Version,
 			},
 		})
-		if t.valid {
+		if testCase.valid {
 			c.Assert(err, IsNil)
 		} else {
-			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+			c.Assert(strings.Contains(err.Error(), testCase.expectError), IsTrue)
 		}
 	}
 
 	// enable placement rules. Report no error any more.
 	c.Assert(tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(c)), IsNil)
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
-				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
-				State:   t.store.State,
-				Labels:  t.store.Labels,
-				Version: t.store.Version,
+				Id:      testCase.store.Id,
+				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				State:   testCase.store.State,
+				Labels:  testCase.store.Labels,
+				Version: testCase.store.Version,
 			},
 		})
-		if t.valid {
+		if testCase.valid {
 			c.Assert(err, IsNil)
 		} else {
-			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+			c.Assert(strings.Contains(err.Error(), testCase.expectError), IsTrue)
 		}
 	}
 }

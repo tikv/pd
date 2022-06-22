@@ -49,7 +49,7 @@ func TestOperatorControllerTestSuite(t *testing.T) {
 
 func (suite *operatorControllerTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.Nil(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
 }
 
 func (suite *operatorControllerTestSuite) TearDownSuite() {
@@ -186,7 +186,7 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 }
 
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
-	suite.Nil(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"))
 
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
@@ -272,7 +272,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	suite.True(op1.Start())
 	oc.SetOperator(op1)
 
-	suite.Nil(failpoint.Enable("github.com/tikv/pd/server/schedule/concurrentRemoveOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/concurrentRemoveOperator", "return(true)"))
 
 	var wg sync.WaitGroup
 	wg.Add(2)

@@ -70,7 +70,7 @@ func TestScatterRegions(t *testing.T) {
 	scatterSpecial(re, 5, 5, 50)
 }
 
-func checkOperator(op *operator.Operator, re *require.Assertions) {
+func checkOperator(re *require.Assertions, op *operator.Operator) {
 	for i := 0; i < op.Len(); i++ {
 		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
 			for j := i + 1; j < op.Len(); j++ {
@@ -105,7 +105,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region, ""); op != nil {
-			checkOperator(op, re)
+			checkOperator(re, op)
 			ApplyOperator(tc, op)
 		}
 	}
@@ -173,7 +173,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region, ""); op != nil {
-			checkOperator(op, re)
+			checkOperator(re, op)
 			ApplyOperator(tc, op)
 		}
 	}
@@ -417,7 +417,7 @@ func TestScattersGroup(t *testing.T) {
 			re.True(ok)
 			re.Nil(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"))
 		} else {
-			re.Len(failures, 0)
+			re.Empty(failures)
 		}
 	}
 }
