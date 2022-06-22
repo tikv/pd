@@ -50,6 +50,6 @@ func TestEqualFloat(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	f1 := rand.Float64()
-	re.True(FloatEqual(f1, f1*1.000))
-	re.True(FloatEqual(f1, f1/1.000))
+	re.True(Float64Equal(f1, f1*1.000))
+	re.True(Float64Equal(f1, f1/1.000))
 }

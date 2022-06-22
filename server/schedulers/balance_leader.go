@@ -250,7 +250,7 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-// candidateStores for balance_leader, order by `getStore` `asc``
+// candidateStores for balance_leader, order by `getStore` `asc`
 type candidateStores struct {
 	stores   []*core.StoreInfo
 	getScore func(*core.StoreInfo) float64
@@ -276,7 +276,7 @@ func (cs *candidateStores) sortFuncWithStores() (less func(*core.StoreInfo, *cor
 	less = func(storei, storej *core.StoreInfo) bool {
 		scorei := cs.getScore(storei)
 		scorej := cs.getScore(storej)
-		if typeutil.FloatEqual(scorei, scorej) {
+		if typeutil.Float64Equal(scorei, scorej) {
 			// when the stores share the same score, returns the one with the bigger ID,
 			// Since we assume that the bigger storeID, the newer store(which would be scheduled as soon as possible).
 			return storei.GetID() > storej.GetID()
