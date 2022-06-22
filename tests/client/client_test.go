@@ -692,7 +692,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.srv, suite.cleanup, err = server.NewTestServer(suite.checkerWithNilAssert())
 	suite.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClientWithTestify(re, suite.srv.GetAddr())
+	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	suite.mustWaitLeader(map[string]*server.Server{suite.srv.GetAddr(): suite.srv})

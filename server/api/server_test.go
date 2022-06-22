@@ -139,7 +139,7 @@ func mustWaitLeader(re *require.Assertions, svrs []*server.Server) {
 }
 
 func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, s.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.ClusterID()),
 		Store:  store,
