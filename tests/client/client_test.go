@@ -729,9 +729,10 @@ func (suite *clientTestSuite) TearDownSuite() {
 }
 
 func (suite *clientTestSuite) checkerWithNilAssert() *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {
 		suite.FailNow("should be nil")
-	})
+	}
 	checker.IsNil = func(obtained interface{}) {
 		suite.Nil(obtained)
 	}

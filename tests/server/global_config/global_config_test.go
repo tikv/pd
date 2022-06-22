@@ -65,7 +65,9 @@ func (s TestReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 func (s *GlobalConfigTestSuite) SetUpSuite(c *C) {
 	var err error
 	var gsi *server.Server
-	gsi, s.cleanup, err = server.NewTestServer(assertutil.NewChecker(func() {}))
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {}
+	gsi, s.cleanup, err = server.NewTestServer(checker)
 	s.server = &server.GrpcServer{Server: gsi}
 	c.Assert(err, IsNil)
 	addr := s.server.GetAddr()

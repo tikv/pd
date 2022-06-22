@@ -33,7 +33,10 @@ import (
 var _ = Suite(&testVersionSuite{})
 
 func checkerWithNilAssert(c *C) *assertutil.Checker {
-	checker := assertutil.NewChecker(c.FailNow)
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {
+		c.FailNow()
+	}
 	checker.IsNil = func(obtained interface{}) {
 		c.Assert(obtained, IsNil)
 	}
