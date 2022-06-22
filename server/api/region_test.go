@@ -456,57 +456,57 @@ func (s *testGetRegionSuite) TestScanRegionByKeys(c *C) {
 	mustRegionHeartbeat(c, s.svr, r)
 
 	url := fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "b")
-	regionIds := []uint64{3, 4, 5, 99}
+	regionIDs := []uint64{3, 4, 5, 99}
 	regions := &RegionsInfo{}
 	err := tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(regionIds, HasLen, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(regionIDs, HasLen, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "d")
-	regionIds = []uint64{4, 5, 99}
+	regionIDs = []uint64{4, 5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(regionIds, HasLen, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(regionIDs, HasLen, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", s.urlPrefix, "g")
-	regionIds = []uint64{5, 99}
+	regionIDs = []uint64{5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(regionIds, HasLen, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(regionIDs, HasLen, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 	url = fmt.Sprintf("%s/regions/key?end_key=%s", s.urlPrefix, "e")
-	regionIds = []uint64{2, 3, 4}
+	regionIDs = []uint64{2, 3, 4}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(len(regionIDs), Equals, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", "g")
-	regionIds = []uint64{3, 4}
+	regionIDs = []uint64{3, 4}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(len(regionIDs), Equals, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", s.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
-	regionIds = []uint64{3, 4, 5, 99}
+	regionIDs = []uint64{3, 4, 5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(c, testDialClient, url, regions)
 	c.Assert(err, IsNil)
-	c.Assert(len(regionIds), Equals, regions.Count)
-	for i, v := range regionIds {
+	c.Assert(len(regionIDs), Equals, regions.Count)
+	for i, v := range regionIDs {
 		c.Assert(v, Equals, regions.Regions[i].ID)
 	}
 }

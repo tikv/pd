@@ -605,7 +605,7 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
 	suite.Nil(suite.rc.Check(region))
 
-	testcases := []struct {
+	testCases := []struct {
 		name        string
 		region      *core.RegionInfo
 		stillCached bool
@@ -643,15 +643,15 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 			stillCached: false,
 		},
 	}
-	for _, testcase := range testcases {
-		suite.T().Log(testcase.name)
-		if testcase.stillCached {
+	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
+		if testCase.stillCached {
 			suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"))
-			suite.rc.Check(testcase.region)
+			suite.rc.Check(testCase.region)
 			suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"))
 		} else {
 			suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"))
-			suite.rc.Check(testcase.region)
+			suite.rc.Check(testCase.region)
 			suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"))
 		}
 	}
