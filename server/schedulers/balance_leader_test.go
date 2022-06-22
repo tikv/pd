@@ -46,15 +46,22 @@ func BenchmarkCandidateStores(b *testing.B) {
 	ctx := context.Background()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	deltaMap := make(map[uint64]int64)
-	getScore := func(store *core.StoreInfo) float64 {
-		return store.LeaderScore(0, deltaMap[store.GetID()])
-	}
+
 	for id := uint64(1); id < uint64(10000); id++ {
 		leaderCount := int(rand.Int31n(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
 	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		updateAndResortStoresInCandidateStores(tc)
+	}
+}
+
+func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
+	deltaMap := make(map[uint64]int64)
+	getScore := func(store *core.StoreInfo) float64 {
+		return store.LeaderScore(0, deltaMap[store.GetID()])
+	}
 	cs := newCandidateStores(tc.GetStores(), false, getScore)
 	stores := tc.GetStores()
 	// update score for store and reorder
