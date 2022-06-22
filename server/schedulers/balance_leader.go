@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -276,7 +276,9 @@ func (cs *candidateStores) sortFuncWithStores() (less func(*core.StoreInfo, *cor
 	less = func(storei, storej *core.StoreInfo) bool {
 		scorei := cs.getScore(storei)
 		scorej := cs.getScore(storej)
-		if math.Abs(scorei-scorej) <= 1e-10 {
+		if typeutil.FloatEqual(scorei, scorej) {
+			// when the stores share the same score, returns the one with the bigger ID,
+			// Since we assume that the bigger storeID, the newer store(which would be scheduled as soon as possible).
 			return storei.GetID() > storej.GetID()
 		}
 		if cs.asc {
@@ -302,16 +304,8 @@ func (cs *candidateStores) next() {
 
 func (cs *candidateStores) binarySearch(store *core.StoreInfo) (index int) {
 	less := cs.sortFuncWithStores()
-	left, right := 0, len(cs.stores)-1
-	for left < right {
-		mid := (left + right) >> 1
-		if less(cs.stores[mid], store) {
-			left = mid + 1
-		} else {
-			right = mid
-		}
-	}
-	return left
+	searchFunc := func(i int) bool { return !less(cs.stores[i], store) }
+	return sort.Search(len(cs.stores)-1, searchFunc)
 }
 
 // return the slice of index for the searched stores.
