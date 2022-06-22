@@ -292,7 +292,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 }
 
-func testCheckRegion(re *require.Assertions, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
+func checkRegion(re *require.Assertions, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
 	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
 		re.Equal(0, expectAddOperator)
@@ -315,9 +315,9 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.addRegionStore(2, 2))
 	re.NoError(tc.addRegionStore(1, 1))
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
-	testCheckRegion(re, tc, co, 1, 1)
+	checkRegion(re, tc, co, 1, 1)
 	testutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
-	testCheckRegion(re, tc, co, 1, 0)
+	checkRegion(re, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
@@ -326,7 +326,7 @@ func TestCheckRegion(t *testing.T) {
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
 	re.NoError(tc.putRegion(r))
-	testCheckRegion(re, tc, co, 1, 0)
+	checkRegion(re, tc, co, 1, 0)
 
 	tc = newTestCluster(ctx, opt)
 	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
@@ -336,14 +336,14 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.addRegionStore(2, 2))
 	re.NoError(tc.addRegionStore(1, 1))
 	re.NoError(tc.putRegion(r))
-	testCheckRegion(re, tc, co, 1, 0)
+	checkRegion(re, tc, co, 1, 0)
 	r = r.Clone(core.WithPendingPeers(nil))
 	re.NoError(tc.putRegion(r))
-	testCheckRegion(re, tc, co, 1, 1)
+	checkRegion(re, tc, co, 1, 1)
 	op := co.opController.GetOperator(1)
 	re.Equal(1, op.Len())
 	re.Equal(uint64(1), op.Step(0).(operator.PromoteLearner).ToStore)
-	testCheckRegion(re, tc, co, 1, 0)
+	checkRegion(re, tc, co, 1, 0)
 }
 
 func TestCheckRegionWithScheduleDeny(t *testing.T) {
@@ -370,10 +370,10 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 	})
 
 	re.True(labelerManager.ScheduleDisabled(region))
-	testCheckRegion(re, tc, co, 1, 0)
+	checkRegion(re, tc, co, 1, 0)
 	labelerManager.DeleteLabelRule("schedulelabel")
 	re.False(labelerManager.ScheduleDisabled(region))
-	testCheckRegion(re, tc, co, 1, 1)
+	checkRegion(re, tc, co, 1, 1)
 }
 
 func TestCheckerIsBusy(t *testing.T) {
@@ -407,7 +407,7 @@ func TestCheckerIsBusy(t *testing.T) {
 			}
 		}
 	}
-	testCheckRegion(re, tc, co, num, 0)
+	checkRegion(re, tc, co, num, 0)
 }
 
 func TestReplica(t *testing.T) {
