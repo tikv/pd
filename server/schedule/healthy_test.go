@@ -59,7 +59,7 @@ func TestIsRegionHealthy(t *testing.T) {
 	}
 
 	// healthy only check down peer and pending peer
-	cases := []testCase{
+	testCases := []testCase{
 		{region(peers(1, 2, 3)), true, true, true, true, true, true},
 		{region(peers(1, 2, 3), core.WithPendingPeers(peers(1))), false, true, true, false, true, true},
 		{region(peers(1, 2, 3), core.WithLearners(peers(1))), true, true, false, true, true, false},
@@ -74,14 +74,14 @@ func TestIsRegionHealthy(t *testing.T) {
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		tc.SetEnablePlacementRules(false)
-		re.Equal(t.healthy1, IsRegionHealthy(t.region))
-		re.Equal(t.healthyAllowPending1, IsRegionHealthyAllowPending(t.region))
-		re.Equal(t.replicated1, IsRegionReplicated(tc, t.region))
+		re.Equal(testCase.healthy1, IsRegionHealthy(testCase.region))
+		re.Equal(testCase.healthyAllowPending1, IsRegionHealthyAllowPending(testCase.region))
+		re.Equal(testCase.replicated1, IsRegionReplicated(tc, testCase.region))
 		tc.SetEnablePlacementRules(true)
-		re.Equal(t.healthy2, IsRegionHealthy(t.region))
-		re.Equal(t.healthyAllowPending2, IsRegionHealthyAllowPending(t.region))
-		re.Equal(t.replicated2, IsRegionReplicated(tc, t.region))
+		re.Equal(testCase.healthy2, IsRegionHealthy(testCase.region))
+		re.Equal(testCase.healthyAllowPending2, IsRegionHealthyAllowPending(testCase.region))
+		re.Equal(testCase.replicated2, IsRegionReplicated(tc, testCase.region))
 	}
 }

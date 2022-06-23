@@ -477,6 +477,8 @@ func TestRegionFromDifferentGroups(t *testing.T) {
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
 
+// TestSelectedStores tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/4565
 func TestSelectedStores(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

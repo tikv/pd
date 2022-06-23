@@ -167,6 +167,7 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	suite.Nil(oc.GetOperator(region.GetID()))
 }
 
+// Issue 3353
 func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
@@ -251,6 +252,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	}
 }
 
+// issue #1716
 func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
@@ -331,14 +333,12 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
 	suite.Nil(r)
-
 	suite.False(next)
 
 	// after wait 100 millisecond, the region1 need to dispatch, but not region2.
 	time.Sleep(100 * time.Millisecond)
 	r, next = oc.pollNeedDispatchRegion()
 	suite.NotNil(r)
-
 	suite.True(next)
 	suite.Equal(region1.GetID(), r.GetID())
 
@@ -347,14 +347,12 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 
 	r, next = oc.pollNeedDispatchRegion()
 	suite.Nil(r)
-
 	suite.True(next)
 	suite.Nil(oc.GetOperator(3))
 
 	// find op4 finished
 	r, next = oc.pollNeedDispatchRegion()
 	suite.NotNil(r)
-
 	suite.True(next)
 	suite.Equal(region4.GetID(), r.GetID())
 
@@ -362,12 +360,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	time.Sleep(400 * time.Millisecond)
 	r, next = oc.pollNeedDispatchRegion()
 	suite.NotNil(r)
-
 	suite.True(next)
 	suite.Equal(region2.GetID(), r.GetID())
 	r, next = oc.pollNeedDispatchRegion()
 	suite.Nil(r)
-
 	suite.False(next)
 }
 
@@ -438,6 +434,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	suite.False(oc.RemoveOperator(op))
 }
 
+// #1652
 func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
