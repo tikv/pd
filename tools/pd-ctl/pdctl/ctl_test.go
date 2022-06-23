@@ -86,7 +86,7 @@ func TestReadStdin(t *testing.T) {
 	for _, v := range s {
 		in, err := ReadStdin(v.in)
 		re.NoError(err)
-		re.Equal(len(v.targets), len(in))
+		re.Len(in, len(v.targets))
 		for i, target := range v.targets {
 			re.Equal(target, in[i])
 		}

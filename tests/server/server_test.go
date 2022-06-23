@@ -34,9 +34,9 @@ func TestMain(m *testing.M) {
 }
 
 func TestUpdateAdvertiseUrls(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re := require.New(t)
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -60,10 +60,10 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 		conf.AdvertisePeerURLs = conf.PeerURLs + "," + tempurl.Alloc()
 	}
 	for _, conf := range cluster.GetConfig().InitialServers {
-		serverConf, e := conf.Generate()
-		re.NoError(e)
-		s, e := tests.NewTestServer(ctx, serverConf)
-		re.NoError(e)
+		serverConf, err := conf.Generate()
+		re.NoError(err)
+		s, err := tests.NewTestServer(ctx, serverConf)
+		re.NoError(err)
 		cluster.GetServers()[conf.Name] = s
 	}
 	err = cluster.RunInitialServers()
@@ -75,9 +75,9 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 }
 
 func TestClusterID(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re := require.New(t)
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -111,9 +111,9 @@ func TestClusterID(t *testing.T) {
 }
 
 func TestLeader(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re := require.New(t)
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -122,12 +122,11 @@ func TestLeader(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
-	re.NotEqual("", leader1)
+	re.NotEmpty(leader1)
 
 	err = cluster.GetServer(leader1).Stop()
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		leader := cluster.GetLeader()
-		return leader != leader1
+		return cluster.GetLeader() != leader1
 	})
 }

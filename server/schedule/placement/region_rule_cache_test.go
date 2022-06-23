@@ -181,7 +181,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Log(testCase.name)
-		re.Equal(false, cache.IsUnchanged(testCase.region, testCase.rules, mockStoresNoHeartbeat(3)))
+		re.False(cache.IsUnchanged(testCase.region, testCase.rules, mockStoresNoHeartbeat(3)))
 	}
 	// Invalid Input4
 	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil))
