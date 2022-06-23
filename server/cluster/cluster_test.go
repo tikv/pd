@@ -283,7 +283,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 	re.NoError(cluster.RemoveStore(2, false))
 	// should be failed since no enough store to accommodate the extra replica.
 	err = cluster.RemoveStore(3, false)
-	re.True(strings.Contains(err.Error(), string(errs.ErrStoresNotEnough.RFCCode())))
+	re.Contains(err.Error(), string(errs.ErrStoresNotEnough.RFCCode()))
 	re.Error(cluster.RemoveStore(3, false))
 	// should be success since physically-destroyed is true.
 	re.NoError(cluster.RemoveStore(3, true))
@@ -326,7 +326,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	// should be failed since there is only 1 store left and it is the evict-leader store.
 	err = cluster.RemoveStore(3, false)
 	re.Error(err)
-	re.True(strings.Contains(err.Error(), string(errs.ErrNoStoreForRegionLeader.RFCCode())))
+	re.Contains(err.Error(), string(errs.ErrNoStoreForRegionLeader.RFCCode()))
 	re.NoError(cluster.RemoveScheduler(schedulers.EvictLeaderName))
 	re.NoError(cluster.RemoveStore(3, false))
 }
