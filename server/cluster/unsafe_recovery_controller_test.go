@@ -180,8 +180,8 @@ func TestFinished(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		// require peer report by empty plan
 		re.NotNil(resp.RecoveryPlan)
-		re.Equal(0, len(resp.RecoveryPlan.Creates))
-		re.Equal(0, len(resp.RecoveryPlan.Demotes))
+		re.Empty(len(resp.RecoveryPlan.Creates))
+		re.Empty(len(resp.RecoveryPlan.Demotes))
 		re.Nil(resp.RecoveryPlan.ForceLeader)
 		re.Equal(uint64(1), resp.RecoveryPlan.Step)
 		applyRecoveryPlan(re, storeID, reports, resp)
@@ -260,8 +260,8 @@ func TestFailed(t *testing.T) {
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
-		re.Equal(0, len(resp.RecoveryPlan.Creates))
-		re.Equal(0, len(resp.RecoveryPlan.Demotes))
+		re.Empty(len(resp.RecoveryPlan.Creates))
+		re.Empty(len(resp.RecoveryPlan.Demotes))
 		re.Nil(resp.RecoveryPlan.ForceLeader)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
@@ -564,7 +564,7 @@ func TestOneLearner(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(len(report.PeerReports))
 		}
 	}
 }
@@ -988,7 +988,7 @@ func TestJointState(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(len(report.PeerReports))
 		}
 	}
 }
@@ -1094,7 +1094,7 @@ func TestExitForceLeader(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(len(report.PeerReports))
 		}
 	}
 }
@@ -1211,8 +1211,8 @@ func TestOnHealthyRegions(t *testing.T) {
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
-		re.Equal(0, len(resp.RecoveryPlan.Creates))
-		re.Equal(0, len(resp.RecoveryPlan.Demotes))
+		re.Empty(len(resp.RecoveryPlan.Creates))
+		re.Empty(len(resp.RecoveryPlan.Demotes))
 		re.Nil(resp.RecoveryPlan.ForceLeader)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
@@ -1322,7 +1322,7 @@ func TestCreateEmptyRegion(t *testing.T) {
 		if expect, ok := expects[storeID]; ok {
 			re.Equal(expect.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(len(report.PeerReports))
 		}
 	}
 }
@@ -1429,7 +1429,7 @@ func TestRangeOverlap1(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(len(report.PeerReports))
 		}
 	}
 }

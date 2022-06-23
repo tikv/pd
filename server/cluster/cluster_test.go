@@ -58,7 +58,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	regions := newTestRegions(n, n, np)
 
 	for _, region := range regions {
-		re.Nil(cluster.putRegion(region))
+		re.NoError(cluster.putRegion(region))
 	}
 	re.Equal(int(n), cluster.core.Regions.GetRegionCount())
 
@@ -80,7 +80,6 @@ func TestStoreHeartbeat(t *testing.T) {
 
 		s := cluster.GetStore(store.GetID())
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
-
 		re.Equal(storeStats, s.GetStoreStats())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
@@ -122,9 +121,9 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
-	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
-	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
-	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats := cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Len(storeStats[1], 1)
@@ -135,7 +134,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[statistics.RegionReadKeys])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[statistics.RegionReadQuery])
 	// After cold heartbeat, we won't find region 1 peer in regionStats
-	re.Nil(cluster.HandleStoreHeartbeat(coldHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	re.Len(storeStats[1], 0)
@@ -465,7 +464,7 @@ func TestRemovingProcess(t *testing.T) {
 		}
 		re.NoError(cluster.putRegion(region))
 	}
-	re.Equal(20, len(regionInStore1))
+	re.Len(len(regionInStore1), 20)
 	cluster.progressManager = progress.NewManager()
 	cluster.RemoveStore(1, false)
 	cluster.checkStores()
@@ -1155,7 +1154,7 @@ func TestHeartbeatSplit(t *testing.T) {
 	checkRegion(re, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, q) is missing before r3's heartbeat.
 	re.Nil(cluster.GetRegionByKey([]byte("n")))
-	re.Nil(cluster.processRegionHeartbeat(region3))
+	re.NoError(cluster.processRegionHeartbeat(region3))
 	checkRegion(re, cluster.GetRegionByKey([]byte("n")), region3)
 }
 
