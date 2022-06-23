@@ -179,7 +179,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 
 		filters := []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
 			filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore),
 		}
 		stores := cluster.GetStores()

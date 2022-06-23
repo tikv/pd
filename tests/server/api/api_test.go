@@ -507,7 +507,7 @@ func TestRemovingProgress(t *testing.T) {
 
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leader.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -624,7 +624,7 @@ func TestPreparingProgress(t *testing.T) {
 
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leader.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),

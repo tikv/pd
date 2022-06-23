@@ -78,7 +78,7 @@ func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLoca
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewGrpcClientWithTestify(re, cluster.GetServer(pdName).GetAddr())
+		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 	for _, dcLocation := range dcLocationConfig {
 		req := &pdpb.TsoRequest{

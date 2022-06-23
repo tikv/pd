@@ -43,9 +43,9 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 }
 
 // CheckStoresInfo is used to check the test results.
-// CheckStoresInfo will not check Store.State because this field has been omitted pdctl output
+// CheckStoresInfo will not check Store.State because this field has been omitted pd-ctl output
 func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*api.StoreInfo) {
-	re.Equal(len(want), len(stores))
+	re.Len(stores, len(want))
 	mapWant := make(map[uint64]*api.StoreInfo)
 	for _, s := range want {
 		if _, ok := mapWant[s.Store.Id]; !ok {
@@ -70,7 +70,7 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 
 // CheckRegionInfo is used to check the test results.
 func CheckRegionInfo(re *require.Assertions, output *api.RegionInfo, expected *core.RegionInfo) {
-	region := api.NewRegionInfo(expected)
+	region := api.NewAPIRegionInfo(expected)
 	output.Adjust()
 	re.Equal(region, output)
 }
@@ -124,9 +124,10 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 }
 
 func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {
 		re.FailNow("should be nil")
-	})
+	}
 	checker.IsNil = func(obtained interface{}) {
 		re.Nil(obtained)
 	}

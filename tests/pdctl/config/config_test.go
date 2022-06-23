@@ -761,7 +761,7 @@ func TestPDServerConfig(t *testing.T) {
 }
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
-	re.Equal(len(a), len(b))
+	re.Len(b, len(a))
 	for i := 0; i < len(a); i++ {
 		assertBundle(re, a[i], b[i])
 	}
@@ -771,7 +771,7 @@ func assertBundle(re *require.Assertions, a, b placement.GroupBundle) {
 	re.Equal(a.ID, b.ID)
 	re.Equal(a.Index, b.Index)
 	re.Equal(a.Override, b.Override)
-	re.Equal(len(a.Rules), len(b.Rules))
+	re.Len(b.Rules, len(a.Rules))
 	for i := 0; i < len(a.Rules); i++ {
 		assertRule(re, a.Rules[i], b.Rules[i])
 	}

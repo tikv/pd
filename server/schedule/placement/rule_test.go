@@ -54,7 +54,7 @@ func TestPrepareRulesForApply(t *testing.T) {
 	sortRules(rules)
 	rules = prepareRulesForApply(rules)
 
-	re.Equal(len(expected), len(rules))
+	re.Len(rules, len(expected))
 	for i := range rules {
 		re.Equal(expected[i], rules[i].Key())
 	}

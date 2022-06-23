@@ -22,20 +22,14 @@ type Checker struct {
 }
 
 // NewChecker creates Checker with FailNow function.
-func NewChecker(failNow func()) *Checker {
-	return &Checker{
-		FailNow: failNow,
-	}
-}
-
-func (c *Checker) failNow() {
-	c.FailNow()
+func NewChecker() *Checker {
+	return &Checker{}
 }
 
 // AssertNil calls the injected IsNil assertion.
 func (c *Checker) AssertNil(obtained interface{}) {
 	if c.IsNil == nil {
-		c.failNow()
+		c.FailNow()
 		return
 	}
 	c.IsNil(obtained)

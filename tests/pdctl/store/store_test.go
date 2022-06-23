@@ -17,7 +17,6 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -101,7 +100,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal(false, strings.Contains(string(output), "\"state\":"))
+	re.NotContains(string(output), "\"state\":")
 	storesInfo = new(api.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 

@@ -216,7 +216,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIds()),
+		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIDs()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
 		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.GetOpts()),
 		filter.NewSpecialUseFilter(s.GetName()),

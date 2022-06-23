@@ -70,7 +70,7 @@ func (suite *tsoConsistencyTestSuite) TestNormalGlobalTSO() {
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(suite.Require(), leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(suite.Require(), leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
@@ -143,10 +143,10 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClientWithTestify(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClientWithTestify(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -218,10 +218,10 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClientWithTestify(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClientWithTestify(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -250,10 +250,10 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClientWithTestify(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClientWithTestify(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -311,7 +311,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	leaderCli := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
+	leaderCli := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
 		Count:      tsoCount,
@@ -352,7 +352,7 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewGrpcClientWithTestify(re, cluster.GetServer(pdName).GetAddr())
+		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	var wg sync.WaitGroup
@@ -412,7 +412,7 @@ func TestFallbackTSOConsistency(t *testing.T) {
 	cluster.WaitLeader()
 
 	server := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, server.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, server.GetAddr())
 	svr := server.GetServer()
 	svr.Close()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/fallBackSync"))

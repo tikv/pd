@@ -45,7 +45,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	expectBool := true
 	o.setEnableTSOFollowerProxy(expectBool)
 	// Check the value changing notification.
-	testutil.WaitUntil(t, func() bool {
+	testutil.Eventually(re, func() bool {
 		<-o.enableTSOFollowerProxyCh
 		return true
 	})

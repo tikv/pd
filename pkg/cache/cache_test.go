@@ -355,7 +355,7 @@ func TestPriorityQueue(t *testing.T) {
 	// case4 remove all element
 	pq.Remove(uint64(2))
 	re.Equal(0, pq.Len())
-	re.Len(pq.items, 0)
+	re.Empty(pq.items)
 	re.Nil(pq.Peek())
 	re.Nil(pq.Tail())
 }

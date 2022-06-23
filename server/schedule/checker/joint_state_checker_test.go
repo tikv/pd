@@ -132,8 +132,8 @@ func checkSteps(re *require.Assertions, op *operator.Operator, steps []operator.
 		switch obtain := op.Step(i).(type) {
 		case operator.ChangePeerV2Leave:
 			expect := steps[i].(operator.ChangePeerV2Leave)
-			re.Equal(len(expect.PromoteLearners), len(obtain.PromoteLearners))
-			re.Equal(len(expect.DemoteVoters), len(obtain.DemoteVoters))
+			re.Len(obtain.PromoteLearners, len(expect.PromoteLearners))
+			re.Len(obtain.DemoteVoters, len(expect.DemoteVoters))
 			for j, p := range expect.PromoteLearners {
 				re.Equal(p.ToStore, obtain.PromoteLearners[j].ToStore)
 			}
