@@ -464,7 +464,7 @@ func TestRemovingProcess(t *testing.T) {
 		}
 		re.NoError(cluster.putRegion(region))
 	}
-	re.Len(len(regionInStore1), 20)
+	re.Len(regionInStore1, 20)
 	cluster.progressManager = progress.NewManager()
 	cluster.RemoveStore(1, false)
 	cluster.checkStores()

@@ -402,7 +402,7 @@ func TestCheckerIsBusy(t *testing.T) {
 				if regionID%2 == 1 {
 					ops, err := operator.CreateMergeRegionOperator("merge-region", co.cluster, tc.GetRegion(regionID), tc.GetRegion(regionID-1), operator.OpMerge)
 					re.NoError(err)
-					re.Len(co.opController.AddWaitingOperator(ops...), len(ops))
+					re.Len(ops, co.opController.AddWaitingOperator(ops...))
 				}
 			}
 		}
