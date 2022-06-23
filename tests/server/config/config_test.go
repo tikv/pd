@@ -40,11 +40,10 @@ func TestRateLimitConfigReload(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 3)
-	defer cluster.Destroy()
 	re.NoError(err)
+	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-
 	leader := cluster.GetServer(cluster.GetLeader())
 
 	re.Empty(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig)
