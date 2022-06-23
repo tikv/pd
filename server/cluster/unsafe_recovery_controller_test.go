@@ -795,7 +795,7 @@ func TestUninitializedPeer(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(report.PeerReports)
 		}
 	}
 }
@@ -1523,7 +1523,7 @@ func TestRangeOverlap2(t *testing.T) {
 		if result, ok := expects[storeID]; ok {
 			re.Equal(result.PeerReports, report.PeerReports)
 		} else {
-			re.Equal(0, len(report.PeerReports))
+			re.Empty(report.PeerReports)
 		}
 	}
 }
