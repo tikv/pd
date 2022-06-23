@@ -110,7 +110,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sc.Schedule(tc)
+		sc.Schedule(tc, false)
 	}
 }
 
@@ -121,7 +121,7 @@ func BenchmarkLabel(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sc.Schedule(tc)
+		sc.Schedule(tc, false)
 	}
 }
 
@@ -132,7 +132,7 @@ func BenchmarkNoLabel(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sc.Schedule(tc)
+		sc.Schedule(tc, false)
 	}
 }
 
@@ -143,6 +143,6 @@ func BenchmarkTombStore(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		sc.Schedule(tc)
+		sc.Schedule(tc, false)
 	}
 }

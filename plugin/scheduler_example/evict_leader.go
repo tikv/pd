@@ -212,7 +212,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -236,7 +236,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		ops = append(ops, op)
 	}
 
-	return ops
+	return ops, nil
 }
 
 type evictLeaderHandler struct {

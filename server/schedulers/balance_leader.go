@@ -342,7 +342,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	batch := l.conf.Batch
@@ -369,7 +369,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result
+					return result, nil
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
 			}
@@ -380,14 +380,14 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result
+					return result, nil
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 	}
 	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
-	return result
+	return result, nil
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,
