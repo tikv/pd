@@ -255,9 +255,9 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {

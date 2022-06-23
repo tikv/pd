@@ -230,7 +230,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -252,7 +252,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		ops = append(ops, op)
 	}
 
-	return ops
+	return ops, nil
 }
 
 type grantLeaderHandler struct {

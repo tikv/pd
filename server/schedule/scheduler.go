@@ -40,7 +40,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster) []*operator.Operator
+	Schedule(cluster Cluster, dryRun bool) ([]*operator.Operator, []Plan)
 	IsScheduleAllowed(cluster Cluster) bool
 }
 

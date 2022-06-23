@@ -169,7 +169,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
 
@@ -184,10 +184,10 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 		} else {
-			return s.schedulerEvictLeader(cluster)
+			return s.schedulerEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
-		return ops
+		return ops, nil
 	}
 
 	var slowStore *core.StoreInfo
@@ -200,14 +200,14 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
-				return ops
+				return ops, nil
 			}
 			slowStore = store
 		}
 	}
 
 	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
-		return ops
+		return ops, nil
 	}
 
 	// If there is only one slow store, evict leaders from that store.
@@ -216,9 +216,9 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster) []*operator
 	err := s.prepareEvictLeader(cluster, slowStore.GetID())
 	if err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return ops
+		return ops, nil
 	}
-	return s.schedulerEvictLeader(cluster)
+	return s.schedulerEvictLeader(cluster), nil
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.

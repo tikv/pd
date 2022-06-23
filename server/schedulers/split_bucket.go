@@ -189,7 +189,7 @@ type splitBucketPlan struct {
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{
@@ -198,7 +198,7 @@ func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		hotBuckets:         cluster.BucketsStats(conf.Degree),
 		hotRegionSplitSize: cluster.GetOpts().GetMaxMovableHotPeerSize(),
 	}
-	return s.splitBucket(plan)
+	return s.splitBucket(plan), nil
 }
 
 func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Operator {
