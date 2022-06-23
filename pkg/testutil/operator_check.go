@@ -21,24 +21,24 @@ import (
 )
 
 // CheckAddPeer checks if the operator is to add peer on specified store.
-func CheckAddPeer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, storeID uint64) {
-	re.NotNil(op)
-	re.Equal(2, op.Len())
-	re.Equal(storeID, op.Step(0).(operator.AddLearner).ToStore)
-	re.IsType(operator.PromoteLearner{}, op.Step(1))
+func CheckAddPeer(c *check.C, op *operator.Operator, kind operator.OpKind, storeID uint64) {
+	c.Assert(op, check.NotNil)
+	c.Assert(op.Len(), check.Equals, 2)
+	c.Assert(op.Step(0).(operator.AddLearner).ToStore, check.Equals, storeID)
+	c.Assert(op.Step(1), check.FitsTypeOf, operator.PromoteLearner{})
 	kind |= operator.OpRegion
-	re.Equal(kind, op.Kind()&kind)
+	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 
 // CheckRemovePeer checks if the operator is to remove peer on specified store.
-func CheckRemovePeer(re *require.Assertions, op *operator.Operator, storeID uint64) {
-	re.NotNil(op)
+func CheckRemovePeer(c *check.C, op *operator.Operator, storeID uint64) {
+	c.Assert(op, check.NotNil)
 	if op.Len() == 1 {
-		re.Equal(storeID, op.Step(0).(operator.RemovePeer).FromStore)
+		c.Assert(op.Step(0).(operator.RemovePeer).FromStore, check.Equals, storeID)
 	} else {
-		re.Len(op.Len(), 2)
-		re.Equal(storeID, op.Step(0).(operator.TransferLeader).FromStore)
-		re.Equal(storeID, op.Step(1).(operator.RemovePeer).FromStore)
+		c.Assert(op.Len(), check.Equals, 2)
+		c.Assert(op.Step(0).(operator.TransferLeader).FromStore, check.Equals, storeID)
+		c.Assert(op.Step(1).(operator.RemovePeer).FromStore, check.Equals, storeID)
 	}
 }
 
