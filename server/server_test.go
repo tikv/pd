@@ -65,6 +65,9 @@ func (suite *leaderServerTestSuite) mustWaitLeader(svrs []*Server) *Server {
 
 func (suite *leaderServerTestSuite) checkerWithNilAssert() *assertutil.Checker {
 	checker := assertutil.NewChecker()
+	checker.FailNow = func() {
+		suite.FailNow("should be nil")
+	}
 	checker.IsNil = func(obtained interface{}) {
 		suite.Nil(obtained)
 	}
@@ -131,7 +134,6 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 	for i := 0; i < len(cfgs); i++ {
 		svr := <-ch
 		suite.NotNil(svr)
-
 		svrs = append(svrs, svr)
 	}
 	suite.mustWaitLeader(svrs)
