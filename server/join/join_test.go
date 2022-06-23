@@ -23,21 +23,10 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		re.FailNow("")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
-}
-
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(re))
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	defer testutil.CleanServer(cfg.DataDir)
 	cfg.Join = cfg.AdvertiseClientUrls
 	re.Error(PrepareJoinCluster(cfg))

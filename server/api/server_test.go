@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -78,7 +79,7 @@ var zapLogOnce sync.Once
 func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(checkerWithNilAssert(re), num)
+	cfgs := server.NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
