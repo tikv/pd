@@ -930,14 +930,14 @@ func TestPauseScheduler(t *testing.T) {
 	re.Error(err)
 	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
 	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
-	re.Equal(true, paused)
+	re.True(paused)
 	pausedAt, err := co.getPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
 	re.NoError(err)
 	resumeAt, err := co.getPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
 	re.NoError(err)
 	re.Equal(int64(60), resumeAt-pausedAt)
 	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
-	re.Equal(false, allowed)
+	re.False(allowed)
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {
