@@ -266,27 +266,23 @@ func newCandidateStores(stores []*core.StoreInfo, asc bool, getScore func(*core.
 
 func (cs *candidateStores) sortFunc() (less func(int, int) bool) {
 	less = func(i, j int) bool {
-		storei, storej := cs.stores[i], cs.stores[j]
-		return cs.sortFuncWithStores()(storei, storej)
+		scorei := cs.getScore(cs.stores[i])
+		scorej := cs.getScore(cs.stores[j])
+		return cs.less(cs.stores[i].GetID(), scorei, cs.stores[j].GetID(), scorej)
 	}
 	return less
 }
 
-func (cs *candidateStores) sortFuncWithStores() (less func(*core.StoreInfo, *core.StoreInfo) bool) {
-	less = func(storei, storej *core.StoreInfo) bool {
-		scorei := cs.getScore(storei)
-		scorej := cs.getScore(storej)
-		if typeutil.Float64Equal(scorei, scorej) {
-			// when the stores share the same score, returns the one with the bigger ID,
-			// Since we assume that the bigger storeID, the newer store(which would be scheduled as soon as possible).
-			return storei.GetID() > storej.GetID()
-		}
-		if cs.asc {
-			return scorei < scorej
-		}
-		return scorei > scorej
+func (cs *candidateStores) less(iID uint64, scorei float64, jID uint64, scorej float64) bool {
+	if typeutil.Float64Equal(scorei, scorej) {
+		// when the stores share the same score, returns the one with the bigger ID,
+		// Since we assume that the bigger storeID, the newer store(which would be scheduled as soon as possible).
+		return iID > jID
 	}
-	return less
+	if cs.asc {
+		return scorei < scorej
+	}
+	return scorei > scorej
 }
 
 // hasStore returns returns true when there are leftover stores.
@@ -303,8 +299,11 @@ func (cs *candidateStores) next() {
 }
 
 func (cs *candidateStores) binarySearch(store *core.StoreInfo) (index int) {
-	less := cs.sortFuncWithStores()
-	searchFunc := func(i int) bool { return !less(cs.stores[i], store) }
+	score := cs.getScore(store)
+	searchFunc := func(i int) bool {
+		curScore := cs.getScore(cs.stores[i])
+		return !cs.less(cs.stores[i].GetID(), curScore, store.GetID(), score)
+	}
 	return sort.Search(len(cs.stores)-1, searchFunc)
 }
 
@@ -325,11 +324,20 @@ func (cs *candidateStores) binarySearchStores(stores ...*core.StoreInfo) (offset
 // In general, it has very few swaps. In the worst case, the time complexity is O(n).
 func (cs *candidateStores) resortStoreWithPos(pos int) {
 	swapper := func(i, j int) { cs.stores[i], cs.stores[j] = cs.stores[j], cs.stores[i] }
-	less := cs.sortFunc()
-	for ; pos+1 < len(cs.stores) && !less(pos, pos+1); pos++ {
+	score := cs.getScore(cs.stores[pos])
+	storeID := cs.stores[pos].GetID()
+	for ; pos+1 < len(cs.stores); pos++ {
+		curScore := cs.getScore(cs.stores[pos+1])
+		if cs.less(storeID, score, cs.stores[pos+1].GetID(), curScore) {
+			break
+		}
 		swapper(pos, pos+1)
 	}
-	for ; pos > 1 && less(pos, pos-1); pos-- {
+	for ; pos > 1; pos-- {
+		curScore := cs.getScore(cs.stores[pos-1])
+		if !cs.less(storeID, score, cs.stores[pos-1].GetID(), curScore) {
+			break
+		}
 		swapper(pos, pos-1)
 	}
 }
