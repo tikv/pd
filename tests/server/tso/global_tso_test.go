@@ -82,7 +82,7 @@ func TestZeroTSOCount(t *testing.T) {
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
@@ -116,7 +116,7 @@ func TestRequestFollower(t *testing.T) {
 	}
 	re.NotNil(followerServer)
 
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, followerServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
@@ -161,7 +161,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	}
 	re.NotNil(nextLeaderServer)
 
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, nextLeaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),

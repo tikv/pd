@@ -18,38 +18,36 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
 
-var _ = Suite(&testHealthAPISuite{})
-
-type testHealthAPISuite struct{}
-
-func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealthy string) {
+func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
 	got := []Health{}
-	c.Assert(json.Unmarshal(body, &got), IsNil)
-	c.Assert(len(got), Equals, len(cfgs))
+	re.NoError(json.Unmarshal(body, &got))
+	re.Len(cfgs, len(got))
 
 	for _, h := range got {
 		for _, cfg := range cfgs {
 			if h.Name != cfg.Name {
 				continue
 			}
-			relaxEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
+			relaxEqualStings(re, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 		}
 		if h.Name == unhealthy {
-			c.Assert(h.Health, IsFalse)
+			re.False(h.Health)
 			continue
 		}
-		c.Assert(h.Health, IsTrue)
+		re.True(h.Health)
 	}
 }
 
-func (s *testHealthAPISuite) TestHealthSlice(c *C) {
-	cfgs, svrs, clean := mustNewCluster(c, 3)
+func TestHealthSlice(t *testing.T) {
+	re := require.New(t)
+	cfgs, svrs, clean := mustNewCluster(re, 3)
 	defer clean()
 	var leader, follow *server.Server
 
@@ -60,13 +58,13 @@ func (s *testHealthAPISuite) TestHealthSlice(c *C) {
 			follow = svr
 		}
 	}
-	mustBootstrapCluster(c, leader)
+	mustBootstrapCluster(re, leader)
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
 	follow.Close()
 	resp, err := testDialClient.Get(addr)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
-	checkSliceResponse(c, buf, cfgs, follow.GetConfig().Name)
+	re.NoError(err)
+	checkSliceResponse(re, buf, cfgs, follow.GetConfig().Name)
 }
