@@ -44,7 +44,7 @@ func NewDiagnosisCommand() *cobra.Command {
 // NewBalanceRegionDiagnoseCommand returns commands to diagnose balance-region scheduler.
 func NewBalanceRegionDiagnoseCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "balance-region <store_id>",
+		Use:   "balance-region-scheduler <store_id>",
 		Short: "diagnose balance-region scheduler",
 		Run:   diagnoseBalanceRegionCommandFunc,
 	}
@@ -61,6 +61,7 @@ func NewBalanceRegionDiagnosisResultCommand() *cobra.Command {
 		Short: "get balance-region scheduler diagnosis result",
 		Run:   getBalanceRegionDiagnosisResultCommandFunc,
 	}
+	c.Flags().String("detailed", "", "detailed diagnosis")
 	return c
 }
 
@@ -87,7 +88,7 @@ func getBalanceRegionDiagnosisResultCommandFunc(cmd *cobra.Command, args []strin
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	p := cmd.Name()
+	p := cmd.Parent().Name()
 	path := path.Join(schedulersPrefix, p, "diagnose", args[0])
 	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
 	if err != nil {
@@ -107,8 +108,8 @@ func convertDiagnosisOutput(content string, detailed bool) string {
 		return content
 	}
 	lines := make([]string, 0)
-	lines = append(lines, fmt.Sprintf("%s ————", result.SchedulerName))
-	lines = append(lines, fmt.Sprintf("\tStore %6d: %s", result.StoreID, result.Description))
+	lines = append(lines, fmt.Sprintf("%s :", result.SchedulerName))
+	lines = append(lines, fmt.Sprintf("\tStore %-6d: %s", result.StoreID, result.Description))
 	lines = append(lines, fmt.Sprintf("\t              %s", result.Reason))
 	if detailed {
 		lines = append(lines, fmt.Sprintf("\t              |%s|%s|%s|%s|", template("Step", 40), template("Failure Reason", 40), template("Ratio", 20), template("Sample Object", 30)))

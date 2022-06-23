@@ -17,6 +17,9 @@ package diagnosis
 import (
 	"context"
 	"fmt"
+
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 /**
@@ -85,12 +88,12 @@ func (s ScheduleStep) Description() string {
 	return ""
 }
 
-func (s ScheduleStep) Reason(reason string) string {
+func (s ScheduleStep) Reason(reason string, objectID uint64) string {
 	switch s {
 	case 0:
-		return "store-%d is filtered as source because of " + reason + "."
+		return fmt.Sprintf("store-%d is filtered as source because of "+reason+".", objectID)
 	case 1:
-		return "Most regions in store-%d are filtered because of " + reason + "."
+		return fmt.Sprintf("Most regions in store-%d are filtered because of "+reason+".", objectID)
 	case 2:
 		return "Most targets store are filtered because of " + reason + "."
 	case 3:
@@ -141,10 +144,16 @@ func (c *DiagnosisController) InitSchedule() {
 	c.currentStep = 0
 }
 
+func (c *DiagnosisController) Debug() {
+	log.Info("DiagnosisController Debug", zap.Int("currentStep", int(c.currentStep)), zap.Uint64("currentSource", c.currentSource), zap.Uint64("currentRegion", c.currentRegion), zap.Uint64("currentTarget", c.currentTarget))
+}
+
 func (c *DiagnosisController) CleanUpSchedule(success bool) {
 	if c.currentSource != 0 {
 		if record, ok := c.storeReaders[c.currentSource]; ok {
 			record.schedulable = success
+			_, ok2 := c.historyRecord[c.currentSource]
+			log.Info("CleanUpSchedule", zap.Int64("storeID", int64(c.currentSource)), zap.Bool("has history", ok2))
 			c.historyRecord[c.currentSource] = record
 			delete(c.storeReaders, c.currentSource)
 		}
@@ -161,6 +170,8 @@ func (c *DiagnosisController) DiagnoseStore(storeID uint64) {
 		storeID:       storeID,
 		stepRecorders: stepRecorders,
 	}
+	_, ok := c.historyRecord[storeID]
+	log.Info("DiagnoseStore", zap.Int64("storeID", int64(storeID)), zap.Bool("has history", ok))
 }
 
 func (c *DiagnosisController) GetAnalysisResult(storeID uint64) *DiagnosisResult {
@@ -244,7 +255,10 @@ func (a *DiagnosisAnalyzer) Schedulable() bool {
 }
 
 func (a *DiagnosisAnalyzer) GetFinalReason() string {
-	return a.stepRecorders[a.maxStep].GetMostReason().Reason
+	log.Info("GetFinalReason", zap.Int("maxStep", int(a.maxStep)), zap.Int("stepRecorders length", len(a.stepRecorders)))
+	recoder := a.stepRecorders[a.maxStep]
+	reason := recoder.GetMostReason()
+	return reason.Reason
 }
 
 func (a *DiagnosisAnalyzer) GetFinalStep() ScheduleStep {
@@ -257,7 +271,7 @@ func (a *DiagnosisAnalyzer) AnalysisResult(scope string) *DiagnosisResult {
 		description = fmt.Sprintf("%s can create scheduling operator at store-%d", scope, a.storeID)
 	} else {
 		description = fmt.Sprintf("%s can't create schedule operator from store-%d in %s.", scope, a.storeID, a.GetFinalStep().Name())
-		reason = fmt.Sprintf(a.maxStep.Reason(a.GetFinalReason()), a.storeID)
+		reason = a.maxStep.Reason(a.GetFinalReason(), a.storeID)
 	}
 	detailed := make([]*ReasonMetrics, 0)
 	for i, stepRecord := range a.stepRecorders {
@@ -321,7 +335,7 @@ func (r *DiagnosisRecoder) GetMostReason() (most *ReasonRecorder) {
 			most = recorder
 		}
 	}
-	return
+	return nil
 }
 
 func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonRecorder {

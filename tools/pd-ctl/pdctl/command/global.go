@@ -206,7 +206,6 @@ func doGet(endpoint, prefix, method string, resp *string, customHeader http.Head
 		method = http.MethodGet
 	}
 	var req *http.Request
-
 	req, err = http.NewRequest(method, url, b.body)
 	if err != nil {
 		return err

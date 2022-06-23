@@ -46,6 +46,7 @@ func GetRootCmd() *cobra.Command {
 
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
+		command.NewDiagnosisCommand(),
 		command.NewRegionCommand(),
 		command.NewStoreCommand(),
 		command.NewStoresCommand(),

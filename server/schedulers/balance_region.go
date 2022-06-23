@@ -159,6 +159,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	// source init
 	stores := cluster.GetStores()
 
+	s.DiagnosisController.Debug()
 	// source filter
 	stores = filter.SelectSourceStoresWithDiagnosis(stores, s.filters, opts, s.DiagnosisController)
 
@@ -192,6 +193,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	for _, plan.source = range stores {
 		s.DiagnosisController.SetObject(plan.SourceStoreID())
 		retryLimit := s.retryQuota.GetLimit(plan.source)
+		s.DiagnosisController.Debug()
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
@@ -218,7 +220,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-
+			s.DiagnosisController.Debug()
 			s.DiagnosisController.NextStep()
 			// ** step = 2
 			s.DiagnosisController.SetObject(plan.region.GetID())
@@ -252,13 +254,16 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		FilterTargetWithDiagnosis(plan.GetOpts(), s.DiagnosisController, filters...).
 		Sort(filter.RegionScoreComparer(plan.GetOpts()))
 
-	s.DiagnosisController.NextStep()
+	if len(candidates.Stores) != 0 {
+		s.DiagnosisController.NextStep()
+	}
 	// **step = 3
 	for _, plan.target = range candidates.Stores {
 		regionID := plan.region.GetID()
 		sourceID := plan.source.GetID()
 		targetID := plan.target.GetID()
 		s.DiagnosisController.SetObject(targetID)
+		s.DiagnosisController.Debug()
 		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !plan.shouldBalance(s.GetName()) {
@@ -287,7 +292,9 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
-	s.DiagnosisController.LastStep()
+	if len(candidates.Stores) != 0 {
+		s.DiagnosisController.LastStep()
+	}
 	// **step=2
 	return nil
 }
