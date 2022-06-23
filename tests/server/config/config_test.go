@@ -76,15 +76,9 @@ func TestRateLimitConfigReload(t *testing.T) {
 func mustWaitLeader(re *require.Assertions, svrs map[string]*tests.TestServer) *server.Server {
 	var leader *server.Server
 	testutil.Eventually(re, func() bool {
-<<<<<<< HEAD
-		for _, s := range svrs {
-			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
-				leader = s.GetServer()
-=======
 		for _, svr := range svrs {
 			if !svr.GetServer().IsClosed() && svr.GetServer().GetMember().IsLeader() {
 				leader = svr.GetServer()
->>>>>>> 2aa6049c691be21c67768ad9a74859891a6ac8b3
 				return true
 			}
 		}
