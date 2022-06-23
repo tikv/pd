@@ -590,7 +590,6 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 		// The Operator has finished, so no message should be sent
 		suite.Equal(4, stream.MsgLength())
 		suite.Nil(controller.GetOperator(1))
-
 		e := stream.Drain(4)
 		suite.NoError(e)
 	}
