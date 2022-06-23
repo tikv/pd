@@ -38,12 +38,12 @@ var dialClient = &http.Client{
 func TestRateLimitConfigReload(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 3)
+	defer cluster.Destroy()
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	defer cancel()
-	defer cluster.Destroy()
 
 	leader := cluster.GetServer(cluster.GetLeader())
 
@@ -61,7 +61,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	resp, err := dialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
-	re.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
+	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 
 	oldLeaderName := leader.GetServer().Name()
@@ -69,7 +69,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	mustWaitLeader(re, cluster.GetServers())
 	leader = cluster.GetServer(cluster.GetLeader())
 
-	re.Equal(true, leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
+	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 }
 
