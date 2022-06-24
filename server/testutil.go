@@ -122,13 +122,16 @@ func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
 func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 	var leader *Server
 	testutil.Eventually(re, func() bool {
-		for _, s := range svrs {
-			if !s.IsClosed() && s.member.IsLeader() {
-				leader = s
-				return true
+		for _, svr := range svrs {
+			// All servers' GetLeader should return the same leader.
+			if svr.GetLeader() == nil || (leader != nil && svr.GetLeader().GetMemberId() != leader.GetLeader().GetMemberId()) {
+				return false
+			}
+			if leader == nil && !svr.IsClosed() {
+				leader = svr
 			}
 		}
-		return false
+		return true
 	})
 	return leader
 }
