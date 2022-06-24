@@ -123,18 +123,11 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	source := filter.NewCandidates(coLocationStores).
-<<<<<<< HEAD
 		FilterSource(s.cluster.GetOpts(),
 			&filter.LongTermStateFilter{ActionScope: replicaCheckerName, MoveRegion: true},
 			&filter.TemporaryStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
-		Sort(isolationComparer).Top(isolationComparer).
-		Sort(filter.RegionScoreComparer(s.cluster.GetOpts())).Reverse().
-		PickFirst()
-=======
-		FilterSource(s.cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
->>>>>>> rleungx/change-schedule-interface
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0

@@ -1614,19 +1614,11 @@ func Test(t *testing.T) {
 	pendingFilter := filter.NewRegionPengdingFilter("test")
 	downFilter := filter.NewRegionDownFilter("test")
 	for i := uint64(0); i < n; i++ {
-<<<<<<< HEAD
 		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
-		c.Assert(region.GetLeader().GetStoreId(), Equals, i)
-
-		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
-		c.Assert(region.GetLeader().GetStoreId(), Not(Equals), i)
-=======
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.NotEqual(i, region.GetLeader().GetStoreId())
->>>>>>> rleungx/change-schedule-interface
 
 		re.NotNil(region.GetStorePeer(i))
 	}
@@ -1645,17 +1637,10 @@ func Test(t *testing.T) {
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-<<<<<<< HEAD
-		c.Assert(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter), IsNil)
+		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 	for i := uint64(0); i < n; i++ {
-		c.Assert(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter), IsNil)
-=======
-		re.Nil(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
-	}
-	for i := uint64(0); i < n; i++ {
-		re.Nil(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
->>>>>>> rleungx/change-schedule-interface
+		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 }
 
