@@ -146,7 +146,6 @@ dashboard-replace-distro-info:
 	rm -f pkg/dashboard/distro/distro_info.go
 	cp $(DASHBOARD_DISTRIBUTION_DIR)/distro_info.go pkg/dashboard/distro/distro_info.go
 
-<<<<<<< HEAD
 # Tools
 pd-ctl: export GO111MODULE=on
 pd-ctl:
@@ -163,84 +162,6 @@ pd-analysis:
 pd-heartbeat-bench: export GO111MODULE=on
 pd-heartbeat-bench:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
-=======
-.PHONY: swagger-spec dashboard-ui dashboard-replace-distro-info
-
-#### Static tools ####
-
-PD_PKG := github.com/tikv/pd
-PACKAGES := $(shell go list ./...)
-
-GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
-PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
-SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
-
-install-tools:
-	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.46.0
-	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
-
-.PHONY: install-tools
-
-#### Static checks ####
-
-check: install-tools static tidy check-plugin errdoc check-testing-t
-
-static: install-tools
-	@ echo "gofmt ..."
-	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
-	@ echo "golangci-lint ..."
-	@ golangci-lint run $(PACKAGE_DIRECTORIES)
-	@ echo "revive ..."
-	@ revive -formatter friendly -config revive.toml $(PACKAGES)
-
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd - > /dev/null; done
-
-tidy:
-	@ go mod tidy
-	git diff go.mod go.sum | cat
-	git diff --quiet go.mod go.sum
-	
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
-
-check-plugin:
-	@echo "checking plugin"
-	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
-
-errdoc: install-tools
-	@echo "generator errors.toml"
-	./scripts/check-errdoc.sh
-
-check-testing-t:
-	./scripts/check-testing-t.sh
-
-.PHONY: check static tidy check-plugin errdoc docker-build-test check-testing-t
-
-#### Test utils ####
-
-FAILPOINT_ENABLE  := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl enable)
-FAILPOINT_DISABLE := $$(find $$PWD/ -type d | grep -vE "\.git" | xargs failpoint-ctl disable)
-
-failpoint-enable: install-tools
-	# Converting failpoints...
-	@$(FAILPOINT_ENABLE)
-
-failpoint-disable: install-tools
-	# Restoring failpoints...
-	@$(FAILPOINT_DISABLE)
-
-.PHONY: failpoint-enable failpoint-disable
-
-#### Test ####
-
-PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
-TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
-                     sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
-BASIC_TEST_PKGS := $(filter-out $(PD_PKG)/tests%,$(TEST_PKGS))
-
-SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
-				$(filter-out .,$(shell find . -iname "Makefile" -exec dirname {} \;)))
->>>>>>> 2cced16d4 (Makefile: disable swagger server (#4934))
 
 test: install-go-tools
 	# testing all pkgs...
