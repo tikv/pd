@@ -180,10 +180,10 @@ func TestIsolationScore(t *testing.T) {
 		return peers
 	}
 
-	for _, tc := range testCases {
-		peers1, peers2 := makePeers(tc.peers1), makePeers(tc.peers2)
+	for _, testCase := range testCases {
+		peers1, peers2 := makePeers(testCase.peers1), makePeers(testCase.peers2)
 		score1 := isolationScore(peers1, []string{"zone", "rack", "host"})
 		score2 := isolationScore(peers2, []string{"zone", "rack", "host"})
-		tc.checker(score1, score2)
+		testCase.checker(score1, score2)
 	}
 }

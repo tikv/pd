@@ -588,7 +588,7 @@ func TestShouldRun(t *testing.T) {
 	re.False(co.shouldRun())
 	re.Equal(2, tc.core.Regions.GetStoreRegionCount(4))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -602,11 +602,11 @@ func TestShouldRun(t *testing.T) {
 		{7, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
 		re.NoError(tc.processRegionHeartbeat(nr))
-		re.Equal(t.shouldRun, co.shouldRun())
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
@@ -630,7 +630,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	re.False(co.shouldRun())
 	re.Equal(10, tc.core.Regions.GetStoreRegionCount(1))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -645,11 +645,11 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		{9, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
 		re.NoError(tc.processRegionHeartbeat(nr))
-		re.Equal(t.shouldRun, co.shouldRun())
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)

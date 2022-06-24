@@ -70,11 +70,11 @@ func TestTrim(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
+	for _, testCase := range testCases {
 		p := rc.beginPatch()
-		tc.ops(p)
+		testCase.ops(p)
 		p.trim()
-		re.Equal(tc.mutRules, p.mut.rules)
-		re.Equal(tc.mutGroups, p.mut.groups)
+		re.Equal(testCase.mutRules, p.mut.rules)
+		re.Equal(testCase.mutGroups, p.mut.groups)
 	}
 }

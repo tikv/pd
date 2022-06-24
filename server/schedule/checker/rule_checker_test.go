@@ -497,16 +497,16 @@ func (suite *ruleCheckerTestSuite) TestIssue3299() {
 		},
 	}
 
-	for _, t := range testCases {
+	for _, testCase := range testCases {
 		err := suite.ruleManager.SetRule(&placement.Rule{
 			GroupID:          "p",
 			ID:               "0",
 			Role:             placement.Follower,
 			Count:            1,
-			LabelConstraints: t.constraints,
+			LabelConstraints: testCase.constraints,
 		})
-		if t.err != "" {
-			suite.Regexp(t.err, err.Error())
+		if testCase.err != "" {
+			suite.Regexp(testCase.err, err.Error())
 		} else {
 			suite.NoError(err)
 		}

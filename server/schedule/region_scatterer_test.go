@@ -277,6 +277,7 @@ func TestScatterCheck(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		_, err := scatterer.Scatter(testCase.checkRegion, "")
 		if testCase.needFix {
@@ -323,6 +324,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
@@ -389,6 +391,7 @@ func TestScattersGroup(t *testing.T) {
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 		}
+		t.Log(testCase.name)
 		failures := map[uint64]error{}
 		if testCase.failure {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))

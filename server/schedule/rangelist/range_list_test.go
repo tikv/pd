@@ -98,9 +98,9 @@ func TestRangeList2(t *testing.T) {
 	}{
 		{"", 0}, {"a", 1}, {"abc", 1}, {"efg", 5}, {"z", 9},
 	}
-	for _, tc := range getDataByKeyCases {
-		i, data := rl.GetDataByKey([]byte(tc.key))
-		re.Equal(tc.pos, i)
+	for _, testCase := range getDataByKeyCases {
+		i, data := rl.GetDataByKey([]byte(testCase.key))
+		re.Equal(testCase.pos, i)
 		re.Equal(expectData[i], data)
 	}
 
@@ -111,9 +111,9 @@ func TestRangeList2(t *testing.T) {
 		{"", "", -1}, {"", "a", 0}, {"", "aa", -1},
 		{"b", "c", 2}, {"ef", "ex", 5}, {"e", "", -1},
 	}
-	for _, tc := range getDataCases {
-		i, data := rl.GetData([]byte(tc.start), []byte(tc.end))
-		re.Equal(tc.pos, i)
+	for _, testCase := range getDataCases {
+		i, data := rl.GetData([]byte(testCase.start), []byte(testCase.end))
+		re.Equal(testCase.pos, i)
 		if i >= 0 {
 			re.Equal(expectData[i], data)
 		}
@@ -127,7 +127,7 @@ func TestRangeList2(t *testing.T) {
 		{"a", "c", 2, 3},
 		{"cc", "fx", 4, 7},
 	}
-	for _, tc := range getSplitKeysCases {
-		re.Equal(expectKeys[tc.indexStart:tc.indexEnd], rl.GetSplitKeys([]byte(tc.start), []byte(tc.end)))
+	for _, testCase := range getSplitKeysCases {
+		re.Equal(expectKeys[testCase.indexStart:testCase.indexEnd], rl.GetSplitKeys([]byte(testCase.start), []byte(testCase.end)))
 	}
 }
