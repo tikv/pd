@@ -38,7 +38,7 @@ func TestProfTestSuite(t *testing.T) {
 func (suite *profTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, apiPrefix)

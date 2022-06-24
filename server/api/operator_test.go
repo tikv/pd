@@ -55,7 +55,7 @@ func (suite *operatorTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
@@ -178,7 +178,7 @@ func (suite *transferRegionOperatorTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)

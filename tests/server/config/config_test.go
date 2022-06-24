@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
@@ -65,23 +64,13 @@ func TestRateLimitConfigReload(t *testing.T) {
 
 	oldLeaderName := leader.GetServer().Name()
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
-	mustWaitLeader(re, cluster.GetServers())
+	var servers []*server.Server
+	for _, s := range cluster.GetServers() {
+		servers = append(servers, s.GetServer())
+	}
+	server.MustWaitLeader(re, servers)
 	leader = cluster.GetServer(cluster.GetLeader())
 
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
-}
-
-func mustWaitLeader(re *require.Assertions, svrs map[string]*tests.TestServer) *server.Server {
-	var leader *server.Server
-	testutil.Eventually(re, func() bool {
-		for _, svr := range svrs {
-			if !svr.GetServer().IsClosed() && svr.GetServer().GetMember().IsLeader() {
-				leader = svr.GetServer()
-				return true
-			}
-		}
-		return false
-	})
-	return leader
 }

@@ -695,7 +695,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	suite.mustWaitLeader(map[string]*server.Server{suite.srv.GetAddr(): suite.srv})
+	server.MustWaitLeader(re, []*server.Server{suite.srv})
 	suite.bootstrapServer(newHeader(suite.srv), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
@@ -726,19 +726,6 @@ func (suite *clientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
 	suite.cleanup()
-}
-
-func (suite *clientTestSuite) mustWaitLeader(svrs map[string]*server.Server) *server.Server {
-	for i := 0; i < 500; i++ {
-		for _, s := range svrs {
-			if !s.IsClosed() && s.GetMember().IsLeader() {
-				return s
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	suite.FailNow("no leader")
-	return nil
 }
 
 func newHeader(srv *server.Server) *pdpb.RequestHeader {

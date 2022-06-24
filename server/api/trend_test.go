@@ -31,7 +31,7 @@ func TestTrend(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)
 	defer cleanup()
-	mustWaitLeader(re, []*server.Server{svr})
+	server.MustWaitLeader(re, []*server.Server{svr})
 
 	mustBootstrapCluster(re, svr)
 	for i := 1; i <= 3; i++ {

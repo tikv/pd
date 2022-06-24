@@ -96,7 +96,7 @@ func TestRegionTestSuite(t *testing.T) {
 func (suite *regionTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
@@ -437,7 +437,7 @@ func TestGetRegionTestSuite(t *testing.T) {
 func (suite *getRegionTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
@@ -545,7 +545,7 @@ func TestGetRegionRangeHolesTestSuite(t *testing.T) {
 func (suite *getRegionRangeHolesTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 	mustBootstrapCluster(re, suite.svr)
@@ -594,7 +594,7 @@ func TestRegionsReplicatedTestSuite(t *testing.T) {
 func (suite *regionsReplicatedTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)

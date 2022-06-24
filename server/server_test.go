@@ -49,20 +49,6 @@ func TestLeaderServerTestSuite(t *testing.T) {
 	suite.Run(t, new(leaderServerTestSuite))
 }
 
-func (suite *leaderServerTestSuite) mustWaitLeader(svrs []*Server) *Server {
-	var leader *Server
-	testutil.Eventually(suite.Require(), func() bool {
-		for _, s := range svrs {
-			if !s.IsClosed() && s.member.IsLeader() {
-				leader = s
-				return true
-			}
-		}
-		return false
-	})
-	return leader
-}
-
 func (suite *leaderServerTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.svrs = make(map[string]*Server)
@@ -125,7 +111,7 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 		suite.NotNil(svr)
 		svrs = append(svrs, svr)
 	}
-	suite.mustWaitLeader(svrs)
+	MustWaitLeader(suite.Require(), svrs)
 
 	cleanup := func() {
 		for _, svr := range svrs {

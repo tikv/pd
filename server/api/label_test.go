@@ -119,7 +119,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
 	})
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
@@ -205,7 +205,7 @@ func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
 		cfg.Replication.StrictlyMatchLabel = true
 		cfg.Replication.EnablePlacementRules = false
 	})
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
 	addr := suite.svr.GetAddr()

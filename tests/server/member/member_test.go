@@ -315,7 +315,7 @@ func TestGetLeader(t *testing.T) {
 	go sendRequest(re, wg, done, cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
 
-	mustWaitLeader(re, []*server.Server{svr})
+	server.MustWaitLeader(re, []*server.Server{svr})
 
 	re.NotNil(svr.GetLeader())
 
@@ -344,18 +344,4 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func mustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Server {
-	var leader *server.Server
-	testutil.Eventually(re, func() bool {
-		for _, s := range svrs {
-			if !s.IsClosed() && s.GetMember().IsLeader() {
-				leader = s
-				return true
-			}
-		}
-		return false
-	})
-	return leader
 }

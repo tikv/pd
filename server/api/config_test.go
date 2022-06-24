@@ -44,7 +44,7 @@ func (suite *configTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.EnablePlacementRules = false
 	})
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)

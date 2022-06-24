@@ -106,7 +106,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	}
 	close(ch)
 	// wait etcd and http servers
-	mustWaitLeader(re, svrs)
+	server.MustWaitLeader(re, svrs)
 
 	// clean up
 	clean := func() {
@@ -120,23 +120,6 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	}
 
 	return cfgs, svrs, clean
-}
-
-func mustWaitLeader(re *require.Assertions, svrs []*server.Server) {
-	testutil.Eventually(re, func() bool {
-		var leader *pdpb.Member
-		for _, svr := range svrs {
-			l := svr.GetLeader()
-			// All servers' GetLeader should return the same leader.
-			if l == nil || (leader != nil && l.GetMemberId() != leader.GetMemberId()) {
-				return false
-			}
-			if leader == nil {
-				leader = l
-			}
-		}
-		return true
-	})
 }
 
 func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
@@ -164,7 +147,7 @@ func TestServiceTestSuite(t *testing.T) {
 func (suite *serviceTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)

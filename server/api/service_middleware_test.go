@@ -44,7 +44,7 @@ func (suite *auditMiddlewareTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.EnablePlacementRules = false
 	})
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
@@ -125,7 +125,7 @@ func TestRateLimitConfigTestSuite(t *testing.T) {
 func (suite *rateLimitConfigTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 	mustBootstrapCluster(re, suite.svr)
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", suite.svr.GetAddr(), apiPrefix)
 }

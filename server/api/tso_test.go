@@ -42,7 +42,7 @@ func (suite *tsoTestSuite) SetupSuite() {
 		cfg.EnableLocalTSO = true
 		cfg.Labels[config.ZoneLabel] = "dc-1"
 	})
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)

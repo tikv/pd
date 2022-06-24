@@ -98,7 +98,7 @@ func (suite *storeTestSuite) SetupSuite() {
 	// TODO: enable placmentrules
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
-	mustWaitLeader(re, []*server.Server{suite.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
