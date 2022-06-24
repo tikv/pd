@@ -17,7 +17,9 @@ package operator
 import (
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -56,6 +58,8 @@ type TransferLeader struct {
 	FromStore, ToStore uint64
 	// Multi-target transfer leader.
 	ToStores []uint64
+	Desc     string
+	once     sync.Once
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -69,12 +73,20 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
+	fromID := strconv.FormatUint(tl.FromStore, 10)
 	for _, storeID := range tl.ToStores {
 		if region.GetLeader().GetStoreId() == storeID {
+			targetID := strconv.FormatUint(storeID, 10)
+			transferDirectionCount.WithLabelValues(tl.Desc, fromID, targetID).Inc()
 			return true
 		}
 	}
-	return region.GetLeader().GetStoreId() == tl.ToStore
+	if region.GetLeader().GetStoreId() == tl.ToStore {
+		targetID := strconv.FormatUint(tl.ToStore, 10)
+		transferDirectionCount.WithLabelValues(tl.Desc, fromID, targetID).Inc()
+		return true
+	}
+	return false
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
@@ -119,6 +131,8 @@ func (tl TransferLeader) Timeout(start time.Time, regionSize int64) bool {
 type AddPeer struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	Desc            string
+	once            sync.Once
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -138,7 +152,14 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
-		return region.GetPendingVoter(peer.GetId()) == nil
+		if region.GetPendingLearner(peer.GetId()) == nil {
+			ap.once.Do(func() {
+				leaderID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
+				targetID := strconv.FormatUint(ap.ToStore, 10)
+				snapshotDirectionCounter.WithLabelValues(ap.Desc, leaderID, targetID).Inc()
+			})
+			return true
+		}
 	}
 	return false
 }
@@ -177,6 +198,8 @@ func (ap AddPeer) Timeout(start time.Time, regionSize int64) bool {
 type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	Desc            string
+	once            sync.Once
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -196,7 +219,14 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(peer.GetId()) == nil
+		if region.GetPendingLearner(peer.GetId()) == nil {
+			al.once.Do(func() {
+				leaderID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
+				targetID := strconv.FormatUint(al.ToStore, 10)
+				snapshotDirectionCounter.WithLabelValues(al.Desc, leaderID, targetID).Inc()
+			})
+			return true
+		}
 	}
 	return false
 }

@@ -34,9 +34,27 @@ var (
 			Name:      "operator_limit",
 			Help:      "Counter of operator meeting limit",
 		}, []string{"type", "name"})
+
+	snapshotDirectionCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "snapshot_direction",
+			Help:      "Counter of snapshot direction of balance related schedulers.",
+		}, []string{"type", "source", "target"})
+
+	transferDirectionCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "transfer_direction",
+			Help:      "Counter of transfer direction of balance related schedulers.",
+		}, []string{"type", "source", "target"})
 )
 
 func init() {
 	prometheus.MustRegister(operatorStepDuration)
 	prometheus.MustRegister(OperatorLimitCounter)
+	prometheus.MustRegister(snapshotDirectionCounter)
+	prometheus.MustRegister(transferDirectionCount)
 }
