@@ -166,7 +166,7 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 			defer wg.Done()
 			testutil.Eventually(re, func() bool {
 				return cluster.WaitAllocatorLeader(dc) == serName
-			}, testutil.WithWaitFor(time.Second*90), testutil.WithSleepInterval(time.Second))
+			}, testutil.WithWaitFor(time.Second*90), testutil.WithTickInterval(time.Second))
 		}(serverName, dcLocation)
 	}
 	wg.Wait()

@@ -1306,7 +1306,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(1*time.Second))
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
@@ -1323,5 +1323,5 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(1*time.Second))
 }

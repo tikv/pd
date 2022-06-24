@@ -19,72 +19,40 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
 
 const (
-	defaultWaitRetryTimes = 200
-	defaultSleepInterval  = time.Millisecond * 100
-	defaultWaitFor        = time.Second * 20
+	defaultWaitFor      = time.Second * 20
+	defaultTickInterval = time.Millisecond * 100
 )
 
-// CheckFunc is a condition checker that passed to WaitUntil. Its implementation
-// may call c.Fatal() to abort the test, or c.Log() to add more information.
-type CheckFunc func() bool
-
-// WaitOp represents available options when execute WaitUntil
+// WaitOp represents available options when execute Eventually.
 type WaitOp struct {
-	retryTimes    int
-	sleepInterval time.Duration
-	waitFor       time.Duration
+	waitFor      time.Duration
+	tickInterval time.Duration
 }
 
-// WaitOption configures WaitOp
+// WaitOption configures WaitOp.
 type WaitOption func(op *WaitOp)
 
-// WithRetryTimes specify the retry times
-func WithRetryTimes(retryTimes int) WaitOption {
-	return func(op *WaitOp) { op.retryTimes = retryTimes }
-}
-
-// WithSleepInterval specify the sleep duration
-func WithSleepInterval(sleep time.Duration) WaitOption {
-	return func(op *WaitOp) { op.sleepInterval = sleep }
-}
-
-// WithWaitFor specify the max wait for duration
+// WithWaitFor specify the max wait duration.
 func WithWaitFor(waitFor time.Duration) WaitOption {
 	return func(op *WaitOp) { op.waitFor = waitFor }
 }
 
-// WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
-// NOTICE: this function will be removed soon, please use `Eventually` instead.
-func WaitUntil(c *check.C, f CheckFunc, opts ...WaitOption) {
-	c.Log("wait start")
-	option := &WaitOp{
-		retryTimes:    defaultWaitRetryTimes,
-		sleepInterval: defaultSleepInterval,
-	}
-	for _, opt := range opts {
-		opt(option)
-	}
-	for i := 0; i < option.retryTimes; i++ {
-		if f() {
-			return
-		}
-		time.Sleep(option.sleepInterval)
-	}
-	c.Fatal("wait timeout")
+// WithTickInterval specify the tick interval to check the condition.
+func WithTickInterval(tickInterval time.Duration) WaitOption {
+	return func(op *WaitOp) { op.tickInterval = tickInterval }
 }
 
 // Eventually asserts that given condition will be met in a period of time.
 func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
 	option := &WaitOp{
-		waitFor:       defaultWaitFor,
-		sleepInterval: defaultSleepInterval,
+		waitFor:      defaultWaitFor,
+		tickInterval: defaultTickInterval,
 	}
 	for _, opt := range opts {
 		opt(option)
@@ -92,7 +60,7 @@ func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOptio
 	re.Eventually(
 		condition,
 		option.waitFor,
-		option.sleepInterval,
+		option.tickInterval,
 	)
 }
 

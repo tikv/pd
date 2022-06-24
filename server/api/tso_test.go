@@ -58,7 +58,7 @@ func (suite *tsoTestSuite) TestTransferAllocator() {
 		suite.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
 		_, err := suite.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
 		return err == nil
-	}, tu.WithRetryTimes(5), tu.WithSleepInterval(3*time.Second))
+	}, tu.WithWaitFor(time.Second*15), tu.WithTickInterval(3*time.Second))
 	addr := suite.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
 	err := tu.CheckPostJSON(testDialClient, addr, nil, tu.StatusOK(re))
 	suite.NoError(err)

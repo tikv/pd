@@ -199,7 +199,7 @@ func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old 
 			return false
 		}
 		return leader != old
-	}, testutil.WithWaitFor(time.Second*90), testutil.WithSleepInterval(time.Second))
+	}, testutil.WithWaitFor(time.Second*90), testutil.WithTickInterval(time.Second))
 	return leader
 }
 
