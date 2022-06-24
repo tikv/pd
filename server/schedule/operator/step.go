@@ -17,7 +17,6 @@ package operator
 import (
 	"bytes"
 	"fmt"
-	"go.uber.org/atomic"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -73,6 +73,9 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
+	if tl.finished.Load() {
+		return true
+	}
 	fromID := strconv.FormatUint(tl.FromStore, 10)
 	for _, storeID := range tl.ToStores {
 		if region.GetLeader().GetStoreId() == storeID {
@@ -151,6 +154,9 @@ func (ap AddPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
+	if ap.finished.Load() {
+		return true
+	}
 	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
 		if peer.GetId() != ap.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
@@ -218,6 +224,9 @@ func (al AddLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
+	if al.finished.Load() {
+		return true
+	}
 	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
 		if peer.GetId() != al.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
