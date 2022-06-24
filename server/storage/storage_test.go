@@ -381,10 +381,7 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 		}
 	}
 
-	if err := lb.Flush(); err != nil {
-		return err
-	}
-	return nil
+	return lb.Flush();
 }
 
 func benchmarkLoadRegions(n int, b *testing.B, ratio int) {
