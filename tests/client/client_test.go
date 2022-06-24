@@ -424,14 +424,14 @@ func TestCustomTimeout(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(1*time.Second))
+	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(time.Second))
 
 	start := time.Now()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
 	_, err = cli.GetAllStores(context.TODO())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
 	re.Error(err)
-	re.GreaterOrEqual(time.Since(start), 1*time.Second)
+	re.GreaterOrEqual(time.Since(start), time.Second)
 	re.Less(time.Since(start), 2*time.Second)
 }
 
@@ -1306,7 +1306,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(time.Second))
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
@@ -1323,5 +1323,5 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(time.Second))
 }
