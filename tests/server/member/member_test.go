@@ -42,17 +42,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		re.FailNow("should be nil")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
-}
-
 func TestMemberDelete(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -314,7 +303,7 @@ func TestGetLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(re))
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)

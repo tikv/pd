@@ -690,7 +690,7 @@ func TestClientTestSuite(t *testing.T) {
 func (suite *clientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(suite.checkerWithNilAssert())
+	suite.srv, suite.cleanup, err = server.NewTestServer(assertutil.CheckerWithNilAssert(re))
 	suite.NoError(err)
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
@@ -726,17 +726,6 @@ func (suite *clientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
 	suite.cleanup()
-}
-
-func (suite *clientTestSuite) checkerWithNilAssert() *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		suite.FailNow("should be nil")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		suite.Nil(obtained)
-	}
-	return checker
 }
 
 func (suite *clientTestSuite) mustWaitLeader(svrs map[string]*server.Server) *server.Server {

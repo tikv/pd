@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
@@ -121,15 +120,4 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 	err := cluster.HandleRegionHeartbeat(r)
 	re.NoError(err)
 	return r
-}
-
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		re.FailNow("should be nil")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
 }
