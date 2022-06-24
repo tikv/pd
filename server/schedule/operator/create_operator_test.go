@@ -874,6 +874,7 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 		},
 	}
 	for _, testCase := range testCases {
+		log.Info("TestCreateMoveRegionOperator", zap.String("name", testCase.name))
 		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers}, testCase.originPeers[0])
 		op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, testCase.targetPeerRoles)
 
@@ -1048,6 +1049,7 @@ func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	for _, testCase := range testCases {
+		log.Info("TestMoveRegionWithoutJointConsensus", zap.String("name", testCase.name))
 		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers}, testCase.originPeers[0])
 		op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, testCase.targetPeerRoles)
 
