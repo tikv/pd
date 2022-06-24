@@ -123,8 +123,10 @@ func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDs := make([]uint64, len(conf.StoreIDs))
+	copy(newStoreIDs, conf.StoreIDs)
 	return &grantHotRegionSchedulerConfig{
-		StoreIDs:      conf.StoreIDs,
+		StoreIDs:      newStoreIDs,
 		StoreLeaderID: conf.StoreLeaderID,
 	}
 }
@@ -267,10 +269,10 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
-	return s.dispatch(s.types[i], cluster)
+	return s.dispatch(s.types[i], cluster), nil
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
@@ -361,7 +363,7 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 	} else {
 		filters = append(filters, &filter.LongTermStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			&filter.TemporaryStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = s.conf.StoreIDs
 	}
 	for _, storeID := range candidate {

@@ -104,28 +104,28 @@ func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-		return nil
+		return nil, nil
 	}
 
 	newPeer := s.scheduleAddPeer(cluster, region, oldPeer)
 	if newPeer == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-new-peer").Inc()
-		return nil
+		return nil, nil
 	}
 
 	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-		return nil
+		return nil, nil
 	}
 	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	op.SetPriorityLevel(core.HighPriority)
-	return []*operator.Operator{op}
+	return []*operator.Operator{op}, nil
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
@@ -166,7 +166,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, regio
 		return nil
 	}
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store)
-	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIds())
+	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
 	target := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetOpts(), s.filters...).

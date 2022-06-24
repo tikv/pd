@@ -53,7 +53,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIds()),
+		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
 		filter.NewSpecialUseFilter(s.checkerName),
 		&filter.LongTermStateFilter{ActionScope: s.checkerName, MoveRegion: true},
@@ -71,13 +71,13 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetOpts(), filters...).
-		Sort(isolationComparer).Reverse().Top(isolationComparer). // greater isolation score is better
-		Sort(filter.RegionScoreComparer(s.cluster.GetOpts()))     // less region score is better
+		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
 		return 0, false
 	}
 	strictStateFilter := &filter.TemporaryStateFilter{ActionScope: s.checkerName, MoveRegion: true}
-	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), strictStateFilter).PickFirst() // the filter does not ignore temp states
+	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), strictStateFilter).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true) // less region score is better
 	if target == nil {
 		return 0, true // filter by temporary states
 	}
@@ -123,12 +123,18 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	source := filter.NewCandidates(coLocationStores).
+<<<<<<< HEAD
 		FilterSource(s.cluster.GetOpts(),
 			&filter.LongTermStateFilter{ActionScope: replicaCheckerName, MoveRegion: true},
 			&filter.TemporaryStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		Sort(isolationComparer).Top(isolationComparer).
 		Sort(filter.RegionScoreComparer(s.cluster.GetOpts())).Reverse().
 		PickFirst()
+=======
+		FilterSource(s.cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
+		KeepTheTopStores(isolationComparer, true).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
+>>>>>>> rleungx/change-schedule-interface
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0

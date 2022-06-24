@@ -50,7 +50,7 @@ func TestExpireRegionCache(t *testing.T) {
 	re.True(ok)
 	re.Equal(expV, v2.(string))
 
-	cache.PutWithTTL(11, "11", 1*time.Second)
+	cache.PutWithTTL(11, "11", time.Second)
 	time.Sleep(5 * time.Second)
 	k, v, success = cache.pop()
 	re.False(success)
@@ -58,7 +58,7 @@ func TestExpireRegionCache(t *testing.T) {
 	re.Nil(v)
 
 	// Test Get
-	cache.PutWithTTL(1, 1, 1*time.Second)
+	cache.PutWithTTL(1, 1, time.Second)
 	cache.PutWithTTL(2, "v2", 5*time.Second)
 	cache.PutWithTTL(3, 3.0, 5*time.Second)
 
@@ -355,7 +355,7 @@ func TestPriorityQueue(t *testing.T) {
 	// case4 remove all element
 	pq.Remove(uint64(2))
 	re.Equal(0, pq.Len())
-	re.Len(pq.items, 0)
+	re.Empty(pq.items)
 	re.Nil(pq.Peek())
 	re.Nil(pq.Tail())
 }

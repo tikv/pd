@@ -127,10 +127,10 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) 
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
-	return s.dispatch(s.types[i], cluster)
+	return s.dispatch(s.types[i], cluster), nil
 }
 
 func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
@@ -180,7 +180,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 		filters := []filter.Filter{
 			&filter.LongTermStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 			&filter.TemporaryStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()),
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
 			filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore),
 		}
 		stores := cluster.GetStores()

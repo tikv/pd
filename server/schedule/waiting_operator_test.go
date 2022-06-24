@@ -15,24 +15,23 @@
 package schedule
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
-var _ = Suite(&testWaitingOperatorSuite{})
-
-type testWaitingOperatorSuite struct{}
-
-func (s *testWaitingOperatorSuite) TestRandBuckets(c *C) {
+func TestRandBuckets(t *testing.T) {
+	re := require.New(t)
 	rb := NewRandBuckets()
 	addOperators(rb)
 	for i := 0; i < 3; i++ {
 		op := rb.GetOperator()
-		c.Assert(op, NotNil)
+		re.NotNil(op)
 	}
-	c.Assert(rb.GetOperator(), IsNil)
+	re.Nil(rb.GetOperator())
 }
 
 func addOperators(wop WaitingOperator) {
@@ -52,13 +51,15 @@ func addOperators(wop WaitingOperator) {
 	wop.PutOperator(op)
 }
 
-func (s *testWaitingOperatorSuite) TestListOperator(c *C) {
+func TestListOperator(t *testing.T) {
+	re := require.New(t)
 	rb := NewRandBuckets()
 	addOperators(rb)
-	c.Assert(rb.ListOperator(), HasLen, 3)
+	re.Len(rb.ListOperator(), 3)
 }
 
-func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
+func TestRandomBucketsWithMergeRegion(t *testing.T) {
+	re := require.New(t)
 	rb := NewRandBuckets()
 	descs := []string{"merge-region", "admin-merge-region", "random-merge"}
 	for j := 0; j < 100; j++ {
@@ -105,8 +106,8 @@ func (s *testWaitingOperatorSuite) TestRandomBucketsWithMergeRegion(c *C) {
 
 		for i := 0; i < 2; i++ {
 			op := rb.GetOperator()
-			c.Assert(op, NotNil)
+			re.NotNil(op)
 		}
-		c.Assert(rb.GetOperator(), IsNil)
+		re.Nil(rb.GetOperator())
 	}
 }

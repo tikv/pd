@@ -103,8 +103,12 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
+	for k, v := range conf.StoreIDWithRanges {
+		newStoreIDWithRanges[k] = v
+	}
 	return &grantLeaderSchedulerConfig{
-		StoreIDWithRanges: conf.StoreIDWithRanges,
+		StoreIDWithRanges: newStoreIDWithRanges,
 	}
 }
 
@@ -227,7 +231,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -251,7 +255,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		ops = append(ops, op)
 	}
 
-	return ops
+	return ops, nil
 }
 
 type grantLeaderHandler struct {

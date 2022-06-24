@@ -20,28 +20,18 @@ import (
 	"net/http"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"go.uber.org/zap"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&globalTestSuite{})
-
-type globalTestSuite struct{}
-
-func (s *globalTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
-func (s *globalTestSuite) TestSendAndGetComponent(c *C) {
+func TestSendAndGetComponent(t *testing.T) {
+	re := require.New(t)
 	handler := func(ctx context.Context, s *server.Server) (http.Handler, server.ServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +40,7 @@ func (s *globalTestSuite) TestSendAndGetComponent(c *C) {
 				log.Info("header", zap.String("key", k))
 			}
 			log.Info("component", zap.String("component", component))
-			c.Assert(component, Equals, "pdctl")
+			re.Equal("pdctl", component)
 			fmt.Fprint(w, component)
 		})
 		info := server.ServiceGroup{
@@ -58,12 +48,12 @@ func (s *globalTestSuite) TestSendAndGetComponent(c *C) {
 		}
 		return mux, info, nil
 	}
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(c))
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := server.CreateServer(ctx, cfg, handler)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = svr.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	pdAddr := svr.GetAddr()
 	defer func() {
 		cancel()
@@ -74,6 +64,6 @@ func (s *globalTestSuite) TestSendAndGetComponent(c *C) {
 	cmd := cmd.GetRootCmd()
 	args := []string{"-u", pdAddr, "health"}
 	output, err := ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	c.Assert(string(output), Equals, "pdctl\n")
+	re.NoError(err)
+	re.Equal("pdctl\n", string(output))
 }

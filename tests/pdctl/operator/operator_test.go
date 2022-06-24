@@ -21,9 +21,8 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -31,35 +30,26 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&operatorTestSuite{})
-
-type operatorTestSuite struct{}
-
-func (s *operatorTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
-func (s *operatorTestSuite) TestOperator(c *C) {
+func TestOperator(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var err error
-	var t time.Time
-	t = t.Add(time.Hour)
+	var start time.Time
+	start = start.Add(time.Hour)
 	cluster, err := tests.NewTestCluster(ctx, 1,
 		// TODO: enable placementrules
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 2
 			conf.Replication.EnablePlacementRules = false
 		},
-		func(conf *config.Config, serverName string) { conf.Schedule.MaxStoreDownTime.Duration = time.Since(t) },
+		func(conf *config.Config, serverName string) {
+			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
+		},
 	)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
@@ -88,16 +78,16 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 
-	pdctl.MustPutRegion(c, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(c, cluster, 3, 2, []byte("b"), []byte("c"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("c"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
@@ -175,78 +165,80 @@ func (s *operatorTestSuite) TestOperator(c *C) {
 	}
 
 	for _, testCase := range testCases {
-		_, e := pdctl.ExecuteCommand(cmd, testCase.cmd...)
-		c.Assert(e, IsNil)
-		output, e := pdctl.ExecuteCommand(cmd, testCase.show...)
-		c.Assert(e, IsNil)
-		c.Assert(strings.Contains(string(output), testCase.expect), IsTrue)
-		t := time.Now()
-		_, e = pdctl.ExecuteCommand(cmd, testCase.reset...)
-		c.Assert(e, IsNil)
-		historyCmd := []string{"-u", pdAddr, "operator", "history", strconv.FormatInt(t.Unix(), 10)}
-		records, e := pdctl.ExecuteCommand(cmd, historyCmd...)
-		c.Assert(e, IsNil)
-		c.Assert(strings.Contains(string(records), "admin"), IsTrue)
+		_, err := pdctl.ExecuteCommand(cmd, testCase.cmd...)
+		re.NoError(err)
+		output, err := pdctl.ExecuteCommand(cmd, testCase.show...)
+		re.NoError(err)
+		re.Contains(string(output), testCase.expect)
+		start := time.Now()
+		_, err = pdctl.ExecuteCommand(cmd, testCase.reset...)
+		re.NoError(err)
+		historyCmd := []string{"-u", pdAddr, "operator", "history", strconv.FormatInt(start.Unix(), 10)}
+		records, err := pdctl.ExecuteCommand(cmd, historyCmd...)
+		re.NoError(err)
+		re.Contains(string(records), "admin")
 	}
 
 	// operator add merge-region <source_region_id> <target_region_id>
 	args := []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "show"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "merge region 1 into region 3"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "merge region 1 into region 3")
 	args = []string{"-u", pdAddr, "operator", "remove", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "remove", "3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "true")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "3")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "not supported"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "not supported")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "3")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "not match"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "not match")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-peer", "1", "2", "4")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "is unhealthy"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "is unhealthy")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "4", "follower")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "is unhealthy"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "is unhealthy")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "leader", "3", "follower")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "invalid")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "leader", "2", "follower", "3")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "invalid"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "invalid")
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "false")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	// operator add scatter-region <region_id>
 	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "add", "scatter-region", "1"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "show", "region"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
-	c.Assert(strings.Contains(string(output), "scatter-region"), IsTrue)
+	re.NoError(err)
+	re.Contains(string(output), "scatter-region")
 
 	// test echo, as the scatter region result is random, both region 1 and region 3 can be the region to be scattered
 	output1, _ := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
 	output2, _ := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "3")
-	c.Assert(strings.Contains(string(output1), "Success!") || strings.Contains(string(output2), "Success!"), IsTrue)
+	re.Condition(func() bool {
+		return strings.Contains(string(output1), "Success!") || strings.Contains(string(output2), "Success!")
+	})
 }

@@ -52,7 +52,7 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
-	op := sl.Schedule(tc)
+	op, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
 	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
 	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
@@ -81,15 +81,16 @@ func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
 
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
-	op := sl.Schedule(tc)
+	op, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
-	op = sl.Schedule(tc)
+	op, _ = sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
-	c.Assert(sl.Schedule(tc), HasLen, 0)
+	op, _ = sl.Schedule(tc, false)
+	c.Assert(op, HasLen, 0)
 }
 
 func (s *testEvictLeaderSuite) TestConfigClone(c *C) {

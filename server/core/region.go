@@ -229,6 +229,11 @@ func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
 	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
 }
 
+// IsOversized indicates whether the region is oversized.
+func (r *RegionInfo) IsOversized(maxSize int64, maxKeys int64) bool {
+	return r.GetApproximateSize() >= maxSize || r.GetApproximateKeys() >= maxKeys
+}
+
 // GetTerm returns the current term of the region
 func (r *RegionInfo) GetTerm() uint64 {
 	return r.term
@@ -344,8 +349,8 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetStoreIds returns a map indicate the region distributed.
-func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
+// GetStoreIDs returns a map indicate the region distributed.
+func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
 	stores := make(map[uint64]struct{}, len(peers))
 	for _, peer := range peers {

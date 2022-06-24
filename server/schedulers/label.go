@@ -99,7 +99,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
@@ -110,7 +110,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator
 	}
 	if len(rejectLeaderStores) == 0 {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-		return nil
+		return nil, nil
 	}
 	log.Debug("label scheduler reject leader store list", zap.Reflect("stores", rejectLeaderStores))
 	for id := range rejectLeaderStores {
@@ -139,12 +139,12 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator
 			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), []uint64{}, operator.OpLeader)
 			if err != nil {
 				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
-				return nil
+				return nil, nil
 			}
 			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-			return []*operator.Operator{op}
+			return []*operator.Operator{op}, nil
 		}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-	return nil
+	return nil, nil
 }

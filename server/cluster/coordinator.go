@@ -582,10 +582,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
 		stat, ok = status.AsPeer[storeID]
@@ -595,10 +595,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
 	}
 }
@@ -674,7 +674,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 
 	s.Stop()
-	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
+	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 
 	return nil
@@ -919,7 +919,7 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		}
 		cacheCluster := newCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if ops := s.Scheduler.Schedule(cacheCluster); len(ops) > 0 {
+		if ops, _ := s.Scheduler.Schedule(cacheCluster, false); len(ops) > 0 {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return ops
 		}

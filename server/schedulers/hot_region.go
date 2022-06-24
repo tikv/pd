@@ -150,9 +150,9 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster)
+	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster), nil
 }
 
 func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
@@ -729,7 +729,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		filters = []filter.Filter{
 			&filter.LongTermStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			&filter.TemporaryStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIds(), bs.cur.region.GetStoreIds()),
+			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
