@@ -30,17 +30,6 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		re.FailNow("should be nil")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
-}
-
 func TestGetVersion(t *testing.T) {
 	// TODO: enable it.
 	t.Skip("Temporary disable. See issue: https://github.com/tikv/pd/issues/1893")
@@ -51,7 +40,7 @@ func TestGetVersion(t *testing.T) {
 	temp, _ := os.Create(fname)
 	os.Stdout = temp
 
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(re))
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh

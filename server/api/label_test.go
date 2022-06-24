@@ -215,7 +215,7 @@ func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
 }
 
 func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
-	cases := []struct {
+	testCases := []struct {
 		store       *metapb.Store
 		valid       bool
 		expectError string
@@ -276,21 +276,21 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		},
 	}
 
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		_, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
-				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
-				State:   t.store.State,
-				Labels:  t.store.Labels,
-				Version: t.store.Version,
+				Id:      testCase.store.Id,
+				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				State:   testCase.store.State,
+				Labels:  testCase.store.Labels,
+				Version: testCase.store.Version,
 			},
 		})
-		if t.valid {
+		if testCase.valid {
 			suite.NoError(err)
 		} else {
-			suite.Contains(err.Error(), t.expectError)
+			suite.Contains(err.Error(), testCase.expectError)
 		}
 	}
 
@@ -300,21 +300,21 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		fmt.Sprintf("%s/config", suite.urlPrefix),
 		[]byte(`{"enable-placement-rules":"true"}`),
 		tu.StatusOK(suite.Require())))
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		_, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
-				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
-				State:   t.store.State,
-				Labels:  t.store.Labels,
-				Version: t.store.Version,
+				Id:      testCase.store.Id,
+				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				State:   testCase.store.State,
+				Labels:  testCase.store.Labels,
+				Version: testCase.store.Version,
 			},
 		})
-		if t.valid {
+		if testCase.valid {
 			suite.NoError(err)
 		} else {
-			suite.Contains(err.Error(), t.expectError)
+			suite.Contains(err.Error(), testCase.expectError)
 		}
 	}
 }

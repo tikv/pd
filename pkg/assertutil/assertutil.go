@@ -14,6 +14,8 @@
 
 package assertutil
 
+import "github.com/stretchr/testify/require"
+
 // Checker accepts the injection of check functions and context from test files.
 // Any check function should be set before usage unless the test will fail.
 type Checker struct {
@@ -21,9 +23,21 @@ type Checker struct {
 	FailNow func()
 }
 
-// NewChecker creates Checker with FailNow function.
+// NewChecker creates Checker.
 func NewChecker() *Checker {
 	return &Checker{}
+}
+
+// CheckerWithNilAssert creates Checker with nil assert function.
+func CheckerWithNilAssert(re *require.Assertions) *Checker {
+	checker := NewChecker()
+	checker.FailNow = func() {
+		re.FailNow("should be nil")
+	}
+	checker.IsNil = func(obtained interface{}) {
+		re.Nil(obtained)
+	}
+	return checker
 }
 
 // AssertNil calls the injected IsNil assertion.

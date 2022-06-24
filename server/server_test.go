@@ -63,22 +63,11 @@ func (suite *leaderServerTestSuite) mustWaitLeader(svrs []*Server) *Server {
 	return leader
 }
 
-func (suite *leaderServerTestSuite) checkerWithNilAssert() *assertutil.Checker {
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {
-		suite.FailNow("should be nil")
-	}
-	checker.IsNil = func(obtained interface{}) {
-		suite.Nil(obtained)
-	}
-	return checker
-}
-
 func (suite *leaderServerTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.svrs = make(map[string]*Server)
 
-	cfgs := NewTestMultiConfig(suite.checkerWithNilAssert(), 3)
+	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(suite.Require()), 3)
 
 	ch := make(chan *Server, 3)
 	for i := 0; i < 3; i++ {
@@ -153,7 +142,7 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 func (suite *leaderServerTestSuite) TestCheckClusterID() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfgs := NewTestMultiConfig(suite.checkerWithNilAssert(), 2)
+	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(suite.Require()), 2)
 	for i, cfg := range cfgs {
 		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
 		// Clean up before testing.
@@ -209,7 +198,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 		}
 		return mux, info, nil
 	}
-	cfg := NewTestSingleConfig(suite.checkerWithNilAssert())
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	suite.NoError(err)
@@ -248,7 +237,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 		}
 		return mux, info, nil
 	}
-	cfg := NewTestSingleConfig(suite.checkerWithNilAssert())
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	suite.NoError(err)
@@ -291,7 +280,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 		}
 		return mux, info, nil
 	}
-	cfg := NewTestSingleConfig(suite.checkerWithNilAssert())
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	suite.NoError(err)
@@ -334,7 +323,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 		}
 		return mux, info, nil
 	}
-	cfg := NewTestSingleConfig(suite.checkerWithNilAssert())
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	suite.NoError(err)
