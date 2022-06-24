@@ -21,34 +21,34 @@ import (
 )
 
 const (
-	defaultWaitFor       = time.Second * 20
-	defaultSleepInterval = time.Millisecond * 100
+	defaultWaitFor      = time.Second * 20
+	defaultTickInterval = time.Millisecond * 100
 )
 
 // WaitOp represents available options when execute Eventually.
 type WaitOp struct {
-	waitFor       time.Duration
-	sleepInterval time.Duration
+	waitFor      time.Duration
+	tickInterval time.Duration
 }
 
-// WaitOption configures WaitOp
+// WaitOption configures WaitOp.
 type WaitOption func(op *WaitOp)
 
-// WithSleepInterval specify the sleep duration
-func WithSleepInterval(sleep time.Duration) WaitOption {
-	return func(op *WaitOp) { op.sleepInterval = sleep }
-}
-
-// WithWaitFor specify the max wait for duration
+// WithWaitFor specify the max wait duration.
 func WithWaitFor(waitFor time.Duration) WaitOption {
 	return func(op *WaitOp) { op.waitFor = waitFor }
+}
+
+// WithTickInterval specify the tick interval to check the condition.
+func WithTickInterval(tickInterval time.Duration) WaitOption {
+	return func(op *WaitOp) { op.tickInterval = tickInterval }
 }
 
 // Eventually asserts that given condition will be met in a period of time.
 func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
 	option := &WaitOp{
-		waitFor:       defaultWaitFor,
-		sleepInterval: defaultSleepInterval,
+		waitFor:      defaultWaitFor,
+		tickInterval: defaultTickInterval,
 	}
 	for _, opt := range opts {
 		opt(option)
@@ -56,6 +56,6 @@ func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOptio
 	re.Eventually(
 		condition,
 		option.waitFor,
-		option.sleepInterval,
+		option.tickInterval,
 	)
 }

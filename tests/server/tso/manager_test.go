@@ -182,7 +182,7 @@ func TestNextLeaderKey(t *testing.T) {
 			cluster.CheckClusterDCLocation()
 			currName := cluster.WaitAllocatorLeader("dc-1")
 			return currName == name
-		}, testutil.WithSleepInterval(1*time.Second))
+		}, testutil.WithTickInterval(time.Second))
 		return
 	}
 }
