@@ -80,7 +80,7 @@ func TestRegionInfo(t *testing.T) {
 	r = r.Clone(WithEndKey([]byte{1}))
 	re.Regexp(".*EndKey Changed.*", DiffRegionKeyInfo(r, info))
 
-	stores := r.GetStoreIds()
+	stores := r.GetStoreIDs()
 	re.Len(stores, int(n))
 	for i := uint64(0); i < n; i++ {
 		_, ok := stores[i]

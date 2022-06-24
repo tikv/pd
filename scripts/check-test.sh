@@ -49,4 +49,12 @@ if [ "$res" ]; then
   exit 1
 fi
 
+res=$(grep -rn --include=\*_test.go -E "(re|suite|require)\.(Equal|NotEqual)\((t, )?(true|false)" . | sort -u)
+
+if [ "$res" ]; then
+  echo "following packages use the inefficient assert function: please replace require.Equal/NotEqual(true, xxx) with require.True/False"
+  echo "$res"
+  exit 1
+fi
+
 exit 0

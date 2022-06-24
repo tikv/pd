@@ -80,7 +80,7 @@ func TestBufferSize(t *testing.T) {
 	re.Equal("106", s)
 
 	histories := h2.RecordsFrom(uint64(1))
-	re.Len(histories, 0)
+	re.Empty(histories)
 	histories = h2.RecordsFrom(h2.firstIndex())
 	re.Len(histories, 100)
 	re.Equal(uint64(7), h2.firstIndex())

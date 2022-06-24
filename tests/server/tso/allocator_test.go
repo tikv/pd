@@ -21,10 +21,11 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/testutil"
@@ -33,23 +34,10 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-var _ = Suite(&testAllocatorSuite{})
-
-type testAllocatorSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testAllocatorSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testAllocatorSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-// Make sure we have the correct number of Local TSO Allocator leaders.
-func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
+func TestAllocatorLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// There will be three Local TSO Allocator leaders elected
 	dcLocationConfig := map[string]string{
 		"pd2": "dc-1",
@@ -57,19 +45,16 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 		"pd6": "leader", /* Test dc-location name is same as the special key */
 	}
 	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {
 		if zoneLabel, ok := dcLocationConfig[serverName]; ok {
 			conf.EnableLocalTSO = true
 			conf.Labels[config.ZoneLabel] = zoneLabel
 		}
 	})
+	re.NoError(err)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 	// To check whether we have enough Local TSO Allocator leaders
 	allAllocatorLeaders := make([]tso.Allocator, 0, dcLocationNum)
 	for _, server := range cluster.GetServers() {
@@ -80,7 +65,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 			tso.FilterUninitialized())
 		// One PD server will have at most three initialized Local TSO Allocators,
 		// which also means three allocator leaders
-		c.Assert(len(allocators), LessEqual, dcLocationNum)
+		re.LessOrEqual(len(allocators), dcLocationNum)
 		if len(allocators) == 0 {
 			continue
 		}
@@ -96,7 +81,7 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 	}
 	// At the end, we should have three initialized Local TSO Allocator,
 	// i.e., the Local TSO Allocator leaders for all dc-locations in testDCLocations
-	c.Assert(allAllocatorLeaders, HasLen, dcLocationNum)
+	re.Len(allAllocatorLeaders, dcLocationNum)
 	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
 	for _, allocator := range allAllocatorLeaders {
 		allocatorLeader, _ := allocator.(*tso.LocalTSOAllocator)
@@ -106,62 +91,63 @@ func (s *testAllocatorSuite) TestAllocatorLeader(c *C) {
 		// Filter out Global TSO Allocator
 		allocators := server.GetTSOAllocatorManager().GetAllocators(tso.FilterDCLocation(tso.GlobalDCLocation))
 		if _, ok := dcLocationConfig[server.GetServer().Name()]; !ok {
-			c.Assert(allocators, HasLen, 0)
+			re.Empty(allocators)
 			continue
 		}
-		c.Assert(allocators, HasLen, dcLocationNum)
+		re.Len(allocators, dcLocationNum)
 		for _, allocator := range allocators {
 			allocatorFollower, _ := allocator.(*tso.LocalTSOAllocator)
 			allocatorFollowerMemberID := allocatorFollower.GetAllocatorLeader().GetMemberId()
-			c.Assert(
+			re.True(
 				slice.AnyOf(
 					allocatorLeaderMemberIDs,
-					func(i int) bool { return allocatorLeaderMemberIDs[i] == allocatorFollowerMemberID }),
-				IsTrue)
+					func(i int) bool { return allocatorLeaderMemberIDs[i] == allocatorFollowerMemberID },
+				),
+			)
 		}
 	}
 }
 
-func (s *testAllocatorSuite) TestPriorityAndDifferentLocalTSO(c *C) {
+func TestPriorityAndDifferentLocalTSO(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
 		"pd3": "dc-3",
 	}
 	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
-
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
-	pd4, err := cluster.Join(s.ctx, func(conf *config.Config, serverName string) {
+	pd4, err := cluster.Join(ctx, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
-	c.Assert(err, IsNil)
-	err = pd4.Run()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(pd4.Run())
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	testutil.WaitUntil(c, func() bool {
-		leaderName := cluster.WaitAllocatorLeader("dc-4")
-		return leaderName != ""
-	})
+	re.NotEqual("", cluster.WaitAllocatorLeader(
+		"dc-4",
+		tests.WithRetryTimes(90), tests.WithWaitInterval(time.Second),
+	))
 
 	// Scatter the Local TSO Allocators to different servers
 	waitAllocatorPriorityCheck(cluster)
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	// Before the priority is checked, we may have allocators typology like this:
 	// pd1: dc-1, dc-2 and dc-3 allocator leader
@@ -178,10 +164,9 @@ func (s *testAllocatorSuite) TestPriorityAndDifferentLocalTSO(c *C) {
 	for serverName, dcLocation := range dcLocationConfig {
 		go func(serName, dc string) {
 			defer wg.Done()
-			testutil.WaitUntil(c, func() bool {
-				leaderName := cluster.WaitAllocatorLeader(dc)
-				return leaderName == serName
-			}, testutil.WithRetryTimes(12), testutil.WithSleepInterval(5*time.Second))
+			testutil.Eventually(re, func() bool {
+				return cluster.WaitAllocatorLeader(dc) == serName
+			}, testutil.WithWaitFor(time.Second*90), testutil.WithSleepInterval(time.Second))
 		}(serverName, dcLocation)
 	}
 	wg.Wait()
@@ -189,12 +174,12 @@ func (s *testAllocatorSuite) TestPriorityAndDifferentLocalTSO(c *C) {
 	for serverName, server := range cluster.GetServers() {
 		tsoAllocatorManager := server.GetTSOAllocatorManager()
 		localAllocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		for _, localAllocatorLeader := range localAllocatorLeaders {
-			s.testTSOSuffix(c, cluster, tsoAllocatorManager, localAllocatorLeader.GetDCLocation())
+			testTSOSuffix(re, cluster, tsoAllocatorManager, localAllocatorLeader.GetDCLocation())
 		}
 		if serverName == cluster.GetLeader() {
-			s.testTSOSuffix(c, cluster, tsoAllocatorManager, tso.GlobalDCLocation)
+			testTSOSuffix(re, cluster, tsoAllocatorManager, tso.GlobalDCLocation)
 		}
 	}
 }
@@ -211,29 +196,29 @@ func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
 	wg.Wait()
 }
 
-func (s *testAllocatorSuite) testTSOSuffix(c *C, cluster *tests.TestCluster, am *tso.AllocatorManager, dcLocation string) {
+func testTSOSuffix(re *require.Assertions, cluster *tests.TestCluster, am *tso.AllocatorManager, dcLocation string) {
 	suffixBits := am.GetSuffixBits()
-	c.Assert(suffixBits, Greater, 0)
+	re.Greater(suffixBits, 0)
 	var suffix int64
 	// The suffix of a Global TSO will always be 0
 	if dcLocation != tso.GlobalDCLocation {
 		suffixResp, err := etcdutil.EtcdKVGet(
 			cluster.GetEtcdClient(),
 			am.GetLocalTSOSuffixPath(dcLocation))
-		c.Assert(err, IsNil)
-		c.Assert(suffixResp.Kvs, HasLen, 1)
+		re.NoError(err)
+		re.Len(suffixResp.Kvs, 1)
 		suffix, err = strconv.ParseInt(string(suffixResp.Kvs[0].Value), 10, 64)
-		c.Assert(err, IsNil)
-		c.Assert(suffixBits, GreaterEqual, tso.CalSuffixBits(int32(suffix)))
+		re.NoError(err)
+		re.GreaterOrEqual(suffixBits, tso.CalSuffixBits(int32(suffix)))
 	}
 	allocator, err := am.GetAllocator(dcLocation)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	var tso pdpb.Timestamp
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		tso, err = allocator.GenerateTSO(1)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		return tso.GetPhysical() != 0
 	})
 	// Test whether the TSO has the right suffix
-	c.Assert(suffix, Equals, tso.Logical&((1<<suffixBits)-1))
+	re.Equal(suffix, tso.Logical&((1<<suffixBits)-1))
 }

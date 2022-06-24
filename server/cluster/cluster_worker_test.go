@@ -16,47 +16,41 @@ package cluster
 
 import (
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/core"
 	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 )
 
-var _ = Suite(&testClusterWorkerSuite{})
+func TestReportSplit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-type testClusterWorkerSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testClusterWorkerSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *testClusterWorkerSuite) SetUpTest(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: right, Right: left})
-	c.Assert(err, NotNil)
+	re.Error(err)
 }
 
-func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
+func TestReportBatchSplit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	_, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},
@@ -64,5 +58,5 @@ func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 		{Id: 3, StartKey: []byte("c"), EndKey: []byte("")},
 	}
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
-	c.Assert(err, IsNil)
+	re.NoError(err)
 }
