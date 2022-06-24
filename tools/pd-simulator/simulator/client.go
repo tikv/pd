@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -198,7 +199,8 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	defer wg.Done()
 	for {
 		select {
-		case region := <-c.reportRegionHeartbeatCh:
+		case r := <-c.reportRegionHeartbeatCh:
+			region := r.Clone()
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          c.requestHeader(),
 				Region:          region.GetMeta(),
@@ -263,8 +265,8 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	}
 	_, err = c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
-		Store:  store,
-		Region: region,
+		Store:  proto.Clone(store).(*metapb.Store),
+		Region: proto.Clone(region).(*metapb.Region),
 	})
 	if err != nil {
 		return err
@@ -276,7 +278,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
-		Store:  store,
+		Store:  proto.Clone(store).(*metapb.Store),
 	})
 	cancel()
 	if err != nil {
@@ -293,7 +295,7 @@ func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) err
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
-		Stats:  stats,
+		Stats:  proto.Clone(stats).(*pdpb.StoreStats),
 	})
 	cancel()
 	if err != nil {

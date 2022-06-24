@@ -102,8 +102,12 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
+	for k, v := range conf.StoreIDWithRanges {
+		newStoreIDWithRanges[k] = v
+	}
 	return &grantLeaderSchedulerConfig{
-		StoreIDWithRanges: conf.StoreIDWithRanges,
+		StoreIDWithRanges: newStoreIDWithRanges,
 	}
 }
 

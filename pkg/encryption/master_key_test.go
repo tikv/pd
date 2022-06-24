@@ -34,12 +34,12 @@ func TestPlaintextMasterKey(t *testing.T) {
 	masterKey, err := NewMasterKey(config, nil)
 	re.NoError(err)
 	re.NotNil(masterKey)
-	re.Len(masterKey.key, 0)
+	re.Empty(masterKey.key)
 
 	plaintext := "this is a plaintext"
 	ciphertext, iv, err := masterKey.Encrypt([]byte(plaintext))
 	re.NoError(err)
-	re.Len(iv, 0)
+	re.Empty(iv)
 	re.Equal(plaintext, string(ciphertext))
 
 	plaintext2, err := masterKey.Decrypt(ciphertext, iv)
@@ -99,8 +99,7 @@ func TestNewFileMasterKeyMissingPath(t *testing.T) {
 func TestNewFileMasterKeyMissingFile(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	dir, err := os.MkdirTemp("", "test_key_files")
-	re.NoError(err)
+	dir := t.TempDir()
 	path := dir + "/key"
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -109,15 +108,14 @@ func TestNewFileMasterKeyMissingFile(t *testing.T) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
+	_, err := NewMasterKey(config, nil)
 	re.Error(err)
 }
 
 func TestNewFileMasterKeyNotHexString(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	dir, err := os.MkdirTemp("", "test_key_files")
-	re.NoError(err)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -127,15 +125,14 @@ func TestNewFileMasterKeyNotHexString(t *testing.T) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
+	_, err := NewMasterKey(config, nil)
 	re.Error(err)
 }
 
 func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	dir, err := os.MkdirTemp("", "test_key_files")
-	re.NoError(err)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
 	config := &encryptionpb.MasterKey{
@@ -145,7 +142,7 @@ func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 			},
 		},
 	}
-	_, err = NewMasterKey(config, nil)
+	_, err := NewMasterKey(config, nil)
 	re.Error(err)
 }
 
@@ -153,8 +150,7 @@ func TestNewFileMasterKey(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
-	dir, err := os.MkdirTemp("", "test_key_files")
-	re.NoError(err)
+	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte(key), 0600)
 	config := &encryptionpb.MasterKey{

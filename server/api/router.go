@@ -72,15 +72,15 @@ func getFunctionName(f interface{}) string {
 }
 
 // The returned function is used as a lazy router to avoid the data race problem.
-// @title Placement Driver Core API
-// @version 1.0
-// @description This is placement driver.
-// @contact.name Placement Driver Support
-// @contact.url https://github.com/tikv/pd/issues
-// @contact.email info@pingcap.com
-// @license.name Apache 2.0
-// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
-// @BasePath /pd/api/v1
+// @title          Placement Driver Core API
+// @version        1.0
+// @description    This is placement driver.
+// @contact.name   Placement Driver Support
+// @contact.url    https://github.com/tikv/pd/issues
+// @contact.email  info@pingcap.com
+// @license.name   Apache 2.0
+// @license.url    http://www.apache.org/licenses/LICENSE-2.0.html
+// @BasePath       /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
 	registerPrefix := func(router *mux.Router, prefixPath string,
@@ -285,6 +285,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods("GET"))
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods("POST"), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/service-middleware/config/rate-limit", serviceMiddlewareHandler.SetRatelimitConfig, setMethods("POST"), setAuditBackend(localLog))
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods("POST"), setAuditBackend(localLog))

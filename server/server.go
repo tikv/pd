@@ -44,9 +44,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
@@ -145,9 +145,6 @@ type Server struct {
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
-
-	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock syncutil.Mutex
 
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
@@ -259,6 +256,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
+	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
@@ -404,7 +402,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	s.gcSafePointManager = gc.NewSafepointManager(s.storage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -982,6 +980,34 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 	return nil
 }
 
+// UpdateRateLimitConfig is used to update rate-limit config which will reserve old limiter-config
+func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+	cfg := s.GetServiceMiddlewareConfig()
+	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
+	for label, item := range cfg.LimiterConfig {
+		rateLimitCfg[label] = item
+	}
+	rateLimitCfg[label] = value
+	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
+}
+
+// UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
+func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = s.SetRateLimitConfig(*cfg)
+	}
+	return err
+}
+
 // GetRateLimitConfig gets the rate limit config information.
 func (s *Server) GetRateLimitConfig() *config.RateLimitConfig {
 	return s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
@@ -1225,6 +1251,16 @@ func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
+// IsInRateLimitAllowList returns whethis given service label is in allow lost
+func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
+	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
+}
+
+// UpdateServiceRateLimiter is used to update RateLimiter
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
+	return s.serviceRateLimiter.Update(serviceLabel, opts...)
+}
+
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 	s.cluster.Lock()
@@ -1373,20 +1409,20 @@ func (s *Server) campaignLeader() {
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
 		return
 	}
 	log.Info("initializing the global TSO allocator")
-	if err := alllocator.Initialize(0); err != nil {
+	if err := allocator.Initialize(0); err != nil {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
 	defer func() {
 		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 		failpoint.Inject("updateAfterResetTSO", func() {
-			if err = alllocator.UpdateTSO(); err != nil {
+			if err = allocator.UpdateTSO(); err != nil {
 				panic(err)
 			}
 		})
