@@ -17,34 +17,32 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-var _ = Suite(&testStatusAPISuite{})
-
-type testStatusAPISuite struct{}
-
-func checkStatusResponse(c *C, body []byte) {
+func checkStatusResponse(re *require.Assertions, body []byte) {
 	got := status{}
-	c.Assert(json.Unmarshal(body, &got), IsNil)
-	c.Assert(got.BuildTS, Equals, versioninfo.PDBuildTS)
-	c.Assert(got.GitHash, Equals, versioninfo.PDGitHash)
-	c.Assert(got.Version, Equals, versioninfo.PDReleaseVersion)
+	re.NoError(json.Unmarshal(body, &got))
+	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
+	re.Equal(versioninfo.PDGitHash, got.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, got.Version)
 }
 
-func (s *testStatusAPISuite) TestStatus(c *C) {
-	cfgs, _, clean := mustNewCluster(c, 3)
+func TestStatus(t *testing.T) {
+	re := require.New(t)
+	cfgs, _, clean := mustNewCluster(re, 3)
 	defer clean()
 
 	for _, cfg := range cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
 		resp, err := testDialClient.Get(addr)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		buf, err := io.ReadAll(resp.Body)
-		c.Assert(err, IsNil)
-		checkStatusResponse(c, buf)
+		re.NoError(err)
+		checkStatusResponse(re, buf)
 		resp.Body.Close()
 	}
 }

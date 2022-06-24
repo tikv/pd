@@ -189,13 +189,14 @@ leader-schedule-limit = 0
 	re.Equal(defaultLeaderLease, cfg.LeaderLease)
 	re.Equal(uint(20000000), cfg.MaxRequestBytes)
 	// When defined, use values from config file.
+	re.Equal(0*10000, int(cfg.Schedule.GetMaxMergeRegionKeys()))
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionSize)
 	re.True(cfg.Schedule.EnableOneWayMerge)
 	re.Equal(uint64(0), cfg.Schedule.LeaderScheduleLimit)
 	// When undefined, use default values.
 	re.True(cfg.PreVote)
 	re.Equal("info", cfg.Log.Level)
-	re.Equal(uint64(defaultMaxMergeRegionKeys), cfg.Schedule.MaxMergeRegionKeys)
+	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
 	re.Equal(DefaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
@@ -208,6 +209,7 @@ lease = 0
 
 [schedule]
 type = "random-merge"
+max-merge-region-keys = 400000
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)
@@ -215,7 +217,7 @@ type = "random-merge"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 	re.Contains(cfg.WarningMsgs[0], "Config contains undefined item")
-
+	re.Equal(40*10000, int(cfg.Schedule.GetMaxMergeRegionKeys()))
 	// Check misspelled schedulers name
 	cfgData = `
 name = ""
@@ -229,7 +231,6 @@ type = "random-merge-schedulers"
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
 	re.Error(err)
-
 	// Check correct schedulers name
 	cfgData = `
 name = ""

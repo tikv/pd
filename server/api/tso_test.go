@@ -16,44 +16,50 @@ package api
 
 import (
 	"fmt"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/suite"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
 
-var _ = Suite(&testTsoSuite{})
-
-type testTsoSuite struct {
+type tsoTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testTsoSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) {
+func TestTSOTestSuite(t *testing.T) {
+	suite.Run(t, new(tsoTestSuite))
+}
+
+func (suite *tsoTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.EnableLocalTSO = true
 		cfg.Labels[config.ZoneLabel] = "dc-1"
 	})
-	mustWaitLeader(c, []*server.Server{s.svr})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
-func (s *testTsoSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *tsoTestSuite) TearDownSuite() {
+	suite.cleanup()
 }
 
-func (s *testTsoSuite) TestTransferAllocator(c *C) {
-	tu.WaitUntil(c, func() bool {
-		s.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
-		_, err := s.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
+func (suite *tsoTestSuite) TestTransferAllocator() {
+	re := suite.Require()
+	tu.Eventually(re, func() bool {
+		suite.svr.GetTSOAllocatorManager().ClusterDCLocationChecker()
+		_, err := suite.svr.GetTSOAllocatorManager().GetAllocator("dc-1")
 		return err == nil
-	}, tu.WithRetryTimes(5), tu.WithSleepInterval(3*time.Second))
-	addr := s.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
-	err := tu.CheckPostJSON(testDialClient, addr, nil, tu.StatusOK(c))
-	c.Assert(err, IsNil)
+	}, tu.WithWaitFor(15*time.Second), tu.WithTickInterval(3*time.Second))
+	addr := suite.urlPrefix + "/tso/allocator/transfer/pd1?dcLocation=dc-1"
+	err := tu.CheckPostJSON(testDialClient, addr, nil, tu.StatusOK(re))
+	suite.NoError(err)
 }

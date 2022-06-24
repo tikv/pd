@@ -214,5 +214,5 @@ func TestLoadEmpty(t *testing.T) {
 	// loading empty key spaces should return empty slices
 	safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
 	re.NoError(err)
-	re.Len(safePoints, 0)
+	re.Empty(safePoints)
 }

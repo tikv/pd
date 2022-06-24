@@ -47,7 +47,7 @@ func TestFindJSONFullTagByChildTag(t *testing.T) {
 
 	key = "disable"
 	result = FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
-	re.Len(result, 0)
+	re.Empty(result)
 }
 
 func TestFindSameFieldByJSON(t *testing.T) {
