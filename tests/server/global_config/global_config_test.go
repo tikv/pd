@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
@@ -32,120 +33,120 @@ import (
 	"google.golang.org/grpc"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&GlobalConfigTestSuite{})
-var globalConfigPath = "/global/config/"
+const globalConfigPath = "/global/config/"
 
-type GlobalConfigTestSuite struct {
+type testReceiver struct {
+	re *require.Assertions
+	grpc.ServerStream
+}
+
+func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
+	log.Info("received", zap.Any("received", m.GetChanges()))
+	for _, change := range m.GetChanges() {
+		s.re.Equal(globalConfigPath+change.Value, change.Name)
+	}
+	return nil
+}
+
+type globalConfigTestSuite struct {
+	suite.Suite
 	server  *server.GrpcServer
 	client  *grpc.ClientConn
 	cleanup server.CleanupFunc
 }
 
-type TestReceiver struct {
-	c *C
-	grpc.ServerStream
+func TestGlobalConfigTestSuite(t *testing.T) {
+	suite.Run(t, new(globalConfigTestSuite))
 }
 
-func (s TestReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
-	log.Info("received", zap.Any("received", m.GetChanges()))
-	for _, change := range m.GetChanges() {
-		s.c.Assert(change.Name, Equals, globalConfigPath+change.Value)
-	}
-	return nil
-}
-
-func (s *GlobalConfigTestSuite) SetUpSuite(c *C) {
+func (suite *globalConfigTestSuite) SetupSuite() {
 	var err error
 	var gsi *server.Server
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {}
-	gsi, s.cleanup, err = server.NewTestServer(checker)
-	s.server = &server.GrpcServer{Server: gsi}
-	c.Assert(err, IsNil)
-	addr := s.server.GetAddr()
-	s.client, err = grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-	c.Assert(err, IsNil)
+	gsi, suite.cleanup, err = server.NewTestServer(checker)
+	suite.server = &server.GrpcServer{Server: gsi}
+	suite.NoError(err)
+	addr := suite.server.GetAddr()
+	suite.client, err = grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	suite.NoError(err)
 }
 
-func (s *GlobalConfigTestSuite) TearDownSuite(c *C) {
-	s.client.Close()
-	s.cleanup()
+func (suite *globalConfigTestSuite) TearDownSuite() {
+	suite.client.Close()
+	suite.cleanup()
 }
 
-func (s *GlobalConfigTestSuite) TestLoad(c *C) {
+func (suite *globalConfigTestSuite) TestLoad() {
 	defer func() {
 		// clean up
-		_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+"test")
-		c.Assert(err, IsNil)
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"test")
+		suite.NoError(err)
 	}()
-	_, err := s.server.GetClient().Put(s.server.Context(), globalConfigPath+"test", "test")
-	c.Assert(err, IsNil)
-	res, err := s.server.LoadGlobalConfig(s.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
-	c.Assert(err, IsNil)
-	c.Assert(len(res.Items), Equals, 1)
-	c.Assert(res.Items[0].Value, Equals, "test")
+	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"test", "test")
+	suite.NoError(err)
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
+	suite.NoError(err)
+	suite.Len(res.Items, 1)
+	suite.Equal("test", res.Items[0].Value)
 }
 
-func (s *GlobalConfigTestSuite) TestLoadError(c *C) {
-	res, err := s.server.LoadGlobalConfig(s.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
-	c.Assert(err, IsNil)
-	c.Assert(res.Items[0].Error, Not(Equals), nil)
+func (suite *globalConfigTestSuite) TestLoadError() {
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
+	suite.NoError(err)
+	suite.NotNil(res.Items[0].Error)
 }
 
-func (s *GlobalConfigTestSuite) TestStore(c *C) {
+func (suite *globalConfigTestSuite) TestStore() {
 	defer func() {
 		for i := 1; i <= 3; i++ {
-			_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-			c.Assert(err, IsNil)
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			suite.NoError(err)
 		}
 	}()
 	changes := []*pdpb.GlobalConfigItem{{Name: "1", Value: "1"}, {Name: "2", Value: "2"}, {Name: "3", Value: "3"}}
-	_, err := s.server.StoreGlobalConfig(s.server.Context(), &pdpb.StoreGlobalConfigRequest{Changes: changes})
-	c.Assert(err, IsNil)
+	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{Changes: changes})
+	suite.NoError(err)
 	for i := 1; i <= 3; i++ {
-		res, err := s.server.GetClient().Get(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-		c.Assert(err, IsNil)
-		c.Assert(string(res.Kvs[0].Key), Equals, globalConfigPath+string(res.Kvs[0].Value))
+		res, err := suite.server.GetClient().Get(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+		suite.NoError(err)
+		suite.Equal(globalConfigPath+string(res.Kvs[0].Value), string(res.Kvs[0].Key))
 	}
 }
 
-func (s *GlobalConfigTestSuite) TestWatch(c *C) {
+func (suite *globalConfigTestSuite) TestWatch() {
 	defer func() {
 		for i := 0; i < 3; i++ {
 			// clean up
-			_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-			c.Assert(err, IsNil)
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			suite.NoError(err)
 		}
 	}()
-	server := TestReceiver{c: c}
-	go s.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{}, server)
+	server := testReceiver{re: suite.Require()}
+	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{}, server)
 	for i := 0; i < 3; i++ {
-		_, err := s.server.GetClient().Put(s.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
-		c.Assert(err, IsNil)
+		_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
+		suite.NoError(err)
 	}
 }
 
-func (s *GlobalConfigTestSuite) loadGlobalConfig(ctx context.Context, names []string) ([]*pdpb.GlobalConfigItem, error) {
-	res, err := pdpb.NewPDClient(s.client).LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
+func (suite *globalConfigTestSuite) loadGlobalConfig(ctx context.Context, names []string) ([]*pdpb.GlobalConfigItem, error) {
+	res, err := pdpb.NewPDClient(suite.client).LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
 	return res.GetItems(), err
 }
 
-func (s *GlobalConfigTestSuite) storeGlobalConfig(ctx context.Context, changes []*pdpb.GlobalConfigItem) error {
-	_, err := pdpb.NewPDClient(s.client).StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: changes})
+func (suite *globalConfigTestSuite) storeGlobalConfig(ctx context.Context, changes []*pdpb.GlobalConfigItem) error {
+	_, err := pdpb.NewPDClient(suite.client).StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: changes})
 	return err
 }
 
-func (s *GlobalConfigTestSuite) watchGlobalConfig(ctx context.Context) (chan []*pdpb.GlobalConfigItem, error) {
+func (suite *globalConfigTestSuite) watchGlobalConfig(ctx context.Context) (chan []*pdpb.GlobalConfigItem, error) {
 	globalConfigWatcherCh := make(chan []*pdpb.GlobalConfigItem, 16)
-	res, err := pdpb.NewPDClient(s.client).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
+	res, err := pdpb.NewPDClient(suite.client).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
 	if err != nil {
 		close(globalConfigWatcherCh)
 		return nil, err
@@ -177,53 +178,53 @@ func (s *GlobalConfigTestSuite) watchGlobalConfig(ctx context.Context) (chan []*
 	return globalConfigWatcherCh, err
 }
 
-func (s *GlobalConfigTestSuite) TestClientLoad(c *C) {
+func (suite *globalConfigTestSuite) TestClientLoad() {
 	defer func() {
-		_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+"test")
-		c.Assert(err, IsNil)
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"test")
+		suite.NoError(err)
 	}()
-	_, err := s.server.GetClient().Put(s.server.Context(), globalConfigPath+"test", "test")
-	c.Assert(err, IsNil)
-	res, err := s.loadGlobalConfig(s.server.Context(), []string{"test"})
-	c.Assert(err, IsNil)
-	c.Assert(len(res), Equals, 1)
-	c.Assert(res[0], DeepEquals, &pdpb.GlobalConfigItem{Name: "test", Value: "test", Error: nil})
+	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"test", "test")
+	suite.NoError(err)
+	res, err := suite.loadGlobalConfig(suite.server.Context(), []string{"test"})
+	suite.NoError(err)
+	suite.Len(res, 1)
+	suite.Equal(&pdpb.GlobalConfigItem{Name: "test", Value: "test", Error: nil}, res[0])
 }
 
-func (s *GlobalConfigTestSuite) TestClientLoadError(c *C) {
-	res, err := s.loadGlobalConfig(s.server.Context(), []string{"test"})
-	c.Assert(err, IsNil)
-	c.Assert(res[0].Error, Not(Equals), nil)
+func (suite *globalConfigTestSuite) TestClientLoadError() {
+	res, err := suite.loadGlobalConfig(suite.server.Context(), []string{"test"})
+	suite.NoError(err)
+	suite.NotNil(res[0].Error)
 }
 
-func (s *GlobalConfigTestSuite) TestClientStore(c *C) {
+func (suite *globalConfigTestSuite) TestClientStore() {
 	defer func() {
 		for i := 1; i <= 3; i++ {
-			_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-			c.Assert(err, IsNil)
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			suite.NoError(err)
 		}
 	}()
-	err := s.storeGlobalConfig(s.server.Context(), []*pdpb.GlobalConfigItem{{Name: "1", Value: "1"}, {Name: "2", Value: "2"}, {Name: "3", Value: "3"}})
-	c.Assert(err, IsNil)
+	err := suite.storeGlobalConfig(suite.server.Context(), []*pdpb.GlobalConfigItem{{Name: "1", Value: "1"}, {Name: "2", Value: "2"}, {Name: "3", Value: "3"}})
+	suite.NoError(err)
 	for i := 1; i <= 3; i++ {
-		res, err := s.server.GetClient().Get(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-		c.Assert(err, IsNil)
-		c.Assert(string(res.Kvs[0].Key), Equals, globalConfigPath+string(res.Kvs[0].Value))
+		res, err := suite.server.GetClient().Get(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+		suite.NoError(err)
+		suite.Equal(globalConfigPath+string(res.Kvs[0].Value), string(res.Kvs[0].Key))
 	}
 }
 
-func (s *GlobalConfigTestSuite) TestClientWatch(c *C) {
+func (suite *globalConfigTestSuite) TestClientWatch() {
 	defer func() {
 		for i := 0; i < 3; i++ {
-			_, err := s.server.GetClient().Delete(s.server.Context(), globalConfigPath+strconv.Itoa(i))
-			c.Assert(err, IsNil)
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			suite.NoError(err)
 		}
 	}()
-	wc, err := s.watchGlobalConfig(s.server.Context())
-	c.Assert(err, IsNil)
+	wc, err := suite.watchGlobalConfig(suite.server.Context())
+	suite.NoError(err)
 	for i := 0; i < 3; i++ {
-		_, err = s.server.GetClient().Put(s.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
-		c.Assert(err, IsNil)
+		_, err = suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
+		suite.NoError(err)
 	}
 	for {
 		select {
@@ -231,7 +232,7 @@ func (s *GlobalConfigTestSuite) TestClientWatch(c *C) {
 			return
 		case res := <-wc:
 			for _, r := range res {
-				c.Assert(r.Name, Equals, globalConfigPath+r.Value)
+				suite.Equal(globalConfigPath+r.Value, r.Name)
 			}
 		}
 	}
