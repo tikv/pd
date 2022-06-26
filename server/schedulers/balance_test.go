@@ -620,43 +620,55 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
 	s.tc.AddLeaderStore(5, 100)
 	s.tc.AddLeaderStore(6, 0)
 	stores := s.tc.Stores.GetStores()
+	sort.Slice(stores, func(i, j int) bool {
+		return stores[i].GetID() < stores[j].GetID()
+	})
 
 	deltaMap := make(map[uint64]int64)
-	less := func(i, j int) bool {
-		iOp := deltaMap[stores[i].GetID()]
-		jOp := deltaMap[stores[j].GetID()]
-		return stores[i].LeaderScore(0, iOp) > stores[j].LeaderScore(0, jOp)
+	getScore := func(store *core.StoreInfo) float64 {
+		return store.LeaderScore(0, deltaMap[store.GetID()])
 	}
+	candidateStores := make([]*core.StoreInfo, 0)
+	// order by score desc.
+	cs := newCandidateStores(append(candidateStores, stores...), false, getScore)
+	// in candidate,the order stores:1(104),5(100),4(100),6,3,2
+	// store 4 should in pos 2
+	c.Assert(cs.binarySearch(stores[3]), Equals, 2)
 
-	sort.Slice(stores, less)
-	storeIndexMap := map[uint64]int{}
-	for i := 0; i < len(stores); i++ {
-		storeIndexMap[stores[i].GetID()] = i
-	}
-	c.Assert(stores[0].GetID(), Equals, uint64(1))
-	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
-	deltaMap[1] = -1
-
-	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
-	c.Assert(stores[0].GetID(), Equals, uint64(1))
-	c.Assert(storeIndexMap[uint64(1)], Equals, 0)
+	// store 1 should in pos 0
+	store1 := stores[0]
+	c.Assert(cs.binarySearch(store1), Equals, 0)
+	deltaMap[store1.GetID()] = -1 // store 1
+	cs.resortStoreWithPos(0)
+	// store 1 should still in pos 0.
+	c.Assert(cs.stores[0].GetID(), Equals, uint64(1))
+	curIndx := cs.binarySearch(store1)
+	c.Assert(0, Equals, curIndx)
 	deltaMap[1] = -4
-	resortStores(stores, storeIndexMap, storeIndexMap[uint64(1)], less)
-	c.Assert(stores[2].GetID(), Equals, uint64(1))
-	c.Assert(storeIndexMap[uint64(1)], Equals, 2)
-	topID := stores[0].GetID()
-	deltaMap[topID] = -1
-	resortStores(stores, storeIndexMap, storeIndexMap[topID], less)
-	c.Assert(stores[1].GetID(), Equals, uint64(1))
-	c.Assert(storeIndexMap[uint64(1)], Equals, 1)
-	c.Assert(stores[2].GetID(), Equals, topID)
-	c.Assert(storeIndexMap[topID], Equals, 2)
+	// store 1 update the scores to 104-4=100
+	// the order stores should be:5(100),4(100),1(100),6,3,2
+	cs.resortStoreWithPos(curIndx)
+	c.Assert(cs.stores[2].GetID(), Equals, uint64(1))
+	c.Assert(cs.binarySearch(store1), Equals, 2)
+	// the top store is : 5(100)
+	topStore := cs.stores[0]
+	topStorePos := cs.binarySearch(topStore)
+	deltaMap[topStore.GetID()] = -1
+	cs.resortStoreWithPos(topStorePos)
 
-	bottomID := stores[5].GetID()
-	deltaMap[bottomID] = 4
-	resortStores(stores, storeIndexMap, storeIndexMap[bottomID], less)
-	c.Assert(stores[3].GetID(), Equals, bottomID)
-	c.Assert(storeIndexMap[bottomID], Equals, 3)
+	// after recorder, the order stores should be: 4(100),1(100),5(99),6,3,2
+	c.Assert(cs.stores[1].GetID(), Equals, uint64(1))
+	c.Assert(cs.binarySearch(store1), Equals, 1)
+	c.Assert(cs.stores[2].GetID(), Equals, topStore.GetID())
+	c.Assert(cs.binarySearch(topStore), Equals, 2)
+
+	bottomStore := cs.stores[5]
+	deltaMap[bottomStore.GetID()] = 4
+	cs.resortStoreWithPos(5)
+
+	// the order stores should be: 4(100),1(100),5(99),2(5),6,3
+	c.Assert(cs.stores[3].GetID(), Equals, bottomStore.GetID())
+	c.Assert(cs.binarySearch(bottomStore), Equals, 3)
 }
 
 var _ = Suite(&testBalanceRegionSchedulerSuite{})

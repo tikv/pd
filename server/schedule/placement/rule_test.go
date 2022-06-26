@@ -54,7 +54,7 @@ func TestPrepareRulesForApply(t *testing.T) {
 	sortRules(rules)
 	rules = prepareRulesForApply(rules)
 
-	re.Equal(len(expected), len(rules))
+	re.Len(rules, len(expected))
 	for i := range rules {
 		re.Equal(expected[i], rules[i].Key())
 	}
@@ -132,7 +132,7 @@ func TestBuildRuleList(t *testing.T) {
 		Count:    5,
 	}
 
-	testcases := []struct {
+	testCases := []struct {
 		name   string
 		rules  map[[2]string]*Rule
 		expect ruleList
@@ -178,11 +178,11 @@ func TestBuildRuleList(t *testing.T) {
 		},
 	}
 
-	for _, testcase := range testcases {
-		t.Log(testcase.name)
-		config := &ruleConfig{rules: testcase.rules}
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		config := &ruleConfig{rules: testCase.rules}
 		result, err := buildRuleList(config)
 		re.NoError(err)
-		re.Equal(testcase.expect.ranges, result.ranges)
+		re.Equal(testCase.expect.ranges, result.ranges)
 	}
 }

@@ -21,8 +21,8 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/testutil"
 	"go.uber.org/goleak"
 )
@@ -33,27 +33,22 @@ const (
 	tsoCount                    = 10
 )
 
-func checkAndReturnTimestampResponse(c *C, req *pdpb.TsoRequest, resp *pdpb.TsoResponse) *pdpb.Timestamp {
-	c.Assert(resp.GetCount(), Equals, req.GetCount())
+func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoRequest, resp *pdpb.TsoResponse) *pdpb.Timestamp {
+	re.Equal(req.GetCount(), resp.GetCount())
 	timestamp := resp.GetTimestamp()
-	c.Assert(timestamp.GetPhysical(), Greater, int64(0))
-	c.Assert(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), GreaterEqual, req.GetCount())
+	re.Greater(timestamp.GetPhysical(), int64(0))
+	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), req.GetCount())
 	return timestamp
 }
 
-func testGetTimestamp(c *C, ctx context.Context, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
+func testGetTimestamp(re *require.Assertions, ctx context.Context, pdCli pdpb.PDClient, req *pdpb.TsoRequest) *pdpb.Timestamp {
 	tsoClient, err := pdCli.Tso(ctx)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer tsoClient.CloseSend()
-	err = tsoClient.Send(req)
-	c.Assert(err, IsNil)
+	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
-	c.Assert(err, IsNil)
-	return checkAndReturnTimestampResponse(c, req, resp)
-}
-
-func Test(t *testing.T) {
-	TestingT(t)
+	re.NoError(err)
+	return checkAndReturnTimestampResponse(re, req, resp)
 }
 
 func TestMain(m *testing.M) {

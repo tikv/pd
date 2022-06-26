@@ -274,7 +274,11 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
-	suite.mustWaitLeader()
+	var servers []*server.Server
+	for _, s := range suite.cluster.GetServers() {
+		servers = append(servers, s.GetServer())
+	}
+	server.MustWaitLeader(suite.Require(), servers)
 	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 
 	timeUnix = time.Now().Unix() - 20
@@ -507,7 +511,7 @@ func TestRemovingProgress(t *testing.T) {
 
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leader.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -624,7 +628,7 @@ func TestPreparingProgress(t *testing.T) {
 
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClientWithTestify(re, leader.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -739,18 +743,4 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 	re.NoError(err)
 	resp.Body.Close()
 	return output
-}
-
-func (suite *middlewareTestSuite) mustWaitLeader() *server.Server {
-	var leader *server.Server
-	testutil.Eventually(suite.Require(), func() bool {
-		for _, s := range suite.cluster.GetServers() {
-			if !s.GetServer().IsClosed() && s.GetServer().GetMember().IsLeader() {
-				leader = s.GetServer()
-				return true
-			}
-		}
-		return false
-	})
-	return leader
 }
