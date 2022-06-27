@@ -136,6 +136,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods("POST"))
 	registerFunc(apiRouter, "/schedulers/{name}/diagnose/{store_id}", schedulerHandler.DiagnoseScheduler, setMethods("POST"))
 	registerFunc(apiRouter, "/schedulers/{name}/diagnose/{store_id}", schedulerHandler.GetDiagnosisReuslt, setMethods("GET"))
+	registerFunc(apiRouter, "/schedulers/diagnose", schedulerHandler.CreateSchedulerDiagnosis, setMethods("POST"))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
 	registerPrefix(apiRouter, "/scheduler-config", schedulerConfigHandler.GetSchedulerConfig)

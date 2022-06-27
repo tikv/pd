@@ -15,7 +15,6 @@
 package diagnosis
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/pingcap/log"
@@ -112,86 +111,54 @@ type DiagnosisResult struct {
 }
 
 type DiagnosisController struct {
+	dryRun bool
 	//mu syncutil.RWMutex
 	//enable    bool
-	ctx       context.Context
-	ctxCancel context.CancelFunc
 	//cache        *cache.TTLUint64
-	scope         string
-	storeReaders  map[uint64]*DiagnosisAnalyzer
-	historyRecord map[uint64]*DiagnosisAnalyzer
+	// scope         string
+	// storeReaders  map[uint64]*DiagnosisAnalyzer
+	// historyRecord map[uint64]*DiagnosisAnalyzer
 	// currentReader  *DiagnosisStoreRecoder
-	currentStep   ScheduleStep
-	currentSource uint64
-	currentRegion uint64
-	currentTarget uint64
+	currentStep     ScheduleStep
+	currentSource   uint64
+	currentRegion   uint64
+	currentTarget   uint64
+	plans           []*SchedulePlan
+	schedulablePlan *SchedulePlan
 }
 
-func NewDiagnosisController(ctx context.Context, scope string) *DiagnosisController {
-	ctx, ctxCancel := context.WithCancel(ctx)
+func NewDiagnosisController(dryRun bool) *DiagnosisController {
+
 	return &DiagnosisController{
+		dryRun: dryRun,
+		plans:  make([]*SchedulePlan, 0),
 		//enable:    false,
-		ctx:       ctx,
-		ctxCancel: ctxCancel,
 		//cache:        cache.NewIDTTL(ctx, time.Minute, 5*time.Minute),
-		scope:         scope,
-		storeReaders:  make(map[uint64]*DiagnosisAnalyzer),
-		historyRecord: make(map[uint64]*DiagnosisAnalyzer),
 	}
-}
-
-func (c *DiagnosisController) InitSchedule() {
-	c.currentStep = 0
 }
 
 func (c *DiagnosisController) Debug() {
 	log.Info("DiagnosisController Debug", zap.Int("currentStep", int(c.currentStep)), zap.Uint64("currentSource", c.currentSource), zap.Uint64("currentRegion", c.currentRegion), zap.Uint64("currentTarget", c.currentTarget))
 }
 
-func (c *DiagnosisController) CleanUpSchedule(success bool) {
-	if c.currentSource != 0 {
-		if record, ok := c.storeReaders[c.currentSource]; ok {
-			record.schedulable = success
-			_, ok2 := c.historyRecord[c.currentSource]
-			log.Info("CleanUpSchedule", zap.Int64("storeID", int64(c.currentSource)), zap.Bool("has history", ok2))
-			c.historyRecord[c.currentSource] = record
-			delete(c.storeReaders, c.currentSource)
-		}
-	}
-	c.currentSource = 0
-}
-
-func (c *DiagnosisController) DiagnoseStore(storeID uint64) {
-	stepRecorders := make([]DiagnoseStepRecoder, 4)
-	for i := 0; i < 4; i++ {
-		stepRecorders[i] = NewDiagnosisRecoder()
-	}
-	c.storeReaders[storeID] = &DiagnosisAnalyzer{
-		storeID:       storeID,
-		stepRecorders: stepRecorders,
-	}
-	_, ok := c.historyRecord[storeID]
-	log.Info("DiagnoseStore", zap.Int64("storeID", int64(storeID)), zap.Bool("has history", ok))
-}
-
-func (c *DiagnosisController) GetAnalysisResult(storeID uint64) *DiagnosisResult {
-	if analyzer, ok := c.historyRecord[storeID]; ok {
-		return analyzer.AnalysisResult(c.scope)
-	}
-	return nil
-}
-
-func (c *DiagnosisController) GetDiagnosisAnalyzer(storeID uint64) *DiagnosisAnalyzer {
-	return c.historyRecord[storeID]
-}
-
-func (c *DiagnosisController) SetObject(objectID uint64) {
+func (c *DiagnosisController) SetSelectedObject(objectID uint64) {
 	switch c.currentStep {
 	case 1:
 		c.currentSource = objectID
 	case 2:
 		c.currentRegion = objectID
 	case 3:
+		c.currentTarget = objectID
+	}
+}
+
+func (c *DiagnosisController) setObject(objectID uint64) {
+	switch c.currentStep {
+	case 0:
+		c.currentSource = objectID
+	case 1:
+		c.currentRegion = objectID
+	case 2:
 		c.currentTarget = objectID
 	}
 }
@@ -204,31 +171,32 @@ func (c *DiagnosisController) LastStep() {
 	c.currentStep--
 }
 
-func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
-	if !c.ShouldDiagnose(objectID) {
-		return
-	}
-	reader := c.storeReaders[c.currentSource]
-	reader.GenerateStoreRecord(c.currentStep, objectID, reason)
-	if c.currentStep == 0 {
-		c.CleanUpSchedule(false)
-	}
+func (c *DiagnosisController) GetPlans() []*SchedulePlan {
+	return c.plans
 }
 
-// func (c *DiagnosisController) SelectSourceStores(stores []*core.StoreInfo, filtxers []filter.Filter, opt *config.PersistOptions) []*core.StoreInfo {
-// 	return nil
-// }
-
-func (c *DiagnosisController) ShouldDiagnose(objectID uint64) bool {
-	if c.currentStep == 0 {
-		c.currentSource = objectID
+func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
+	if !c.dryRun {
+		return
 	}
-	// if !c.enable {
-	// 	return false
-	// }
-	//return c.cache.Exists(storeID)
-	_, ok := c.storeReaders[c.currentSource]
-	return ok
+	c.setObject(objectID)
+	c.recordNotSchedulablePlan(reason)
+}
+
+func (c *DiagnosisController) RecordSchedulablePlan(objectID uint64, reason string) {
+	if !c.dryRun {
+		return
+	}
+	c.setObject(objectID)
+	c.recordSchedulablePlan()
+}
+
+func (c *DiagnosisController) recordNotSchedulablePlan(reason string) {
+	c.plans = append(c.plans, nil)
+}
+
+func (c *DiagnosisController) recordSchedulablePlan() {
+	c.schedulablePlan = nil
 }
 
 type DiagnosisAnalyzer struct {
@@ -353,4 +321,23 @@ type ReasonMetrics struct {
 	Reason       string
 	Ratio        string
 	SampleObject string
+}
+
+type SchedulePlan struct {
+}
+
+func (s *SchedulePlan) GetSourceStore() uint64 {
+	return 0
+}
+func (s *SchedulePlan) GetRegion() uint64 {
+	return 0
+}
+func (s *SchedulePlan) GetTargetStore() uint64 {
+	return 0
+}
+func (s *SchedulePlan) GetStep() uint64 {
+	return 0
+}
+func (s *SchedulePlan) GetReason() string {
+	return ""
 }

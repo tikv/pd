@@ -128,6 +128,32 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+func (h *schedulerHandler) CreateSchedulerDiagnosis(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
+		return
+	}
+
+	name, ok := input["name"].(string)
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "missing scheduler name")
+		return
+	}
+
+	switch name {
+	case schedulers.BalanceRegionName:
+		if err := h.AddBalanceRegionScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	default:
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
+		return
+	}
+
+	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+}
+
 // FIXME: details of input json body params
 // @Tags     scheduler
 // @Summary  Create a scheduler.

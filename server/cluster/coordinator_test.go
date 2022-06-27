@@ -1182,11 +1182,12 @@ func TestController(t *testing.T) {
 		kind:      operator.OpLeader,
 	}
 
-	sc := newScheduleController(co, lb)
+	sc := newScheduleController(co.ctx, co.cluster, co.opController, lb)
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		re.Equal(i, sc.GetInterval())
-		re.Len(sc.Schedule(), 0)
+		ops, _ := sc.Schedule()
+		re.Len(ops, 0)
 	}
 	// limit = 2
 	lb.limit = 2
@@ -1262,14 +1263,15 @@ func TestInterval(t *testing.T) {
 
 	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
-	sc := newScheduleController(co, lb)
+	sc := newScheduleController(co.ctx, co.cluster, co.opController, lb)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.
 	idleSeconds := []int{5, 10, 20, 30, 60}
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			re.Len(sc.Schedule(), 0)
+			ops, _ := sc.Schedule()
+			re.Len(ops, 0)
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
 	}

@@ -129,6 +129,7 @@ type RaftCluster struct {
 	opt                      *config.PersistOptions
 	limiter                  *StoreLimiter
 	coordinator              *coordinator
+	diagnosisManager         *diagnosisManager
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
@@ -268,6 +269,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
+	c.diagnosisManager = newDiagnosisManager(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
@@ -534,6 +536,20 @@ func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string)
 	return c.coordinator.addScheduler(scheduler, args...)
 }
 
+func (c *RaftCluster) AddSchedulerDiagnosis(scheduler schedule.Scheduler, args ...string) error {
+	return c.diagnosisManager.addSchedulerDiagnosis(scheduler, args...)
+}
+
+// GetSchedulerDiagnosisResult pauses or resumes a scheduler.
+func (c *RaftCluster) GetSchedulerDiagnosisResult(name string) *diagnosis.DiagnosisResult {
+	return c.diagnosisManager.GetSchedulerDiagnosisResult(name)
+}
+
+// GetSchedulerDiagnosisResult pauses or resumes a scheduler.
+func (c *RaftCluster) GetSchedulerStoreDiagnosisResult(name string, storeID uint64) *diagnosis.DiagnosisResult {
+	return c.diagnosisManager.GetSchedulerStoreDiagnosisResult(name, storeID)
+}
+
 // RemoveScheduler removes a scheduler.
 func (c *RaftCluster) RemoveScheduler(name string) error {
 	return c.coordinator.removeScheduler(name)
@@ -542,16 +558,6 @@ func (c *RaftCluster) RemoveScheduler(name string) error {
 // PauseOrResumeScheduler pauses or resumes a scheduler.
 func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.pauseOrResumeScheduler(name, t)
-}
-
-// DiagnoseScheduler disgnoses a scheduler.
-func (c *RaftCluster) DiagnoseScheduler(name string, storeID uint64) error {
-	return c.coordinator.diagnoseScheduler(name, storeID)
-}
-
-// GetSchedulerDiagnosisResult pauses or resumes a scheduler.
-func (c *RaftCluster) GetSchedulerDiagnosisResult(name string, storeID uint64) *diagnosis.DiagnosisResult {
-	return c.coordinator.getSchedulerDiagnosisResult(name, storeID)
 }
 
 // IsSchedulerPaused checks if a scheduler is paused.

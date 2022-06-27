@@ -36,3 +36,6 @@ type Cluster interface {
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
 }
+
+type DiagnosisResult interface {
+}

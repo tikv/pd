@@ -1,32 +1,29 @@
 package schedule
 
-import (
-	"strconv"
-
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/statistics"
-)
-
-type Plan struct {
-	source *core.StoreInfo
-	target *core.StoreInfo
-	region *core.RegionInfo
-
-	// hot region only
-	// TODO: remove it
-	srcPeerStat *statistics.HotPeerStat
-
-	score int64
+type Plan interface {
+	GetSourceStore() uint64
+	GetRegion() uint64
+	GetTargetStore() uint64
+	GetStep() uint64
+	GetReason() string
 }
 
-func NewSchedulePlan() *Plan {
-	return &Plan{}
-}
+// type schedulePlan struct {
+// 	source *core.StoreInfo
+// 	target *core.StoreInfo
+// 	region *core.RegionInfo
 
-func (p *Plan) SourceMetricLabel() string {
-	return strconv.FormatUint(p.source.GetID(), 10)
-}
+// 	score int64
+// }
 
-func (p *Plan) TargetMetricLabel() string {
-	return strconv.FormatUint(p.target.GetID(), 10)
-}
+// func NewSchedulePlan() Plan {
+// 	return &schedulePlan{}
+// }
+
+// func (p *schedulePlan) SourceMetricLabel() string {
+// 	return strconv.FormatUint(p.source.GetID(), 10)
+// }
+
+// func (p *schedulePlan) TargetMetricLabel() string {
+// 	return strconv.FormatUint(p.target.GetID(), 10)
+// }

@@ -238,6 +238,26 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	return err
 }
 
+// AddScheduler adds a scheduler.
+func (h *Handler) AddSchedulerDiagonsis(name string, args ...string) error {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return err
+	}
+
+	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	if err != nil {
+		return err
+	}
+	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
+	if err = c.AddSchedulerDiagnosis(s, args...); err != nil {
+		log.Error("can not add scheduler diagnosis", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+	} else {
+		log.Info("add scheduler diagnosis successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	}
+	return err
+}
+
 // RemoveScheduler removes a scheduler by name.
 func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.GetRaftCluster()
@@ -320,6 +340,10 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
 	return h.AddScheduler(schedulers.BalanceRegionType)
+}
+
+func (h *Handler) AddBalanceRegionSchedulerDiagnosis() error {
+	return h.AddSchedulerDiagonsis(schedulers.BalanceRegionType)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
