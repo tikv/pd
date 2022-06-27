@@ -384,7 +384,7 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 	return lb.Flush()
 }
 
-func benchmarkLoadRegions(n int, b *testing.B, ratio int) {
+func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	ctx := context.Background()
 	dir := b.TempDir()
 	lb, err := newLevelDBBackend(ctx, dir, nil)
@@ -422,7 +422,7 @@ var volumes = []struct {
 func BenchmarkLoadRegionsByVolume(b *testing.B) {
 	for _, v := range volumes {
 		b.Run(fmt.Sprintf("input size %d", v.input), func(b *testing.B) {
-			benchmarkLoadRegions(v.input, b, 0)
+			benchmarkLoadRegions(b, v.input, 0)
 		})
 	}
 }
@@ -440,7 +440,7 @@ var ratios = []struct {
 func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
 	for _, r := range ratios {
 		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
-			benchmarkLoadRegions(1000000, b, r.ratio)
+			benchmarkLoadRegions(b, 1000000, r.ratio)
 		})
 	}
 }
