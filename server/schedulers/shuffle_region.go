@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
@@ -70,7 +71,7 @@ type shuffleRegionScheduler struct {
 func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true},
-		filter.NewSpecialUseFilter(ShuffleRegionName),
+		filter.NewLabelConstaintFilter(ShuffleRegionName, []placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{

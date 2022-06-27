@@ -19,6 +19,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
 
@@ -55,7 +56,8 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
-		filter.NewSpecialUseFilter(s.checkerName),
+		filter.NewLabelConstaintFilter(s.checkerName,
+			[]placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
 		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {

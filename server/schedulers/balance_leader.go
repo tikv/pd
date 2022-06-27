@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
@@ -203,7 +204,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	}
 	s.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
-		filter.NewSpecialUseFilter(s.GetName()),
+		filter.NewLabelConstaintFilter(s.GetName(), []placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
 	}
 	return s
 }

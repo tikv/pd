@@ -431,13 +431,15 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
 type labelConstraintFilter struct {
-	scope       string
-	constraints []placement.LabelConstraint
+	scope string
+	// When it is true, we can pick up the store as the source store no matter if the label is matched.
+	allowBalanceLowSpace bool
+	constraints          []placement.LabelConstraint
 }
 
 // NewLabelConstaintFilter creates a filter that selects stores satisfy the constraints.
-func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint) Filter {
-	return labelConstraintFilter{scope: scope, constraints: constraints}
+func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint, allowBalanceLowSpace bool) Filter {
+	return labelConstraintFilter{scope: scope, constraints: constraints, allowBalanceLowSpace: allowBalanceLowSpace}
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
@@ -452,6 +454,9 @@ func (f labelConstraintFilter) Type() string {
 
 // Source filters stores when select them as schedule source.
 func (f labelConstraintFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
+	if f.allowBalanceLowSpace && store.IsLowSpace(opt.GetLowSpaceRatio()) {
+		return true
+	}
 	return placement.MatchLabelConstraints(store, f.constraints)
 }
 
@@ -578,104 +583,6 @@ func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, clust
 	return nil
 }
 
-type engineFilter struct {
-	scope      string
-	constraint placement.LabelConstraint
-}
-
-// NewEngineFilter creates a filter that only keeps allowedEngines.
-func NewEngineFilter(scope string, allowedEngines ...string) Filter {
-	return &engineFilter{
-		scope:      scope,
-		constraint: placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: allowedEngines},
-	}
-}
-
-func (f *engineFilter) Scope() string {
-	return f.scope
-}
-
-func (f *engineFilter) Type() string {
-	return "engine-filter"
-}
-
-func (f *engineFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.constraint.MatchStore(store)
-}
-
-func (f *engineFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.constraint.MatchStore(store)
-}
-
-type ordinaryEngineFilter struct {
-	scope      string
-	constraint placement.LabelConstraint
-}
-
-// NewOrdinaryEngineFilter creates a filter that only keeps ordinary engine stores.
-func NewOrdinaryEngineFilter(scope string) Filter {
-	return &ordinaryEngineFilter{
-		scope:      scope,
-		constraint: placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: allSpecialEngines},
-	}
-}
-
-func (f *ordinaryEngineFilter) Scope() string {
-	return f.scope
-}
-
-func (f *ordinaryEngineFilter) Type() string {
-	return "ordinary-engine-filter"
-}
-
-func (f *ordinaryEngineFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.constraint.MatchStore(store)
-}
-
-func (f *ordinaryEngineFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f.constraint.MatchStore(store)
-}
-
-type specialUseFilter struct {
-	scope      string
-	constraint placement.LabelConstraint
-}
-
-// NewSpecialUseFilter creates a filter that filters out normal stores.
-// By default, all stores that are not marked with a special use will be filtered out.
-// Specify the special use label if you want to include the special stores.
-func NewSpecialUseFilter(scope string, allowUses ...string) Filter {
-	var values []string
-	for _, v := range allSpecialUses {
-		if slice.NoneOf(allowUses, func(i int) bool { return allowUses[i] == v }) {
-			values = append(values, v)
-		}
-	}
-	return &specialUseFilter{
-		scope:      scope,
-		constraint: placement.LabelConstraint{Key: SpecialUseKey, Op: placement.In, Values: values},
-	}
-}
-
-func (f *specialUseFilter) Scope() string {
-	return f.scope
-}
-
-func (f *specialUseFilter) Type() string {
-	return "special-use-filter"
-}
-
-func (f *specialUseFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	if store.IsLowSpace(opt.GetLowSpaceRatio()) {
-		return true
-	}
-	return !f.constraint.MatchStore(store)
-}
-
-func (f *specialUseFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return !f.constraint.MatchStore(store)
-}
-
 const (
 	// SpecialUseKey is the label used to indicate special use storage.
 	SpecialUseKey = "specialUse"
@@ -684,9 +591,6 @@ const (
 	// SpecialUseReserved is the reserved value of special use label
 	SpecialUseReserved = "reserved"
 )
-
-var allSpecialUses = []string{SpecialUseHotRegion, SpecialUseReserved}
-var allSpecialEngines = []string{core.EngineTiFlash}
 
 type isolationFilter struct {
 	scope          string

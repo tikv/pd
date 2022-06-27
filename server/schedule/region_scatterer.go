@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
 
@@ -126,10 +127,11 @@ type RegionScatterer struct {
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
 func NewRegionScatterer(ctx context.Context, cluster Cluster) *RegionScatterer {
 	return &RegionScatterer{
-		ctx:            ctx,
-		name:           regionScatterName,
-		cluster:        cluster,
-		ordinaryEngine: newEngineContext(ctx, filter.NewOrdinaryEngineFilter(regionScatterName)),
+		ctx:     ctx,
+		name:    regionScatterName,
+		cluster: cluster,
+		ordinaryEngine: newEngineContext(ctx,
+			filter.NewLabelConstaintFilter(regionScatterName, []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.NotIn, Values: []string{core.EngineTiFlash}}}, false)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
@@ -272,7 +274,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
-	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
+	ordinaryFilter := filter.NewLabelConstaintFilter(r.name, []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.NotIn, Values: []string{core.EngineTiFlash}}}, false)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	// Group peers by the engine of their stores
@@ -328,7 +330,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	for engine, peers := range specialPeers {
 		ctx, ok := r.specialEngines[engine]
 		if !ok {
-			ctx = newEngineContext(r.ctx, filter.NewEngineFilter(r.name, engine))
+			ctx = newEngineContext(r.ctx, filter.NewLabelConstaintFilter(r.name, []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.In, Values: []string{engine}}}, false))
 			r.specialEngines[engine] = ctx
 		}
 		scatterWithSameEngine(peers, ctx)
@@ -462,7 +464,7 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, peers map[uin
 
 // Put put the final distribution in the context no matter the operator was created
 func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint64, group string) {
-	ordinaryFilter := filter.NewOrdinaryEngineFilter(r.name)
+	ordinaryFilter := filter.NewLabelConstaintFilter(r.name, []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.NotIn, Values: []string{core.EngineTiFlash}}}, false)
 	// Group peers by the engine of their stores
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
