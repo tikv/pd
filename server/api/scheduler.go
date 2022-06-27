@@ -44,27 +44,12 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
-<<<<<<< HEAD
-// @Tags scheduler
-// @Summary List all created schedulers by status.
-// @Produce json
-// @Success 200 {array} string
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers [get]
-=======
-type schedulerPausedPeriod struct {
-	Name     string    `json:"name"`
-	PausedAt time.Time `json:"paused_at"`
-	ResumeAt time.Time `json:"resume_at"`
-}
-
 // @Tags     scheduler
 // @Summary  List all created schedulers by status.
 // @Produce  json
 // @Success  200  {array}   string
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers [get]
->>>>>>> 01b8f34a4 (*: update the swagger dependency (#5183))
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	schedulers, err := h.Handler.GetSchedulers()
 	if err != nil {

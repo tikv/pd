@@ -286,7 +286,6 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 	return cfg
 }
 
-<<<<<<< HEAD
 func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
@@ -304,18 +303,11 @@ func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err erro
 	return false, found, nil
 }
 
-// @Tags config
-// @Summary Get schedule config.
-// @Produce json
-// @Success 200 {object} config.ScheduleConfig
-// @Router /config/schedule [get]
-=======
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
 // @Success  200  {object}  config.ScheduleConfig
 // @Router   /config/schedule [get]
->>>>>>> 01b8f34a4 (*: update the swagger dependency (#5183))
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
 }
@@ -404,20 +396,11 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-<<<<<<< HEAD
-// @Tags config
-// @Summary Get label property config.
-// @Produce json
-// @Success 200 {object} config.LabelPropertyConfig
-// @Failure 400 {string} string "The input is invalid."
-// @Router /config/label-property [get]
-=======
 // @Tags     config
 // @Summary  Get label property config.
 // @Produce  json
 // @Success  200  {object}  config.LabelPropertyConfig
 // @Router   /config/label-property [get]
->>>>>>> 01b8f34a4 (*: update the swagger dependency (#5183))
 func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }

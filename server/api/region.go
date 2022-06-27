@@ -758,17 +758,6 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-<<<<<<< HEAD
-// @Tags region
-// @Summary Accelerate regions scheduling a in given range, only receive hex format for keys
-// @Accept json
-// @Param body body object true "json params"
-// @Param limit query integer false "Limit count" default(256)
-// @Produce json
-// @Success 200 {string} string "Accelerate regions scheduling in a given range [startKey, endKey)"
-// @Failure 400 {string} string "The input is invalid."
-// @Router /regions/accelerate-schedule [post]
-=======
 // @Tags     region
 // @Summary  List regions with the largest keys.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -791,7 +780,6 @@ func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Reques
 // @Success  200  {string}  string  "Accelerate regions scheduling in a given range [startKey, endKey)"
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/accelerate-schedule [post]
->>>>>>> 01b8f34a4 (*: update the swagger dependency (#5183))
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	var input map[string]interface{}
