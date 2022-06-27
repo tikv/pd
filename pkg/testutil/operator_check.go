@@ -46,7 +46,7 @@ func CheckRemovePeer(c *check.C, op *operator.Operator, storeID uint64) {
 func CheckTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
 	c.Assert(op.Len(), check.Equals, 1)
-	c.Assert(op.Step(0), check.DeepEquals, operator.TransferLeader{FromStore: sourceID, ToStore: targetID})
+	c.Assert(op.Step(0), check.DeepEquals, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, Desc: op.Desc()})
 	kind |= operator.OpLeader
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
@@ -66,7 +66,7 @@ func CheckMultiTargetTransferLeader(c *check.C, op *operator.Operator, kind oper
 	c.Assert(op.Len(), check.Equals, 1)
 	expectedOps := make([]interface{}, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
-		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
+		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs, Desc: op.Desc()})
 	}
 	c.Assert(op.Step(0), check.DeepEqualsIn, expectedOps)
 	kind |= operator.OpLeader
@@ -169,7 +169,7 @@ func CheckRemovePeerWithTestify(re *require.Assertions, op *operator.Operator, s
 func CheckTransferLeaderWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
 	re.Equal(1, op.Len())
-	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
+	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID, Desc: op.Desc()}, op.Step(0))
 	kind |= operator.OpLeader
 	re.Equal(kind, op.Kind()&kind)
 }

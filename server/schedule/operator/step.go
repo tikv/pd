@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -29,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -59,7 +59,7 @@ type TransferLeader struct {
 	// Multi-target transfer leader.
 	ToStores []uint64
 	Desc     string
-	finished atomic.Bool
+	finished int32
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -73,13 +73,13 @@ func (tl TransferLeader) String() string {
 
 // IsFinish checks if current step is finished.
 func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
-	if tl.finished.Load() {
+	if atomic.LoadInt32(&tl.finished) > 0 {
 		return true
 	}
 	fromID := strconv.FormatUint(tl.FromStore, 10)
 	for _, storeID := range tl.ToStores {
 		if region.GetLeader().GetStoreId() == storeID {
-			if tl.finished.CAS(false, true) {
+			if atomic.CompareAndSwapInt32(&tl.finished, 0, 1) {
 				targetID := strconv.FormatUint(storeID, 10)
 				transferDirectionCount.WithLabelValues(tl.Desc, fromID, targetID).Inc()
 			}
@@ -87,7 +87,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 		}
 	}
 	if region.GetLeader().GetStoreId() == tl.ToStore {
-		if tl.finished.CAS(false, true) {
+		if atomic.CompareAndSwapInt32(&tl.finished, 0, 1) {
 			targetID := strconv.FormatUint(tl.ToStore, 10)
 			transferDirectionCount.WithLabelValues(tl.Desc, fromID, targetID).Inc()
 		}
@@ -139,7 +139,7 @@ type AddPeer struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
 	Desc            string
-	finished        atomic.Bool
+	finished        int32
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -154,7 +154,7 @@ func (ap AddPeer) String() string {
 
 // IsFinish checks if current step is finished.
 func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
-	if ap.finished.Load() {
+	if atomic.LoadInt32(&ap.finished) > 0 {
 		return true
 	}
 	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
@@ -163,7 +163,7 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 			return false
 		}
 		if region.GetPendingLearner(peer.GetId()) == nil {
-			if ap.finished.CAS(false, true) {
+			if atomic.CompareAndSwapInt32(&ap.finished, 0, 1) {
 				leaderID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
 				targetID := strconv.FormatUint(ap.ToStore, 10)
 				snapshotDirectionCounter.WithLabelValues(ap.Desc, leaderID, targetID).Inc()
@@ -209,7 +209,7 @@ type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
 	Desc            string
-	finished        atomic.Bool
+	finished        int32
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -224,7 +224,7 @@ func (al AddLearner) String() string {
 
 // IsFinish checks if current step is finished.
 func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
-	if al.finished.Load() {
+	if atomic.LoadInt32(&al.finished) > 0 {
 		return true
 	}
 	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
@@ -233,7 +233,7 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 			return false
 		}
 		if region.GetPendingLearner(peer.GetId()) == nil {
-			if al.finished.CAS(false, true) {
+			if atomic.CompareAndSwapInt32(&al.finished, 0, 1) {
 				leaderID := strconv.FormatUint(region.GetLeader().GetStoreId(), 10)
 				targetID := strconv.FormatUint(al.ToStore, 10)
 				snapshotDirectionCounter.WithLabelValues(al.Desc, leaderID, targetID).Inc()
