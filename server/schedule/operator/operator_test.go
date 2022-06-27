@@ -372,11 +372,9 @@ func (suite *operatorTestSuite) TestCheck() {
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
-
 		suite.Equal(STARTED, op.Status())
 		op.stepsTime[op.currentStep-1] = time.Now().Add(-SlowOperatorWaitTime).Unix()
 		suite.NotNil(op.Check(region))
-
 		suite.Equal(TIMEOUT, op.Status())
 	}
 	{
@@ -389,12 +387,10 @@ func (suite *operatorTestSuite) TestCheck() {
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
-
 		suite.Equal(STARTED, op.Status())
 		op.status.setTime(STARTED, time.Now().Add(-SlowOperatorWaitTime))
 		region = suite.newTestRegion(1, 1, [2]uint64{1, 1})
 		suite.Nil(op.Check(region))
-
 		suite.Equal(SUCCESS, op.Status())
 	}
 }

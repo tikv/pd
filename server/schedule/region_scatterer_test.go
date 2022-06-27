@@ -386,12 +386,12 @@ func TestScattersGroup(t *testing.T) {
 	}
 	group := "group"
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
 			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 		}
-		t.Log(testCase.name)
 		failures := map[uint64]error{}
 		if testCase.failure {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))
