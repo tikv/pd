@@ -194,7 +194,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		t.Log(testCase.name)
 		plans, err := getScaledTiKVGroups(testCase.informer, testCase.healthyInstances)
 		if testCase.expectedPlan == nil {
-			re.Len(plans, 0)
+			re.Empty(plans)
 			testCase.errorChecker(err)
 		} else {
 			re.Equal(testCase.expectedPlan, plans)

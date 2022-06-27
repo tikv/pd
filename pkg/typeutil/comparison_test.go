@@ -15,6 +15,7 @@
 package typeutil
 
 import (
+	"math/rand"
 	"testing"
 	"time"
 
@@ -43,4 +44,12 @@ func TestMinDuration(t *testing.T) {
 	re.Equal(time.Second, MinDuration(time.Minute, time.Second))
 	re.Equal(time.Second, MinDuration(time.Second, time.Minute))
 	re.Equal(time.Second, MinDuration(time.Second, time.Second))
+}
+
+func TestEqualFloat(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	f1 := rand.Float64()
+	re.True(Float64Equal(f1, f1*1.000))
+	re.True(Float64Equal(f1, f1/1.000))
 }

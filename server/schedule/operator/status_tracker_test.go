@@ -123,11 +123,11 @@ func TestCheckStepTimeout(t *testing.T) {
 		status OpStatus
 	}{{
 		step:   AddLearner{},
-		start:  time.Now().Add(-(SlowOperatorWaitTime - 1*time.Second)),
+		start:  time.Now().Add(-(SlowOperatorWaitTime - time.Second)),
 		status: STARTED,
 	}, {
 		step:   AddLearner{},
-		start:  time.Now().Add(-(SlowOperatorWaitTime + 1*time.Second)),
+		start:  time.Now().Add(-(SlowOperatorWaitTime + time.Second)),
 		status: TIMEOUT,
 	}}
 

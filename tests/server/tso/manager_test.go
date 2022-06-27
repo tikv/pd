@@ -130,7 +130,7 @@ func TestLocalTSOSuffix(t *testing.T) {
 			clientv3.WithPrefix(),
 			clientv3.WithSort(clientv3.SortByValue, clientv3.SortAscend))
 		re.NoError(err)
-		re.Equal(len(testCase.dcLocations), len(allSuffixResp.Kvs))
+		re.Len(allSuffixResp.Kvs, len(testCase.dcLocations))
 		var lastSuffixNum int64
 		for _, kv := range allSuffixResp.Kvs {
 			suffixNum, err := strconv.ParseInt(string(kv.Value), 10, 64)
@@ -182,7 +182,7 @@ func TestNextLeaderKey(t *testing.T) {
 			cluster.CheckClusterDCLocation()
 			currName := cluster.WaitAllocatorLeader("dc-1")
 			return currName == name
-		}, testutil.WithSleepInterval(1*time.Second))
+		}, testutil.WithTickInterval(time.Second))
 		return
 	}
 }

@@ -141,5 +141,5 @@ func TestErrorWithStack(t *testing.T) {
 	re.GreaterOrEqual(idx1, -1)
 	idx2 := strings.Index(m2, "[stack=")
 	re.GreaterOrEqual(idx2, -1)
-	re.Equal(len(m1[idx1:]), len(m2[idx2:]))
+	re.Len(m2[idx2:], len(m1[idx1:]))
 }

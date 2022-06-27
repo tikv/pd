@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -47,7 +48,7 @@ func TestSendAndGetComponent(t *testing.T) {
 		}
 		return mux, info, nil
 	}
-	cfg := server.NewTestSingleConfig(checkerWithNilAssert(re))
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := server.CreateServer(ctx, cfg, handler)
 	re.NoError(err)
