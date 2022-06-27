@@ -630,7 +630,7 @@ func (s *testBalanceLeaderRangeSchedulerSuite) TestReSortStores(c *C) {
 	}
 	candidateStores := make([]*core.StoreInfo, 0)
 	// order by score desc.
-	cs := newCandidateStores(append(candidateStores, stores...), false, getScore)
+	cs := newCandidateStores(append(candidateStores, stores...), getScore)
 	// in candidate,the order stores:1(104),5(100),4(100),6,3,2
 	// store 4 should in pos 2
 	c.Assert(cs.binarySearch(stores[3]), Equals, 2)

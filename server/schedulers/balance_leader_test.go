@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 )
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
@@ -62,7 +64,7 @@ func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
 	getScore := func(store *core.StoreInfo) float64 {
 		return store.LeaderScore(0, deltaMap[store.GetID()])
 	}
-	cs := newCandidateStores(tc.GetStores(), false, getScore)
+	cs := newCandidateStores(tc.GetStores(), getScore)
 	stores := tc.GetStores()
 	// update score for store and reorder
 	for id, store := range stores {
@@ -73,5 +75,37 @@ func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
 			deltaMap[store.GetID()] = int64(-rand.Int31n(10000))
 		}
 		cs.resortStoreWithPos(offsets[0])
+	}
+}
+
+func newBenchBalanceLeaderCluster(ctx context.Context) *mockcluster.Cluster {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	opt.GetScheduleConfig().TolerantSizeRatio = float64(1)
+	for storeID := uint64(1); storeID <= 20; storeID++ {
+		tc.AddLeaderStore(storeID, int(storeID), int64(storeID)*MB)
+	}
+	regionID := uint64(1000)
+	for regionID <= 2000 {
+		for storeID := uint64(20); storeID >= 15; storeID-- {
+			startKey := fmt.Sprintf("a%06d", regionID)
+			endKey := fmt.Sprintf("a%06d", regionID+1)
+			tc.AddLeaderRegionWithRange(regionID, startKey, endKey, storeID, storeID-10, storeID-9)
+			regionID++
+		}
+	}
+
+	return tc
+}
+
+func BenchmarkBalanceLeader(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchBalanceLeaderCluster(ctx)
+	tc.SetLeaderSchedulePolicy(core.ByCount.String())
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceLeaderScheduler(oc, &balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}, Batch: 100}, WithBalanceLeaderName("benchmarkBalanceLeader"))
+
+	for i := 0; i < b.N; i++ {
+		sc.Schedule(tc)
 	}
 }

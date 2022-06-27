@@ -252,14 +252,14 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 
 // candidateStores for balance_leader, order by `getStore` `asc`
 type candidateStores struct {
-	stores   []*core.StoreInfo
-	getScore func(*core.StoreInfo) float64
-	index    int
-	asc      bool
+	stores       []*core.StoreInfo
+	getScore     func(*core.StoreInfo) float64
+	index        int
+	reverseIndex int
 }
 
-func newCandidateStores(stores []*core.StoreInfo, asc bool, getScore func(*core.StoreInfo) float64) *candidateStores {
-	cs := &candidateStores{stores: stores, getScore: getScore, asc: asc}
+func newCandidateStores(stores []*core.StoreInfo, getScore func(*core.StoreInfo) float64) *candidateStores {
+	cs := &candidateStores{stores: stores, getScore: getScore, reverseIndex: len(stores) - 1}
 	sort.Slice(cs.stores, cs.sortFunc())
 	return cs
 }
@@ -279,23 +279,42 @@ func (cs *candidateStores) less(iID uint64, scorei float64, jID uint64, scorej f
 		// Since we assume that the bigger storeID, the newer store(which would be scheduled as soon as possible).
 		return iID > jID
 	}
-	if cs.asc {
-		return scorei < scorej
-	}
 	return scorei > scorej
 }
 
 // hasStore returns returns true when there are leftover stores.
 func (cs *candidateStores) hasStore() bool {
-	return cs.index < len(cs.stores)
+	l := len(cs.stores)
+	return (cs.index < l) || (l > 0 && cs.reverseIndex >= 0)
 }
 
-func (cs *candidateStores) getStore() *core.StoreInfo {
-	return cs.stores[cs.index]
+func (cs *candidateStores) getStore(reverse bool) *core.StoreInfo {
+	if reverse {
+		return cs.getReverseStore()
+	}
+	return cs.getOriginStore()
 }
 
-func (cs *candidateStores) next() {
-	cs.index++
+func (cs *candidateStores) getOriginStore() *core.StoreInfo {
+	if cs.index < len(cs.stores) {
+		return cs.stores[cs.index]
+	}
+	return nil
+}
+
+func (cs *candidateStores) getReverseStore() *core.StoreInfo {
+	if len(cs.stores) > 0 && cs.reverseIndex >= 0 {
+		return cs.stores[cs.reverseIndex]
+	}
+	return nil
+}
+
+func (cs *candidateStores) moveToNext(reverse bool) {
+	if reverse {
+		cs.reverseIndex--
+	} else {
+		cs.index++
+	}
 }
 
 func (cs *candidateStores) binarySearch(store *core.StoreInfo) (index int) {
@@ -357,54 +376,65 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.LeaderScore(plan.kind.Policy, plan.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), false, scoreFunc)
-	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), true, scoreFunc)
+	storesCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
-	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
-		// first choose source
-		if sourceCandidate.hasStore() {
-			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, plan, usedRegions)
-			if op != nil {
-				result = append(result, op)
-				if len(result) >= batch {
-					return result
-				}
-				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
-			}
+
+	transOut := false
+	preNoStore := false
+	for {
+		if !preNoStore {
+			// if current is try to transafer leader out, the next step is to transfer leader in.
+			transOut = !transOut
 		}
-		// next choose target
-		if targetCandidate.hasStore() {
-			op := createTransferLeaderOperator(targetCandidate, transferIn, l, plan, usedRegions)
-			if op != nil {
-				result = append(result, op)
-				if len(result) >= batch {
-					return result
-				}
-				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
+		// If it transfer out leaders, the source store should be picked in the origin(asc) order.
+		// If it want to transfer in leader, the target store should be picked in reverse(desc) order.
+		candidateReverse := !transOut
+		store := storesCandidate.getStore(candidateReverse)
+		if store == nil {
+			if preNoStore {
+				break
 			}
+			// The store will always be nil with the same transOut value.
+			transOut = !transOut
+			preNoStore = true
+			continue
 		}
+		op := createTransferLeaderOperator(store, transOut, l, plan, usedRegions)
+
+		if op == nil {
+			storesCandidate.moveToNext(candidateReverse)
+			continue
+		}
+		result = append(result, op)
+		if len(result) >= batch {
+			return result
+		}
+		makeInfluence(op, plan, usedRegions, storesCandidate)
 	}
-	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
+	l.retryQuota.GC(storesCandidate.stores)
 	return result
 }
 
-func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,
+func createTransferLeaderOperator(store *core.StoreInfo, transOut bool, l *balanceLeaderScheduler,
 	plan *balancePlan, usedRegions map[uint64]struct{}) *operator.Operator {
-	store := cs.getStore()
-	retryLimit := l.retryQuota.GetLimit(store)
+
 	var creator func(*balancePlan) *operator.Operator
-	switch dir {
-	case transferOut:
+	var transferMsg string
+	switch transOut {
+	case true:
 		plan.source, plan.target = store, nil
 		l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 		creator = l.transferLeaderOut
-	case transferIn:
+		transferMsg = transferIn
+	case false:
 		plan.source, plan.target = nil, store
 		l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 		creator = l.transferLeaderIn
+		transferMsg = transferOut
 	}
+	retryLimit := l.retryQuota.GetLimit(store)
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
 		schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
@@ -417,27 +447,20 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	if op != nil {
 		l.retryQuota.ResetLimit(store)
-		op.Counters = append(op.Counters, l.counter.WithLabelValues(dir, plan.SourceMetricLabel()))
-	} else {
-		l.Attenuate(store)
-		log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()))
-		cs.next()
+		op.Counters = append(op.Counters, l.counter.WithLabelValues(transferMsg, plan.SourceMetricLabel()))
+		return op
 	}
+	l.Attenuate(store)
+	log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64(transferMsg, store.GetID()))
 	return op
 }
 
-func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uint64]struct{}, candidates ...*candidateStores) {
+func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uint64]struct{}, candidate *candidateStores) {
 	usedRegions[op.RegionID()] = struct{}{}
-	candidateUpdateStores := make([][]int, len(candidates))
-	for id, candidate := range candidates {
-		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
-		candidateUpdateStores[id] = storesIDs
-	}
+	storesIDs := candidate.binarySearchStores(plan.source, plan.target)
 	schedule.AddOpInfluence(op, plan.opInfluence, plan.Cluster)
-	for id, candidate := range candidates {
-		for _, pos := range candidateUpdateStores[id] {
-			candidate.resortStoreWithPos(pos)
-		}
+	for _, pos := range storesIDs {
+		candidate.resortStoreWithPos(pos)
 	}
 }
 
