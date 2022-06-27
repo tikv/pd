@@ -15,43 +15,41 @@
 package pd
 
 import (
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
 )
 
-var _ = Suite(&testClientOptionSuite{})
-
-type testClientOptionSuite struct{}
-
-func (s *testClientSuite) TestDynamicOptionChange(c *C) {
+func TestDynamicOptionChange(t *testing.T) {
+	re := require.New(t)
 	o := newOption()
 	// Check the default value setting.
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, defaultMaxTSOBatchWaitInterval)
-	c.Assert(o.getEnableTSOFollowerProxy(), Equals, defaultEnableTSOFollowerProxy)
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
+	re.Equal(defaultEnableTSOFollowerProxy, o.getEnableTSOFollowerProxy())
 
 	// Check the invalid value setting.
-	c.Assert(o.setMaxTSOBatchWaitInterval(time.Second), NotNil)
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, defaultMaxTSOBatchWaitInterval)
+	re.NotNil(o.setMaxTSOBatchWaitInterval(time.Second))
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
 	expectInterval := time.Millisecond
 	o.setMaxTSOBatchWaitInterval(expectInterval)
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
 	expectInterval = time.Duration(float64(time.Millisecond) * 0.5)
 	o.setMaxTSOBatchWaitInterval(expectInterval)
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
 	expectInterval = time.Duration(float64(time.Millisecond) * 1.5)
 	o.setMaxTSOBatchWaitInterval(expectInterval)
-	c.Assert(o.getMaxTSOBatchWaitInterval(), Equals, expectInterval)
+	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
 
 	expectBool := true
 	o.setEnableTSOFollowerProxy(expectBool)
 	// Check the value changing notification.
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		<-o.enableTSOFollowerProxyCh
 		return true
 	})
-	c.Assert(o.getEnableTSOFollowerProxy(), Equals, expectBool)
+	re.Equal(expectBool, o.getEnableTSOFollowerProxy())
 	// Check whether any data will be sent to the channel.
 	// It will panic if the test fails.
 	close(o.enableTSOFollowerProxyCh)

@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -1295,8 +1294,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	safePoint, err := storage.LoadGCSafePoint()
+	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}
@@ -1335,19 +1333,13 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var storage endpoint.GCSafePointStorage = s.storage
-	oldSafePoint, err := storage.LoadGCSafePoint()
+	newSafePoint := request.GetSafePoint()
+	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
 	if err != nil {
 		return nil, err
 	}
 
-	newSafePoint := request.SafePoint
-
-	// Only save the safe point if it's greater than the previous one
 	if newSafePoint > oldSafePoint {
-		if err := storage.SaveGCSafePoint(newSafePoint); err != nil {
-			return nil, err
-		}
 		log.Info("updated gc safe point",
 			zap.Uint64("safe-point", newSafePoint))
 	} else if newSafePoint < oldSafePoint {
@@ -1365,8 +1357,6 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 
 // UpdateServiceGCSafePoint update the safepoint for specific service
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
-	s.serviceSafePointLock.Lock()
-	defer s.serviceSafePointLock.Unlock()
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
 	}
@@ -1392,36 +1382,17 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		return nil, err
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
-	min, err := storage.LoadMinServiceGCSafePoint(now)
+	serviceID := string(request.ServiceId)
+	min, updated, err := s.gcSafePointManager.UpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
 		return nil, err
 	}
-
-	if request.TTL > 0 && request.SafePoint >= min.SafePoint {
-		ssp := &endpoint.ServiceSafePoint{
-			ServiceID: string(request.ServiceId),
-			ExpiredAt: now.Unix() + request.TTL,
-			SafePoint: request.SafePoint,
-		}
-		if math.MaxInt64-now.Unix() <= request.TTL {
-			ssp.ExpiredAt = math.MaxInt64
-		}
-		if err := storage.SaveServiceGCSafePoint(ssp); err != nil {
-			return nil, err
-		}
+	if updated {
 		log.Info("update service GC safe point",
-			zap.String("service-id", ssp.ServiceID),
-			zap.Int64("expire-at", ssp.ExpiredAt),
-			zap.Uint64("safepoint", ssp.SafePoint))
-		// If the min safepoint is updated, load the next one
-		if string(request.ServiceId) == min.ServiceID {
-			min, err = storage.LoadMinServiceGCSafePoint(now)
-			if err != nil {
-				return nil, err
-			}
-		}
+			zap.String("service-id", serviceID),
+			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
+			zap.Uint64("safepoint", request.GetSafePoint()))
 	}
-
 	return &pdpb.UpdateServiceGCSafePointResponse{
 		Header:       s.header(),
 		ServiceId:    []byte(min.ServiceID),

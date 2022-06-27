@@ -97,6 +97,10 @@ func (c *coordinator) GetWaitingRegions() []*cache.Item {
 	return c.checkers.GetWaitingRegions()
 }
 
+func (c *coordinator) IsPendingRegion(region uint64) bool {
+	return c.checkers.IsPendingRegion(region)
+}
+
 // patrolRegions is used to scan regions.
 // The checkers will check these regions to decide if they need to do some operations.
 func (c *coordinator) patrolRegions() {
@@ -577,10 +581,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
 		stat, ok = status.AsPeer[storeID]
@@ -590,10 +594,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
 	}
 }
@@ -669,7 +673,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 
 	s.Stop()
-	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
+	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 
 	return nil
@@ -718,10 +722,12 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	}
 	var err error
 	for _, sc := range s {
-		var delayUntil int64
+		var delayAt, delayUntil int64
 		if t > 0 {
-			delayUntil = time.Now().Unix() + t
+			delayAt = time.Now().Unix()
+			delayUntil = delayAt + t
 		}
+		atomic.StoreInt64(&sc.delayAt, delayAt)
 		atomic.StoreInt64(&sc.delayUntil, delayUntil)
 	}
 	return err
@@ -851,6 +857,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
+	delayAt      int64
 	delayUntil   int64
 }
 
@@ -908,4 +915,46 @@ func (s *scheduleController) AllowSchedule() bool {
 func (s *scheduleController) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil
+}
+
+// GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
+func (s *scheduleController) GetDelayAt() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayAt)
+	}
+	return 0
+}
+
+// GetPausedSchedulerDelayUntil returns resume timestamp of a paused scheduler
+func (s *scheduleController) GetDelayUntil() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayUntil)
+	}
+	return 0
+}
+
+func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayAt(), nil
+}
+
+func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayUntil(), nil
 }

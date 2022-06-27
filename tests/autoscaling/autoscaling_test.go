@@ -20,37 +20,30 @@ import (
 	"net/http"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&apiTestSuite{})
-
-type apiTestSuite struct{}
-
-func (s *apiTestSuite) TestAPI(c *C) {
+func TestAPI(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	re.NoError(leaderServer.BootstrapCluster())
 
 	var jsonStr = []byte(`
 {
@@ -102,7 +95,7 @@ func (s *apiTestSuite) TestAPI(c *C) {
     ]
 }`)
 	resp, err := http.Post(leaderServer.GetAddr()+"/autoscaling", "application/json", bytes.NewBuffer(jsonStr))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer resp.Body.Close()
-	c.Assert(resp.StatusCode, Equals, 200)
+	re.Equal(200, resp.StatusCode)
 }

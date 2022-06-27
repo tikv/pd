@@ -18,18 +18,9 @@ import (
 	"bytes"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/btree"
 )
-
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testRangeTreeSuite{})
-
-type testRangeTreeSuite struct {
-}
 
 type simpleBucketItem struct {
 	startKey []byte
@@ -79,7 +70,7 @@ func bucketDebrisFactory(startKey, endKey []byte, item RangeItem) []RangeItem {
 
 	left := maxKey(startKey, item.GetStartKey())
 	right := minKey(endKey, item.GetEndKey())
-	// they have no intersection if they are neighbour like |010 - 100| and |100 - 200|.
+	// they have no intersection if they are neighbors like |010 - 100| and |100 - 200|.
 	if bytes.Compare(left, right) >= 0 {
 		return nil
 	}
@@ -94,52 +85,56 @@ func bucketDebrisFactory(startKey, endKey []byte, item RangeItem) []RangeItem {
 	return res
 }
 
-func (bs *testRangeTreeSuite) TestRingPutItem(c *C) {
+func TestRingPutItem(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	bucketTree := NewRangeTree(2, bucketDebrisFactory)
 	bucketTree.Update(newSimpleBucketItem([]byte("002"), []byte("100")))
-	c.Assert(bucketTree.Len(), Equals, 1)
+	re.Equal(1, bucketTree.Len())
 	bucketTree.Update(newSimpleBucketItem([]byte("100"), []byte("200")))
-	c.Assert(bucketTree.Len(), Equals, 2)
+	re.Equal(2, bucketTree.Len())
 
 	// init key range: [002,100], [100,200]
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("002"))), HasLen, 0)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("009"))), HasLen, 1)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("110"))), HasLen, 2)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("200"), []byte("300"))), HasLen, 0)
+	re.Empty(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("002"))))
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("009"))), 1)
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), 1)
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("110"))), 2)
+	re.Empty(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("200"), []byte("300"))))
 
 	// test1： insert one key range, the old overlaps will retain like split buckets.
 	// key range: [002,010],[010,090],[090,100],[100,200]
 	bucketTree.Update(newSimpleBucketItem([]byte("010"), []byte("090")))
-	c.Assert(bucketTree.Len(), Equals, 4)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
+	re.Equal(4, bucketTree.Len())
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), 1)
 
 	// test2: insert one key range, the old overlaps will retain like merge .
 	// key range: [001,080], [080,090],[090,100],[100,200]
 	bucketTree.Update(newSimpleBucketItem([]byte("001"), []byte("080")))
-	c.Assert(bucketTree.Len(), Equals, 4)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 2)
+	re.Equal(4, bucketTree.Len())
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), 2)
 
 	// test2: insert one keyrange, the old overlaps will retain like merge .
 	// key range: [001,120],[120,200]
 	bucketTree.Update(newSimpleBucketItem([]byte("001"), []byte("120")))
-	c.Assert(bucketTree.Len(), Equals, 2)
-	c.Assert(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), HasLen, 1)
+	re.Equal(2, bucketTree.Len())
+	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), 1)
 }
 
-func (bs *testRangeTreeSuite) TestDebris(c *C) {
+func TestDebris(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	ringItem := newSimpleBucketItem([]byte("010"), []byte("090"))
 	var overlaps []RangeItem
 	overlaps = bucketDebrisFactory([]byte("000"), []byte("100"), ringItem)
-	c.Assert(overlaps, HasLen, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("000"), []byte("080"), ringItem)
-	c.Assert(overlaps, HasLen, 1)
+	re.Len(overlaps, 1)
 	overlaps = bucketDebrisFactory([]byte("020"), []byte("080"), ringItem)
-	c.Assert(overlaps, HasLen, 2)
+	re.Len(overlaps, 2)
 	overlaps = bucketDebrisFactory([]byte("010"), []byte("090"), ringItem)
-	c.Assert(overlaps, HasLen, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("010"), []byte("100"), ringItem)
-	c.Assert(overlaps, HasLen, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("100"), []byte("200"), ringItem)
-	c.Assert(overlaps, HasLen, 0)
+	re.Empty(overlaps)
 }

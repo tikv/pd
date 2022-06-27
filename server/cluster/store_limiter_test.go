@@ -15,43 +15,40 @@
 package cluster
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core/storelimit"
 )
 
-var _ = Suite(&testStoreLimiterSuite{})
+func TestCollect(t *testing.T) {
+	re := require.New(t)
 
-type testStoreLimiterSuite struct {
-	opt *config.PersistOptions
-}
-
-func (s *testStoreLimiterSuite) SetUpSuite(c *C) {
-	// Create a server for testing
-	s.opt = config.NewTestOptions()
-}
-
-func (s *testStoreLimiterSuite) TestCollect(c *C) {
-	limiter := NewStoreLimiter(s.opt)
+	limiter := NewStoreLimiter(config.NewTestOptions())
 
 	limiter.Collect(&pdpb.StoreStats{})
-	c.Assert(limiter.state.cst.total, Equals, int64(1))
+	re.Equal(int64(1), limiter.state.cst.total)
 }
 
-func (s *testStoreLimiterSuite) TestStoreLimitScene(c *C) {
-	limiter := NewStoreLimiter(s.opt)
-	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, storelimit.DefaultScene(storelimit.AddPeer))
-	c.Assert(limiter.scene[storelimit.RemovePeer], DeepEquals, storelimit.DefaultScene(storelimit.RemovePeer))
+func TestStoreLimitScene(t *testing.T) {
+	re := require.New(t)
+
+	limiter := NewStoreLimiter(config.NewTestOptions())
+	re.Equal(storelimit.DefaultScene(storelimit.AddPeer), limiter.scene[storelimit.AddPeer])
+	re.Equal(storelimit.DefaultScene(storelimit.RemovePeer), limiter.scene[storelimit.RemovePeer])
 }
 
-func (s *testStoreLimiterSuite) TestReplaceStoreLimitScene(c *C) {
-	limiter := NewStoreLimiter(s.opt)
+func TestReplaceStoreLimitScene(t *testing.T) {
+	re := require.New(t)
+
+	limiter := NewStoreLimiter(config.NewTestOptions())
 
 	sceneAddPeer := &storelimit.Scene{Idle: 4, Low: 3, Normal: 2, High: 1}
 	limiter.ReplaceStoreLimitScene(sceneAddPeer, storelimit.AddPeer)
 
-	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, sceneAddPeer)
+	re.Equal(sceneAddPeer, limiter.scene[storelimit.AddPeer])
 
 	sceneRemovePeer := &storelimit.Scene{Idle: 5, Low: 4, Normal: 3, High: 2}
 	limiter.ReplaceStoreLimitScene(sceneRemovePeer, storelimit.RemovePeer)

@@ -41,12 +41,12 @@ type listServiceGCSafepoint struct {
 	GCSafePoint         uint64                       `json:"gc_safe_point"`
 }
 
-// @Tags service_gc_safepoint
-// @Summary Get all service GC safepoint.
-// @Produce json
-// @Success 200 {array} listServiceGCSafepoint
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /gc/safepoint [get]
+// @Tags     service_gc_safepoint
+// @Summary  Get all service GC safepoint.
+// @Produce  json
+// @Success  200  {array}   listServiceGCSafepoint
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
@@ -66,14 +66,14 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *htt
 	h.rd.JSON(w, http.StatusOK, list)
 }
 
-// @Tags service_gc_safepoint
-// @Summary Delete a service GC safepoint.
-// @Param service_id path string true "Service ID"
-// @Produce json
-// @Success 200 {string} string "Delete service GC safepoint successfully."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /gc/safepoint/{service_id} [delete]
-// @Tags rule
+// @Tags     service_gc_safepoint
+// @Summary  Delete a service GC safepoint.
+// @Param    service_id  path  string  true  "Service ID"
+// @Produce  json
+// @Success  200  {string}  string  "Delete service GC safepoint successfully."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /gc/safepoint/{service_id} [delete]
+// @Tags     rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	storage := h.svr.GetStorage()
 	serviceID := mux.Vars(r)["service_id"]

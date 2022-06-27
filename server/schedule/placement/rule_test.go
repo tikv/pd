@@ -17,15 +17,13 @@ package placement
 import (
 	"encoding/hex"
 	"math/rand"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testRuleSuite{})
-
-type testRuleSuite struct{}
-
-func (s *testRuleSuite) TestPrepareRulesForApply(c *C) {
+func TestPrepareRulesForApply(t *testing.T) {
+	re := require.New(t)
 	rules := []*Rule{
 		{GroupID: "g1", Index: 0, ID: "id5"},
 		{GroupID: "g1", Index: 0, ID: "id6"},
@@ -56,13 +54,13 @@ func (s *testRuleSuite) TestPrepareRulesForApply(c *C) {
 	sortRules(rules)
 	rules = prepareRulesForApply(rules)
 
-	c.Assert(len(rules), Equals, len(expected))
+	re.Len(rules, len(expected))
 	for i := range rules {
-		c.Assert(rules[i].Key(), Equals, expected[i])
+		re.Equal(expected[i], rules[i].Key())
 	}
 }
-
-func (s *testRuleSuite) TestGroupProperties(c *C) {
+func TestGroupProperties(t *testing.T) {
+	re := require.New(t)
 	testCases := []struct {
 		rules  []*Rule
 		expect [][2]string
@@ -103,15 +101,14 @@ func (s *testRuleSuite) TestGroupProperties(c *C) {
 		rand.Shuffle(len(tc.rules), func(i, j int) { tc.rules[i], tc.rules[j] = tc.rules[j], tc.rules[i] })
 		sortRules(tc.rules)
 		rules := prepareRulesForApply(tc.rules)
-		c.Assert(rules, HasLen, len(tc.expect))
+		re.Len(rules, len(tc.expect))
 		for i := range rules {
-			c.Assert(rules[i].Key(), Equals, tc.expect[i])
+			re.Equal(tc.expect[i], rules[i].Key())
 		}
 	}
 }
-
-// TODO: fulfill unit test case to cover BuildRuleList
-func (s *testRuleSuite) TestBuildRuleList(c *C) {
+func TestBuildRuleList(t *testing.T) {
+	re := require.New(t)
 	defaultRule := &Rule{
 		GroupID:  "pd",
 		ID:       "default",
@@ -121,9 +118,9 @@ func (s *testRuleSuite) TestBuildRuleList(c *C) {
 		Count:    3,
 	}
 	byteStart, err := hex.DecodeString("a1")
-	c.Check(err, IsNil)
+	re.NoError(err)
 	byteEnd, err := hex.DecodeString("a2")
-	c.Check(err, IsNil)
+	re.NoError(err)
 	ruleMeta := &Rule{
 		GroupID:  "pd",
 		ID:       "meta",
@@ -135,7 +132,7 @@ func (s *testRuleSuite) TestBuildRuleList(c *C) {
 		Count:    5,
 	}
 
-	testcases := []struct {
+	testCases := []struct {
 		name   string
 		rules  map[[2]string]*Rule
 		expect ruleList
@@ -181,11 +178,11 @@ func (s *testRuleSuite) TestBuildRuleList(c *C) {
 		},
 	}
 
-	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		config := &ruleConfig{rules: testcase.rules}
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		config := &ruleConfig{rules: testCase.rules}
 		result, err := buildRuleList(config)
-		c.Assert(err, IsNil)
-		c.Assert(result.ranges, DeepEquals, testcase.expect.ranges)
+		re.NoError(err)
+		re.Equal(testCase.expect.ranges, result.ranges)
 	}
 }

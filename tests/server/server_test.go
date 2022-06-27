@@ -18,10 +18,9 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -30,47 +29,30 @@ import (
 	_ "github.com/tikv/pd/server/schedulers"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-var _ = Suite(&serverTestSuite{})
-
-type serverTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *serverTestSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
-}
-
-func (s *serverTestSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 2)
+func TestUpdateAdvertiseUrls(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// AdvertisePeerUrls should equals to PeerUrls.
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
-		c.Assert(serverConf.AdvertisePeerUrls, Equals, conf.PeerURLs)
-		c.Assert(serverConf.AdvertiseClientUrls, Equals, conf.ClientURLs)
+		re.Equal(conf.PeerURLs, serverConf.AdvertisePeerUrls)
+		re.Equal(conf.ClientURLs, serverConf.AdvertiseClientUrls)
 	}
 
 	err = cluster.StopAll()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// Change config will not affect peer urls.
 	// Recreate servers with new peer URLs.
@@ -78,68 +60,73 @@ func (s *serverTestSuite) TestUpdateAdvertiseUrls(c *C) {
 		conf.AdvertisePeerURLs = conf.PeerURLs + "," + tempurl.Alloc()
 	}
 	for _, conf := range cluster.GetConfig().InitialServers {
-		serverConf, e := conf.Generate()
-		c.Assert(e, IsNil)
-		s, e := tests.NewTestServer(s.ctx, serverConf)
-		c.Assert(e, IsNil)
+		serverConf, err := conf.Generate()
+		re.NoError(err)
+		s, err := tests.NewTestServer(ctx, serverConf)
+		re.NoError(err)
 		cluster.GetServers()[conf.Name] = s
 	}
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf := cluster.GetServer(conf.Name).GetConfig()
-		c.Assert(serverConf.AdvertisePeerUrls, Equals, conf.PeerURLs)
+		re.Equal(conf.PeerURLs, serverConf.AdvertisePeerUrls)
 	}
 }
 
-func (s *serverTestSuite) TestClusterID(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+func TestClusterID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	clusterID := cluster.GetServer("pd1").GetClusterID()
 	for _, s := range cluster.GetServers() {
-		c.Assert(s.GetClusterID(), Equals, clusterID)
+		re.Equal(clusterID, s.GetClusterID())
 	}
 
 	// Restart all PDs.
 	err = cluster.StopAll()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// All PDs should have the same cluster ID as before.
 	for _, s := range cluster.GetServers() {
-		c.Assert(s.GetClusterID(), Equals, clusterID)
+		re.Equal(clusterID, s.GetClusterID())
 	}
 
-	cluster2, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.InitialClusterToken = "foobar" })
+	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster2.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
-	c.Assert(clusterID2, Not(Equals), clusterID)
+	re.NotEqual(clusterID, clusterID2)
 }
 
-func (s *serverTestSuite) TestLeader(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 3)
+func TestLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
-	c.Assert(leader1, Not(Equals), "")
+	re.NotEmpty(leader1)
 
 	err = cluster.GetServer(leader1).Stop()
-	c.Assert(err, IsNil)
-	testutil.WaitUntil(c, func() bool {
-		leader := cluster.GetLeader()
-		return leader != leader1
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return cluster.GetLeader() != leader1
 	})
 }

@@ -17,12 +17,14 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/reflectutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
@@ -299,6 +301,38 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *
 	rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
+func (conf *hotRegionSchedulerConfig) validPriority() error {
+	isValid := func(priorities []string) (map[string]bool, error) {
+		priorityMap := map[string]bool{}
+		for _, p := range priorities {
+			if p != BytePriority && p != KeyPriority && p != QueryPriority {
+				return nil, errs.ErrSchedulerConfig.FastGenByArgs("invalid scheduling dimensions.")
+			}
+			priorityMap[p] = true
+		}
+		if len(priorityMap) != len(priorities) {
+			return nil, errors.New("priorities shouldn't be repeated")
+		}
+		if len(priorityMap) != 0 && len(priorityMap) < 2 {
+			return nil, errors.New("priorities should have at least 2 dimensions")
+		}
+		return priorityMap, nil
+	}
+	if _, err := isValid(conf.ReadPriorities); err != nil {
+		return err
+	}
+	if _, err := isValid(conf.WriteLeaderPriorities); err != nil {
+		return err
+	}
+	pm, err := isValid(conf.WritePeerPriorities)
+	if err != nil {
+		return err
+	} else if pm[QueryPriority] {
+		return errors.New("qps is not allowed to be set in priorities for write-peer-priorities")
+	}
+	return nil
+}
+
 func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *http.Request) {
 	conf.Lock()
 	defer conf.Unlock()
@@ -313,6 +347,15 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 
 	if err := json.Unmarshal(data, conf); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := conf.validPriority(); err != nil {
+		// revert to old version
+		if err2 := json.Unmarshal(oldc, conf); err2 != nil {
+			rd.JSON(w, http.StatusInternalServerError, err2.Error())
+		} else {
+			rd.JSON(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 	newc, _ := json.Marshal(conf)

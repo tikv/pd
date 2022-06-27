@@ -18,39 +18,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/suite"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testAdminSuite{})
-
-type testAdminSuite struct {
+type adminTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testAdminSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
+func TestAdminTestSuite(t *testing.T) {
+	suite.Run(t, new(adminTestSuite))
 }
 
-func (s *testAdminSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *adminTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
 }
 
-func (s *testAdminSuite) TestDropRegion(c *C) {
-	cluster := s.svr.GetRaftCluster()
+func (suite *adminTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *adminTestSuite) TestDropRegion() {
+	cluster := suite.svr.GetRaftCluster()
 
 	// Update region's epoch to (100, 100).
 	region := cluster.GetRegionByKey([]byte("foo")).Clone(
@@ -63,7 +68,7 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 		},
 	}))
 	err := cluster.HandleRegionHeartbeat(region)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 
 	// Region epoch cannot decrease.
 	region = region.Clone(
@@ -71,39 +76,32 @@ func (s *testAdminSuite) TestDropRegion(c *C) {
 		core.SetRegionVersion(50),
 	)
 	err = cluster.HandleRegionHeartbeat(region)
-	c.Assert(err, NotNil)
+	suite.Error(err)
 
 	// After drop region from cache, lower version is accepted.
-	url := fmt.Sprintf("%s/admin/cache/region/%d", s.urlPrefix, region.GetID())
+	url := fmt.Sprintf("%s/admin/cache/region/%d", suite.urlPrefix, region.GetID())
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	res, err := testDialClient.Do(req)
-	c.Assert(err, IsNil)
-	c.Assert(res.StatusCode, Equals, http.StatusOK)
+	suite.NoError(err)
+	suite.Equal(http.StatusOK, res.StatusCode)
 	res.Body.Close()
 	err = cluster.HandleRegionHeartbeat(region)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 
 	region = cluster.GetRegionByKey([]byte("foo"))
-	c.Assert(region.GetRegionEpoch().ConfVer, Equals, uint64(50))
-	c.Assert(region.GetRegionEpoch().Version, Equals, uint64(50))
+	suite.Equal(uint64(50), region.GetRegionEpoch().ConfVer)
+	suite.Equal(uint64(50), region.GetRegionEpoch().Version)
 }
 
-func (s *testAdminSuite) TestPersistFile(c *C) {
+func (suite *adminTestSuite) TestPersistFile() {
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(c))
-	c.Assert(err, IsNil)
+	re := suite.Require()
+	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(re))
+	suite.NoError(err)
 	data = []byte(`{"foo":"bar"}`)
-	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(c))
-	c.Assert(err, IsNil)
-}
-
-var _ = Suite(&testTSOSuite{})
-
-type testTSOSuite struct {
-	svr       *server.Server
-	cleanup   cleanUpFunc
-	urlPrefix string
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(re))
+	suite.NoError(err)
 }
 
 func makeTS(offset time.Duration) uint64 {
@@ -111,81 +109,49 @@ func makeTS(offset time.Duration) uint64 {
 	return uint64(physical << 18)
 }
 
-func (s *testTSOSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/reset-ts", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (s *testTSOSuite) TearDownSuite(c *C) {
-	s.cleanup()
-}
-
-func (s *testTSOSuite) TestResetTS(c *C) {
+func (suite *adminTestSuite) TestResetTS() {
 	args := make(map[string]interface{})
 	t1 := makeTS(time.Hour)
-	url := s.urlPrefix
+	url := fmt.Sprintf("%s/admin/reset-ts", suite.urlPrefix)
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	re := suite.Require()
 	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.StatusOK(c),
-		tu.StringEqual(c, "\"Reset ts successfully.\"\n"))
-	c.Assert(err, IsNil)
+		tu.StatusOK(re),
+		tu.StringEqual(re, "\"Reset ts successfully.\"\n"))
+	suite.NoError(err)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
 	values, err = json.Marshal(args)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.Status(c, http.StatusForbidden),
-		tu.StringContain(c, "too large"))
-	c.Assert(err, IsNil)
+		tu.Status(re, http.StatusForbidden),
+		tu.StringContain(re, "too large"))
+	suite.NoError(err)
 
 	t3 := makeTS(-2 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t3)
 	values, err = json.Marshal(args)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.Status(c, http.StatusForbidden),
-		tu.StringContain(c, "small"))
-	c.Assert(err, IsNil)
+		tu.Status(re, http.StatusForbidden),
+		tu.StringContain(re, "small"))
+	suite.NoError(err)
 
 	args["tso"] = ""
 	values, err = json.Marshal(args)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.Status(c, http.StatusBadRequest),
-		tu.StringEqual(c, "\"invalid tso value\"\n"))
-	c.Assert(err, IsNil)
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "\"invalid tso value\"\n"))
+	suite.NoError(err)
 
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.Status(c, http.StatusBadRequest),
-		tu.StringEqual(c, "\"invalid tso value\"\n"))
-	c.Assert(err, IsNil)
-}
-
-var _ = Suite(&testServiceSuite{})
-
-type testServiceSuite struct {
-	svr     *server.Server
-	cleanup cleanUpFunc
-}
-
-func (s *testServiceSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (s *testServiceSuite) TearDownSuite(c *C) {
-	s.cleanup()
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "\"invalid tso value\"\n"))
+	suite.NoError(err)
 }

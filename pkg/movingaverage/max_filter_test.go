@@ -15,22 +15,22 @@
 package movingaverage
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testMaxFilter{})
-
-type testMaxFilter struct{}
-
-func (t *testMaxFilter) TestMaxFilter(c *C) {
+func TestMaxFilter(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{2, 1, 3, 4, 1, 1, 3, 3, 2, 0, 5}
 	expected := []float64{2, 2, 3, 4, 4, 4, 4, 4, 3, 3, 5}
 
 	mf := NewMaxFilter(5)
-	c.Assert(mf.Get(), Equals, empty)
+	re.Equal(empty, mf.Get())
 
-	checkReset(c, mf, empty)
-	checkAdd(c, mf, data, expected)
-	checkSet(c, mf, data, expected)
+	checkReset(re, mf, empty)
+	checkAdd(re, mf, data, expected)
+	checkSet(re, mf, data, expected)
 }
