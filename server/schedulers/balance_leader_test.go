@@ -82,19 +82,30 @@ func newBenchBalanceLeaderCluster(ctx context.Context) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(1)
-	for storeID := uint64(1); storeID <= 20; storeID++ {
-		tc.AddLeaderStore(storeID, int(storeID), int64(storeID)*MB)
-	}
+	leaderCount := make(map[uint64]int, 5000)
 	regionID := uint64(1000)
-	for regionID <= 2000 {
-		for storeID := uint64(20); storeID >= 15; storeID-- {
-			startKey := fmt.Sprintf("a%06d", regionID)
-			endKey := fmt.Sprintf("a%06d", regionID+1)
-			tc.AddLeaderRegionWithRange(regionID, startKey, endKey, storeID, storeID-10, storeID-9)
+	// put the leaders into store 500-1000
+	for regionID <= 200000 {
+		for storeID := uint64(1000); storeID >= 500; storeID-- {
+			_, ok := leaderCount[storeID]
+			if !ok {
+				leaderCount[storeID] = 1
+			} else {
+				leaderCount[storeID]++
+			}
+
+			startKey := fmt.Sprintf("a%08d", regionID)
+			endKey := fmt.Sprintf("a%08d", regionID+1)
+			followerID := regionID/40 + 5000
+			followerID2 := 1 + followerID
+			tc.AddLeaderRegionWithRange(regionID, startKey, endKey, storeID, followerID, followerID2)
 			regionID++
 		}
 	}
-
+	// we should update the number of leaders into store since it is a mock cluster.
+	for storeID := uint64(1); storeID <= 10000; storeID++ {
+		tc.AddLeaderStore(storeID, leaderCount[storeID], int64(leaderCount[storeID])*MB)
+	}
 	return tc
 }
 
@@ -104,7 +115,7 @@ func BenchmarkBalanceLeader(b *testing.B) {
 	tc.SetLeaderSchedulePolicy(core.ByCount.String())
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceLeaderScheduler(oc, &balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}, Batch: 100}, WithBalanceLeaderName("benchmarkBalanceLeader"))
-
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc)
 	}

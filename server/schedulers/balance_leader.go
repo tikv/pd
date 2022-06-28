@@ -288,13 +288,6 @@ func (cs *candidateStores) hasStore() bool {
 	return (cs.index < l) || (l > 0 && cs.reverseIndex >= 0)
 }
 
-func (cs *candidateStores) getStore(reverse bool) *core.StoreInfo {
-	if reverse {
-		return cs.getReverseStore()
-	}
-	return cs.getOriginStore()
-}
-
 func (cs *candidateStores) getOriginStore() *core.StoreInfo {
 	if cs.index < len(cs.stores) {
 		return cs.stores[cs.index]
@@ -381,58 +374,59 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 
 	result := make([]*operator.Operator, 0, batch)
 
-	transOut := false
-	preNoStore := false
-	for {
-		if !preNoStore {
-			// if current is try to transafer leader out, the next step is to transfer leader in.
-			transOut = !transOut
-		}
-		// If it transfer out leaders, the source store should be picked in the origin(asc) order.
-		// If it want to transfer in leader, the target store should be picked in reverse(desc) order.
-		candidateReverse := !transOut
-		store := storesCandidate.getStore(candidateReverse)
-		if store == nil {
-			if preNoStore {
-				break
-			}
-			// The store will always be nil with the same transOut value.
-			transOut = !transOut
-			preNoStore = true
-			continue
-		}
-		op := createTransferLeaderOperator(store, transOut, l, plan, usedRegions)
-
+	createOpWithPlan := func(transferOut bool) bool {
+		op := l.createTransferLeaderOperator(plan, usedRegions)
 		if op == nil {
-			storesCandidate.moveToNext(candidateReverse)
-			continue
+			storesCandidate.moveToNext(!transferOut)
+			return false
 		}
 		result = append(result, op)
 		if len(result) >= batch {
-			return result
+			return true
 		}
 		makeInfluence(op, plan, usedRegions, storesCandidate)
+		return false
+	}
+
+	for {
+		source := storesCandidate.getOriginStore()
+		if source != nil {
+			plan.source, plan.target = source, nil
+			if createOpWithPlan(true) {
+				return result
+			}
+		}
+		target := storesCandidate.getReverseStore()
+		if target != nil {
+			plan.source, plan.target = nil, target
+			if createOpWithPlan(false) {
+				return result
+			}
+		}
+		if source == nil && target == nil {
+			break
+		}
 	}
 	l.retryQuota.GC(storesCandidate.stores)
 	return result
 }
 
-func createTransferLeaderOperator(store *core.StoreInfo, transOut bool, l *balanceLeaderScheduler,
+func (l *balanceLeaderScheduler) createTransferLeaderOperator(
 	plan *balancePlan, usedRegions map[uint64]struct{}) *operator.Operator {
-
 	var creator func(*balancePlan) *operator.Operator
 	var transferMsg string
-	switch transOut {
+	var store *core.StoreInfo
+	switch plan.source != nil {
 	case true:
-		plan.source, plan.target = store, nil
+		store = plan.source
 		l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 		creator = l.transferLeaderOut
-		transferMsg = transferIn
+		transferMsg = transferOut
 	case false:
-		plan.source, plan.target = nil, store
+		store = plan.target
 		l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 		creator = l.transferLeaderIn
-		transferMsg = transferOut
+		transferMsg = transferIn
 	}
 	retryLimit := l.retryQuota.GetLimit(store)
 	var op *operator.Operator
