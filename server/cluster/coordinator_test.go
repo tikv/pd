@@ -17,11 +17,12 @@ package cluster
 import (
 	"context"
 	"encoding/json"
-	"github.com/pingcap/failpoint"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -316,7 +317,7 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.addRegionStore(1, 1))
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
 	checkRegionAndOperator(re, tc, co, 1, 1)
-	testutil.CheckAddPeerWithTestify(re, co.opController.GetOperator(1), operator.OpReplica, 1)
+	testutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
 	checkRegionAndOperator(re, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
