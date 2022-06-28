@@ -413,7 +413,7 @@ func (suite *regionTestSuite) TestTopN() {
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
-			suite.Len(writtenBytes, len(topN))
+			suite.Len(topN, len(writtenBytes))
 		} else {
 			suite.Len(topN, n)
 		}

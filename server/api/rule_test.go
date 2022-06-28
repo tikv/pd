@@ -167,7 +167,7 @@ func (suite *ruleTestSuite) TestSet() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
+			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)
@@ -541,7 +541,7 @@ func (suite *ruleTestSuite) TestDelete() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
+			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)

@@ -566,8 +566,8 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			case PromoteLearner:
 				suite.Equal(testCase.steps[i].(PromoteLearner).ToStore, step.ToStore)
 			case ChangePeerV2Enter:
-				suite.Len(testCase.steps[i].(ChangePeerV2Enter).PromoteLearners, len(step.PromoteLearners))
-				suite.Len(testCase.steps[i].(ChangePeerV2Enter).DemoteVoters, len(step.DemoteVoters))
+				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Enter).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Enter).DemoteVoters))
 				for j, p := range testCase.steps[i].(ChangePeerV2Enter).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
@@ -575,8 +575,8 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			case ChangePeerV2Leave:
-				suite.Len(testCase.steps[i].(ChangePeerV2Leave).PromoteLearners, len(step.PromoteLearners))
-				suite.Len(testCase.steps[i].(ChangePeerV2Leave).DemoteVoters, len(step.DemoteVoters))
+				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Leave).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Leave).DemoteVoters))
 				for j, p := range testCase.steps[i].(ChangePeerV2Leave).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
