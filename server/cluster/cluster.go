@@ -541,12 +541,12 @@ func (c *RaftCluster) AddSchedulerDiagnosis(scheduler schedule.Scheduler, args .
 }
 
 // GetSchedulerDiagnosisResult pauses or resumes a scheduler.
-func (c *RaftCluster) GetSchedulerDiagnosisResult(name string) *diagnosis.DiagnosisResult {
+func (c *RaftCluster) GetSchedulerDiagnosisResult(name string) *diagnosis.StepDiagnosisResult {
 	return c.diagnosisManager.GetSchedulerDiagnosisResult(name)
 }
 
 // GetSchedulerDiagnosisResult pauses or resumes a scheduler.
-func (c *RaftCluster) GetSchedulerStoreDiagnosisResult(name string, storeID uint64) *diagnosis.DiagnosisResult {
+func (c *RaftCluster) GetSchedulerStoreDiagnosisResult(name string, storeID uint64) *diagnosis.StepDiagnosisResult {
 	return c.diagnosisManager.GetSchedulerStoreDiagnosisResult(name, storeID)
 }
 

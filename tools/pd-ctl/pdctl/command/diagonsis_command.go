@@ -102,7 +102,7 @@ func getBalanceRegionDiagnosisResultCommandFunc(cmd *cobra.Command, args []strin
 }
 
 func convertDiagnosisOutput(content string, detailed bool) string {
-	result := &diagnosis.DiagnosisResult{}
+	result := &diagnosis.StepDiagnosisResult{}
 	err := json.Unmarshal([]byte(content), result)
 	if err != nil {
 		return content

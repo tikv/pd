@@ -220,13 +220,11 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		s.retryQuota.Attenuate(plan.source)
 	}
 	s.retryQuota.GC(stores)
-	plans := dc.GetPlans()
+	plans := make([]schedule.Plan, 0)
+	for _, item := range dc.GetPlans() {
+		plans = append(plans, item)
+	}
 	return nil, plans
-}
-
-func (s *balanceRegionScheduler) test() schedule.Plan {
-	plan := &diagnosis.SchedulePlan{}
-	return plan
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
@@ -266,8 +264,10 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan, dc *diagnosis.D
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
+			dc.Diagnose(targetID, "create-operator-fail")
 			return nil
 		}
+		dc.RecordSchedulablePlan(targetID)
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,

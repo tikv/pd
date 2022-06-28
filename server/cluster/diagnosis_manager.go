@@ -55,17 +55,18 @@ func (d *diagnosisManager) addSchedulerDiagnosis(scheduler schedule.Scheduler, a
 	return nil
 }
 
-func (d *diagnosisManager) GetSchedulerDiagnosisResult(name string) *diagnosis.DiagnosisResult {
+func (d *diagnosisManager) GetSchedulerDiagnosisResult(name string) *diagnosis.StepDiagnosisResult {
 	return nil
 }
 
-func (d *diagnosisManager) GetSchedulerStoreDiagnosisResult(name string, store uint64) *diagnosis.DiagnosisResult {
+func (d *diagnosisManager) GetSchedulerStoreDiagnosisResult(name string, store uint64) *diagnosis.StepDiagnosisResult {
 	return nil
 }
 
 func (d *diagnosisManager) runSchedulerDiagnosis(name string) []schedule.Plan {
 	if scheduler, ok := d.schedulers[name]; ok {
-		plans := scheduler.runDiagnosis()
+		scheduler.runDiagnosis()
+		plans := scheduler.result
 		return plans
 	}
 	return nil
@@ -73,20 +74,19 @@ func (d *diagnosisManager) runSchedulerDiagnosis(name string) []schedule.Plan {
 
 type diagnosisSchedulerManager struct {
 	Scheduler *scheduleController
-	result    map[uint64]*SchedulerDiagnoseRecord
+	result    []schedule.Plan
 }
 
 // newDiagnosisSchedulerManager creates a new scheduleController.
 func newDiagnosisSchedulerManager(m *diagnosisManager, s schedule.Scheduler) *diagnosisSchedulerManager {
 	return &diagnosisSchedulerManager{
 		Scheduler: newScheduleController(m.ctx, m.cluster, m.opController, s),
-		result:    make(map[uint64]*SchedulerDiagnoseRecord),
+		result:    nil,
 	}
 }
 
-func (d *diagnosisSchedulerManager) runDiagnosis() []schedule.Plan {
-	_, plans := d.Scheduler.Schedule()
-	return plans
+func (d *diagnosisSchedulerManager) runDiagnosis() {
+	_, d.result = d.Scheduler.Schedule()
 }
 
 type SchedulerDiagnoseRecord struct{}

@@ -41,6 +41,32 @@ detailed:
 			|	Step 2: search region		|		not fit replicated		|		30%			|		region-3	|
 **/
 
+type SampleObjects []uint64
+
+func (o SampleObjects) Object(step ScheduleStep) string {
+	// str := ""
+	// if len(o) < 1 {
+	// 	return str
+	// }
+	// for idx, i := range o {
+	// 	if idx > 0 {
+	// 		str += ","
+	// 	}
+	// 	str += strconv.FormatUint(i, 10)
+	// }
+	switch step {
+	case 0:
+		return fmt.Sprintf("store-%d", o)
+	case 1:
+		return fmt.Sprintf("region-%d", o)
+	case 2:
+		return fmt.Sprintf("store-%d", o)
+	case 3:
+		return fmt.Sprintf("store-%d", o)
+	}
+	return ""
+}
+
 type SampleObject uint64
 
 func (o SampleObject) Object(step ScheduleStep) string {
@@ -101,7 +127,22 @@ func (s ScheduleStep) Reason(reason string, objectID uint64) string {
 	return ""
 }
 
-type DiagnosisResult struct {
+type MatrixDiagnosisResult struct {
+	SchedulerName string                        `json:"scheduler"`
+	StoreID       []*MatrixStoreDiagnosisResult `json:"stores"`
+}
+
+type MatrixStoreDiagnosisResult struct {
+	StoreID string                         `json:"store"`
+	Targets []*MatrixTargetDiagnosisResult `json:"targets"`
+}
+
+type MatrixTargetDiagnosisResult struct {
+	TargetID string           `json:"target"`
+	Detailed []*ReasonMetrics `json:"detailed"`
+}
+
+type StepDiagnosisResult struct {
 	SchedulerName string           `json:"scheduler"`
 	StoreID       uint64           `json:"store"`
 	Schedulable   bool             `json:"Schedulable"`
@@ -139,6 +180,18 @@ func NewDiagnosisController(dryRun bool) *DiagnosisController {
 
 func (c *DiagnosisController) Debug() {
 	log.Info("DiagnosisController Debug", zap.Int("currentStep", int(c.currentStep)), zap.Uint64("currentSource", c.currentSource), zap.Uint64("currentRegion", c.currentRegion), zap.Uint64("currentTarget", c.currentTarget))
+}
+
+func (c *DiagnosisController) GetSourceStore() uint64 {
+	return c.currentSource
+}
+
+func (c *DiagnosisController) GetTargetStore() uint64 {
+	return c.currentTarget
+}
+
+func (c *DiagnosisController) GetRegion() uint64 {
+	return c.currentRegion
 }
 
 func (c *DiagnosisController) SetSelectedObject(objectID uint64) {
@@ -183,7 +236,7 @@ func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
 	c.recordNotSchedulablePlan(reason)
 }
 
-func (c *DiagnosisController) RecordSchedulablePlan(objectID uint64, reason string) {
+func (c *DiagnosisController) RecordSchedulablePlan(objectID uint64) {
 	if !c.dryRun {
 		return
 	}
@@ -192,128 +245,31 @@ func (c *DiagnosisController) RecordSchedulablePlan(objectID uint64, reason stri
 }
 
 func (c *DiagnosisController) recordNotSchedulablePlan(reason string) {
-	c.plans = append(c.plans, nil)
+	plan := &SchedulePlan{
+		Step:        c.currentStep,
+		Source:      c.currentSource,
+		Target:      c.currentTarget,
+		Region:      c.currentRegion,
+		reason:      reason,
+		schedulable: false,
+	}
+	if c.currentStep < 2 {
+		plan.Target = 0
+	}
+	if c.currentStep < 1 {
+		plan.Region = 0
+	}
+	c.plans = append(c.plans, plan)
 }
 
 func (c *DiagnosisController) recordSchedulablePlan() {
-	c.schedulablePlan = nil
-}
-
-type DiagnosisAnalyzer struct {
-	storeID       uint64
-	stepRecorders []DiagnoseStepRecoder
-	// schedulable is true when scheduler can create operator for specific store
-	schedulable bool
-	maxStep     ScheduleStep
-}
-
-func (a *DiagnosisAnalyzer) GenerateStoreRecord(step ScheduleStep, objectID uint64, reason string) {
-	a.stepRecorders[step].Add(reason, objectID)
-	if step > a.maxStep {
-		a.maxStep = step
+	c.schedulablePlan = &SchedulePlan{
+		Step:        c.currentStep,
+		Source:      c.currentSource,
+		Target:      c.currentTarget,
+		Region:      c.currentRegion,
+		schedulable: true,
 	}
-}
-
-func (a *DiagnosisAnalyzer) GetReasonRecord() []DiagnoseStepRecoder {
-	return a.stepRecorders
-}
-
-func (a *DiagnosisAnalyzer) Schedulable() bool {
-	return a.schedulable
-}
-
-func (a *DiagnosisAnalyzer) GetFinalReason() string {
-	log.Info("GetFinalReason", zap.Int("maxStep", int(a.maxStep)), zap.Int("stepRecorders length", len(a.stepRecorders)))
-	recoder := a.stepRecorders[a.maxStep]
-	reason := recoder.GetMostReason()
-	return reason.Reason
-}
-
-func (a *DiagnosisAnalyzer) GetFinalStep() ScheduleStep {
-	return a.maxStep
-}
-
-func (a *DiagnosisAnalyzer) AnalysisResult(scope string) *DiagnosisResult {
-	var description, reason string
-	if a.schedulable {
-		description = fmt.Sprintf("%s can create scheduling operator at store-%d", scope, a.storeID)
-	} else {
-		description = fmt.Sprintf("%s can't create schedule operator from store-%d in %s.", scope, a.storeID, a.GetFinalStep().Name())
-		reason = a.maxStep.Reason(a.GetFinalReason(), a.storeID)
-	}
-	detailed := make([]*ReasonMetrics, 0)
-	for i, stepRecord := range a.stepRecorders {
-		step := ScheduleStep(i)
-		for _, metrics := range stepRecord.GetAllReasons() {
-			detailed = append(detailed, &ReasonMetrics{
-				Step:         step.Description(),
-				Reason:       metrics.Reason,
-				Ratio:        fmt.Sprintf("%.2f", float64(metrics.Count)/float64(stepRecord.Count())),
-				SampleObject: SampleObject(metrics.SampleId).Object(step),
-			})
-		}
-	}
-	result := &DiagnosisResult{
-		SchedulerName: scope,
-		StoreID:       a.storeID,
-		Schedulable:   a.schedulable,
-		Description:   description,
-		Reason:        reason,
-		Detailed:      detailed,
-	}
-	return result
-}
-
-type DiagnoseStepRecoder interface {
-	Add(reason string, id uint64)
-	GetMostReason() *ReasonRecorder
-	GetAllReasons() map[string]*ReasonRecorder
-	Count() int
-}
-
-type DiagnosisRecoder struct {
-	//step          ScheduleStep
-	reasonCounter map[string]*ReasonRecorder
-	count         int
-}
-
-func NewDiagnosisRecoder() *DiagnosisRecoder {
-	return &DiagnosisRecoder{
-		reasonCounter: make(map[string]*ReasonRecorder),
-	}
-}
-
-func (r *DiagnosisRecoder) Add(reason string, id uint64) {
-	if _, ok := r.reasonCounter[reason]; !ok {
-		r.reasonCounter[reason] = &ReasonRecorder{Reason: reason}
-	}
-	reader := r.reasonCounter[reason]
-	reader.Count++
-	reader.SampleId = id
-	r.count++
-}
-
-func (r *DiagnosisRecoder) Count() int {
-	return r.count
-}
-
-func (r *DiagnosisRecoder) GetMostReason() (most *ReasonRecorder) {
-	for _, recorder := range r.reasonCounter {
-		if most == nil || most.Count < recorder.Count {
-			most = recorder
-		}
-	}
-	return nil
-}
-
-func (r *DiagnosisRecoder) GetAllReasons() map[string]*ReasonRecorder {
-	return r.reasonCounter
-}
-
-type ReasonRecorder struct {
-	Reason   string
-	Count    int
-	SampleId uint64
 }
 
 type ReasonMetrics struct {
@@ -324,20 +280,45 @@ type ReasonMetrics struct {
 }
 
 type SchedulePlan struct {
+	Step        ScheduleStep
+	Source      uint64
+	Target      uint64
+	Region      uint64
+	reason      string
+	schedulable bool
 }
 
 func (s *SchedulePlan) GetSourceStore() uint64 {
-	return 0
+	return s.Source
 }
 func (s *SchedulePlan) GetRegion() uint64 {
-	return 0
+	return s.Region
 }
 func (s *SchedulePlan) GetTargetStore() uint64 {
-	return 0
+	return s.Target
 }
-func (s *SchedulePlan) GetStep() uint64 {
-	return 0
+func (s *SchedulePlan) GetStep() ScheduleStep {
+	return s.Step
 }
 func (s *SchedulePlan) GetReason() string {
-	return ""
+	return s.reason
+}
+
+func (s *SchedulePlan) IsSchedulable() bool {
+	return s.schedulable
+}
+
+func (s *SchedulePlan) GetFailObject() uint64 {
+	switch s.Step {
+	case 0:
+		return s.Source
+	case 1:
+		return s.Region
+	case 2:
+		return s.Target
+	case 3:
+		return s.Target
+	default:
+		return 0
+	}
 }
