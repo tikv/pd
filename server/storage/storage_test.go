@@ -253,7 +253,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 	n := 10
 	regions := mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegionsOnce(context.Background(), cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
 
 	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
@@ -262,7 +262,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 	n = 20
 	mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegionsOnce(context.Background(), cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
 	re.Equal(n, cache.GetRegionCount())
 }
 
