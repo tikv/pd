@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"container/heap"
 	"sort"
 	"strconv"
 
@@ -223,11 +224,24 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
-	candidates := filter.NewCandidates(plan.GetStores()).
-		FilterTarget(plan.GetOpts(), filters...).
-		Sort(filter.RegionScoreComparer(plan.GetOpts()))
+	candidatesRaw := filter.NewCandidates(plan.GetStores()).
+		FilterTarget(plan.GetOpts(), filters...)
 
-	for _, plan.target = range candidates.Stores {
+	candidates := filter.NewStoreCandidatesHeap(candidatesRaw, filter.RegionScoreComparer(plan.GetOpts()))
+	heap.Init(candidates)
+
+	// we just checked top 1/3 elements of candidates
+	topN := candidates.Len()
+
+	// magic number to be defined or configured somewhere else
+	if 10 < topN && topN <= 30 {
+		topN = 10
+	} else if topN > 30 {
+		topN /= 3
+	}
+
+	for i := 1; i <= topN; i++ {
+		plan.target = heap.Pop(candidates).(*core.StoreInfo)
 		regionID := plan.region.GetID()
 		sourceID := plan.source.GetID()
 		targetID := plan.target.GetID()

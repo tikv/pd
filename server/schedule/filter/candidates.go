@@ -119,3 +119,46 @@ func (c *StoreCandidates) PickAll() []*core.StoreInfo {
 func (c *StoreCandidates) Len() int {
 	return len(c.Stores)
 }
+
+// StoreCandidatesHeap wraps StoreCandidates together with a comparer and support heap interface
+type StoreCandidatesHeap struct {
+	*StoreCandidates
+	less StoreComparer
+}
+
+// NewStoreCandidatesHeap creates StoreCandidatesHeap with storeCandidates and comparer
+func NewStoreCandidatesHeap(candidates *StoreCandidates, lessComp StoreComparer) *StoreCandidatesHeap {
+	instance := new(StoreCandidatesHeap)
+	instance.StoreCandidates = candidates
+	instance.less = lessComp
+	return instance
+}
+
+// Len returns a length of candidate list.
+func (c *StoreCandidatesHeap) Len() int {
+	return len(c.Stores)
+}
+
+// Less compares the items at index i, j.
+func (c *StoreCandidatesHeap) Less(i, j int) bool {
+	return c.less(c.Stores[i], c.Stores[j]) <= 0
+}
+
+// Swap swaps items at index i, j.
+func (c *StoreCandidatesHeap) Swap(i, j int) {
+	c.Stores[i], c.Stores[j] = c.Stores[j], c.Stores[i]
+}
+
+// Push pushes an *core.StoreInfo item into c.Stores, which is called by heap.Push()
+func (c *StoreCandidatesHeap) Push(val interface{}) {
+	c.Stores = append(c.Stores, val.(*core.StoreInfo))
+}
+
+// Pop pops out the last item of c.Stores, which is called by heap.Pop()
+func (c *StoreCandidatesHeap) Pop() interface{} {
+	old := c.Stores
+	n := len(old)
+	x := old[n-1]
+	c.Stores = old[0 : n-1]
+	return x
+}
