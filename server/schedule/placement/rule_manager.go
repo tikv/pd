@@ -694,8 +694,8 @@ func (m *RuleManager) IsInitialized() bool {
 // checkRule check the rule whether will have RuleFit after FitRegion
 // in order to reduce the calculation.
 func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
-	return slice.AnyOf(stores, func(id int) bool {
-		return MatchLabelConstraints(stores[id], rule.LabelConstraints)
+	return slice.AnyOf(stores, func(idx int) bool {
+		return MatchLabelConstraints(stores[idx], rule.LabelConstraints)
 	})
 }
 
