@@ -277,15 +277,7 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 
 func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	region := mockRegion(5, 0)
-	rules := []*Rule{
-		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Leader,
-			Count:          1,
-			LocationLabels: []string{},
-		},
-	}
+	rules := []*Rule{}
 	// create 100 rules, with each rule has 101 LabelConstraints.
 	for i := 0; i < 100; i++ {
 		rule := &Rule{
@@ -327,7 +319,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		}
 		label := &metapb.StoreLabel{Key: "exclusive", Value: "exclusive"}
 		labels = append(labels, label)
-		store := core.NewStoreInfo(&metapb.Store{Id: uint64(storeID)}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(labels))
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(labels))
 		lists = append(lists, store)
 	}
 	mm := make(map[uint64]*core.StoreInfo)
