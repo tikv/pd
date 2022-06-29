@@ -22,17 +22,12 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/gcpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
-
-// KeyspaceGCSafePoint is gcWorker's safepoint for specific key-space
-type KeyspaceGCSafePoint struct {
-	SpaceID   uint32 `json:"space_id"`
-	SafePoint uint64 `json:"safe_point,omitempty"`
-}
 
 // KeyspaceGCSafePointStorage defines the storage operations on Keyspaces' safe points
 type KeyspaceGCSafePointStorage interface {
@@ -43,7 +38,7 @@ type KeyspaceGCSafePointStorage interface {
 
 	SaveKeyspaceGCSafePoint(spaceID uint32, safePoint uint64) error
 	LoadKeyspaceGCSafePoint(spaceID uint32) (uint64, error)
-	LoadAllKeyspaceGCSafePoints() ([]*KeyspaceGCSafePoint, error)
+	LoadAllKeyspaceGCSafePoints() ([]*gcpb.GCSafePoint, error)
 }
 
 var _ KeyspaceGCSafePointStorage = (*StorageEndpoint)(nil)
@@ -197,7 +192,7 @@ func (se *StorageEndpoint) LoadKeyspaceGCSafePoint(spaceID uint32) (uint64, erro
 }
 
 // LoadAllKeyspaceGCSafePoints returns slice of KeySpaceGCSafePoint.
-func (se *StorageEndpoint) LoadAllKeyspaceGCSafePoints() ([]*KeyspaceGCSafePoint, error) {
+func (se *StorageEndpoint) LoadAllKeyspaceGCSafePoints() ([]*gcpb.GCSafePoint, error) {
 	prefix := KeyspaceSafePointPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	suffix := KeySpaceGCSafePointSuffix()
@@ -205,20 +200,20 @@ func (se *StorageEndpoint) LoadAllKeyspaceGCSafePoints() ([]*KeyspaceGCSafePoint
 	if err != nil {
 		return nil, err
 	}
-	safePoints := make([]*KeyspaceGCSafePoint, 0, len(values))
+	safePoints := make([]*gcpb.GCSafePoint, 0, len(values))
 	for i := range keys {
 		// skip non gc safe points
 		if !strings.HasSuffix(keys[i], suffix) {
 			continue
 		}
-		safePoint := &KeyspaceGCSafePoint{}
+		safePoint := &gcpb.GCSafePoint{}
 		spaceIDStr := strings.TrimPrefix(keys[i], prefix)
 		spaceIDStr = strings.TrimSuffix(spaceIDStr, suffix)
 		spaceID, err := strconv.ParseUint(spaceIDStr, 10, 32)
 		if err != nil {
 			return nil, err
 		}
-		safePoint.SpaceID = uint32(spaceID)
+		safePoint.SpaceId = uint32(spaceID)
 		value, err := strconv.ParseUint(values[i], 16, 64)
 		if err != nil {
 			return nil, err
