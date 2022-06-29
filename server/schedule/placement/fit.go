@@ -217,8 +217,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 2. Role match, or can match after transformed.
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
-			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				!p.selected {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) {
 				candidates = append(candidates, p)
 			}
 		}
