@@ -179,7 +179,7 @@ func TestLoadAllKeySpaceGCSafePoints(t *testing.T) {
 	loadedSafePoints, err := storage.LoadAllKeyspaceGCSafePoints()
 	re.NoError(err)
 	for i := range loadedSafePoints {
-		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceID)
+		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceId)
 		re.Equal(testSafePoints[i], loadedSafePoints[i].SafePoint)
 	}
 
@@ -193,7 +193,7 @@ func TestLoadAllKeySpaceGCSafePoints(t *testing.T) {
 	loadedSafePoints, err = storage.LoadAllKeyspaceGCSafePoints()
 	re.NoError(err)
 	for i := range loadedSafePoints {
-		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceID)
+		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceId)
 		re.Equal(testSafePoints[i], loadedSafePoints[i].SafePoint)
 	}
 }
