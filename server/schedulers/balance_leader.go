@@ -288,7 +288,7 @@ func (cs *candidateStores) hasStore() bool {
 	return (cs.index < l) || (l > 0 && cs.reverseIndex >= 0)
 }
 
-func (cs *candidateStores) getOriginStore() *core.StoreInfo {
+func (cs *candidateStores) getForwardStore() *core.StoreInfo {
 	if cs.index < len(cs.stores) {
 		return cs.stores[cs.index]
 	}
@@ -389,7 +389,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 	}
 
 	for {
-		source := storesCandidate.getOriginStore()
+		source := storesCandidate.getForwardStore()
 		if source != nil {
 			plan.source, plan.target = source, nil
 			if createOpWithPlan(true) {
