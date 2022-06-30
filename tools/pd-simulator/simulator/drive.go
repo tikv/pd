@@ -27,6 +27,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	balanceRegionScheduler = "balance-region-scheduler"
+	startSchedulerTick     = 10
+)
+
 // Driver promotes the cluster status change.
 type Driver struct {
 	wg          sync.WaitGroup
@@ -106,6 +111,12 @@ func (d *Driver) Prepare() error {
 func (d *Driver) Tick() {
 	d.tickCount++
 	d.raftEngine.stepRegions()
+	if d.tickCount <= 1 {
+		d.client.RemoveScheduler(balanceRegionScheduler)
+	} else if d.tickCount == startSchedulerTick {
+		// wait some store update status
+		d.client.AddScheduler(balanceRegionScheduler, nil)
+	}
 	d.eventRunner.Tick(d.tickCount)
 	for _, n := range d.conn.Nodes {
 		n.reportRegionChange()

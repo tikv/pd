@@ -15,7 +15,12 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -39,12 +44,15 @@ type Client interface {
 	PutStore(ctx context.Context, store *metapb.Store) error
 	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
 	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
+	RemoveScheduler(name string) error
+	AddScheduler(name string, body map[string]interface{}) error
 	Close()
 }
 
 const (
 	pdTimeout             = time.Second
 	maxInitClusterRetries = 100
+	httpPrefix            = "pd/api/v1"
 )
 
 var (
@@ -57,6 +65,7 @@ type client struct {
 	tag        string
 	clusterID  uint64
 	clientConn *grpc.ClientConn
+	httpClient *http.Client
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -77,6 +86,7 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 		ctx:                      ctx,
 		cancel:                   cancel,
 		tag:                      tag,
+		httpClient:               &http.Client{},
 	}
 	cc, err := c.createConn()
 	if err != nil {
@@ -288,6 +298,56 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 		simutil.Logger.Error("put store error", zap.Reflect("error", resp.Header.GetError()))
 		return nil
 	}
+	return nil
+}
+
+func (c *client) RemoveScheduler(name string) error {
+	path := fmt.Sprintf("%s/%s/schedulers/%s", c.url, httpPrefix, name)
+	req, err := http.NewRequest(http.MethodDelete, path, nil)
+	if err != nil {
+		return err
+	}
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		reason, _ := ioutil.ReadAll(res.Body)
+		simutil.Logger.Error("remove scheduler failed",
+			zap.String("scheduler-name", name),
+			zap.ByteString("reason", reason))
+	}
+	simutil.Logger.Info("remove scheduler success", zap.String("scheduler-name", name))
+	return nil
+}
+
+func (c *client) AddScheduler(name string, body map[string]interface{}) error {
+	path := fmt.Sprintf("%s/%s/schedulers", c.url, httpPrefix)
+	if body == nil {
+		body = make(map[string]interface{})
+	}
+	body["name"] = name
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, path, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		reason, _ := ioutil.ReadAll(res.Body)
+		simutil.Logger.Error("add scheduler failed",
+			zap.String("scheduler-name", name),
+			zap.ByteString("reason", reason))
+	}
+	simutil.Logger.Info("add scheduler success", zap.String("scheduler-name", name))
 	return nil
 }
 
