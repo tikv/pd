@@ -540,8 +540,12 @@ func (c *RaftCluster) AddSchedulerDiagnosis(scheduler schedule.Scheduler, args .
 	return c.diagnosisManager.addSchedulerDiagnosis(scheduler, args...)
 }
 
+func (c *RaftCluster) IsExistSchedulerDiagnosis(name string) bool {
+	return c.diagnosisManager.isExistSchedulerDiagnosis(name)
+}
+
 // GetSchedulerDiagnosisResult pauses or resumes a scheduler.
-func (c *RaftCluster) GetSchedulerDiagnosisResult(name string) *diagnosis.StepDiagnosisResult {
+func (c *RaftCluster) GetSchedulerDiagnosisResult(name string) *diagnosis.MatrixDiagnosisResult {
 	return c.diagnosisManager.GetSchedulerDiagnosisResult(name)
 }
 

@@ -16,6 +16,7 @@ package diagnosis
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -129,7 +130,18 @@ func (s ScheduleStep) Reason(reason string, objectID uint64) string {
 
 type MatrixDiagnosisResult struct {
 	SchedulerName string                        `json:"scheduler"`
-	StoreID       []*MatrixStoreDiagnosisResult `json:"stores"`
+	Stores        []*MatrixStoreDiagnosisResult `json:"stores"`
+}
+
+func NewMatrixDiagnosisResult(name string) *MatrixDiagnosisResult {
+	return &MatrixDiagnosisResult{
+		SchedulerName: name,
+		Stores:        make([]*MatrixStoreDiagnosisResult, 0),
+	}
+}
+
+func (r *MatrixDiagnosisResult) AppendResult(result *MatrixStoreDiagnosisResult) {
+	r.Stores = append(r.Stores, result)
 }
 
 type MatrixStoreDiagnosisResult struct {
@@ -137,9 +149,57 @@ type MatrixStoreDiagnosisResult struct {
 	Targets []*MatrixTargetDiagnosisResult `json:"targets"`
 }
 
+func NewAllEmptyMatrixStoreDiagnosisResult(storeID uint64) *MatrixStoreDiagnosisResult {
+	return &MatrixStoreDiagnosisResult{
+		StoreID: strconv.FormatUint(storeID, 10),
+		Targets: []*MatrixTargetDiagnosisResult{NewAllEmptyMatrixTargetDiagnosisResult()},
+	}
+}
+
+func NewMatrixStoreDiagnosisResult(storeID uint64) *MatrixStoreDiagnosisResult {
+	return &MatrixStoreDiagnosisResult{
+		StoreID: strconv.FormatUint(storeID, 10),
+		Targets: make([]*MatrixTargetDiagnosisResult, 0),
+	}
+}
+
+func (r *MatrixStoreDiagnosisResult) Append(result *MatrixTargetDiagnosisResult) {
+	r.Targets = append(r.Targets, result)
+}
+
 type MatrixTargetDiagnosisResult struct {
 	TargetID string           `json:"target"`
 	Detailed []*ReasonMetrics `json:"detailed"`
+}
+
+func NewMatrixTargetDiagnosisResult(targetID uint64) *MatrixTargetDiagnosisResult {
+	return &MatrixTargetDiagnosisResult{
+		TargetID: strconv.FormatUint(targetID, 10),
+		Detailed: make([]*ReasonMetrics, 0),
+	}
+}
+
+func NewEmptyMatrixTargetDiagnosisResult(targetID uint64) *MatrixTargetDiagnosisResult {
+	return &MatrixTargetDiagnosisResult{
+		TargetID: strconv.FormatUint(targetID, 10),
+		// todo
+		Detailed: nil,
+	}
+}
+
+func NewAllEmptyMatrixTargetDiagnosisResult() *MatrixTargetDiagnosisResult {
+	return nil
+}
+
+func NewAllMatrixTargetDiagnosisResult() *MatrixTargetDiagnosisResult {
+	return &MatrixTargetDiagnosisResult{
+		TargetID: "All Stores",
+		Detailed: make([]*ReasonMetrics, 0),
+	}
+}
+
+func (r *MatrixTargetDiagnosisResult) Append(detail *ReasonMetrics) {
+	r.Detailed = append(r.Detailed, detail)
 }
 
 type StepDiagnosisResult struct {

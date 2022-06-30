@@ -238,7 +238,16 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	return err
 }
 
-// AddScheduler adds a scheduler.
+//
+func (h *Handler) IsExistSchedulerDiagonsis(name string) bool {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return false
+	}
+	return c.IsExistSchedulerDiagnosis(name)
+}
+
+// AddSchedulerDiagonsis adds a scheduler.
 func (h *Handler) AddSchedulerDiagonsis(name string, args ...string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
@@ -297,21 +306,21 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 }
 
 // DisgnoseScheduler disgnoses scheduler for the specific
-func (h *Handler) DisgnoseScheduler(name string, storeID uint64) error {
+func (h *Handler) GetDiagnosisReuslt(name string) (*diagnosis.MatrixDiagnosisResult, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return c.DiagnoseScheduler(name, storeID)
+	return c.GetSchedulerDiagnosisResult(name), nil
 }
 
 // DisgnoseScheduler disgnoses scheduler for the specific
-func (h *Handler) GetDiagnosisReuslt(name string, storeID uint64) *diagnosis.DiagnosisResult {
+func (h *Handler) GetStoreDiagnosisReuslt(name string, storeID uint64) (*diagnosis.StepDiagnosisResult, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return c.GetSchedulerDiagnosisResult(name, storeID)
+	return c.GetSchedulerStoreDiagnosisResult(name, storeID), nil
 }
 
 // PauseOrResumeChecker pauses checker for delay seconds or resume checker
@@ -344,6 +353,18 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 
 func (h *Handler) AddBalanceRegionSchedulerDiagnosis() error {
 	return h.AddSchedulerDiagonsis(schedulers.BalanceRegionType)
+}
+
+func (h *Handler) GetBalanceRegionSchedulerDiagnosisReuslt() (*diagnosis.MatrixDiagnosisResult, error) {
+	return h.GetDiagnosisReuslt(schedulers.BalanceRegionType)
+}
+
+func (h *Handler) GetBalanceRegionSchedulerStoreDiagnosisReuslt(storeID uint64) (*diagnosis.StepDiagnosisResult, error) {
+	return h.GetStoreDiagnosisReuslt(schedulers.BalanceRegionType, storeID)
+}
+
+func (h *Handler) IsExistBalanceRegionSchedulerDiagnosis() bool {
+	return h.IsExistSchedulerDiagonsis(schedulers.BalanceRegionType)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.

@@ -8,6 +8,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/hbstream"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 type diagnosisManager struct {
@@ -39,6 +40,11 @@ func newDiagnosisManager(ctx context.Context, cluster *RaftCluster, hbStreams *h
 	}
 }
 
+func (d *diagnosisManager) isExistSchedulerDiagnosis(name string) bool {
+	_, ok := d.schedulers[name]
+	return ok
+}
+
 func (d *diagnosisManager) addSchedulerDiagnosis(scheduler schedule.Scheduler, args ...string) error {
 	d.Lock()
 	defer d.Unlock()
@@ -55,8 +61,9 @@ func (d *diagnosisManager) addSchedulerDiagnosis(scheduler schedule.Scheduler, a
 	return nil
 }
 
-func (d *diagnosisManager) GetSchedulerDiagnosisResult(name string) *diagnosis.StepDiagnosisResult {
-	return nil
+func (d *diagnosisManager) GetSchedulerDiagnosisResult(name string) *diagnosis.MatrixDiagnosisResult {
+	scheduler := d.schedulers[name]
+	return scheduler.GetSchedulerDiagnosisResult()
 }
 
 func (d *diagnosisManager) GetSchedulerStoreDiagnosisResult(name string, store uint64) *diagnosis.StepDiagnosisResult {
@@ -73,20 +80,40 @@ func (d *diagnosisManager) runSchedulerDiagnosis(name string) []schedule.Plan {
 }
 
 type diagnosisSchedulerManager struct {
+	cluster   *RaftCluster
 	Scheduler *scheduleController
 	result    []schedule.Plan
+	ops       []*operator.Operator
 }
 
 // newDiagnosisSchedulerManager creates a new scheduleController.
 func newDiagnosisSchedulerManager(m *diagnosisManager, s schedule.Scheduler) *diagnosisSchedulerManager {
 	return &diagnosisSchedulerManager{
 		Scheduler: newScheduleController(m.ctx, m.cluster, m.opController, s),
-		result:    nil,
+		cluster:   m.cluster,
 	}
 }
 
 func (d *diagnosisSchedulerManager) runDiagnosis() {
-	_, d.result = d.Scheduler.Schedule()
+	d.ops, d.result = d.Scheduler.Schedule()
+}
+
+func (d *diagnosisSchedulerManager) GetSchedulerDiagnosisResult() *diagnosis.MatrixDiagnosisResult {
+	d.runDiagnosis()
+	analyzer := schedule.NewMatrixPlanAnalyzer(d.Scheduler.GetName(), d.cluster)
+	for _, plan := range d.result {
+		analyzer.PutPlan(plan)
+	}
+	return analyzer.AnalysisResult()
+}
+
+func (d *diagnosisSchedulerManager) GetSchedulerStoreDiagnosisResult(store uint64) *diagnosis.StepDiagnosisResult {
+	d.runDiagnosis()
+	analyzer := schedule.NewPeriodicalPlanAnalyzer(d.Scheduler.GetName(), store)
+	for _, plan := range d.result {
+		analyzer.PutPlan(plan)
+	}
+	return analyzer.AnalysisResult()
 }
 
 type SchedulerDiagnoseRecord struct{}

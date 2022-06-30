@@ -381,20 +381,28 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 // @Success 200 {string} string "Disgnosethe scheduler successfully."
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers/{name}/diagnose/{store_id} [post]
+// @Router /schedulers/{name}/diagnose [post]
 func (h *schedulerHandler) DiagnoseScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	store := mux.Vars(r)["store_id"]
-	storeID, err := strconv.ParseUint(store, 10, 64)
-	if err != nil {
-		h.r.JSON(w, http.StatusBadRequest, err.Error())
+
+	switch name {
+	case schedulers.BalanceRegionName:
+		if h.IsExistBalanceRegionSchedulerDiagnosis() {
+			if err := h.AddBalanceRegionSchedulerDiagnosis(); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		result, err := h.GetBalanceRegionSchedulerDiagnosisReuslt()
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.r.JSON(w, http.StatusOK, result)
+	default:
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
 	}
-	if err := h.Handler.DisgnoseScheduler(name, storeID); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.r.JSON(w, http.StatusOK, "Diagnose scheduler successfully.")
 }
 
 // @Tags scheduler
@@ -407,7 +415,7 @@ func (h *schedulerHandler) DiagnoseScheduler(w http.ResponseWriter, r *http.Requ
 // @Failure 400 {string} string "Bad format request."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /schedulers/{name}/diagnose/{store_id} [get]
-func (h *schedulerHandler) GetDiagnosisReuslt(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerHandler) DiagnoseSchedulerByStore(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	store := mux.Vars(r)["store_id"]
 	storeID, err := strconv.ParseUint(store, 10, 64)
@@ -415,12 +423,24 @@ func (h *schedulerHandler) GetDiagnosisReuslt(w http.ResponseWriter, r *http.Req
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result := h.Handler.GetDiagnosisReuslt(name, storeID)
-	if result == nil {
-		h.r.JSON(w, http.StatusInternalServerError, "")
+	switch name {
+	case schedulers.BalanceRegionName:
+		if h.IsExistBalanceRegionSchedulerDiagnosis() {
+			if err := h.AddBalanceRegionSchedulerDiagnosis(); err != nil {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		result, err := h.GetBalanceRegionSchedulerStoreDiagnosisReuslt(storeID)
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.r.JSON(w, http.StatusOK, result)
+	default:
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
 	}
-	h.r.JSON(w, http.StatusOK, result)
 }
 
 type schedulerConfigHandler struct {
