@@ -318,34 +318,14 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 		}
 		note[pos] = true
 
-		mergeIndex := pos
-		if mergeIndex == 0 {
-			for {
-				mergeIndex++
-				if _, ok := note[mergeIndex]; !ok {
-					break
-				}
-			}
-			regions[mergeIndex].StartKey = regions[pos].StartKey
+		if pos == 0 {
+			regions[pos].EndKey = regions[pos+1].EndKey
+			note[1] = true
 		} else {
-			for {
-				mergeIndex--
-				if _, ok := note[mergeIndex]; !ok {
-					break
-				}
+			regions[pos-1].EndKey = regions[pos].EndKey
+			if pos == 1 {
+				note[0] = true
 			}
-			if mergeIndex != -1 {
-				regions[pos].StartKey = regions[mergeIndex].StartKey
-				continue
-			}
-			mergeIndex = pos
-			for {
-				mergeIndex++
-				if _, ok := note[mergeIndex]; !ok {
-					break
-				}
-			}
-			regions[mergeIndex].StartKey = regions[pos].StartKey
 		}
 	}
 }
