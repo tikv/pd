@@ -20,28 +20,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
-// CheckAddPeer checks if the operator is to add peer on specified store.
-func CheckAddPeer(c *check.C, op *operator.Operator, kind operator.OpKind, storeID uint64) {
-	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 2)
-	c.Assert(op.Step(0).(operator.AddLearner).ToStore, check.Equals, storeID)
-	c.Assert(op.Step(1), check.FitsTypeOf, operator.PromoteLearner{})
-	kind |= operator.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
-}
-
-// CheckRemovePeer checks if the operator is to remove peer on specified store.
-func CheckRemovePeer(c *check.C, op *operator.Operator, storeID uint64) {
-	c.Assert(op, check.NotNil)
-	if op.Len() == 1 {
-		c.Assert(op.Step(0).(operator.RemovePeer).FromStore, check.Equals, storeID)
-	} else {
-		c.Assert(op.Len(), check.Equals, 2)
-		c.Assert(op.Step(0).(operator.TransferLeader).FromStore, check.Equals, storeID)
-		c.Assert(op.Step(1).(operator.RemovePeer).FromStore, check.Equals, storeID)
-	}
-}
-
 // CheckTransferLeader checks if the operator is to transfer leader between the specified source and target stores.
 func CheckTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	c.Assert(op, check.NotNil)
@@ -143,8 +121,8 @@ func CheckTransferPeerWithLeaderTransferFrom(c *check.C, op *operator.Operator, 
 	c.Assert(op.Kind()&kind, check.Equals, kind)
 }
 
-// CheckAddPeerWithTestify checks if the operator is to add peer on specified store.
-func CheckAddPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, storeID uint64) {
+// CheckAddPeer checks if the operator is to add peer on specified store.
+func CheckAddPeer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, storeID uint64) {
 	re.NotNil(op)
 	re.Equal(2, op.Len())
 	re.Equal(storeID, op.Step(0).(operator.AddLearner).ToStore)
@@ -153,8 +131,8 @@ func CheckAddPeerWithTestify(re *require.Assertions, op *operator.Operator, kind
 	re.Equal(kind, op.Kind()&kind)
 }
 
-// CheckRemovePeerWithTestify checks if the operator is to remove peer on specified store.
-func CheckRemovePeerWithTestify(re *require.Assertions, op *operator.Operator, storeID uint64) {
+// CheckRemovePeer checks if the operator is to remove peer on specified store.
+func CheckRemovePeer(re *require.Assertions, op *operator.Operator, storeID uint64) {
 	re.NotNil(op)
 	if op.Len() == 1 {
 		re.Equal(storeID, op.Step(0).(operator.RemovePeer).FromStore)

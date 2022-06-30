@@ -413,7 +413,7 @@ func (suite *regionTestSuite) TestTopN() {
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
-			suite.Len(writtenBytes, len(topN))
+			suite.Len(topN, len(writtenBytes))
 		} else {
 			suite.Len(topN, n)
 		}
@@ -505,7 +505,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
@@ -514,7 +514,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
@@ -523,7 +523,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
