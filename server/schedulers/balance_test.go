@@ -1021,7 +1021,7 @@ func (s *testBalanceRegionSchedulerSuite) TestOpInfluence(c *C) {
 		c.Assert(op, NotNil)
 		oc.AddOperator(op)
 	}
-	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 3, 1)
+	testutil.CheckTransferPeerWithLeaderTransfer(c, sb.Schedule(tc)[0], operator.OpKind(0), 2, 1)
 }
 
 func (s *testBalanceRegionSchedulerSuite) checkReplacePendingRegion(c *C, tc *mockcluster.Cluster, sb schedule.Scheduler) {
