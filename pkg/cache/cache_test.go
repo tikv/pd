@@ -20,100 +20,93 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-func TestCore(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testRegionCacheSuite{})
-
-type testRegionCacheSuite struct {
-}
-
-func (s *testRegionCacheSuite) TestExpireRegionCache(c *C) {
+func TestExpireRegionCache(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cache := NewIDTTL(ctx, time.Second, 2*time.Second)
 	// Test Pop
 	cache.PutWithTTL(9, "9", 5*time.Second)
 	cache.PutWithTTL(10, "10", 5*time.Second)
-	c.Assert(cache.Len(), Equals, 2)
+	re.Equal(2, cache.Len())
 	k, v, success := cache.pop()
-	c.Assert(success, IsTrue)
-	c.Assert(cache.Len(), Equals, 1)
+	re.True(success)
+	re.Equal(1, cache.Len())
 	k2, v2, success := cache.pop()
-	c.Assert(success, IsTrue)
+	re.True(success)
 	// we can't ensure the order which the key/value pop from cache, so we save into a map
 	kvMap := map[uint64]string{
 		9:  "9",
 		10: "10",
 	}
 	expV, ok := kvMap[k.(uint64)]
-	c.Assert(ok, IsTrue)
-	c.Assert(expV, Equals, v.(string))
+	re.True(ok)
+	re.Equal(expV, v.(string))
 	expV, ok = kvMap[k2.(uint64)]
-	c.Assert(ok, IsTrue)
-	c.Assert(expV, Equals, v2.(string))
+	re.True(ok)
+	re.Equal(expV, v2.(string))
 
-	cache.PutWithTTL(11, "11", 1*time.Second)
+	cache.PutWithTTL(11, "11", time.Second)
 	time.Sleep(5 * time.Second)
 	k, v, success = cache.pop()
-	c.Assert(success, IsFalse)
-	c.Assert(k, IsNil)
-	c.Assert(v, IsNil)
+	re.False(success)
+	re.Nil(k)
+	re.Nil(v)
 
 	// Test Get
-	cache.PutWithTTL(1, 1, 1*time.Second)
+	cache.PutWithTTL(1, 1, time.Second)
 	cache.PutWithTTL(2, "v2", 5*time.Second)
 	cache.PutWithTTL(3, 3.0, 5*time.Second)
 
 	value, ok := cache.Get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, 1)
+	re.True(ok)
+	re.Equal(1, value)
 
 	value, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, "v2")
+	re.True(ok)
+	re.Equal("v2", value)
 
 	value, ok = cache.Get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, 3.0)
+	re.True(ok)
+	re.Equal(3.0, value)
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
-	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{1, 2, 3})
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{1, 2, 3})
 
 	time.Sleep(2 * time.Second)
 
 	value, ok = cache.Get(1)
-	c.Assert(ok, IsFalse)
-	c.Assert(value, IsNil)
+	re.False(ok)
+	re.Nil(value)
 
 	value, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, "v2")
+	re.True(ok)
+	re.Equal("v2", value)
 
 	value, ok = cache.Get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, 3.0)
+	re.True(ok)
+	re.Equal(3.0, value)
 
-	c.Assert(cache.Len(), Equals, 2)
-	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{2, 3})
+	re.Equal(2, cache.Len())
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{2, 3})
 
 	cache.Remove(2)
 
 	value, ok = cache.Get(2)
-	c.Assert(ok, IsFalse)
-	c.Assert(value, IsNil)
+	re.False(ok)
+	re.Nil(value)
 
 	value, ok = cache.Get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(value, Equals, 3.0)
+	re.True(ok)
+	re.Equal(3.0, value)
 
-	c.Assert(cache.Len(), Equals, 1)
-	c.Assert(sortIDs(cache.GetAllID()), DeepEquals, []uint64{3})
+	re.Equal(1, cache.Len())
+	re.Equal(sortIDs(cache.GetAllID()), []uint64{3})
 }
 
 func sortIDs(ids []uint64) []uint64 {
@@ -122,7 +115,9 @@ func sortIDs(ids []uint64) []uint64 {
 	return ids
 }
 
-func (s *testRegionCacheSuite) TestLRUCache(c *C) {
+func TestLRUCache(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	cache := newLRU(3)
 
 	cache.Put(1, "1")
@@ -130,173 +125,177 @@ func (s *testRegionCacheSuite) TestLRUCache(c *C) {
 	cache.Put(3, "3")
 
 	val, ok := cache.Get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "3")
+	re.True(ok)
+	re.Equal(val, "3")
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
+	re.True(ok)
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	cache.Put(4, "4")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	val, ok = cache.Get(3)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
+	re.True(ok)
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(4)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "4")
+	re.True(ok)
+	re.Equal(val, "4")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
 	elems := cache.Elems()
-	c.Assert(elems, HasLen, 3)
-	c.Assert(elems[0].Value, DeepEquals, "4")
-	c.Assert(elems[1].Value, DeepEquals, "2")
-	c.Assert(elems[2].Value, DeepEquals, "1")
+	re.Len(elems, 3)
+	re.Equal(elems[0].Value, "4")
+	re.Equal(elems[1].Value, "2")
+	re.Equal(elems[2].Value, "1")
 
 	cache.Remove(1)
 	cache.Remove(2)
 	cache.Remove(4)
 
-	c.Assert(cache.Len(), Equals, 0)
+	re.Equal(0, cache.Len())
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(3)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(4)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 }
 
-func (s *testRegionCacheSuite) TestFifoCache(c *C) {
+func TestFifoCache(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	cache := NewFIFO(3)
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	cache.Put(4, "4")
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	elems := cache.Elems()
-	c.Assert(elems, HasLen, 3)
-	c.Assert(elems[0].Value, DeepEquals, "2")
-	c.Assert(elems[1].Value, DeepEquals, "3")
-	c.Assert(elems[2].Value, DeepEquals, "4")
+	re.Len(elems, 3)
+	re.Equal(elems[0].Value, "2")
+	re.Equal(elems[1].Value, "3")
+	re.Equal(elems[2].Value, "4")
 
 	elems = cache.FromElems(3)
-	c.Assert(elems, HasLen, 1)
-	c.Assert(elems[0].Value, DeepEquals, "4")
+	re.Len(elems, 1)
+	re.Equal(elems[0].Value, "4")
 
 	cache.Remove()
 	cache.Remove()
 	cache.Remove()
-	c.Assert(cache.Len(), Equals, 0)
+	re.Equal(0, cache.Len())
 }
 
-func (s *testRegionCacheSuite) TestTwoQueueCache(c *C) {
+func TestTwoQueueCache(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	cache := newTwoQueue(3)
 	cache.Put(1, "1")
 	cache.Put(2, "2")
 	cache.Put(3, "3")
 
 	val, ok := cache.Get(3)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "3")
+	re.True(ok)
+	re.Equal(val, "3")
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
+	re.True(ok)
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	cache.Put(4, "4")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	val, ok = cache.Get(3)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "2")
+	re.True(ok)
+	re.Equal(val, "2")
 
 	val, ok = cache.Get(4)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "4")
+	re.True(ok)
+	re.Equal(val, "4")
 
-	c.Assert(cache.Len(), Equals, 3)
+	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
-	c.Assert(ok, IsTrue)
-	c.Assert(val, DeepEquals, "1")
+	re.True(ok)
+	re.Equal(val, "1")
 
 	elems := cache.Elems()
-	c.Assert(elems, HasLen, 3)
-	c.Assert(elems[0].Value, DeepEquals, "4")
-	c.Assert(elems[1].Value, DeepEquals, "2")
-	c.Assert(elems[2].Value, DeepEquals, "1")
+	re.Len(elems, 3)
+	re.Equal(elems[0].Value, "4")
+	re.Equal(elems[1].Value, "2")
+	re.Equal(elems[2].Value, "1")
 
 	cache.Remove(1)
 	cache.Remove(2)
 	cache.Remove(4)
 
-	c.Assert(cache.Len(), Equals, 0)
+	re.Equal(0, cache.Len())
 
 	val, ok = cache.Get(1)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(2)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(3)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 
 	val, ok = cache.Get(4)
-	c.Assert(ok, IsFalse)
-	c.Assert(val, IsNil)
+	re.False(ok)
+	re.Nil(val)
 }
 
 var _ PriorityQueueItem = PriorityQueueItemTest(0)
@@ -307,54 +306,56 @@ func (pq PriorityQueueItemTest) ID() uint64 {
 	return uint64(pq)
 }
 
-func (s *testRegionCacheSuite) TestPriorityQueue(c *C) {
+func TestPriorityQueue(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	testData := []PriorityQueueItemTest{0, 1, 2, 3, 4, 5}
 	pq := NewPriorityQueue(0)
-	c.Assert(pq.Put(1, testData[1]), IsFalse)
+	re.False(pq.Put(1, testData[1]))
 
 	// it will have priority-value pair as 1-1 2-2 3-3
 	pq = NewPriorityQueue(3)
-	c.Assert(pq.Put(1, testData[1]), IsTrue)
-	c.Assert(pq.Put(2, testData[2]), IsTrue)
-	c.Assert(pq.Put(3, testData[4]), IsTrue)
-	c.Assert(pq.Put(5, testData[4]), IsTrue)
-	c.Assert(pq.Put(5, testData[5]), IsFalse)
-	c.Assert(pq.Put(3, testData[3]), IsTrue)
-	c.Assert(pq.Put(3, testData[3]), IsTrue)
-	c.Assert(pq.Get(4), IsNil)
-	c.Assert(pq.Len(), Equals, 3)
+	re.True(pq.Put(1, testData[1]))
+	re.True(pq.Put(2, testData[2]))
+	re.True(pq.Put(3, testData[4]))
+	re.True(pq.Put(5, testData[4]))
+	re.False(pq.Put(5, testData[5]))
+	re.True(pq.Put(3, testData[3]))
+	re.True(pq.Put(3, testData[3]))
+	re.Nil(pq.Get(4))
+	re.Equal(3, pq.Len())
 
 	// case1 test getAll, the highest element should be the first
 	entries := pq.Elems()
-	c.Assert(entries, HasLen, 3)
-	c.Assert(entries[0].Priority, Equals, 1)
-	c.Assert(entries[0].Value, Equals, testData[1])
-	c.Assert(entries[1].Priority, Equals, 2)
-	c.Assert(entries[1].Value, Equals, testData[2])
-	c.Assert(entries[2].Priority, Equals, 3)
-	c.Assert(entries[2].Value, Equals, testData[3])
+	re.Len(entries, 3)
+	re.Equal(1, entries[0].Priority)
+	re.Equal(testData[1], entries[0].Value)
+	re.Equal(2, entries[1].Priority)
+	re.Equal(testData[2], entries[1].Value)
+	re.Equal(3, entries[2].Priority)
+	re.Equal(testData[3], entries[2].Value)
 
 	// case2 test remove the high element, and the second element should be the first
 	pq.Remove(uint64(1))
-	c.Assert(pq.Get(1), IsNil)
-	c.Assert(pq.Len(), Equals, 2)
+	re.Nil(pq.Get(1))
+	re.Equal(2, pq.Len())
 	entry := pq.Peek()
-	c.Assert(entry.Priority, Equals, 2)
-	c.Assert(entry.Value, Equals, testData[2])
+	re.Equal(2, entry.Priority)
+	re.Equal(testData[2], entry.Value)
 
 	// case3 update 3's priority to highest
 	pq.Put(-1, testData[3])
 	entry = pq.Peek()
-	c.Assert(entry.Priority, Equals, -1)
-	c.Assert(entry.Value, Equals, testData[3])
+	re.Equal(-1, entry.Priority)
+	re.Equal(testData[3], entry.Value)
 	pq.Remove(entry.Value.ID())
-	c.Assert(pq.Peek().Value, Equals, testData[2])
-	c.Assert(pq.Len(), Equals, 1)
+	re.Equal(testData[2], pq.Peek().Value)
+	re.Equal(1, pq.Len())
 
 	// case4 remove all element
 	pq.Remove(uint64(2))
-	c.Assert(pq.Len(), Equals, 0)
-	c.Assert(pq.items, HasLen, 0)
-	c.Assert(pq.Peek(), IsNil)
-	c.Assert(pq.Tail(), IsNil)
+	re.Equal(0, pq.Len())
+	re.Empty(pq.items)
+	re.Nil(pq.Peek())
+	re.Nil(pq.Tail())
 }

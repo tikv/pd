@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
@@ -44,12 +45,18 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
-// @Tags scheduler
-// @Summary List all created schedulers by status.
-// @Produce json
-// @Success 200 {array} string
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers [get]
+type schedulerPausedPeriod struct {
+	Name     string    `json:"name"`
+	PausedAt time.Time `json:"paused_at"`
+	ResumeAt time.Time `json:"resume_at"`
+}
+
+// @Tags     scheduler
+// @Summary  List all created schedulers by status.
+// @Produce  json
+// @Success  200  {array}   string
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers [get]
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	schedulers, err := h.Handler.GetSchedulers()
 	if err != nil {
@@ -58,9 +65,11 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 	}
 
 	status := r.URL.Query().Get("status")
+	_, tsFlag := r.URL.Query()["timestamp"]
 	switch status {
 	case "paused":
 		var pausedSchedulers []string
+		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := h.Handler.IsSchedulerPaused(scheduler)
 			if err != nil {
@@ -69,10 +78,35 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 			}
 
 			if paused {
-				pausedSchedulers = append(pausedSchedulers, scheduler)
+				if tsFlag {
+					s := schedulerPausedPeriod{
+						Name:     scheduler,
+						PausedAt: time.Time{},
+						ResumeAt: time.Time{},
+					}
+					pausedAt, err := h.Handler.GetPausedSchedulerDelayAt(scheduler)
+					if err != nil {
+						h.r.JSON(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					s.PausedAt = time.Unix(pausedAt, 0)
+					resumeAt, err := h.Handler.GetPausedSchedulerDelayUntil(scheduler)
+					if err != nil {
+						h.r.JSON(w, http.StatusInternalServerError, err.Error())
+						return
+					}
+					s.ResumeAt = time.Unix(resumeAt, 0)
+					pausedPeriods = append(pausedPeriods, s)
+				} else {
+					pausedSchedulers = append(pausedSchedulers, scheduler)
+				}
 			}
 		}
-		h.r.JSON(w, http.StatusOK, pausedSchedulers)
+		if tsFlag {
+			h.r.JSON(w, http.StatusOK, pausedPeriods)
+		} else {
+			h.r.JSON(w, http.StatusOK, pausedSchedulers)
+		}
 		return
 	case "disabled":
 		var disabledSchedulers []string
@@ -94,15 +128,15 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 }
 
 // FIXME: details of input json body params
-// @Tags scheduler
-// @Summary Create a scheduler.
-// @Accept json
-// @Param body body object true "json params"
-// @Produce json
-// @Success 200 {string} string "The scheduler is created."
-// @Failure 400 {string} string "Bad format request."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers [post]
+// @Tags     scheduler
+// @Summary  Create a scheduler.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The scheduler is created."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers [post]
 func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -235,14 +269,14 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 	}
 }
 
-// @Tags scheduler
-// @Summary Delete a scheduler.
-// @Param name path string true "The name of the scheduler."
-// @Produce json
-// @Success 200 {string} string "The scheduler is removed."
-// @Failure 404 {string} string "The scheduler is not found."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers/{name} [delete]
+// @Tags     scheduler
+// @Summary  Delete a scheduler.
+// @Param    name  path  string  true  "The name of the scheduler."
+// @Produce  json
+// @Success  200  {string}  string  "The scheduler is removed."
+// @Failure  404  {string}  string  "The scheduler is not found."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/{name} [delete]
 func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
@@ -282,16 +316,16 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 }
 
 // FIXME: details of input json body params
-// @Tags scheduler
-// @Summary Pause or resume a scheduler.
-// @Accept json
-// @Param name path string true "The name of the scheduler."
-// @Param body body object true "json params"
-// @Produce json
-// @Success 200 {string} string "Pause or resume the scheduler successfully."
-// @Failure 400 {string} string "Bad format request."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /schedulers/{name} [post]
+// @Tags     scheduler
+// @Summary  Pause or resume a scheduler.
+// @Accept   json
+// @Param    name  path  string  true  "The name of the scheduler."
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/{name} [post]
 func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int64
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {

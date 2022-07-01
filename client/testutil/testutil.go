@@ -17,48 +17,45 @@ package testutil
 import (
 	"time"
 
-	"github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
 const (
-	waitMaxRetry   = 200
-	waitRetrySleep = time.Millisecond * 100
+	defaultWaitFor      = time.Second * 20
+	defaultTickInterval = time.Millisecond * 100
 )
 
-// WaitOp represents available options when execute WaitUntil
+// WaitOp represents available options when execute Eventually.
 type WaitOp struct {
-	retryTimes    int
-	sleepInterval time.Duration
+	waitFor      time.Duration
+	tickInterval time.Duration
 }
 
-// WaitOption configures WaitOp
+// WaitOption configures WaitOp.
 type WaitOption func(op *WaitOp)
 
-// WithRetryTimes specify the retry times
-func WithRetryTimes(retryTimes int) WaitOption {
-	return func(op *WaitOp) { op.retryTimes = retryTimes }
+// WithWaitFor specify the max wait duration.
+func WithWaitFor(waitFor time.Duration) WaitOption {
+	return func(op *WaitOp) { op.waitFor = waitFor }
 }
 
-// WithSleepInterval specify the sleep duration
-func WithSleepInterval(sleep time.Duration) WaitOption {
-	return func(op *WaitOp) { op.sleepInterval = sleep }
+// WithTickInterval specify the tick interval to check the condition.
+func WithTickInterval(tickInterval time.Duration) WaitOption {
+	return func(op *WaitOp) { op.tickInterval = tickInterval }
 }
 
-// WaitUntil repeatedly evaluates f() for a period of time, util it returns true.
-func WaitUntil(c *check.C, f func() bool, opts ...WaitOption) {
-	c.Log("wait start")
+// Eventually asserts that given condition will be met in a period of time.
+func Eventually(re *require.Assertions, condition func() bool, opts ...WaitOption) {
 	option := &WaitOp{
-		retryTimes:    waitMaxRetry,
-		sleepInterval: waitRetrySleep,
+		waitFor:      defaultWaitFor,
+		tickInterval: defaultTickInterval,
 	}
 	for _, opt := range opts {
 		opt(option)
 	}
-	for i := 0; i < option.retryTimes; i++ {
-		if f() {
-			return
-		}
-		time.Sleep(option.sleepInterval)
-	}
-	c.Fatal("wait timeout")
+	re.Eventually(
+		condition,
+		option.waitFor,
+		option.tickInterval,
+	)
 }

@@ -41,12 +41,12 @@ type minResolvedTS struct {
 	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
 }
 
-// @Tags min_resolved_ts
-// @Summary Get cluster-level min resolved ts.
-// @Produce json
-// @Success 200 {array} minResolvedTS
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /min-resolved-ts [get]
+// @Tags     min_resolved_ts
+// @Summary  Get cluster-level min resolved ts.
+// @Produce  json
+// @Success  200  {array}   minResolvedTS
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
 	value := c.GetMinResolvedTS()

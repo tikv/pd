@@ -15,21 +15,20 @@
 package operator
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testOpStatusSuite{})
-
-type testOpStatusSuite struct{}
-
-func (s *testOpStatusSuite) TestIsEndStatus(c *C) {
+func TestIsEndStatus(t *testing.T) {
+	re := require.New(t)
 	for st := OpStatus(0); st < firstEndStatus; st++ {
-		c.Assert(IsEndStatus(st), IsFalse)
+		re.False(IsEndStatus(st))
 	}
 	for st := firstEndStatus; st < statusCount; st++ {
-		c.Assert(IsEndStatus(st), IsTrue)
+		re.True(IsEndStatus(st))
 	}
 	for st := statusCount; st < statusCount+100; st++ {
-		c.Assert(IsEndStatus(st), IsFalse)
+		re.False(IsEndStatus(st))
 	}
 }

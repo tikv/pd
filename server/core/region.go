@@ -172,10 +172,10 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// Inherit inherits the buckets and region size from the parent region.
+// Inherit inherits the buckets and region size from the parent region if bucket enabled.
 // correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
 // See https://github.com/tikv/tikv/issues/11114
-func (r *RegionInfo) Inherit(origin *RegionInfo) {
+func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	// regionSize should not be zero if region is not empty.
 	if r.GetApproximateSize() == 0 {
 		if origin != nil {
@@ -184,7 +184,7 @@ func (r *RegionInfo) Inherit(origin *RegionInfo) {
 			r.approximateSize = EmptyRegionApproximateSize
 		}
 	}
-	if origin != nil && r.buckets == nil {
+	if bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -227,6 +227,11 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 // NeedMerge returns true if size is less than merge size and keys is less than mergeKeys.
 func (r *RegionInfo) NeedMerge(mergeSize int64, mergeKeys int64) bool {
 	return r.GetApproximateSize() <= mergeSize && r.GetApproximateKeys() <= mergeKeys
+}
+
+// IsOversized indicates whether the region is oversized.
+func (r *RegionInfo) IsOversized(maxSize int64, maxKeys int64) bool {
+	return r.GetApproximateSize() >= maxSize || r.GetApproximateKeys() >= maxKeys
 }
 
 // GetTerm returns the current term of the region
@@ -344,8 +349,8 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetStoreIds returns a map indicate the region distributed.
-func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
+// GetStoreIDs returns a map indicate the region distributed.
+func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
 	stores := make(map[uint64]struct{}, len(peers))
 	for _, peer := range peers {
@@ -423,8 +428,8 @@ func (r *RegionInfo) GetStat() *pdpb.RegionStat {
 
 // UpdateBuckets sets the buckets of the region.
 func (r *RegionInfo) UpdateBuckets(buckets, old *metapb.Buckets) bool {
-	// the bucket can't be nil except in the test cases.
 	if buckets == nil {
+		atomic.StorePointer(&r.buckets, nil)
 		return true
 	}
 	// only need to update bucket keys, versions.
@@ -615,6 +620,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveCache, needSync = true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
+				saveKV, saveCache = true, true
+			}
+			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
+				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
 				saveKV, saveCache = true, true
 			}
 

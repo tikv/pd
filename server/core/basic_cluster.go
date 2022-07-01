@@ -95,7 +95,7 @@ func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	var Stores []*StoreInfo
-	for id := range region.GetStoreIds() {
+	for id := range region.GetStoreIDs() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
 		}

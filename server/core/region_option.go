@@ -96,14 +96,14 @@ func WithNewRegionID(id uint64) RegionCreateOption {
 	}
 }
 
-// WithNewPeerIds sets new ids for peers.
-func WithNewPeerIds(peerIds ...uint64) RegionCreateOption {
+// WithNewPeerIDs sets new ids for peers.
+func WithNewPeerIDs(peerIDs ...uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if len(peerIds) != len(region.meta.GetPeers()) {
+		if len(peerIDs) != len(region.meta.GetPeers()) {
 			return
 		}
 		for i, p := range region.meta.GetPeers() {
-			p.Id = peerIds[i]
+			p.Id = peerIDs[i]
 		}
 	}
 }
@@ -182,6 +182,13 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 			}
 		}
 		region.meta.Peers = peers
+	}
+}
+
+// SetBuckets sets the buckets for the region, only use test.
+func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.UpdateBuckets(buckets, region.GetBuckets())
 	}
 }
 

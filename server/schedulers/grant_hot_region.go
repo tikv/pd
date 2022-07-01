@@ -123,8 +123,10 @@ func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDs := make([]uint64, len(conf.StoreIDs))
+	copy(newStoreIDs, conf.StoreIDs)
 	return &grantHotRegionSchedulerConfig{
-		StoreIDs:      conf.StoreIDs,
+		StoreIDs:      newStoreIDs,
 		StoreLeaderID: conf.StoreLeaderID,
 	}
 }
@@ -359,7 +361,7 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 		candidate = []uint64{s.conf.GetStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = s.conf.StoreIDs
 	}
 	for _, storeID := range candidate {
