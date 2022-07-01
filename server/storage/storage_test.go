@@ -318,13 +318,33 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 		}
 		note[pos] = true
 
-		if pos == 0 {
-			regions[pos].EndKey = regions[pos+1].EndKey
-			note[1] = true
-		} else {
-			regions[pos-1].EndKey = regions[pos].EndKey
-			if pos == 1 {
-				note[0] = true
+		mergeIndex := pos + 1
+		for mergeIndex < n {
+			_, ok := note[mergeIndex]
+			if ok {
+				mergeIndex++
+			} else {
+				break
+			}
+		}
+		if mergeIndex < n {
+			regions[mergeIndex].StartKey = regions[pos].StartKey
+		}
+		if mergeIndex == n {
+			if pos == n-1 {
+				preMergeIndex := pos - 1
+				for preMergeIndex >= 0 {
+					_, ok := note[preMergeIndex]
+					if ok {
+						preMergeIndex--
+					} else {
+						break
+					}
+				}
+				regions[mergeIndex-1].StartKey = regions[preMergeIndex].StartKey
+				note[preMergeIndex] = true
+			} else {
+				regions[mergeIndex-1].StartKey = regions[pos].StartKey
 			}
 		}
 	}
@@ -360,7 +380,6 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 			return err
 		}
 	}
-
 	return lb.Flush()
 }
 
