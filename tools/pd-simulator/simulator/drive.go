@@ -29,7 +29,6 @@ import (
 
 const (
 	balanceRegionScheduler = "balance-region-scheduler"
-	startSchedulerTick     = 10
 )
 
 // Driver promotes the cluster status change.
@@ -113,8 +112,8 @@ func (d *Driver) Tick() {
 	d.raftEngine.stepRegions()
 	if d.tickCount <= 1 {
 		d.client.RemoveScheduler(balanceRegionScheduler)
-	} else if d.tickCount == startSchedulerTick {
-		// wait some store update status
+	} else if d.tickCount == storeHeartBeatPeriod {
+		// wait all stores update status.
 		d.client.AddScheduler(balanceRegionScheduler, nil)
 	}
 	d.eventRunner.Tick(d.tickCount)
