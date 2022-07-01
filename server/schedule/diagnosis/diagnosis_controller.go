@@ -239,6 +239,9 @@ func NewDiagnosisController(dryRun bool) *DiagnosisController {
 }
 
 func (c *DiagnosisController) Debug() {
+	if !c.dryRun {
+		return
+	}
 	log.Info("DiagnosisController Debug", zap.Int("currentStep", int(c.currentStep)), zap.Uint64("currentSource", c.currentSource), zap.Uint64("currentRegion", c.currentRegion), zap.Uint64("currentTarget", c.currentTarget))
 }
 
@@ -292,6 +295,7 @@ func (c *DiagnosisController) Diagnose(objectID uint64, reason string) {
 	if !c.dryRun {
 		return
 	}
+	log.Info("DiagnosisController diagnose ", zap.Uint64("object", objectID), zap.String("reason", reason))
 	c.setObject(objectID)
 	c.recordNotSchedulablePlan(reason)
 }
@@ -320,6 +324,7 @@ func (c *DiagnosisController) recordNotSchedulablePlan(reason string) {
 		plan.Region = 0
 	}
 	c.plans = append(c.plans, plan)
+	log.Info("diagnose plans length", zap.Int("plans length", len(c.plans)))
 }
 
 func (c *DiagnosisController) recordSchedulablePlan() {

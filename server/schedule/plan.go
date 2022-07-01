@@ -148,7 +148,7 @@ func (node *SchedulePlanTreeLevel2Node) putPlan(plan Plan) {
 		node.self.Add(plan.GetReason(), 0)
 	case 1:
 		node.regions = NewSchedulePlanTreeLevel3Node(1)
-		node.self.Add(plan.GetReason(), plan.GetRegion())
+		node.regions.Add(plan.GetReason(), plan.GetRegion())
 	case 2:
 		targetID := plan.GetTargetStore()
 		node.usedStores[targetID] = true

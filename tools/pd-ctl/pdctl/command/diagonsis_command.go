@@ -44,7 +44,7 @@ func NewDiagnosisCommand() *cobra.Command {
 // NewBalanceRegionDiagnoseCommand returns commands to diagnose balance-region scheduler.
 func NewBalanceRegionDiagnoseCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "balance-region-scheduler <store_id>",
+		Use:   "balance-region-scheduler",
 		Short: "diagnose balance-region scheduler",
 		Run:   diagnoseBalanceRegionCommandFunc,
 	}
@@ -57,7 +57,7 @@ func NewBalanceRegionDiagnoseCommand() *cobra.Command {
 // NewBalanceRegionDiagnosisResultCommand returns commands to get balance-region scheduler diagnosis result.
 func NewBalanceRegionDiagnosisResultCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "result <store_id>",
+		Use:   "<store_id>",
 		Short: "get balance-region scheduler diagnosis result",
 		Run:   getBalanceRegionDiagnosisResultCommandFunc,
 	}
@@ -66,12 +66,12 @@ func NewBalanceRegionDiagnosisResultCommand() *cobra.Command {
 }
 
 func diagnoseBalanceRegionCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	p := cmd.Name()
-	path := path.Join(schedulersPrefix, p, "diagnose", args[0])
+	path := path.Join(schedulersPrefix, p, "diagnose")
 	r, err := doRequest(cmd, path, http.MethodPost, http.Header{})
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
@@ -90,7 +90,7 @@ func getBalanceRegionDiagnosisResultCommandFunc(cmd *cobra.Command, args []strin
 	}
 	p := cmd.Parent().Name()
 	path := path.Join(schedulersPrefix, p, "diagnose", args[0])
-	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, path, http.MethodPost, http.Header{})
 	if err != nil {
 		if strings.Contains(err.Error(), "404") {
 			err = errors.New("[404] scheduler not found")

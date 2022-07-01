@@ -139,6 +139,9 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
+	if dryRun {
+		log.Info("Pebug begin balanceRegionScheduler")
+	}
 	dc := diagnosis.NewDiagnosisController(dryRun)
 	// **step = 0
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
@@ -148,6 +151,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	stores := cluster.GetStores()
 
 	// source filter
+	dc.Debug()
 	stores = filter.SelectSourceStoresWithDiagnosis(stores, s.filters, opts, dc)
 
 	opInfluence := s.opController.GetOpInfluence(cluster)
@@ -176,6 +180,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	}
 
 	dc.NextStep()
+	dc.Debug()
 	// ** step = 1
 	for _, plan.source = range stores {
 		dc.SetSelectedObject(plan.SourceStoreID())
@@ -205,6 +210,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
+			dc.Debug()
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 			dc.NextStep()
 			// ** step = 2
@@ -220,10 +226,17 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		s.retryQuota.Attenuate(plan.source)
 	}
 	s.retryQuota.GC(stores)
+	if dryRun {
+		log.Info("diagnose controller plans length", zap.Int("plans length", len(dc.GetPlans())))
+	}
 	plans := make([]schedule.Plan, 0)
 	for _, item := range dc.GetPlans() {
 		plans = append(plans, item)
 	}
+	if dryRun {
+		log.Info("diagnose controller plans length2", zap.Int("plans length", len(plans)))
+	}
+
 	return nil, plans
 }
 

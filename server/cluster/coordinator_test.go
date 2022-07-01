@@ -1186,7 +1186,7 @@ func TestController(t *testing.T) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		re.Equal(i, sc.GetInterval())
-		ops, _ := sc.Schedule()
+		ops, _ := sc.Schedule(false)
 		re.Len(ops, 0)
 	}
 	// limit = 2
@@ -1270,7 +1270,7 @@ func TestInterval(t *testing.T) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			ops, _ := sc.Schedule()
+			ops, _ := sc.Schedule(false)
 			re.Len(ops, 0)
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))

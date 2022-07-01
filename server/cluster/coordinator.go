@@ -808,7 +808,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 			if !s.AllowSchedule() {
 				continue
 			}
-			if op, _ := s.Schedule(); len(op) > 0 {
+			if op, _ := s.Schedule(false); len(op) > 0 {
 				added := c.opController.AddWaitingOperator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
@@ -882,7 +882,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule() ([]*operator.Operator, []schedule.Plan) {
+func (s *scheduleController) Schedule(dryrun bool) (ops []*operator.Operator, plans []schedule.Plan) {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -892,13 +892,13 @@ func (s *scheduleController) Schedule() ([]*operator.Operator, []schedule.Plan) 
 		}
 		cacheCluster := newCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if ops, plans := s.Scheduler.Schedule(cacheCluster, false); len(ops) > 0 {
+		if ops, plans = s.Scheduler.Schedule(cacheCluster, dryrun); len(ops) > 0 {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return ops, plans
 		}
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
-	return nil, nil
+	return ops, plans
 }
 
 // GetInterval returns the interval of scheduling for a scheduler.

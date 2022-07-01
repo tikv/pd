@@ -3,12 +3,14 @@ package cluster
 import (
 	"context"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/diagnosis"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"go.uber.org/zap"
 )
 
 type diagnosisManager struct {
@@ -62,8 +64,10 @@ func (d *diagnosisManager) addSchedulerDiagnosis(scheduler schedule.Scheduler, a
 }
 
 func (d *diagnosisManager) GetSchedulerDiagnosisResult(name string) *diagnosis.MatrixDiagnosisResult {
-	scheduler := d.schedulers[name]
-	return scheduler.GetSchedulerDiagnosisResult()
+	if scheduler, ok := d.schedulers[name]; ok {
+		return scheduler.GetSchedulerDiagnosisResult()
+	}
+	return nil
 }
 
 func (d *diagnosisManager) GetSchedulerStoreDiagnosisResult(name string, store uint64) *diagnosis.StepDiagnosisResult {
@@ -95,10 +99,12 @@ func newDiagnosisSchedulerManager(m *diagnosisManager, s schedule.Scheduler) *di
 }
 
 func (d *diagnosisSchedulerManager) runDiagnosis() {
-	d.ops, d.result = d.Scheduler.Schedule()
+	d.ops, d.result = d.Scheduler.Schedule(true)
+	log.Info("Qebug", zap.Int("len ops", len(d.ops)), zap.Int("len plan", len(d.result)))
 }
 
 func (d *diagnosisSchedulerManager) GetSchedulerDiagnosisResult() *diagnosis.MatrixDiagnosisResult {
+	log.Info("Diagnosis", zap.Bool("SchedulerDiagnosis is nil", d == nil))
 	d.runDiagnosis()
 	analyzer := schedule.NewMatrixPlanAnalyzer(d.Scheduler.GetName(), d.cluster)
 	for _, plan := range d.result {

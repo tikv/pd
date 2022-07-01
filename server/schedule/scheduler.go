@@ -76,11 +76,11 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 }
 
 // ConfigSliceDecoder the default decode for the config.
-func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
-	builder, ok := schedulerArgsToDecoder[name]
+func ConfigSliceDecoder(typ string, args []string) ConfigDecoder {
+	builder, ok := schedulerArgsToDecoder[typ]
 	if !ok {
 		return func(v interface{}) error {
-			return errors.Errorf("the config decoder do not register for %s", name)
+			return errors.Errorf("the config decoder do not register for %s", typ)
 		}
 	}
 	return builder(args)
