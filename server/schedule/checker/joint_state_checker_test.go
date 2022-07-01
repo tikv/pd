@@ -39,7 +39,7 @@ func TestLeaveJointState(t *testing.T) {
 		Peers   []*metapb.Peer // first is leader
 		OpSteps []operator.OpStep
 	}
-	cases := []testCase{
+	testCases := []testCase{
 		{
 			[]*metapb.Peer{
 				{Id: 101, StoreId: 1, Role: metapb.PeerRole_Voter},
@@ -111,10 +111,10 @@ func TestLeaveJointState(t *testing.T) {
 		},
 	}
 
-	for _, tc := range cases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.Peers}, tc.Peers[0])
+	for _, testCase := range testCases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
 		op := jsc.Check(region)
-		checkSteps(re, op, tc.OpSteps)
+		checkSteps(re, op, testCase.OpSteps)
 	}
 }
 

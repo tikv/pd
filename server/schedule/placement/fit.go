@@ -242,7 +242,10 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 	}
 
 	var better bool
-	for i, p := range candidates {
+	// make sure the left number of candidates should be enough.
+	indexLimit := len(candidates) - (count - len(selected))
+	for i := 0; i <= indexLimit; i++ {
+		p := candidates[i]
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false

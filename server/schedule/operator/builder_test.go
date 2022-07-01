@@ -179,7 +179,7 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		kind              OpKind
 		steps             []OpStep // empty means error
 	}
-	cases := []testCase{
+	testCases := []testCase{
 		{
 			"(disable JointConsensus) empty step",
 			false,
@@ -534,53 +534,53 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		},
 	}
 
-	for _, tc := range cases {
-		suite.T().Log(tc.name)
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: tc.originPeers}, tc.originPeers[0])
+	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers}, testCase.originPeers[0])
 		builder := NewBuilder("test", suite.cluster, region)
-		builder.useJointConsensus = tc.useJointConsensus
+		builder.useJointConsensus = testCase.useJointConsensus
 		m := make(map[uint64]*metapb.Peer)
-		for _, p := range tc.targetPeers {
+		for _, p := range testCase.targetPeers {
 			m[p.GetStoreId()] = p
 		}
-		builder.SetPeers(m).SetLeader(tc.targetPeers[0].GetStoreId())
+		builder.SetPeers(m).SetLeader(testCase.targetPeers[0].GetStoreId())
 		op, err := builder.Build(0)
-		if len(tc.steps) == 0 {
+		if len(testCase.steps) == 0 {
 			suite.Error(err)
 			continue
 		}
 		suite.NoError(err)
-		suite.Equal(tc.kind, op.Kind())
-		suite.Len(tc.steps, op.Len())
+		suite.Equal(testCase.kind, op.Kind())
+		suite.Len(testCase.steps, op.Len())
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
 			case TransferLeader:
-				suite.Equal(tc.steps[i].(TransferLeader).FromStore, step.FromStore)
-				suite.Equal(tc.steps[i].(TransferLeader).ToStore, step.ToStore)
+				suite.Equal(testCase.steps[i].(TransferLeader).FromStore, step.FromStore)
+				suite.Equal(testCase.steps[i].(TransferLeader).ToStore, step.ToStore)
 			case AddPeer:
-				suite.Equal(tc.steps[i].(AddPeer).ToStore, step.ToStore)
+				suite.Equal(testCase.steps[i].(AddPeer).ToStore, step.ToStore)
 			case RemovePeer:
-				suite.Equal(tc.steps[i].(RemovePeer).FromStore, step.FromStore)
+				suite.Equal(testCase.steps[i].(RemovePeer).FromStore, step.FromStore)
 			case AddLearner:
-				suite.Equal(tc.steps[i].(AddLearner).ToStore, step.ToStore)
+				suite.Equal(testCase.steps[i].(AddLearner).ToStore, step.ToStore)
 			case PromoteLearner:
-				suite.Equal(tc.steps[i].(PromoteLearner).ToStore, step.ToStore)
+				suite.Equal(testCase.steps[i].(PromoteLearner).ToStore, step.ToStore)
 			case ChangePeerV2Enter:
-				suite.Len(tc.steps[i].(ChangePeerV2Enter).PromoteLearners, len(step.PromoteLearners))
-				suite.Len(tc.steps[i].(ChangePeerV2Enter).DemoteVoters, len(step.DemoteVoters))
-				for j, p := range tc.steps[i].(ChangePeerV2Enter).PromoteLearners {
+				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Enter).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range testCase.steps[i].(ChangePeerV2Enter).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
-				for j, d := range tc.steps[i].(ChangePeerV2Enter).DemoteVoters {
+				for j, d := range testCase.steps[i].(ChangePeerV2Enter).DemoteVoters {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			case ChangePeerV2Leave:
-				suite.Len(tc.steps[i].(ChangePeerV2Leave).PromoteLearners, len(step.PromoteLearners))
-				suite.Len(tc.steps[i].(ChangePeerV2Leave).DemoteVoters, len(step.DemoteVoters))
-				for j, p := range tc.steps[i].(ChangePeerV2Leave).PromoteLearners {
+				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Leave).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Leave).DemoteVoters))
+				for j, p := range testCase.steps[i].(ChangePeerV2Leave).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
-				for j, d := range tc.steps[i].(ChangePeerV2Leave).DemoteVoters {
+				for j, d := range testCase.steps[i].(ChangePeerV2Leave).DemoteVoters {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			}

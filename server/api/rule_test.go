@@ -167,7 +167,7 @@ func (suite *ruleTestSuite) TestSet() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
+			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)
@@ -541,7 +541,7 @@ func (suite *ruleTestSuite) TestDelete() {
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(testCase.popKeyRange, len(popKeyRangeMap))
+			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
 			for k := range popKeyRangeMap {
 				_, ok := testCase.popKeyRange[k]
 				suite.True(ok)
@@ -824,10 +824,10 @@ func (suite *ruleTestSuite) TestBundleBadRequest() {
 		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"foo", "id":"baz", "role":"voter", "count":1}]}]`, true},
 		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}]`, false},
 	}
-	for _, tc := range testCases {
-		err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+tc.uri, []byte(tc.data),
+	for _, testCase := range testCases {
+		err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+testCase.uri, []byte(testCase.data),
 			func(_ []byte, code int) {
-				suite.Equal(tc.ok, code == http.StatusOK)
+				suite.Equal(testCase.ok, code == http.StatusOK)
 			})
 		suite.NoError(err)
 	}
