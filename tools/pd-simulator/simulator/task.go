@@ -17,13 +17,13 @@ package simulator
 import (
 	"bytes"
 	"fmt"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 )
 
 var (
@@ -42,7 +42,7 @@ const (
 type snapStatus int
 
 const (
-	pending snapStatus = 0
+	pending snapStatus = iota
 	running
 	finished
 )
@@ -84,7 +84,6 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				regionID: regionID,
 				size:     region.GetApproximateSize(),
 				keys:     region.GetApproximateKeys(),
-				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 				// This two variables are used to simulate sending and receiving snapshot processes.
@@ -344,7 +343,6 @@ type addLearner struct {
 	regionID      uint64
 	size          int64
 	keys          int64
-	speed         int64
 	epoch         *metapb.RegionEpoch
 	peer          *metapb.Peer
 	finished      bool
@@ -372,7 +370,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 		a.finished = true
 		return
 	}
-	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
+	if !processSnapshot(sendNode, a.sendingStat) {
 		return
 	}
 	r.schedulerStats.snapshotStats.incSendSnapshot(sendNode.Id)
@@ -382,7 +380,7 @@ func (a *addLearner) Step(r *RaftEngine) {
 		a.finished = true
 		return
 	}
-	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
+	if !processSnapshot(recvNode, a.receivingStat) {
 		return
 	}
 	r.schedulerStats.snapshotStats.incReceiveSnapshot(recvNode.Id)
@@ -412,12 +410,12 @@ func (a *addLearner) IsFinished() bool {
 	return a.finished
 }
 
-func processSnapshot(n *Node, stat *snapshotStat, snapshotSize int64) bool {
+func processSnapshot(n *Node, stat *snapshotStat) bool {
 	if stat.status == pending {
 		if stat.kind == Generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.kind == Receive && n.stats.ReceivingSnapCount > maxSnapGeneratorPoolSize {
+		if stat.kind == Receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
