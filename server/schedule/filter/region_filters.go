@@ -49,23 +49,6 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 	return nil
 }
 
-// type RegionFilterType int32
-
-// const (
-// 	RegionUnhealthy           RegionFilterType = 0
-// 	RegionNotFitPlacementRule RegionFilterType = 1
-// )
-
-// var RegionFilterTypeName = map[int32]string{
-// 	0: "Unhealthy",
-// 	1: "NotFitPlacementRule",
-// }
-
-// var RegionFilterTypeValue = map[string]int32{
-// 	"Unhealthy":           0,
-// 	"NotFitPlacementRule": 1,
-// }
-
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
 	// RegionFilter is used to indicate where the filter will act on.
@@ -178,28 +161,6 @@ func (f *RegionEmptyFilter) Reason() string {
 
 func (f *RegionEmptyFilter) Select(region *core.RegionInfo) bool {
 	return isEmptyRegionAllowBalance(f.cluster, region)
-}
-
-type RegionAlwaysAllowFilter struct{}
-
-func NewRegionAlwaysAllowFilter() RegionFilter {
-	return &RegionAlwaysAllowFilter{}
-}
-
-func (f *RegionAlwaysAllowFilter) Scope() string {
-	return ""
-}
-
-func (f *RegionAlwaysAllowFilter) Type() string {
-	return ""
-}
-
-func (f *RegionAlwaysAllowFilter) Reason() string {
-	return ""
-}
-
-func (f *RegionAlwaysAllowFilter) Select(region *core.RegionInfo) bool {
-	return true
 }
 
 // isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
