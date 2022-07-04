@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -40,7 +41,7 @@ type Scheduler interface {
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster, dryRun bool) ([]*operator.Operator, []Plan)
+	Schedule(cluster Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster Cluster) bool
 }
 

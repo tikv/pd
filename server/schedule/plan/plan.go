@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package plan
 
-// Plan is the basic unit for diagnosis.
-// TODO: for each schedulers, we can have an individual definition but need to implement the common interfaces.
+// Plan is the basic unit for both scheduling and diagnosis.
+// TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
 type Plan interface{}

@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -169,7 +170,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
+func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	var ops []*operator.Operator
 

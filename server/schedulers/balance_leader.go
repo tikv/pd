@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -342,7 +343,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []schedule.Plan) {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	batch := l.conf.Batch
