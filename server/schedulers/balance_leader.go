@@ -156,8 +156,8 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", handler.UpdateConfig).Methods("POST")
-	router.HandleFunc("/list", handler.ListConfig).Methods("GET")
+	router.HandleFunc("/config", handler.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", handler.ListConfig).Methods(http.MethodGet)
 	return router
 }
 

@@ -320,9 +320,9 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
-	router.HandleFunc("/list", h.ListConfig).Methods("GET")
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods("DELETE")
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
 	return router
 }
 
