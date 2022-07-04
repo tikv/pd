@@ -17,12 +17,34 @@ package simulator
 import (
 	"bytes"
 	"fmt"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
+)
+
+var (
+	chunkSize                = int64(4 * cases.KB)
+	maxSnapGeneratorPoolSize = uint32(2)
+	maxSnapReceivePoolSize   = uint32(4)
+)
+
+type snapKind string
+
+const (
+	Generate snapKind = "generator"
+	Receive           = "receive"
+)
+
+type snapStatus int
+
+const (
+	pending snapStatus = 0
+	running
+	finished
 )
 
 // Task running in node.
@@ -45,14 +67,8 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 		case eraftpb.ConfChangeType_AddNode:
 			return &addPeer{
 				regionID: regionID,
-				size:     region.GetApproximateSize(),
-				keys:     region.GetApproximateKeys(),
-				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
-				// This two variables are used to simulate sending and receiving snapshot processes.
-				sendingStat:   &snapshotStat{"sending", region.GetApproximateSize(), false},
-				receivingStat: &snapshotStat{"receiving", region.GetApproximateSize(), false},
 			}
 		case eraftpb.ConfChangeType_RemoveNode:
 			return &removePeer{
@@ -71,6 +87,9 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				speed:    100 * 1000 * 1000,
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
+				// This two variables are used to simulate sending and receiving snapshot processes.
+				sendingStat:   &snapshotStat{Generate, region.GetApproximateSize(), pending},
+				receivingStat: &snapshotStat{Receive, region.GetApproximateSize(), pending},
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
@@ -94,9 +113,9 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 }
 
 type snapshotStat struct {
-	kind       string
+	kind       snapKind
 	remainSize int64
-	finished   bool
+	status     snapStatus
 }
 
 type mergeRegion struct {
@@ -209,15 +228,10 @@ func (t *transferLeader) IsFinished() bool {
 }
 
 type addPeer struct {
-	regionID      uint64
-	size          int64
-	keys          int64
-	speed         int64
-	epoch         *metapb.RegionEpoch
-	peer          *metapb.Peer
-	finished      bool
-	sendingStat   *snapshotStat
-	receivingStat *snapshotStat
+	regionID uint64
+	epoch    *metapb.RegionEpoch
+	peer     *metapb.Peer
+	finished bool
 }
 
 func (a *addPeer) Desc() string {
@@ -234,44 +248,19 @@ func (a *addPeer) Step(r *RaftEngine) {
 		return
 	}
 
-	snapshotSize := region.GetApproximateSize()
-	sendNode := r.conn.Nodes[region.GetLeader().GetStoreId()]
-	if sendNode == nil {
-		a.finished = true
-		return
+	var opts []core.RegionCreateOption
+	if region.GetPeer(a.peer.GetId()) == nil {
+		opts = append(opts, core.WithAddPeer(a.peer))
+		r.schedulerStats.taskStats.incAddPeer(region.GetID())
+	} else {
+		opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
+		r.schedulerStats.taskStats.incPromoteLeaner(region.GetID())
 	}
-	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
-		return
-	}
-	r.schedulerStats.snapshotStats.incSendSnapshot(sendNode.Id)
-
-	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
-	if recvNode == nil {
-		a.finished = true
-		return
-	}
-	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
-		return
-	}
-	r.schedulerStats.snapshotStats.incReceiveSnapshot(recvNode.Id)
-
-	a.size -= a.speed
-	if a.size < 0 {
-		var opts []core.RegionCreateOption
-		if region.GetPeer(a.peer.GetId()) == nil {
-			opts = append(opts, core.WithAddPeer(a.peer))
-			r.schedulerStats.taskStats.incAddPeer(region.GetID())
-		} else {
-			opts = append(opts, core.WithPromoteLearner(a.peer.GetId()))
-			r.schedulerStats.taskStats.incPromoteLeaner(region.GetID())
-		}
-		opts = append(opts, core.WithIncConfVer())
-		newRegion := region.Clone(opts...)
-		r.SetRegion(newRegion)
-		r.recordRegionChange(newRegion)
-		recvNode.incUsedSize(uint64(snapshotSize))
-		a.finished = true
-	}
+	opts = append(opts, core.WithIncConfVer())
+	newRegion := region.Clone(opts...)
+	r.SetRegion(newRegion)
+	r.recordRegionChange(newRegion)
+	a.finished = true
 }
 
 func (a *addPeer) RegionID() uint64 {
@@ -352,13 +341,15 @@ func (a *removePeer) IsFinished() bool {
 }
 
 type addLearner struct {
-	regionID uint64
-	size     int64
-	keys     int64
-	speed    int64
-	epoch    *metapb.RegionEpoch
-	peer     *metapb.Peer
-	finished bool
+	regionID      uint64
+	size          int64
+	keys          int64
+	speed         int64
+	epoch         *metapb.RegionEpoch
+	peer          *metapb.Peer
+	finished      bool
+	sendingStat   *snapshotStat
+	receivingStat *snapshotStat
 }
 
 func (a *addLearner) Desc() string {
@@ -375,21 +366,41 @@ func (a *addLearner) Step(r *RaftEngine) {
 		return
 	}
 
-	a.size -= a.speed
-	if a.size < 0 {
-		if region.GetPeer(a.peer.GetId()) == nil {
-			newRegion := region.Clone(
-				core.WithAddPeer(a.peer),
-				core.WithIncConfVer(),
-			)
-			r.SetRegion(newRegion)
-			r.recordRegionChange(newRegion)
-			r.schedulerStats.taskStats.incAddLeaner(region.GetID())
-		}
+	snapshotSize := region.GetApproximateSize()
+	sendNode := r.conn.Nodes[region.GetLeader().GetStoreId()]
+	if sendNode == nil {
 		a.finished = true
-		if analysis.GetTransferCounter().IsValid {
-			analysis.GetTransferCounter().AddTarget(a.regionID, a.peer.StoreId)
-		}
+		return
+	}
+	if !processSnapshot(sendNode, a.sendingStat, snapshotSize) {
+		return
+	}
+	r.schedulerStats.snapshotStats.incSendSnapshot(sendNode.Id)
+
+	recvNode := r.conn.Nodes[a.peer.GetStoreId()]
+	if recvNode == nil {
+		a.finished = true
+		return
+	}
+	if !processSnapshot(recvNode, a.receivingStat, snapshotSize) {
+		return
+	}
+	r.schedulerStats.snapshotStats.incReceiveSnapshot(recvNode.Id)
+
+	if region.GetPeer(a.peer.GetId()) == nil {
+		newRegion := region.Clone(
+			core.WithAddPeer(a.peer),
+			core.WithIncConfVer(),
+		)
+		r.SetRegion(newRegion)
+		r.recordRegionChange(newRegion)
+		r.schedulerStats.taskStats.incAddLeaner(region.GetID())
+		recvNode.incUsedSize(uint64(snapshotSize))
+		a.finished = true
+	}
+
+	if analysis.GetTransferCounter().IsValid {
+		analysis.GetTransferCounter().AddTarget(a.regionID, a.peer.StoreId)
 	}
 }
 
@@ -402,22 +413,34 @@ func (a *addLearner) IsFinished() bool {
 }
 
 func processSnapshot(n *Node, stat *snapshotStat, snapshotSize int64) bool {
-	// If the statement is true, it will start to send or receive the snapshot.
-	if stat.remainSize == snapshotSize {
-		if stat.kind == "sending" {
+	if stat.status == pending {
+		if stat.kind == Generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+			return false
+		}
+		if stat.kind == Receive && n.stats.ReceivingSnapCount > maxSnapGeneratorPoolSize {
+			return false
+		}
+		stat.status = running
+		// If the statement is true, it will start to send or receive the snapshot.
+		if stat.kind == Generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
 		}
 	}
-	stat.remainSize -= n.ioRate
-	// The sending or receiving process has not finished yet.
+
+	// store should generate/receive snapshot by chunk size.
+	for n.limiter.AllowN(int(chunkSize)) {
+		stat.remainSize -= chunkSize
+	}
+
+	// The sending or receiving process has not status yet.
 	if stat.remainSize > 0 {
 		return false
 	}
-	if !stat.finished {
-		stat.finished = true
-		if stat.kind == "sending" {
+	if stat.status == running {
+		stat.status = finished
+		if stat.kind == Generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--
