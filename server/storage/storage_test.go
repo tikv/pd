@@ -309,12 +309,12 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	rand.Seed(6)
 	note := make(map[int]bool)
 	for i := 0; i < n*ratio/100; i++ {
-		pos := rand.Intn(n)
+		pos := rand.Intn(n - 1)
 		for {
 			if _, ok := note[pos]; !ok {
 				break
 			}
-			pos = rand.Intn(n)
+			pos = rand.Intn(n - 1)
 		}
 		note[pos] = true
 
@@ -327,26 +327,11 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 				break
 			}
 		}
-		if mergeIndex < n {
-			regions[mergeIndex].StartKey = regions[pos].StartKey
+		regions[mergeIndex].StartKey = regions[pos].StartKey
+		if regions[pos].GetRegionEpoch().GetVersion() > regions[mergeIndex].GetRegionEpoch().GetVersion() {
+			regions[mergeIndex].GetRegionEpoch().Version = regions[pos].GetRegionEpoch().GetVersion()
 		}
-		if mergeIndex == n {
-			if pos == n-1 {
-				preMergeIndex := pos - 1
-				for preMergeIndex >= 0 {
-					_, ok := note[preMergeIndex]
-					if ok {
-						preMergeIndex--
-					} else {
-						break
-					}
-				}
-				regions[mergeIndex-1].StartKey = regions[preMergeIndex].StartKey
-				note[preMergeIndex] = true
-			} else {
-				regions[mergeIndex-1].StartKey = regions[pos].StartKey
-			}
-		}
+		regions[mergeIndex].GetRegionEpoch().Version++
 	}
 }
 
@@ -360,12 +345,18 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 				Id:       i,
 				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
 				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
 			}
 		} else {
 			region = &metapb.Region{
 				Id:       i,
 				StartKey: []byte(keys[i-1]),
 				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
 			}
 		}
 		regions = append(regions, region)
@@ -404,7 +395,6 @@ func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 
 	b.ResetTimer()
 	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
-	// b.Log("region number is: ", cluster.GetRegionCount())
 	if err != nil {
 		b.Fatal(err)
 	}
