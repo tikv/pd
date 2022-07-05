@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -693,12 +694,9 @@ func (m *RuleManager) IsInitialized() bool {
 // checkRule check the rule whether will have RuleFit after FitRegion
 // in order to reduce the calculation.
 func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
-	for _, store := range stores {
-		if MatchLabelConstraints(store, rule.LabelConstraints) {
-			return true
-		}
-	}
-	return false
+	return slice.AnyOf(stores, func(idx int) bool {
+		return MatchLabelConstraints(stores[idx], rule.LabelConstraints)
+	})
 }
 
 // SetKeyType will update keyType for adjustRule()
