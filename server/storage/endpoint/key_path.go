@@ -37,7 +37,7 @@ const (
 	keySpaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
 	keyspaceMeta               = "meta"
-	spaceIDBase                = 10
+	keyspaceID                 = "id"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -152,4 +152,9 @@ func KeyspaceMetaPrefix() string {
 func KeyspaceMetaPath(spaceID uint32) string {
 	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
+}
+
+// KeyspaceIDPath returns the path to keyspace id from the given name.
+func KeyspaceIDPath(name string) string {
+	return path.Join(keyspacePrefix, keyspaceID, name)
 }

@@ -66,6 +66,29 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 	re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
 }
 
+func TestSaveLoadKeyspaceID(t *testing.T) {
+	re := require.New(t)
+	storage := NewStorageWithMemoryBackend()
+
+	ids := []uint32{100, 200, 300}
+	names := []string{"keyspace1", "keyspace2", "keyspace3"}
+	for i := range ids {
+		re.NoError(storage.SaveKeyspaceID(ids[i], names[i]))
+	}
+
+	for i := range names {
+		success, id, err := storage.LoadKeyspaceID(names[i])
+		re.NoError(err)
+		re.True(success)
+		re.Equal(ids[i], id)
+	}
+	// loading non-existing id should return false, 0, nil
+	success, id, err := storage.LoadKeyspaceID("non-existing")
+	re.NoError(err)
+	re.False(success)
+	re.Equal(uint32(0), id)
+}
+
 func testKeyspaces() []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	return []*keyspacepb.KeyspaceMeta{

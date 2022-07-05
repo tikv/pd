@@ -15,10 +15,14 @@
 package endpoint
 
 import (
+	"strconv"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"go.etcd.io/etcd/clientv3"
 )
+
+const spaceIDBase = 10
 
 type KeyspaceStorage interface {
 	// SaveKeyspace saves the given keyspace to the storage.
@@ -27,6 +31,10 @@ type KeyspaceStorage interface {
 	LoadKeyspace(spaceID uint32, keyspace *keyspacepb.KeyspaceMeta) (bool, error)
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
+	// SaveKeyspaceID saves keyspace name to ID lookup information.
+	SaveKeyspaceID(spaceID uint32, name string) error
+	// LoadKeyspaceID loads keyspace ID for the given keyspace specified by name.
+	LoadKeyspaceID(name string) (bool, uint32, error)
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
@@ -64,4 +72,25 @@ func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keys
 		keyspaces = append(keyspaces, keyspace)
 	}
 	return keyspaces, nil
+}
+
+// SaveKeyspaceID saves keyspace name to ID lookup information to storage.
+func (se *StorageEndpoint) SaveKeyspaceID(spaceID uint32, name string) error {
+	key := KeyspaceIDPath(name)
+	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	return se.Save(key, idStr)
+}
+
+// LoadKeyspaceID loads keyspace ID for the given keyspace name
+func (se *StorageEndpoint) LoadKeyspaceID(name string) (bool, uint32, error) {
+	key := KeyspaceIDPath(name)
+	idStr, err := se.Load(key)
+	if err != nil || idStr == "" {
+		return false, 0, err
+	}
+	id64, err := strconv.ParseUint(idStr, spaceIDBase, 32)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, uint32(id64), nil
 }
