@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
@@ -96,8 +95,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	}
 	scheduler.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
-		filter.NewLabelConstaintFilter(scheduler.GetName(),
-			[]placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
+		filter.NewLabelConstaintFilter(scheduler.GetName(), filter.NotHotOrReserved, true),
 	}
 	return scheduler
 }
@@ -222,8 +220,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIDs()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
 		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.GetOpts()),
-		filter.NewLabelConstaintFilter(s.GetName(),
-			[]placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
+		filter.NewLabelConstaintFilter(s.GetName(), filter.NotHotOrReserved, true),
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 

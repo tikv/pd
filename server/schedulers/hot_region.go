@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -731,7 +730,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
-			filter.NewLabelConstaintFilter(bs.sche.GetName(), []placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseReserved}}}, true),
+			filter.NewLabelConstaintFilter(bs.sche.GetName(), filter.NotReserved, true),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
 
@@ -742,7 +741,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	case transferLeader:
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
-			filter.NewLabelConstaintFilter(bs.sche.GetName(), []placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseReserved}}}, true),
+			filter.NewLabelConstaintFilter(bs.sche.GetName(), filter.NotReserved, true),
 		}
 		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
 			filters = append(filters, leaderFilter)

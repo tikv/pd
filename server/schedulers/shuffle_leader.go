@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
@@ -75,7 +74,7 @@ type shuffleLeaderScheduler struct {
 func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
-		filter.NewLabelConstaintFilter(conf.Name, []placement.LabelConstraint{{Key: filter.SpecialUseKey, Op: placement.NotIn, Values: []string{filter.SpecialUseHotRegion, filter.SpecialUseReserved}}}, true),
+		filter.NewLabelConstaintFilter(conf.Name, filter.NotHotOrReserved, true),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleLeaderScheduler{

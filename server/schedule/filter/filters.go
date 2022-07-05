@@ -429,6 +429,15 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 	return true
 }
 
+var (
+	// NotHotOrReserved means the store label should not contains either "specialUse": "hotRegion" or "specialUse": "reserved".
+	NotHotOrReserved = []placement.LabelConstraint{{Key: SpecialUseKey, Op: placement.NotIn, Values: []string{SpecialUseHotRegion, SpecialUseReserved}}}
+	// NotReserved means the store label should not contains "specialUse": "reserved".
+	NotReserved = []placement.LabelConstraint{{Key: SpecialUseKey, Op: placement.NotIn, Values: []string{SpecialUseReserved}}}
+	// NotTiFlashEngine means the store label should not contains "engine": "tiflash".
+	NotTiFlashEngine = []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.NotIn, Values: []string{core.EngineTiFlash}}}
+)
+
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
 type labelConstraintFilter struct {
 	scope string
