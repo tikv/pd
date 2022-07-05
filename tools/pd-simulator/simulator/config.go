@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"fmt"
+	"github.com/tikv/pd/pkg/metricutil"
 	"os"
 	"time"
 
@@ -51,7 +52,8 @@ type SimConfig struct {
 	StoreIOMBPerSecond int64  `toml:"store-io-per-second"`
 	StoreVersion       string `toml:"store-version"`
 	// server
-	ServerConfig *config.Config `toml:"server"`
+	ServerConfig  *config.Config          `toml:"server"`
+	MetricsConfig metricutil.MetricConfig `toml:"metrics-config"`
 }
 
 // NewSimConfig create a new configuration of the simulator.

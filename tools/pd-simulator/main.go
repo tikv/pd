@@ -18,6 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/tikv/pd/pkg/metricutil"
 	"os"
 	"os/signal"
 	"syscall"
@@ -146,7 +147,7 @@ func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, cle
 	if err != nil {
 		simutil.Logger.Fatal("simulator prepare error", zap.Error(err))
 	}
-
+	metricutil.Push(&simConfig.MetricsConfig)
 	tickInterval := simConfig.SimTickInterval.Duration
 
 	tick := time.NewTicker(tickInterval)
