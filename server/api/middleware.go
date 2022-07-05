@@ -178,8 +178,8 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
 	rateLimiter := s.svr.GetServiceRateLimiter()
 	if rateLimiter.Allow(requestInfo.ServiceLabel) {
-		next(w, r)
 		defer rateLimiter.Release(requestInfo.ServiceLabel)
+		next(w, r)
 	} else {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 	}
