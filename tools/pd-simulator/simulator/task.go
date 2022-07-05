@@ -17,6 +17,7 @@ package simulator
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,13 +31,14 @@ var (
 	chunkSize                = int64(4 * cases.KB)
 	maxSnapGeneratorPoolSize = uint32(2)
 	maxSnapReceivePoolSize   = uint32(4)
+	compressionRatio         = int64(2)
 )
 
-type snapKind string
+type snapAction string
 
 const (
-	Generate snapKind = "generator"
-	Receive           = "receive"
+	generate snapAction = "generator"
+	receive             = "receive"
 )
 
 type snapStatus int
@@ -87,8 +89,8 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 				// This two variables are used to simulate sending and receiving snapshot processes.
-				sendingStat:   &snapshotStat{Generate, region.GetApproximateSize(), pending},
-				receivingStat: &snapshotStat{Receive, region.GetApproximateSize(), pending},
+				sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
+				receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
@@ -112,9 +114,22 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 }
 
 type snapshotStat struct {
-	kind       snapKind
+	action     snapAction
 	remainSize int64
 	status     snapStatus
+	start      time.Time
+}
+
+func newSnapshotState(size int64, action snapAction) *snapshotStat {
+	if action == receive {
+		size = size / compressionRatio
+	}
+	return &snapshotStat{
+		remainSize: size,
+		action:     action,
+		status:     pending,
+		start:      time.Now(),
+	}
 }
 
 type mergeRegion struct {
@@ -411,16 +426,19 @@ func (a *addLearner) IsFinished() bool {
 }
 
 func processSnapshot(n *Node, stat *snapshotStat) bool {
+	if stat.status == finished {
+		return true
+	}
 	if stat.status == pending {
-		if stat.kind == Generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+		if stat.action == generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.kind == Receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
+		if stat.action == receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
 		// If the statement is true, it will start to send or receive the snapshot.
-		if stat.kind == Generate {
+		if stat.action == generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
@@ -438,7 +456,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
-		if stat.kind == Generate {
+		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--
