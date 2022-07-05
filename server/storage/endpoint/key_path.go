@@ -37,7 +37,7 @@ const (
 	keySpaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
 	keyspaceMeta               = "meta"
-	spaceIDBase                = 16
+	spaceIDBase                = 10
 )
 
 // AppendToRootPath appends the given key to the rootPath.
