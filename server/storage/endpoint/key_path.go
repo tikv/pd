@@ -17,6 +17,7 @@ package endpoint
 import (
 	"fmt"
 	"path"
+	"strconv"
 )
 
 const (
@@ -34,6 +35,9 @@ const (
 	minResolvedTS              = "min_resolved_ts"
 	keySpaceSafePointPrefix    = "key_space/gc_safepoint"
 	keySpaceGCSafePointSuffix  = "gc"
+	keyspacePrefix             = "keyspaces"
+	keyspaceMeta               = "meta"
+	spaceIDBase                = 16
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -135,4 +139,17 @@ func KeySpaceSafePointPrefix() string {
 // Postfix: /gc
 func KeySpaceGCSafePointSuffix() string {
 	return "/" + keySpaceGCSafePointSuffix
+}
+
+// KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
+// Prefix: keyspaces/meta/
+func KeyspaceMetaPrefix() string {
+	return path.Join(keyspacePrefix, keyspaceMeta) + "/"
+}
+
+// KeyspaceMetaPath returns the path to the given keyspace's metadata.
+// Path: /keyspaces/meta/{space_id}
+func KeyspaceMetaPath(spaceID uint32) string {
+	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	return path.Join(KeyspaceMetaPrefix(), idStr)
 }
