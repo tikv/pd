@@ -102,7 +102,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 		testCluster.PutRegion(core.NewRegionInfo(&metapb.Region{
 			Id: i,
 			Peers: []*metapb.Peer{
-				{StoreId: uint64(i + 1), Id: uint64(i + 1)}},
+				{StoreId: i + 1, Id: i + 1}},
 			StartKey: []byte(fmt.Sprintf("%3da", i+1)),
 			EndKey:   []byte(fmt.Sprintf("%3dz", i+1)),
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
