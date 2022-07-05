@@ -227,32 +227,71 @@ func (w *fitWorker) fitRule(index int) bool {
 	if len(candidates) < count {
 		count = len(candidates)
 	}
-	return w.enumPeers(candidates, nil, index, count)
+
+	return w.fixRuleWithCandidates(candidates, index, count)
 }
 
-// Recursively traverses all feasible peer combinations.
-// For each combination, call `compareBest` to determine whether it is better
-// than the existing option.
+// Pick the most suitable peer combination for the rule with candidates.
 // Returns true if it replaces `bestFit` with a better alternative.
-func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count int) bool {
-	if len(selected) == count {
-		// We collect enough peers. End recursive.
-		return w.compareBest(selected, index)
-	}
-
+func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, count int) bool {
+	// map the candidates to binary numbers with len(candidates) bits,
+	// each bit can be 1 or 0, 1 means a picked candidate
+	// the binary numbers with `count` 1 means a choose for the current rule.
+	limit := 1<<len(candidates) - 1
 	var better bool
-	// make sure the left number of candidates should be enough.
-	indexLimit := len(candidates) - (count - len(selected))
-	for i := 0; i <= indexLimit; i++ {
-		p := candidates[i]
-		p.selected = true
-		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
-		p.selected = false
+
+	for binaryInt := (1<<count - 1); binaryInt <= limit; binaryInt++ {
+		// there should be exactly `count` number in current binary number `m`
+		if !seletedBitEqualsTo(binaryInt, count) {
+			continue
+		}
+		selected := pickPeersFromBinaryInt(candidates, binaryInt)
+		better = w.compareBest(selected, index) || better
+		// reset the seleted items to false.
+		unSelectPeers(selected)
 		if w.exit {
 			break
 		}
 	}
 	return better
+}
+
+// seletedBitEqualsTo returns true when the number of 1 in the `binaryNumber` equals to `expectCount`.
+// binaryNumber = 5, the related binary is 101, the count of `1` should be 2, which means return false if the `expetedCount`` is not 2.
+// binaryNumber = 7, the related binary is 111, the count of `1` should be 3.
+func seletedBitEqualsTo(binaryNumber int, expectCount int) bool {
+	num := 0
+	for ; binaryNumber > 0; binaryNumber >>= 1 {
+		num += (binaryNumber & 1)
+		if num > expectCount {
+			return false
+		}
+	}
+	return num == expectCount
+}
+
+// pickPeersFromBinaryInt picks the candidates with the related index at the position of binary for the `binaryNumber`` is `1`.
+// binaryNumber = 5, which means the related binary is 101, it will returns {candidates[0],candidates[2]}
+// binaryNumber = 6, which means the related binary is 110, it will returns {candidates[1],candidates[2]}
+func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber int) []*fitPeer {
+	selected := make([]*fitPeer, 0)
+	for _, p := range candidates {
+		if binaryNumber&1 == 1 {
+			p.selected = true
+			selected = append(selected, p)
+		}
+		binaryNumber >>= 1
+		if binaryNumber == 0 {
+			break
+		}
+	}
+	return selected
+}
+
+func unSelectPeers(seleted []*fitPeer) {
+	for _, p := range seleted {
+		p.selected = false
+	}
 }
 
 // compareBest checks if the selected peers is better then previous best.
