@@ -137,8 +137,8 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 		rd:   render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/list", h.ListConfig).Methods("GET")
-	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
 	return router
 }
 
