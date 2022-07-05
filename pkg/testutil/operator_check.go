@@ -16,30 +16,9 @@ package testutil
 
 import (
 	"github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/schedule/operator"
 )
-
-// CheckAddPeer checks if the operator is to add peer on specified store.
-func CheckAddPeer(c *check.C, op *operator.Operator, kind operator.OpKind, storeID uint64) {
-	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 2)
-	c.Assert(op.Step(0).(operator.AddLearner).ToStore, check.Equals, storeID)
-	c.Assert(op.Step(1), check.FitsTypeOf, operator.PromoteLearner{})
-	kind |= operator.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
-}
-
-// CheckRemovePeer checks if the operator is to remove peer on specified store.
-func CheckRemovePeer(c *check.C, op *operator.Operator, storeID uint64) {
-	c.Assert(op, check.NotNil)
-	if op.Len() == 1 {
-		c.Assert(op.Step(0).(operator.RemovePeer).FromStore, check.Equals, storeID)
-	} else {
-		c.Assert(op.Len(), check.Equals, 2)
-		c.Assert(op.Step(0).(operator.TransferLeader).FromStore, check.Equals, storeID)
-		c.Assert(op.Step(1).(operator.RemovePeer).FromStore, check.Equals, storeID)
-	}
-}
 
 // CheckTransferLeader checks if the operator is to transfer leader between the specified source and target stores.
 func CheckTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
@@ -140,4 +119,72 @@ func CheckTransferPeerWithLeaderTransferFrom(c *check.C, op *operator.Operator, 
 	c.Assert(lastLeader, check.Not(check.Equals), sourceID)
 	kind |= operator.OpRegion | operator.OpLeader
 	c.Assert(op.Kind()&kind, check.Equals, kind)
+}
+
+// CheckAddPeer checks if the operator is to add peer on specified store.
+func CheckAddPeer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, storeID uint64) {
+	re.NotNil(op)
+	re.Equal(2, op.Len())
+	re.Equal(storeID, op.Step(0).(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, op.Step(1))
+	kind |= operator.OpRegion
+	re.Equal(kind, op.Kind()&kind)
+}
+
+// CheckRemovePeer checks if the operator is to remove peer on specified store.
+func CheckRemovePeer(re *require.Assertions, op *operator.Operator, storeID uint64) {
+	re.NotNil(op)
+	if op.Len() == 1 {
+		re.Equal(storeID, op.Step(0).(operator.RemovePeer).FromStore)
+	} else {
+		re.Equal(2, op.Len())
+		re.Equal(storeID, op.Step(0).(operator.TransferLeader).FromStore)
+		re.Equal(storeID, op.Step(1).(operator.RemovePeer).FromStore)
+	}
+}
+
+// CheckTransferLeaderWithTestify checks if the operator is to transfer leader between the specified source and target stores.
+func CheckTransferLeaderWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
+	re.Equal(1, op.Len())
+	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
+	kind |= operator.OpLeader
+	re.Equal(kind, op.Kind()&kind)
+}
+
+// CheckTransferPeerWithTestify checks if the operator is to transfer peer between the specified source and target stores.
+func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
+
+	steps, _ := trimTransferLeaders(op)
+	re.Len(steps, 3)
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, steps[1])
+	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	kind |= operator.OpRegion
+	re.Equal(kind, op.Kind()&kind)
+}
+
+// CheckSteps checks if the operator matches the given steps.
+func CheckSteps(re *require.Assertions, op *operator.Operator, steps []operator.OpStep) {
+	re.NotEqual(0, op.Kind()&operator.OpMerge)
+	re.NotNil(steps)
+	re.Len(steps, op.Len())
+	for i := range steps {
+		switch op.Step(i).(type) {
+		case operator.AddLearner:
+			re.Equal(steps[i].(operator.AddLearner).ToStore, op.Step(i).(operator.AddLearner).ToStore)
+		case operator.PromoteLearner:
+			re.Equal(steps[i].(operator.PromoteLearner).ToStore, op.Step(i).(operator.PromoteLearner).ToStore)
+		case operator.TransferLeader:
+			re.Equal(steps[i].(operator.TransferLeader).FromStore, op.Step(i).(operator.TransferLeader).FromStore)
+			re.Equal(steps[i].(operator.TransferLeader).ToStore, op.Step(i).(operator.TransferLeader).ToStore)
+		case operator.RemovePeer:
+			re.Equal(steps[i].(operator.RemovePeer).FromStore, op.Step(i).(operator.RemovePeer).FromStore)
+		case operator.MergeRegion:
+			re.Equal(steps[i].(operator.MergeRegion).IsPassive, op.Step(i).(operator.MergeRegion).IsPassive)
+		default:
+			re.FailNow("unknown operator step type")
+		}
+	}
 }

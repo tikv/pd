@@ -17,46 +17,44 @@ package labeler
 import (
 	"encoding/json"
 	"math"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testRuleSuite{})
-
-type testRuleSuite struct{}
-
-func (s *testLabelerSuite) TestRegionLabelTTL(c *C) {
+func TestRegionLabelTTL(t *testing.T) {
+	re := require.New(t)
 	label := RegionLabel{Key: "k1", Value: "v1"}
 
 	// test label with no ttl.
 	err := label.checkAndAdjustExpire()
-	c.Assert(err, IsNil)
-	c.Assert(label.StartAt, HasLen, 0)
-	c.Assert(label.expire, IsNil)
+	re.NoError(err)
+	re.Empty(label.StartAt)
+	re.Empty(label.expire)
 
 	// test rule with illegal ttl.
 	label.TTL = "ttl"
 	err = label.checkAndAdjustExpire()
-	c.Assert(err, NotNil)
+	re.Error(err)
 
 	// test legal rule with ttl
 	label.TTL = "10h10m10s10ms"
 	err = label.checkAndAdjustExpire()
-	c.Assert(err, IsNil)
-	c.Assert(len(label.StartAt) > 0, IsTrue)
-	c.Assert(label.expireBefore(time.Now().Add(time.Hour)), IsFalse)
-	c.Assert(label.expireBefore(time.Now().Add(24*time.Hour)), IsTrue)
+	re.NoError(err)
+	re.Greater(len(label.StartAt), 0)
+	re.False(label.expireBefore(time.Now().Add(time.Hour)))
+	re.True(label.expireBefore(time.Now().Add(24 * time.Hour)))
 
 	// test legal rule with ttl, rule unmarshal from json.
 	data, err := json.Marshal(label)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	var label2 RegionLabel
 	err = json.Unmarshal(data, &label2)
-	c.Assert(err, IsNil)
-	c.Assert(label2.StartAt, Equals, label.StartAt)
-	c.Assert(label2.TTL, Equals, label.TTL)
+	re.NoError(err)
+	re.Equal(label.StartAt, label2.StartAt)
+	re.Equal(label.TTL, label2.TTL)
 	label2.checkAndAdjustExpire()
 	// The `expire` should be the same with minor inaccuracies.
-	c.Assert(math.Abs(label2.expire.Sub(*label.expire).Seconds()) < 1, IsTrue)
+	re.True(math.Abs(label2.expire.Sub(*label.expire).Seconds()) < 1)
 }

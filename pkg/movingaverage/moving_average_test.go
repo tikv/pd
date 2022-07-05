@@ -40,7 +40,7 @@ func checkReset(re *require.Assertions, ma MovingAvg, emptyValue float64) {
 
 // checkAddGet checks Add works properly.
 func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []float64) {
-	re.Equal(len(expected), len(data))
+	re.Len(data, len(expected))
 	for i, x := range data {
 		ma.Add(x)
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
@@ -49,7 +49,7 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 
 // checkSet checks Set = Reset + Add
 func checkSet(re *require.Assertions, ma MovingAvg, data []float64, expected []float64) {
-	re.Equal(len(expected), len(data))
+	re.Len(data, len(expected))
 
 	// Reset + Add
 	addRandData(ma, 100, 1000)

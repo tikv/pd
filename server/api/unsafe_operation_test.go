@@ -17,63 +17,69 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/suite"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 )
 
-var _ = Suite(&testUnsafeAPISuite{})
-
-type testUnsafeAPISuite struct {
+type unsafeOperationTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testUnsafeAPISuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
+func TestUnsafeOperationTestSuite(t *testing.T) {
+	suite.Run(t, new(unsafeOperationTestSuite))
 }
 
-func (s *testUnsafeAPISuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *unsafeOperationTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
+	mustPutStore(re, suite.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
 }
 
-func (s *testUnsafeAPISuite) TestRemoveFailedStores(c *C) {
+func (suite *unsafeOperationTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	input := map[string]interface{}{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
-		tu.StringEqual(c, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
-	c.Assert(err, IsNil)
+	re := suite.Require()
+	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
+	suite.NoError(err)
 
 	input = map[string]interface{}{"stores": []string{"abc", "def"}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
-		tu.StringEqual(c, "\"Store ids are invalid\"\n"))
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
+	suite.NoError(err)
 
 	input = map[string]interface{}{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(c),
-		tu.StringEqual(c, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
+	suite.NoError(err)
 
 	input = map[string]interface{}{"stores": []uint64{1}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, s.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(c))
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	suite.NoError(err)
 
 	// Test show
 	var output []cluster.StageOutput
-	err = tu.ReadGetJSON(c, testDialClient, s.urlPrefix+"/remove-failed-stores/show", &output)
-	c.Assert(err, IsNil)
+	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
+	suite.NoError(err)
 }

@@ -39,26 +39,26 @@ func newRegionLabelHandler(s *server.Server, rd *render.Render) *regionLabelHand
 	}
 }
 
-// @Tags region_label
-// @Summary List all label rules of cluster.
-// @Produce json
-// @Success 200 {array} labeler.LabelRule
-// @Router /config/region-label/rules [get]
+// @Tags     region_label
+// @Summary  List all label rules of cluster.
+// @Produce  json
+// @Success  200  {array}  labeler.LabelRule
+// @Router   /config/region-label/rules [get]
 func (h *regionLabelHandler) GetAllRegionLabelRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	rules := cluster.GetRegionLabeler().GetAllLabelRules()
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
-// @Tags region_label
-// @Summary Update region label rules in batch.
-// @Accept json
-// @Param patch body labeler.LabelRulePatch true "Patch to update rules"
-// @Produce json
-// @Success 200 {string} string "Update region label rules successfully."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/region-label/rules [patch]
+// @Tags     region_label
+// @Summary  Update region label rules in batch.
+// @Accept   json
+// @Param    patch  body  labeler.LabelRulePatch  true  "Patch to update rules"
+// @Produce  json
+// @Success  200  {string}  string  "Update region label rules successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules [patch]
 func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var patch labeler.LabelRulePatch
@@ -76,14 +76,14 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 	h.rd.JSON(w, http.StatusOK, "Update region label rules successfully.")
 }
 
-// @Tags region_label
-// @Summary Get label rules of cluster by ids.
-// @Param body body []string true "IDs of query rules"
-// @Produce json
-// @Success 200 {array} labeler.LabelRule
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/region-label/rule/ids [get]
+// @Tags     region_label
+// @Summary  Get label rules of cluster by ids.
+// @Param    body  body  []string  true  "IDs of query rules"
+// @Produce  json
+// @Success  200  {array}   labeler.LabelRule
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rule/ids [get]
 func (h *regionLabelHandler) GetRegionLabelRulesByIDs(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var ids []string
@@ -98,13 +98,13 @@ func (h *regionLabelHandler) GetRegionLabelRulesByIDs(w http.ResponseWriter, r *
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
-// @Tags region_label
-// @Summary Get label rule of cluster by id.
-// @Param id path string true "Rule Id"
-// @Produce json
-// @Success 200 {object} labeler.LabelRule
-// @Failure 404 {string} string "The rule does not exist."
-// @Router /config/region-label/rule/{id} [get]
+// @Tags     region_label
+// @Summary  Get label rule of cluster by id.
+// @Param    id  path  string  true  "Rule Id"
+// @Produce  json
+// @Success  200  {object}  labeler.LabelRule
+// @Failure  404  {string}  string  "The rule does not exist."
+// @Router   /config/region-label/rule/{id} [get]
 func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	id, err := url.PathUnescape(mux.Vars(r)["id"])
@@ -120,14 +120,14 @@ func (h *regionLabelHandler) GetRegionLabelRuleByID(w http.ResponseWriter, r *ht
 	h.rd.JSON(w, http.StatusOK, rule)
 }
 
-// @Tags region_label
-// @Summary Delete label rule of cluster by id.
-// @Param id path string true "Rule Id"
-// @Produce json
-// @Success 200 {string} string "Delete rule successfully."
-// @Failure 404 {string} string "The rule does not exist."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/region-label/rule/{id} [delete]
+// @Tags     region_label
+// @Summary  Delete label rule of cluster by id.
+// @Param    id  path  string  true  "Rule Id"
+// @Produce  json
+// @Success  200  {string}  string  "Delete rule successfully."
+// @Failure  404  {string}  string  "The rule does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rule/{id} [delete]
 func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	id, err := url.PathUnescape(mux.Vars(r)["id"])
@@ -147,15 +147,15 @@ func (h *regionLabelHandler) DeleteRegionLabelRule(w http.ResponseWriter, r *htt
 	h.rd.Text(w, http.StatusOK, "Delete rule successfully.")
 }
 
-// @Tags region_label
-// @Summary Update region label rule of cluster.
-// @Accept json
-// @Param rule body labeler.LabelRule true "Parameters of label rule"
-// @Produce json
-// @Success 200 {string} string "Update rule successfully."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/region-label/rule [post]
+// @Tags     region_label
+// @Summary  Update region label rule of cluster.
+// @Accept   json
+// @Param    rule  body  labeler.LabelRule  true  "Parameters of label rule"
+// @Produce  json
+// @Success  200  {string}  string  "Update rule successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rule [post]
 func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var rule labeler.LabelRule
@@ -173,15 +173,15 @@ func (h *regionLabelHandler) SetRegionLabelRule(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, "Update region label rule successfully.")
 }
 
-// @Tags region_label
-// @Summary Get label of a region.
-// @Param id path integer true "Region Id"
-// @Param key path string true "Label key"
-// @Produce json
-// @Success 200 {string} string
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 404 {string} string "The region does not exist."
-// @Router /region/id/{id}/label/{key} [get]
+// @Tags     region_label
+// @Summary  Get label of a region.
+// @Param    id   path  integer  true  "Region Id"
+// @Param    key  path  string   true  "Label key"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Router   /region/id/{id}/label/{key} [get]
 func (h *regionLabelHandler) GetRegionLabelByKey(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	regionID, labelKey := mux.Vars(r)["id"], mux.Vars(r)["key"]
@@ -199,14 +199,14 @@ func (h *regionLabelHandler) GetRegionLabelByKey(w http.ResponseWriter, r *http.
 	h.rd.JSON(w, http.StatusOK, labelValue)
 }
 
-// @Tags region_label
-// @Summary Get labels of a region.
-// @Param id path integer true "Region Id"
-// @Produce json
-// @Success 200 {string} string
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 404 {string} string "The region does not exist."
-// @Router /region/id/{id}/labels [get]
+// @Tags     region_label
+// @Summary  Get labels of a region.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Router   /region/id/{id}/labels [get]
 func (h *regionLabelHandler) GetRegionLabels(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	regionID, err := strconv.ParseUint(mux.Vars(r)["id"], 10, 64)

@@ -1479,7 +1479,7 @@ func addRegionLeaderReadInfo(tc *mockcluster.Cluster, regions []testRegionInfo) 
 }
 
 func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
-	testcases := []struct {
+	testCases := []struct {
 		kind                      statistics.RWType
 		onlyLeader                bool
 		DegreeAfterTransferLeader int
@@ -1501,7 +1501,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		},
 	}
 
-	for _, testcase := range testcases {
+	for _, testCase := range testCases {
 		ctx, cancel := context.WithCancel(context.Background())
 		opt := config.NewTestOptions()
 		tc := mockcluster.NewCluster(ctx, opt)
@@ -1512,8 +1512,8 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		c.Assert(err, IsNil)
 		hb := sche.(*hotScheduler)
 		heartbeat := tc.AddLeaderRegionWithWriteInfo
-		if testcase.kind == statistics.Read {
-			if testcase.onlyLeader {
+		if testCase.kind == statistics.Read {
+			if testCase.onlyLeader {
 				heartbeat = tc.AddRegionLeaderWithReadInfo
 			} else {
 				heartbeat = tc.AddRegionWithReadInfo
@@ -1522,7 +1522,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		tc.AddRegionStore(2, 20)
 		tc.UpdateStorageReadStats(2, 9.5*MB*statistics.StoreHeartBeatReportInterval, 9.5*MB*statistics.StoreHeartBeatReportInterval)
 		reportInterval := uint64(statistics.WriteReportInterval)
-		if testcase.kind == statistics.Read {
+		if testCase.kind == statistics.Read {
 			reportInterval = uint64(statistics.ReadReportInterval)
 		}
 		// hot degree increase
@@ -1537,15 +1537,15 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		items = heartbeat(1, 2, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{1, 3}, 1)
 		for _, item := range items {
 			if item.StoreID == 2 {
-				c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader)
+				c.Check(item.HotDegree, Equals, testCase.DegreeAfterTransferLeader)
 			}
 		}
 
-		if testcase.DegreeAfterTransferLeader >= 3 {
+		if testCase.DegreeAfterTransferLeader >= 3 {
 			// try schedule
-			hb.prepareForBalance(testcase.kind, tc)
-			leaderSolver := newBalanceSolver(hb, tc, testcase.kind, transferLeader)
-			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testcase.kind, transferLeader)][2]}
+			hb.prepareForBalance(testCase.kind, tc)
+			leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
+			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
 			c.Check(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), HasLen, 0) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
 			leaderSolver.minHotDegree = 0
@@ -1557,7 +1557,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 		items = heartbeat(1, 2, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{1, 3, 4}, 1)
 		c.Check(len(items), Greater, 0)
 		for _, item := range items {
-			c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader+1)
+			c.Check(item.HotDegree, Equals, testCase.DegreeAfterTransferLeader+1)
 		}
 		items = heartbeat(1, 2, 512*KB*reportInterval, 0, 0, reportInterval, []uint64{1, 4}, 1)
 		c.Check(len(items), Greater, 0)
@@ -1566,7 +1566,7 @@ func (s *testHotCacheSuite) TestCheckRegionFlow(c *C) {
 				c.Check(item.GetActionType(), Equals, statistics.Remove)
 				continue
 			}
-			c.Check(item.HotDegree, Equals, testcase.DegreeAfterTransferLeader+2)
+			c.Check(item.HotDegree, Equals, testCase.DegreeAfterTransferLeader+2)
 		}
 		cancel()
 	}
@@ -2111,6 +2111,37 @@ func (s *testHotSchedulerSuite) TestCompatibilityConfig(c *C) {
 		{statistics.QueryDim, statistics.KeyDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
+}
+
+func (s *testHotSchedulerSuite) TestConfigValidation(c *C) {
+	// priority should be one of byte/query/key
+	hc := initHotRegionScheduleConfig()
+	hc.ReadPriorities = []string{"byte", "error"}
+	err := hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// priorities should have at least 2 dimensions
+	hc = initHotRegionScheduleConfig()
+	hc.WriteLeaderPriorities = []string{"byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// qps is not allowed to be set in priorities for write-peer-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"query", "byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	// priorities shouldn't be repeated
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"byte", "byte"}
+	err = hc.validPriority()
+	c.Assert(err, NotNil)
+
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"byte", "key"}
+	err = hc.validPriority()
+	c.Assert(err, IsNil)
 }
 
 func checkPriority(c *C, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {

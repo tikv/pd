@@ -17,8 +17,9 @@ package schedule
 import (
 	"bytes"
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -60,52 +61,56 @@ func (m *mockSplitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKe
 	groupKeys.finished = true
 }
 
-var _ = Suite(&testRegionSplitterSuite{})
+type regionSplitterTestSuite struct {
+	suite.Suite
 
-type testRegionSplitterSuite struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func (s *testRegionSplitterSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+func TestRegionSplitterTestSuite(t *testing.T) {
+	suite.Run(t, new(regionSplitterTestSuite))
 }
 
-func (s *testRegionSplitterSuite) TearDownTest(c *C) {
-	s.cancel()
+func (suite *regionSplitterTestSuite) SetupSuite() {
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 }
 
-func (s *testRegionSplitterSuite) TestRegionSplitter(c *C) {
+func (suite *regionSplitterTestSuite) TearDownTest() {
+	suite.cancel()
+}
+
+func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler)
 	newRegions := map[uint64]struct{}{}
 	// assert success
-	failureKeys := splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
-	c.Assert(failureKeys, HasLen, 0)
-	c.Assert(newRegions, HasLen, 2)
+	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
+	suite.Empty(failureKeys)
+	suite.Len(newRegions, 2)
 
-	percentage, newRegionsID := splitter.SplitRegions(s.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
-	c.Assert(percentage, Equals, 100)
-	c.Assert(newRegionsID, HasLen, 2)
+	percentage, newRegionsID := splitter.SplitRegions(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
+	suite.Equal(100, percentage)
+	suite.Len(newRegionsID, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
-	failureKeys = splitter.splitRegionsByKeys(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
-	c.Assert(failureKeys, HasLen, 2)
-	c.Assert(newRegions, HasLen, 0)
+	failureKeys = splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
+	suite.Len(failureKeys, 2)
+	suite.Empty(newRegions)
 
-	percentage, newRegionsID = splitter.SplitRegions(s.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
-	c.Assert(percentage, Equals, 0)
-	c.Assert(newRegionsID, HasLen, 0)
+	percentage, newRegionsID = splitter.SplitRegions(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
+	suite.Equal(0, percentage)
+	suite.Empty(newRegionsID)
 }
 
-func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
+func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 	opt := config.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)
@@ -117,18 +122,18 @@ func (s *testRegionSplitterSuite) TestGroupKeysByRegion(c *C) {
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	c.Assert(groupKeys, HasLen, 3)
+	suite.Len(groupKeys, 3)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
-			c.Assert(v.keys, HasLen, 1)
-			c.Assert(v.keys[0], DeepEquals, []byte("bbb"))
+			suite.Len(v.keys, 1)
+			suite.Equal([]byte("bbb"), v.keys[0])
 		case uint64(2):
-			c.Assert(v.keys, HasLen, 1)
-			c.Assert(v.keys[0], DeepEquals, []byte("ddd"))
+			suite.Len(v.keys, 1)
+			suite.Equal([]byte("ddd"), v.keys[0])
 		case uint64(3):
-			c.Assert(v.keys, HasLen, 1)
-			c.Assert(v.keys[0], DeepEquals, []byte("fff"))
+			suite.Len(v.keys, 1)
+			suite.Equal([]byte("fff"), v.keys[0])
 		}
 	}
 }

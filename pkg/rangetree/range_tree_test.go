@@ -95,11 +95,11 @@ func TestRingPutItem(t *testing.T) {
 	re.Equal(2, bucketTree.Len())
 
 	// init key range: [002,100], [100,200]
-	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("002"))), 0)
+	re.Empty(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("002"))))
 	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("000"), []byte("009"))), 1)
 	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("090"))), 1)
 	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("110"))), 2)
-	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("200"), []byte("300"))), 0)
+	re.Empty(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("200"), []byte("300"))))
 
 	// test1： insert one key range, the old overlaps will retain like split buckets.
 	// key range: [002,010],[010,090],[090,100],[100,200]
@@ -126,15 +126,15 @@ func TestDebris(t *testing.T) {
 	ringItem := newSimpleBucketItem([]byte("010"), []byte("090"))
 	var overlaps []RangeItem
 	overlaps = bucketDebrisFactory([]byte("000"), []byte("100"), ringItem)
-	re.Len(overlaps, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("000"), []byte("080"), ringItem)
 	re.Len(overlaps, 1)
 	overlaps = bucketDebrisFactory([]byte("020"), []byte("080"), ringItem)
 	re.Len(overlaps, 2)
 	overlaps = bucketDebrisFactory([]byte("010"), []byte("090"), ringItem)
-	re.Len(overlaps, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("010"), []byte("100"), ringItem)
-	re.Len(overlaps, 0)
+	re.Empty(overlaps)
 	overlaps = bucketDebrisFactory([]byte("100"), []byte("200"), ringItem)
-	re.Len(overlaps, 0)
+	re.Empty(overlaps)
 }

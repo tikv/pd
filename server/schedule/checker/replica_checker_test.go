@@ -16,11 +16,12 @@ package checker
 
 import (
 	"context"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
@@ -35,28 +36,24 @@ const (
 	MB = 1024 * KB
 )
 
-var _ = Suite(&testReplicaCheckerSuite{})
-
-type testReplicaCheckerSuite struct {
+type replicaCheckerTestSuite struct {
+	suite.Suite
 	cluster *mockcluster.Cluster
 	rc      *ReplicaChecker
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
 
-func (s *testReplicaCheckerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+func TestReplicaCheckerTestSuite(t *testing.T) {
+	suite.Run(t, new(replicaCheckerTestSuite))
 }
 
-func (s *testReplicaCheckerSuite) TearDownTest(c *C) {
-	s.cancel()
-}
-
-func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
+func (suite *replicaCheckerTestSuite) SetupTest() {
 	cfg := config.NewTestOptions()
-	s.cluster = mockcluster.NewCluster(s.ctx, cfg)
-	s.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	s.rc = NewReplicaChecker(s.cluster, cache.NewDefaultCache(10))
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
+	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	suite.rc = NewReplicaChecker(suite.cluster, cache.NewDefaultCache(10))
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
 		Available: 100,
@@ -88,12 +85,16 @@ func (s *testReplicaCheckerSuite) SetUpTest(c *C) {
 		),
 	}
 	for _, store := range stores {
-		s.cluster.PutStore(store)
+		suite.cluster.PutStore(store)
 	}
-	s.cluster.AddLabelsStore(2, 1, map[string]string{"noleader": "true"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"noleader": "true"})
 }
 
-func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
+func (suite *replicaCheckerTestSuite) TearDownTest() {
+	suite.cancel()
+}
+
+func (suite *replicaCheckerTestSuite) TestReplacePendingPeer() {
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -109,16 +110,16 @@ func (s *testReplicaCheckerSuite) TestReplacePendingPeer(c *C) {
 		},
 	}
 	r := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1], core.WithPendingPeers(peers[0:1]))
-	s.cluster.PutRegion(r)
-	op := s.rc.Check(r)
-	c.Assert(op, NotNil)
-	c.Assert(op.Step(0).(operator.AddLearner).ToStore, Equals, uint64(4))
-	c.Assert(op.Step(1).(operator.PromoteLearner).ToStore, Equals, uint64(4))
-	c.Assert(op.Step(2).(operator.RemovePeer).FromStore, Equals, uint64(1))
+	suite.cluster.PutRegion(r)
+	op := suite.rc.Check(r)
+	suite.NotNil(op)
+	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
+	suite.Equal(uint64(1), op.Step(2).(operator.RemovePeer).FromStore)
 }
 
-func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
-	s.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
+func (suite *replicaCheckerTestSuite) TestReplaceOfflinePeer() {
+	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	peers := []*metapb.Peer{
@@ -136,17 +137,17 @@ func (s *testReplicaCheckerSuite) TestReplaceOfflinePeer(c *C) {
 		},
 	}
 	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
-	s.cluster.PutRegion(r)
-	op := s.rc.Check(r)
-	c.Assert(op, NotNil)
-	c.Assert(op.Step(0).(operator.TransferLeader).ToStore, Equals, uint64(3))
-	c.Assert(op.Step(1).(operator.AddLearner).ToStore, Equals, uint64(4))
-	c.Assert(op.Step(2).(operator.PromoteLearner).ToStore, Equals, uint64(4))
-	c.Assert(op.Step(3).(operator.RemovePeer).FromStore, Equals, uint64(1))
+	suite.cluster.PutRegion(r)
+	op := suite.rc.Check(r)
+	suite.NotNil(op)
+	suite.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
+	suite.Equal(uint64(4), op.Step(1).(operator.AddLearner).ToStore)
+	suite.Equal(uint64(4), op.Step(2).(operator.PromoteLearner).ToStore)
+	suite.Equal(uint64(1), op.Step(3).(operator.RemovePeer).FromStore)
 }
 
-func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
-	s.cluster.SetMaxReplicas(1)
+func (suite *replicaCheckerTestSuite) TestOfflineWithOneReplica() {
+	suite.cluster.SetMaxReplicas(1)
 	peers := []*metapb.Peer{
 		{
 			Id:      4,
@@ -154,27 +155,27 @@ func (s *testReplicaCheckerSuite) TestOfflineWithOneReplica(c *C) {
 		},
 	}
 	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
-	s.cluster.PutRegion(r)
-	op := s.rc.Check(r)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "replace-offline-replica")
+	suite.cluster.PutRegion(r)
+	op := suite.rc.Check(r)
+	suite.NotNil(op)
+	suite.Equal("replace-offline-replica", op.Desc())
 }
 
-func (s *testReplicaCheckerSuite) TestDownPeer(c *C) {
+func (suite *replicaCheckerTestSuite) TestDownPeer() {
 	// down a peer, the number of normal peers(except learner) is enough.
-	op := s.downPeerAndCheck(c, metapb.PeerRole_Voter)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "remove-extra-down-replica")
+	op := suite.downPeerAndCheck(metapb.PeerRole_Voter)
+	suite.NotNil(op)
+	suite.Equal("remove-extra-down-replica", op.Desc())
 
 	// down a peer,the number of peers(except learner) is not enough.
-	op = s.downPeerAndCheck(c, metapb.PeerRole_Learner)
-	c.Assert(op, NotNil)
-	c.Assert(op.Desc(), Equals, "replace-down-replica")
+	op = suite.downPeerAndCheck(metapb.PeerRole_Learner)
+	suite.NotNil(op)
+	suite.Equal("replace-down-replica", op.Desc())
 }
 
-func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRole) *operator.Operator {
-	s.cluster.SetMaxReplicas(2)
-	s.cluster.SetStoreUp(1)
+func (suite *replicaCheckerTestSuite) downPeerAndCheck(aliveRole metapb.PeerRole) *operator.Operator {
+	suite.cluster.SetMaxReplicas(2)
+	suite.cluster.SetStoreUp(1)
 	downStoreID := uint64(3)
 	peers := []*metapb.Peer{
 		{
@@ -192,8 +193,8 @@ func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRo
 		},
 	}
 	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
-	s.cluster.PutRegion(r)
-	s.cluster.SetStoreDown(downStoreID)
+	suite.cluster.PutRegion(r)
+	suite.cluster.SetStoreDown(downStoreID)
 	downPeer := &pdpb.PeerStats{
 		Peer: &metapb.Peer{
 			Id:      14,
@@ -202,13 +203,13 @@ func (s *testReplicaCheckerSuite) downPeerAndCheck(c *C, aliveRole metapb.PeerRo
 		DownSeconds: 24 * 60 * 60,
 	}
 	r = r.Clone(core.WithDownPeers(append(r.GetDownPeers(), downPeer)))
-	c.Assert(r.GetDownPeers(), HasLen, 1)
-	return s.rc.Check(r)
+	suite.Len(r.GetDownPeers(), 1)
+	return suite.rc.Check(r)
 }
 
-func (s *testReplicaCheckerSuite) TestBasic(c *C) {
+func (suite *replicaCheckerTestSuite) TestBasic() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetMaxSnapshotCount(2)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -223,41 +224,41 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 
 	// Region has 2 peers, we need to add a new peer.
 	region := tc.GetRegion(1)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 4)
 
 	// Disable make up replica feature.
 	tc.SetEnableMakeUpReplica(false)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 	tc.SetEnableMakeUpReplica(true)
 
 	// Test healthFilter.
 	// If store 4 is down, we add to store 3.
 	tc.SetStoreDown(4)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 3)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3)
 	tc.SetStoreUp(4)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 4)
 
 	// Test snapshotCountFilter.
 	// If snapshotCount > MaxSnapshotCount, we add to store 3.
 	tc.UpdateSnapshotCount(4, 3)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 3)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3)
 	// If snapshotCount < MaxSnapshotCount, we can add peer again.
 	tc.UpdateSnapshotCount(4, 1)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 4)
 
 	// Add peer in store 4, and we have enough replicas.
 	peer4, _ := tc.AllocPeer(4)
 	region = region.Clone(core.WithAddPeer(peer4))
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	// Add peer in store 3, and we have redundant replicas.
 	peer3, _ := tc.AllocPeer(3)
 	region = region.Clone(core.WithAddPeer(peer3))
-	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 1)
 
 	// Disable remove extra replica feature.
 	tc.SetEnableRemoveExtraReplica(false)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 	tc.SetEnableRemoveExtraReplica(true)
 
 	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(3)))
@@ -270,18 +271,18 @@ func (s *testReplicaCheckerSuite) TestBasic(c *C) {
 	}
 
 	region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 1)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 1)
 	region = region.Clone(core.WithDownPeers(nil))
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	// Peer in store 3 is offline, transfer peer to store 1.
 	tc.SetStoreOffline(3)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 1)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 1)
 }
 
-func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
+func (suite *replicaCheckerTestSuite) TestLostStore() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 1)
@@ -295,12 +296,12 @@ func (s *testReplicaCheckerSuite) TestLostStore(c *C) {
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	region := tc.GetRegion(1)
 	op := rc.Check(region)
-	c.Assert(op, IsNil)
+	suite.Nil(op)
 }
 
-func (s *testReplicaCheckerSuite) TestOffline(c *C) {
+func (suite *replicaCheckerTestSuite) TestOffline() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -316,43 +317,43 @@ func (s *testReplicaCheckerSuite) TestOffline(c *C) {
 	region := tc.GetRegion(1)
 
 	// Store 2 has different zone and smallest region score.
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 2)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
 	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 3 has different zone and smallest region score.
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 3)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3)
 	peer3, _ := tc.AllocPeer(3)
 	region = region.Clone(core.WithAddPeer(peer3))
 
 	// Store 4 has the same zone with store 3 and larger region score.
 	peer4, _ := tc.AllocPeer(4)
 	region = region.Clone(core.WithAddPeer(peer4))
-	testutil.CheckRemovePeer(c, rc.Check(region), 4)
+	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 4)
 
 	// Test offline
 	// the number of region peers more than the maxReplicas
 	// remove the peer
 	tc.SetStoreOffline(3)
-	testutil.CheckRemovePeer(c, rc.Check(region), 3)
+	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 3)
 	region = region.Clone(core.WithRemoveStorePeer(4))
 	// the number of region peers equals the maxReplicas
 	// Transfer peer to store 4.
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
 
 	// Store 5 has a same label score with store 4, but the region score smaller than store 4, we will choose store 5.
 	tc.AddLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 5)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 5)
 	// Store 5 has too many snapshots, choose store 4
 	tc.UpdateSnapshotCount(5, 100)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 3, 4)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
 	tc.UpdatePendingPeerCount(4, 100)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
 
-func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
+func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
@@ -365,73 +366,73 @@ func (s *testReplicaCheckerSuite) TestDistinctScore(c *C) {
 	// We need 3 replicas.
 	tc.AddLeaderRegion(1, 1)
 	region := tc.GetRegion(1)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 2)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2)
 	peer2, _ := tc.AllocPeer(2)
 	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 1,2,3 have the same zone, rack, and host.
 	tc.AddLabelsStore(3, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 3)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3)
 
 	// Store 4 has smaller region score.
 	tc.AddLabelsStore(4, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 4)
 
 	// Store 5 has a different host.
 	tc.AddLabelsStore(5, 5, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 5)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 5)
 
 	// Store 6 has a different rack.
 	tc.AddLabelsStore(6, 6, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 6)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 6)
 
 	// Store 7 has a different zone.
 	tc.AddLabelsStore(7, 7, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 7)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 7)
 
 	// Test stateFilter.
 	tc.SetStoreOffline(7)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 6)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 6)
 	tc.SetStoreUp(7)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 7)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 7)
 
 	// Add peer to store 7.
 	peer7, _ := tc.AllocPeer(7)
 	region = region.Clone(core.WithAddPeer(peer7))
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 6)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 6)
 	// Disable locationReplacement feature.
 	tc.SetEnableLocationReplacement(false)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 	tc.SetEnableLocationReplacement(true)
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
-	testutil.CheckRemovePeer(c, rc.Check(region), 1)
+	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 1)
 	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(2)))
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	// Store 8 has the same zone and different rack with store 7.
 	// Store 1 has the same zone and different rack with store 6.
 	// So store 8 and store 1 are equivalent.
 	tc.AddLabelsStore(8, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"})
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	// Store 10 has a different zone.
 	// Store 2 and 6 have the same distinct score, but store 2 has larger region score.
 	// So replace peer in store 2 with store 10.
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 10)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 10)
 	peer10, _ := tc.AllocPeer(10)
 	region = region.Clone(core.WithAddPeer(peer10))
-	testutil.CheckRemovePeer(c, rc.Check(region), 2)
+	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 2)
 	region = region.Clone(core.WithRemoveStorePeer(2))
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
 
-func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
+func (suite *replicaCheckerTestSuite) TestDistinctScore2() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "host"})
@@ -448,20 +449,20 @@ func (s *testReplicaCheckerSuite) TestDistinctScore2(c *C) {
 	tc.AddLeaderRegion(1, 1, 2, 4)
 	region := tc.GetRegion(1)
 
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 6)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 6)
 	peer6, _ := tc.AllocPeer(6)
 	region = region.Clone(core.WithAddPeer(peer6))
 
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 5)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 5)
 	peer5, _ := tc.AllocPeer(5)
 	region = region.Clone(core.WithAddPeer(peer5))
 
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
 
-func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
+func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetLocationLabels([]string{"zone"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -480,24 +481,24 @@ func (s *testReplicaCheckerSuite) TestStorageThreshold(c *C) {
 
 	// Move peer to better location.
 	tc.UpdateStorageRatio(4, 0, 1)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 4)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.9, 0.1)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	tc.AddLeaderRegion(2, 1, 3)
 	region = tc.GetRegion(2)
 	// Add peer on store4.
 	tc.UpdateStorageRatio(4, 0, 1)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 4)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 4)
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.8, 0)
-	testutil.CheckAddPeer(c, rc.Check(region), operator.OpReplica, 2)
+	testutil.CheckAddPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2)
 }
 
-func (s *testReplicaCheckerSuite) TestOpts(c *C) {
+func (suite *replicaCheckerTestSuite) TestOpts() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
 
@@ -518,17 +519,17 @@ func (s *testReplicaCheckerSuite) TestOpts(c *C) {
 	}))
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 1, 4)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
 	tc.SetEnableRemoveDownReplica(false)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpReplica, 2, 4)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 4)
 	tc.SetEnableReplaceOfflineReplica(false)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
 
 // See issue: https://github.com/tikv/pd/issues/3705
-func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
+func (suite *replicaCheckerTestSuite) TestFixDownPeer() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -541,25 +542,25 @@ func (s *testReplicaCheckerSuite) TestFixDownPeer(c *C) {
 
 	tc.AddLeaderRegion(1, 1, 3, 4)
 	region := tc.GetRegion(1)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	tc.SetStoreDown(4)
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
 
 	tc.SetStoreDown(5)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
 
 	tc.SetIsolationLevel("zone")
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
 
 // See issue: https://github.com/tikv/pd/issues/3705
-func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
+func (suite *replicaCheckerTestSuite) TestFixOfflinePeer() {
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
 	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
@@ -572,14 +573,14 @@ func (s *testReplicaCheckerSuite) TestFixOfflinePeer(c *C) {
 
 	tc.AddLeaderRegion(1, 1, 3, 4)
 	region := tc.GetRegion(1)
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 
 	tc.SetStoreOffline(4)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
 
 	tc.SetStoreOffline(5)
-	testutil.CheckTransferPeer(c, rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
 
 	tc.SetIsolationLevel("zone")
-	c.Assert(rc.Check(region), IsNil)
+	suite.Nil(rc.Check(region))
 }
