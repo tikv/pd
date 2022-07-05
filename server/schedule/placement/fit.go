@@ -155,12 +155,15 @@ func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule)
 }
 
 type fitWorker struct {
-	stores        []*core.StoreInfo
-	bestFit       RegionFit  // update during execution
-	peers         []*fitPeer // p.selected is updated during execution.
-	rules         []*Rule
-	needIsolation bool
-	exit          bool
+	stores  []*core.StoreInfo
+	bestFit RegionFit  // update during execution
+	peers   []*fitPeer // p.selected is updated during execution.
+	rules   []*Rule
+	// caches for match info for rules to peers. match,exist:= rulesMatchCache[i][j]
+	// exist is false means haven't been cached. match is true means peers[j] can match rules[i]
+	rulesMatchCache map[int]map[int]bool
+	needIsolation   bool
+	exit            bool
 }
 
 func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
@@ -180,12 +183,22 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
 
+	matchRules := make(map[int]map[int]bool, len(rules))
+	for id, rule := range rules {
+		matchPeers := make(map[int]bool, 0)
+		if checkRule(rule, stores) {
+			matchRules[id] = make(map[int]bool)
+		}
+		matchRules[id] = matchPeers
+	}
+
 	return &fitWorker{
-		stores:        stores,
-		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:         peers,
-		needIsolation: needIsolation(rules),
-		rules:         rules,
+		stores:          stores,
+		bestFit:         RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:           peers,
+		rulesMatchCache: matchRules,
+		needIsolation:   needIsolation(rules),
+		rules:           rules,
 	}
 }
 
@@ -211,13 +224,17 @@ func (w *fitWorker) fitRule(index int) bool {
 	}
 
 	var candidates []*fitPeer
-	if checkRule(w.rules[index], w.stores) {
-		// Only consider stores:
-		// 1. Match label constraints
-		// 2. Role match, or can match after transformed.
-		// 3. Not selected by other rules.
-		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) {
+	if matchPeers, exist := w.rulesMatchCache[index]; exist {
+		for idx, p := range w.peers {
+			if p.selected {
+				continue
+			}
+			m, cached := matchPeers[idx]
+			if !cached {
+				m = MatchLabelConstraints(p.store, w.rules[index].LabelConstraints)
+				matchPeers[idx] = m
+			}
+			if m {
 				candidates = append(candidates, p)
 			}
 		}
