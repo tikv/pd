@@ -179,7 +179,7 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 	rateLimiter := s.svr.GetServiceRateLimiter()
 	if rateLimiter.Allow(requestInfo.ServiceLabel) {
 		next(w, r)
-		rateLimiter.Release(requestInfo.ServiceLabel)
+		defer rateLimiter.Release(requestInfo.ServiceLabel)
 	} else {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 	}
