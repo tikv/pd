@@ -249,20 +249,20 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		"enable-rate-limit": "true",
 	}
 	data, err := json.Marshal(input)
-	suite.Nil(err)
+	suite.NoError(err)
 	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
-	suite.Nil(err)
+	suite.NoError(err)
 	resp.Body.Close()
 	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
 
 	// returns StatusOK when no rate-limit config
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)
-	suite.Nil(err)
+	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	suite.Nil(err)
+	suite.NoError(err)
 	suite.Equal(resp.StatusCode, http.StatusOK)
 	input = make(map[string]interface{})
 	input["type"] = "label"
@@ -270,22 +270,22 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	input["qps"] = 0.5
 	input["concurrency"] = 1
 	jsonBody, err := json.Marshal(input)
-	suite.Nil(err)
+	suite.NoError(err)
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config/rate-limit", bytes.NewBuffer(jsonBody))
 	resp, err = dialClient.Do(req)
-	suite.Nil(err)
+	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	suite.Nil(err)
+	suite.NoError(err)
 	suite.Equal(resp.StatusCode, http.StatusOK)
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		if i > 0 {
 			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
@@ -299,10 +299,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		if i > 0 {
 			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
@@ -316,10 +316,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
@@ -343,10 +343,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		if i > 0 {
 			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
@@ -360,10 +360,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		if i > 0 {
 			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
@@ -377,10 +377,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
 		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
@@ -389,20 +389,20 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		"enable-rate-limit": "false",
 	}
 	data, err = json.Marshal(input)
-	suite.Nil(err)
+	suite.NoError(err)
 	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
-	suite.Nil(err)
+	suite.NoError(err)
 	resp.Body.Close()
 	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), false)
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = dialClient.Do(req)
-		suite.Nil(err)
+		suite.NoError(err)
 		_, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
-		suite.Nil(err)
+		suite.NoError(err)
 		suite.Equal(resp.StatusCode, http.StatusOK)
 	}
 }
