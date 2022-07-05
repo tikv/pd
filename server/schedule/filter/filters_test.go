@@ -88,7 +88,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 		{"_id", "notExists", []string{}, true},
 	}
 	for _, testCase := range testCases {
-		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
+		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}}, false)
 		re.Equal(testCase.res, filter.Source(testCluster.GetOpts(), store))
 	}
 }
