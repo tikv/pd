@@ -203,7 +203,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	}
 	s.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
-		filter.NewLabelConstaintFilter(s.GetName(), filter.NotHotOrReserved, true),
+		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s
 }
