@@ -32,7 +32,7 @@ func TestRegionState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-	rsc := NewRegionState(cluster.GetOpts())
+	rsc := newRegionState(cluster.GetOpts())
 	endTimestamp := time.Now().UnixNano()
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(
@@ -64,7 +64,7 @@ func TestRegionState(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		rsc.Observe(region)
+		rsc.observe(region)
 	}
-	re.Len(rsc.GetRegionStateByType(RegionStateDown), 1)
+	re.Len(rsc.getRegionStateByType(RegionStateDown), 1)
 }

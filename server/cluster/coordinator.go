@@ -91,7 +91,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		opController:    opController,
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
-		regionState:     NewRegionState(cluster.GetOpts()),
+		regionState:     newRegionState(cluster.GetOpts()),
 	}
 }
 
@@ -144,7 +144,7 @@ func (c *coordinator) patrolRegions() {
 
 		for _, region := range regions {
 			// Records the region if it is in abnormal state.
-			c.regionState.Observe(region)
+			c.regionState.observe(region)
 
 			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
@@ -171,7 +171,7 @@ func (c *coordinator) patrolRegions() {
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
-			c.regionState.Collect()
+			c.regionState.collect()
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()

@@ -22,7 +22,7 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-// RegionStateType represents the type of region's state.
+// regionStateType represents the type of region's state.
 type regionStateType uint32
 
 // region state type
@@ -30,15 +30,15 @@ const (
 	RegionStateDown regionStateType = 1 << iota
 )
 
-// regionState ensures regions in abnormal state will be recorded.
+// regionState is used to record abnormal regions.
 type regionState struct {
 	sync.RWMutex
 	opt    *config.PersistOptions
 	states map[regionStateType]map[uint64]*core.RegionInfo
 }
 
-// NewRegionStateChecker creates a region state checker.
-func NewRegionState(opt *config.PersistOptions) *regionState {
+// newRegionState creates a new regionState.
+func newRegionState(opt *config.PersistOptions) *regionState {
 	r := &regionState{
 		opt:    opt,
 		states: make(map[regionStateType]map[uint64]*core.RegionInfo),
@@ -48,7 +48,7 @@ func NewRegionState(opt *config.PersistOptions) *regionState {
 }
 
 // GetRegionStateByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
-func (r *regionState) GetRegionStateByType(typ regionStateType) []*core.RegionInfo {
+func (r *regionState) getRegionStateByType(typ regionStateType) []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.states[typ]))
@@ -59,7 +59,7 @@ func (r *regionState) GetRegionStateByType(typ regionStateType) []*core.RegionIn
 }
 
 // Check verifies a region's state, recording it if need.
-func (r *regionState) Observe(region *core.RegionInfo) {
+func (r *regionState) observe(region *core.RegionInfo) {
 	r.Lock()
 	defer r.Unlock()
 	regionID := region.GetID()
@@ -74,7 +74,7 @@ func (r *regionState) Observe(region *core.RegionInfo) {
 }
 
 // Collect collects the metrics of the regions' states.
-func (r *regionState) Collect() {
+func (r *regionState) collect() {
 	r.Lock()
 	defer r.Unlock()
 	regionStateGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[RegionStateDown])))
