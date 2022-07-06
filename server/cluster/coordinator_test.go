@@ -17,12 +17,12 @@ package cluster
 import (
 	"context"
 	"encoding/json"
-	"github.com/pingcap/failpoint"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -316,7 +316,7 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.addRegionStore(1, 1))
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
 	checkRegionAndOperator(re, tc, co, 1, 1)
-	testutil.CheckAddPeerWithTestify(re, co.opController.GetOperator(1), operator.OpReplica, 1)
+	testutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
 	checkRegionAndOperator(re, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
@@ -588,7 +588,7 @@ func TestShouldRun(t *testing.T) {
 	re.False(co.shouldRun())
 	re.Equal(2, tc.core.Regions.GetStoreRegionCount(4))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -602,11 +602,11 @@ func TestShouldRun(t *testing.T) {
 		{7, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
 		re.NoError(tc.processRegionHeartbeat(nr))
-		re.Equal(t.shouldRun, co.shouldRun())
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
@@ -630,7 +630,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	re.False(co.shouldRun())
 	re.Equal(10, tc.core.Regions.GetStoreRegionCount(1))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -645,11 +645,11 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		{9, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
 		re.NoError(tc.processRegionHeartbeat(nr))
-		re.Equal(t.shouldRun, co.shouldRun())
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
@@ -1040,7 +1040,7 @@ func TestStoreOverloaded(t *testing.T) {
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		re.Len(ops, 1)
 		op1 := ops[0]
 		re.NotNil(op1)
@@ -1049,7 +1049,7 @@ func TestStoreOverloaded(t *testing.T) {
 	}
 	for {
 		time.Sleep(time.Millisecond * 10)
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		if time.Since(start) > time.Second {
 			break
 		}
@@ -1062,7 +1062,7 @@ func TestStoreOverloaded(t *testing.T) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		re.Len(ops, 1)
 		op := ops[0]
 		re.True(oc.AddOperator(op))
@@ -1071,7 +1071,8 @@ func TestStoreOverloaded(t *testing.T) {
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
-		re.Greater(len(lb.Schedule(tc)), 0)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		re.Greater(len(ops), 0)
 	}
 }
 
@@ -1101,10 +1102,12 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	re.True(oc.AddOperator(op2))
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	re.False(oc.AddOperator(op3))
-	re.Len(lb.Schedule(tc), 0)
+	ops, _ := lb.Schedule(tc, false /* dryRun */)
+	re.Len(ops, 0)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	re.Greater(len(lb.Schedule(tc)), 0)
+	ops, _ = lb.Schedule(tc, false /* dryRun */)
+	re.Greater(len(ops), 0)
 }
 
 func TestDownStoreLimit(t *testing.T) {

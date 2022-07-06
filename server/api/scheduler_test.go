@@ -108,7 +108,7 @@ func (suite *scheduleTestSuite) TestOriginAPI() {
 	statusCode, err = apiutil.DoDelete(testDialClient, deleteURL)
 	suite.NoError(err)
 	suite.Equal(200, statusCode)
-	suite.Len(rc.GetSchedulers(), 0)
+	suite.Empty(rc.GetSchedulers())
 	suite.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, 404)))
 	statusCode, _ = apiutil.DoDelete(testDialClient, deleteURL)
 	suite.Equal(404, statusCode)

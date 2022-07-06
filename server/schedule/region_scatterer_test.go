@@ -277,6 +277,7 @@ func TestScatterCheck(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		_, err := scatterer.Scatter(testCase.checkRegion, "")
 		if testCase.needFix {
@@ -323,6 +324,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
@@ -384,6 +386,7 @@ func TestScattersGroup(t *testing.T) {
 	}
 	group := "group"
 	for _, testCase := range testCases {
+		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {

@@ -213,9 +213,9 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		Data:     makeKeyRanges("", "74"),
 	})
 	ops = suite.mc.Check(suite.regions[0])
-	suite.Len(ops, 0)
+	suite.Empty(ops)
 	ops = suite.mc.Check(suite.regions[1])
-	suite.Len(ops, 0)
+	suite.Empty(ops)
 
 	// Skip recently split regions.
 	suite.cluster.SetSplitMergeInterval(time.Hour)

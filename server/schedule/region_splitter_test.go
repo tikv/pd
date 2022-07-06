@@ -90,7 +90,7 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	newRegions := map[uint64]struct{}{}
 	// assert success
 	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
-	suite.Len(failureKeys, 0)
+	suite.Empty(failureKeys)
 	suite.Len(newRegions, 2)
 
 	percentage, newRegionsID := splitter.SplitRegions(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
@@ -100,11 +100,11 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	newRegions = map[uint64]struct{}{}
 	failureKeys = splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
 	suite.Len(failureKeys, 2)
-	suite.Len(newRegions, 0)
+	suite.Empty(newRegions)
 
 	percentage, newRegionsID = splitter.SplitRegions(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
 	suite.Equal(0, percentage)
-	suite.Len(newRegionsID, 0)
+	suite.Empty(newRegionsID)
 }
 
 func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {

@@ -53,7 +53,8 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 
 	sl, err := schedule.CreateScheduler(ShuffleLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
-	c.Assert(sl.Schedule(tc), IsNil)
+	op, _ := sl.Schedule(tc, false)
+	c.Assert(op, IsNil)
 
 	// Add stores 1,2,3,4
 	tc.AddLeaderStore(1, 6)
@@ -67,7 +68,7 @@ func (s *testShuffleLeaderSuite) TestShuffle(c *C) {
 	tc.AddLeaderRegion(4, 4, 1, 2, 3)
 
 	for i := 0; i < 4; i++ {
-		op := sl.Schedule(tc)
+		op, _ := sl.Schedule(tc, false)
 		c.Assert(op, NotNil)
 		c.Assert(op[0].Kind(), Equals, operator.OpLeader|operator.OpAdmin)
 	}
@@ -99,25 +100,25 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sl, err := schedule.CreateScheduler(LabelType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	c.Assert(err, IsNil)
-	op := sl.Schedule(tc)
+	op, _ := sl.Schedule(tc, false)
 	testutil.CheckTransferLeaderFrom(c, op[0], operator.OpLeader, 1)
 
 	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
-	op = sl.Schedule(tc)
+	op, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
 	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	c.Assert(err, IsNil)
-	op = bs.Schedule(tc)
+	op, _ = bs.Schedule(tc, false)
 	c.Assert(op, HasLen, 0)
 
 	// Can't evict leader from store2, neither.
 	el, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
 	c.Assert(err, IsNil)
-	op = el.Schedule(tc)
+	op, _ = el.Schedule(tc, false)
 	c.Assert(op, IsNil)
 
 	// If the peer on store3 is pending, not transfer to store3 neither.
@@ -130,7 +131,7 @@ func (s *testRejectLeaderSuite) TestRejectLeader(c *C) {
 		}
 	}
 	tc.Regions.SetRegion(region)
-	op = sl.Schedule(tc)
+	op, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 1, 2)
 }
 
@@ -200,7 +201,7 @@ func (s *testShuffleHotRegionSchedulerSuite) checkBalance(c *C, tc *mockcluster.
 	// try to get an operator
 	var op []*operator.Operator
 	for i := 0; i < 100; i++ {
-		op = hb.Schedule(tc)
+		op, _ = hb.Schedule(tc, false)
 		if op != nil {
 			break
 		}
@@ -253,7 +254,8 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	c.Assert(err, IsNil)
 	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
-	c.Assert(sl.Schedule(tc), IsNil)
+	op, _ := sl.Schedule(tc, false)
+	c.Assert(op, IsNil)
 
 	// Add stores 1, 2, 3, 4
 	tc.AddRegionStore(1, 6)
@@ -267,7 +269,7 @@ func (s *testShuffleRegionSuite) TestShuffle(c *C) {
 	tc.AddLeaderRegion(4, 4, 1, 2)
 
 	for i := 0; i < 4; i++ {
-		op := sl.Schedule(tc)
+		op, _ := sl.Schedule(tc, false)
 		c.Assert(op, NotNil)
 		c.Assert(op[0].Kind(), Equals, operator.OpRegion)
 	}
@@ -319,11 +321,11 @@ func (s *testShuffleRegionSuite) TestRole(c *C) {
 
 	conf := sl.(*shuffleRegionScheduler).conf
 	conf.Roles = []string{"follower"}
-	ops := sl.Schedule(tc)
+	ops, _ := sl.Schedule(tc, false)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 2, 4) // transfer follower
 	conf.Roles = []string{"learner"}
-	ops = sl.Schedule(tc)
+	ops, _ = sl.Schedule(tc, false)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferLearner(c, ops[0], operator.OpRegion, 3, 4) // transfer learner
 }
@@ -359,14 +361,14 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.AddLeaderRegion(5, 1, 2, 3)
 
 	// balance region without label
-	ops := bs.Schedule(tc)
+	ops, _ := bs.Schedule(tc, false)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 and 5 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
 	tc.AddLabelsStore(5, 0, map[string]string{"specialUse": "reserved"})
-	ops = bs.Schedule(tc)
+	ops, _ = bs.Schedule(tc, false)
 	c.Assert(ops, HasLen, 0)
 
 	// can only move peer to 4
@@ -380,7 +382,7 @@ func (s *testSpecialUseSuite) TestSpecialUseHotRegion(c *C) {
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 3})
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 2})
-	ops = hs.Schedule(tc)
+	ops, _ = hs.Schedule(tc, false)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpHotRegion, 1, 4)
 }
@@ -409,13 +411,13 @@ func (s *testSpecialUseSuite) TestSpecialUseReserved(c *C) {
 	tc.AddLeaderRegion(5, 1, 2, 3)
 
 	// balance region without label
-	ops := bs.Schedule(tc)
+	ops, _ := bs.Schedule(tc, false)
 	c.Assert(ops, HasLen, 1)
 	testutil.CheckTransferPeer(c, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "reserved"})
-	ops = bs.Schedule(tc)
+	ops, _ = bs.Schedule(tc, false)
 	c.Assert(ops, HasLen, 0)
 }
 
@@ -446,7 +448,8 @@ func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TearDownTest(c *C) {
 }
 
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) schedule() []*operator.Operator {
-	return s.lb.Schedule(s.tc)
+	op, _ := s.lb.Schedule(s.tc, false)
+	return op
 }
 
 func (s *testBalanceLeaderSchedulerWithRuleEnabledSuite) TestBalanceLeaderWithConflictRule(c *C) {

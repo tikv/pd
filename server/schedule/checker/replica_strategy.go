@@ -55,7 +55,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
-		filter.NewSpecialUseFilter(s.checkerName),
+		filter.NewLabelConstaintFilter(s.checkerName, filter.NotHotOrReserved, true),
 		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true},
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {

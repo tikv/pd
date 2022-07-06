@@ -73,23 +73,24 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 	s.tc.PutStore(newStoreInfo)
 	c.Assert(s.es.IsScheduleAllowed(s.tc), IsTrue)
 	// Add evict leader scheduler to store 1
-	op := s.es.Schedule(s.tc)
+	op, _ := s.es.Schedule(s.tc, false)
 	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
 	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
 	// Cannot balance leaders to store 1
-	op = s.bs.Schedule(s.tc)
+	op, _ = s.bs.Schedule(s.tc, false)
 	c.Assert(op, HasLen, 0)
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
 	})
 	s.tc.PutStore(newStoreInfo)
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
-	c.Check(s.es.Schedule(s.tc), IsNil)
-	op = s.bs.Schedule(s.tc)
+	op, _ = s.es.Schedule(s.tc, false)
+	c.Check(op, IsNil)
+	op, _ = s.bs.Schedule(s.tc, false)
 	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
 
 	// no slow store need to evict.
-	op = s.es.Schedule(s.tc)
+	op, _ = s.es.Schedule(s.tc, false)
 	c.Assert(op, IsNil)
 
 	es2, ok := s.es.(*evictSlowStoreScheduler)
@@ -138,9 +139,9 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStorePersistFail(c *C) {
 	s.tc.PutStore(newStoreInfo)
 	c.Assert(s.es.IsScheduleAllowed(s.tc), IsTrue)
 	// Add evict leader scheduler to store 1
-	op := s.es.Schedule(s.tc)
+	op, _ := s.es.Schedule(s.tc, false)
 	c.Assert(op, IsNil)
 	c.Assert(failpoint.Disable(persisFail), IsNil)
-	op = s.es.Schedule(s.tc)
+	op, _ = s.es.Schedule(s.tc, false)
 	c.Assert(op, NotNil)
 }

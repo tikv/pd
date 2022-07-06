@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -94,7 +95,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	}
 	scheduler.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
-		filter.NewSpecialUseFilter(scheduler.GetName()),
+		filter.NewLabelConstaintFilter(scheduler.GetName(), filter.NotHotOrReserved, true),
 	}
 	return scheduler
 }
@@ -136,7 +137,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
@@ -204,13 +205,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			if op := s.transferPeer(plan); op != nil {
 				s.retryQuota.ResetLimit(plan.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-				return []*operator.Operator{op}
+				return []*operator.Operator{op}, nil
 			}
 		}
 		s.retryQuota.Attenuate(plan.source)
 	}
 	s.retryQuota.GC(stores)
-	return nil
+	return nil, nil
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
@@ -219,7 +220,7 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIDs()),
 		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
 		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.GetOpts()),
-		filter.NewSpecialUseFilter(s.GetName()),
+		filter.NewLabelConstaintFilter(s.GetName(), filter.NotHotOrReserved, true),
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 

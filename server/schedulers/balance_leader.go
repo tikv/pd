@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -156,8 +157,8 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", handler.UpdateConfig).Methods("POST")
-	router.HandleFunc("/list", handler.ListConfig).Methods("GET")
+	router.HandleFunc("/config", handler.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", handler.ListConfig).Methods(http.MethodGet)
 	return router
 }
 
@@ -202,7 +203,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	}
 	s.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true},
-		filter.NewSpecialUseFilter(s.GetName()),
+		filter.NewLabelConstaintFilter(s.GetName(), filter.NotHotOrReserved, true),
 	}
 	return s
 }
@@ -342,7 +343,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	batch := l.conf.Batch
@@ -369,7 +370,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result
+					return result, nil
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
 			}
@@ -380,14 +381,14 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
-					return result
+					return result, nil
 				}
 				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 	}
 	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
-	return result
+	return result, nil
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,

@@ -182,7 +182,7 @@ func (suite *storeTestSuite) TestStoreLabel() {
 	var info StoreInfo
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
 	suite.NoError(err)
-	suite.Len(info.Store.Labels, 0)
+	suite.Empty(info.Store.Labels)
 
 	// Test merge.
 	// enable label match check.
@@ -256,7 +256,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	for id := 1111; id <= 1115; id++ {
 		mustPutStore(re, suite.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	}
-	table := []struct {
+	testCases := []struct {
 		id     int
 		status int
 	}{
@@ -269,10 +269,10 @@ func (suite *storeTestSuite) TestStoreDelete() {
 			status: http.StatusGone,
 		},
 	}
-	for _, t := range table {
-		url := fmt.Sprintf("%s/store/%d", suite.urlPrefix, t.id)
+	for _, testCase := range testCases {
+		url := fmt.Sprintf("%s/store/%d", suite.urlPrefix, testCase.id)
 		status := suite.requestStatusBody(testDialClient, http.MethodDelete, url)
-		suite.Equal(t.status, status)
+		suite.Equal(testCase.status, status)
 	}
 	// store 6 origin status:offline
 	url := fmt.Sprintf("%s/store/6", suite.urlPrefix)
@@ -358,7 +358,7 @@ func (suite *storeTestSuite) TestStoreSetState() {
 }
 
 func (suite *storeTestSuite) TestUrlStoreFilter() {
-	table := []struct {
+	testCases := []struct {
 		u    string
 		want []*metapb.Store
 	}{
@@ -380,12 +380,12 @@ func (suite *storeTestSuite) TestUrlStoreFilter() {
 		},
 	}
 
-	for _, t := range table {
-		uu, err := url.Parse(t.u)
+	for _, testCase := range testCases {
+		uu, err := url.Parse(testCase.u)
 		suite.NoError(err)
 		f, err := newStoreStateFilter(uu)
 		suite.NoError(err)
-		suite.Equal(t.want, f.filter(suite.stores))
+		suite.Equal(testCase.want, f.filter(suite.stores))
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
@@ -461,7 +461,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 		info := make(map[uint64]interface{}, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		suite.NoError(err)
-		suite.Len(testCase.expectedStores, len(info))
+		suite.Len(info, len(testCase.expectedStores))
 		for id := range testCase.expectedStores {
 			_, ok := info[id]
 			suite.True(ok)
