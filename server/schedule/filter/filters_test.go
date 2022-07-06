@@ -285,6 +285,35 @@ func TestPlacementGuard(t *testing.T) {
 		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store))
 }
 
+func TestSpecialUseFilter(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := config.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+
+	testCases := []struct {
+		label     map[string]string
+		allowUse  []string
+		sourceRes bool
+		targetRes bool
+	}{
+		{nil, []string{""}, true, true},
+		{map[string]string{SpecialUseKey: SpecialUseHotRegion}, []string{""}, false, false},
+		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{""}, false, false},
+		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{SpecialUseReserved}, true, true},
+		{map[string]string{core.EngineKey: core.EngineTiFlash}, []string{""}, true, true},
+		{map[string]string{core.EngineKey: core.EngineTiKV}, []string{""}, true, true},
+	}
+	for _, testCase := range testCases {
+		store := core.NewStoreInfoWithLabel(1, 1, testCase.label)
+		filter := NewSpecialUseFilter("", testCase.allowUse...)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store))
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store))
+	}
+}
+
 func BenchmarkCloneRegionTest(b *testing.B) {
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
