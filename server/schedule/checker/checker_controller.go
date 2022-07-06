@@ -34,20 +34,19 @@ const DefaultCacheSize = 1000
 
 // Controller is used to manage all checkers.
 type Controller struct {
-	cluster            schedule.Cluster
-	opts               *config.PersistOptions
-	opController       *schedule.OperatorController
-	learnerChecker     *LearnerChecker
-	replicaChecker     *ReplicaChecker
-	ruleChecker        *RuleChecker
-	splitChecker       *SplitChecker
-	mergeChecker       *MergeChecker
-	jointStateChecker  *JointStateChecker
-	regionStateChecker *RegionStateChecker
-	priorityInspector  *PriorityInspector
-	regionWaitingList  cache.Cache
-	suspectRegions     *cache.TTLUint64 // suspectRegions are regions that may need fix
-	suspectKeyRanges   *cache.TTLString // suspect key-range regions that may need fix
+	cluster           schedule.Cluster
+	opts              *config.PersistOptions
+	opController      *schedule.OperatorController
+	learnerChecker    *LearnerChecker
+	replicaChecker    *ReplicaChecker
+	ruleChecker       *RuleChecker
+	splitChecker      *SplitChecker
+	mergeChecker      *MergeChecker
+	jointStateChecker *JointStateChecker
+	priorityInspector *PriorityInspector
+	regionWaitingList cache.Cache
+	suspectRegions    *cache.TTLUint64 // suspectRegions are regions that may need fix
+	suspectKeyRanges  *cache.TTLString // suspect key-range regions that may need fix
 }
 
 // NewController create a new Controller.
@@ -55,20 +54,19 @@ type Controller struct {
 func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
-		cluster:            cluster,
-		opts:               cluster.GetOpts(),
-		opController:       opController,
-		learnerChecker:     NewLearnerChecker(cluster),
-		replicaChecker:     NewReplicaChecker(cluster, regionWaitingList),
-		ruleChecker:        NewRuleChecker(cluster, ruleManager, regionWaitingList),
-		splitChecker:       NewSplitChecker(cluster, ruleManager, labeler),
-		mergeChecker:       NewMergeChecker(ctx, cluster),
-		jointStateChecker:  NewJointStateChecker(cluster),
-		regionStateChecker: NewRegionStateChecker(cluster.GetOpts()),
-		priorityInspector:  NewPriorityInspector(cluster),
-		regionWaitingList:  regionWaitingList,
-		suspectRegions:     cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
-		suspectKeyRanges:   cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
+		cluster:           cluster,
+		opts:              cluster.GetOpts(),
+		opController:      opController,
+		learnerChecker:    NewLearnerChecker(cluster),
+		replicaChecker:    NewReplicaChecker(cluster, regionWaitingList),
+		ruleChecker:       NewRuleChecker(cluster, ruleManager, regionWaitingList),
+		splitChecker:      NewSplitChecker(cluster, ruleManager, labeler),
+		mergeChecker:      NewMergeChecker(ctx, cluster),
+		jointStateChecker: NewJointStateChecker(cluster),
+		priorityInspector: NewPriorityInspector(cluster),
+		regionWaitingList: regionWaitingList,
+		suspectRegions:    cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
+		suspectKeyRanges:  cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
 	}
 }
 
@@ -124,8 +122,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return ops
 		}
 	}
-
-	c.regionStateChecker.Check(region)
 	return nil
 }
 
@@ -137,11 +133,6 @@ func (c *Controller) GetMergeChecker() *MergeChecker {
 // GetRuleChecker returns the rule checker.
 func (c *Controller) GetRuleChecker() *RuleChecker {
 	return c.ruleChecker
-}
-
-// GetRegionStateChecker returns the region state checker.
-func (c *Controller) GetRegionStateChecker() *RegionStateChecker {
-	return c.regionStateChecker
 }
 
 // GetWaitingRegions returns the regions in the waiting list.

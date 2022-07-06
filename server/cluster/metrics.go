@@ -119,6 +119,14 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	regionStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "state",
+			Help:      "State of the regions.",
+		}, []string{"type"})
 )
 
 func init() {
@@ -135,4 +143,5 @@ func init() {
 	prometheus.MustRegister(storesSpeedGauge)
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
+	prometheus.MustRegister(regionStateGauge)
 }

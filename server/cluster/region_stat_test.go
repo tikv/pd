@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package checker
+package cluster
 
 import (
 	"context"
@@ -27,12 +27,12 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-func TestRegionStates(t *testing.T) {
+func TestRegionState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-	rsc := NewRegionStateChecker(cluster.GetOpts())
+	rsc := NewRegionState(cluster.GetOpts())
 	endTimestamp := time.Now().UnixNano()
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(
@@ -64,7 +64,7 @@ func TestRegionStates(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		rsc.Check(region)
+		rsc.Observe(region)
 	}
-	re.Len(rsc.GetRegionStatesByType(DownRegion), 1)
+	re.Len(rsc.GetRegionStateByType(RegionStateDown), 1)
 }

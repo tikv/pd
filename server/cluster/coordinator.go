@@ -72,6 +72,7 @@ type coordinator struct {
 	opController    *schedule.OperatorController
 	hbStreams       *hbstream.HeartbeatStreams
 	pluginInterface *schedule.PluginInterface
+	regionState     *regionState
 }
 
 // newCoordinator creates a new coordinator.
@@ -90,6 +91,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		opController:    opController,
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
+		regionState:     NewRegionState(cluster.GetOpts()),
 	}
 }
 
@@ -141,6 +143,9 @@ func (c *coordinator) patrolRegions() {
 		}
 
 		for _, region := range regions {
+			// Records the region if it is in abnormal state.
+			c.regionState.Observe(region)
+
 			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
 				continue
@@ -164,9 +169,9 @@ func (c *coordinator) patrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			c.checkers.GetRegionStateChecker().Collect()
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
+			c.regionState.Collect()
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()

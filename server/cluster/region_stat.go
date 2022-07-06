@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package checker
+package cluster
 
 import (
 	"sync"
@@ -22,33 +22,33 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-// RegionStateType represents the type of the region's state.
-type RegionStateType uint32
+// RegionStateType represents the type of region's state.
+type regionStateType uint32
 
 // region state type
 const (
-	DownRegion RegionStateType = 1 << iota
+	RegionStateDown regionStateType = 1 << iota
 )
 
-// RegionStateChecker ensures regions in abnormal state will be recorded.
-type RegionStateChecker struct {
+// regionState ensures regions in abnormal state will be recorded.
+type regionState struct {
 	sync.RWMutex
 	opt    *config.PersistOptions
-	states map[RegionStateType]map[uint64]*core.RegionInfo
+	states map[regionStateType]map[uint64]*core.RegionInfo
 }
 
 // NewRegionStateChecker creates a region state checker.
-func NewRegionStateChecker(opt *config.PersistOptions) *RegionStateChecker {
-	r := &RegionStateChecker{
+func NewRegionState(opt *config.PersistOptions) *regionState {
+	r := &regionState{
 		opt:    opt,
-		states: make(map[RegionStateType]map[uint64]*core.RegionInfo),
+		states: make(map[regionStateType]map[uint64]*core.RegionInfo),
 	}
-	r.states[DownRegion] = make(map[uint64]*core.RegionInfo)
+	r.states[RegionStateDown] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
-// GetRegionStatesByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
-func (r *RegionStateChecker) GetRegionStatesByType(typ RegionStateType) []*core.RegionInfo {
+// GetRegionStateByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
+func (r *regionState) GetRegionStateByType(typ regionStateType) []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.states[typ]))
@@ -59,23 +59,23 @@ func (r *RegionStateChecker) GetRegionStatesByType(typ RegionStateType) []*core.
 }
 
 // Check verifies a region's state, recording it if need.
-func (r *RegionStateChecker) Check(region *core.RegionInfo) {
+func (r *regionState) Observe(region *core.RegionInfo) {
 	r.Lock()
 	defer r.Unlock()
 	regionID := region.GetID()
 
 	// check down region
 	if time.Now().UnixNano()-int64(region.GetInterval().GetEndTimestamp()) >= r.opt.GetMaxStoreDownTime().Nanoseconds() {
-		_, exist := r.states[DownRegion][regionID]
+		_, exist := r.states[RegionStateDown][regionID]
 		if !exist {
-			r.states[DownRegion][regionID] = region
+			r.states[RegionStateDown][regionID] = region
 		}
 	}
 }
 
 // Collect collects the metrics of the regions' states.
-func (r *RegionStateChecker) Collect() {
+func (r *regionState) Collect() {
 	r.Lock()
 	defer r.Unlock()
-	regionStatesGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[DownRegion])))
+	regionStateGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[RegionStateDown])))
 }
