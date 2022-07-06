@@ -70,7 +70,7 @@ type shuffleRegionScheduler struct {
 func newShuffleRegionScheduler(opController *schedule.OperatorController, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true},
-		filter.NewLabelConstaintFilter(ShuffleRegionName, filter.NotHotOrReserved, true),
+		filter.NewSpecialUseFilter(ShuffleRegionName),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{
