@@ -155,7 +155,6 @@ func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule)
 }
 
 type fitWorker struct {
-	stores  []*core.StoreInfo
 	bestFit RegionFit  // update during execution
 	peers   []*fitPeer // p.selected is updated during execution.
 	rules   []*Rule
@@ -193,7 +192,6 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 	}
 
 	return &fitWorker{
-		stores:          stores,
 		bestFit:         RegionFit{RuleFits: make([]*RuleFit, len(rules))},
 		peers:           peers,
 		rulesMatchCache: matchRules,
@@ -225,7 +223,12 @@ func (w *fitWorker) fitRule(index int) bool {
 
 	var candidates []*fitPeer
 	if matchPeers, exist := w.rulesMatchCache[index]; exist {
+		// Only consider stores:
+		// 1. Match label constraints
+		// 2. Role match, or can match after transformed.
+		// 3. Not selected by other rules.
 		for idx, p := range w.peers {
+			// Not selected by other rules.
 			if p.selected {
 				continue
 			}
