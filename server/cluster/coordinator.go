@@ -164,6 +164,7 @@ func (c *coordinator) patrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
+			c.checkers.GetRegionStateChecker().Collect()
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}

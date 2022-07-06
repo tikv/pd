@@ -24,8 +24,17 @@ var (
 			Name:      "event_count",
 			Help:      "Counter of checker events.",
 		}, []string{"type", "name"})
+
+	regionStatesGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "regions",
+			Name:      "states",
+			Help:      "States of the regions.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
+	prometheus.MustRegister(regionStatesGauge)
 }
