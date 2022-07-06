@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/plan"
 )
 
 // A dummy comparer for testing.
@@ -49,11 +50,18 @@ type idFilter func(uint64) bool
 
 func (f idFilter) Scope() string { return "idFilter" }
 func (f idFilter) Type() string  { return "idFilter" }
-func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f(store.GetID())
+func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
+	if f(store.GetID()) {
+		return okStatus
+	}
+	return noNeedStatus
 }
-func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	return f(store.GetID())
+
+func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
+	if f(store.GetID()) {
+		return okStatus
+	}
+	return noNeedStatus
 }
 
 func TestCandidates(t *testing.T) {

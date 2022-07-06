@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/plan"
 	"go.uber.org/zap"
 )
 
@@ -270,7 +271,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster.GetOpts(), s) {
+	if stateFilter.Target(c.cluster.GetOpts(), s).StatusCode != plan.StatusOK {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
