@@ -45,7 +45,7 @@ func TestRegionStates(t *testing.T) {
 			},
 			core.WithInterval(&pdpb.TimeInterval{
 				StartTimestamp: uint64(endTimestamp - cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds() - 10),
-				EndTimestamp: uint64(endTimestamp  - cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds()),
+				EndTimestamp:   uint64(endTimestamp - cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds()),
 			}),
 		),
 		core.NewRegionInfo(
@@ -58,7 +58,7 @@ func TestRegionStates(t *testing.T) {
 			},
 			core.WithInterval(&pdpb.TimeInterval{
 				StartTimestamp: uint64(endTimestamp - 10),
-				EndTimestamp: uint64(endTimestamp),
+				EndTimestamp:   uint64(endTimestamp),
 			}),
 		),
 	}

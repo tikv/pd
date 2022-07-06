@@ -40,7 +40,7 @@ type RegionStateChecker struct {
 // NewRegionStateChecker creates a region state checker.
 func NewRegionStateChecker(opt *config.PersistOptions) *RegionStateChecker {
 	r := &RegionStateChecker{
-		opt: opt,
+		opt:    opt,
 		states: make(map[RegionStateType]map[uint64]*core.RegionInfo),
 	}
 	r.states[DownRegion] = make(map[uint64]*core.RegionInfo)
@@ -65,7 +65,7 @@ func (r *RegionStateChecker) Check(region *core.RegionInfo) {
 	regionID := region.GetID()
 
 	// check down region
-	if time.Now().UnixNano() - int64(region.GetInterval().GetEndTimestamp())  >= r.opt.GetMaxStoreDownTime().Nanoseconds() {
+	if time.Now().UnixNano()-int64(region.GetInterval().GetEndTimestamp()) >= r.opt.GetMaxStoreDownTime().Nanoseconds() {
 		_, exist := r.states[DownRegion][regionID]
 		if !exist {
 			r.states[DownRegion][regionID] = region
