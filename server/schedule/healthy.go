@@ -17,6 +17,7 @@ package schedule
 import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/plan"
 )
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
@@ -24,14 +25,14 @@ import (
 func IsRegionHealthy(region *core.RegionInfo) bool {
 	pendingFilter := filter.NewRegionPengdingFilter("option")
 	downFilter := filter.NewRegionDownFilter("option")
-	return pendingFilter.Select(region) && downFilter.Select(region)
+	return pendingFilter.Select(region) == plan.StatusOK && downFilter.Select(region) == plan.StatusOK
 }
 
 // IsRegionHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
 func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
 	downFilter := filter.NewRegionDownFilter("option")
-	return downFilter.Select(region)
+	return downFilter.Select(region) == plan.StatusOK
 }
 
 // IsRegionReplicated checks if a region is fully replicated. When placement
@@ -39,7 +40,7 @@ func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
 // rules is disabled, it should have enough replicas and no any learner peer.
 func IsRegionReplicated(cluster Cluster, region *core.RegionInfo) bool {
 	filter := filter.NewRegionReplicatedFilter("option", cluster)
-	return filter.Select(region)
+	return filter.Select(region) == plan.StatusOK
 }
 
 // ReplicatedRegion returns a function that checks if a region is fully replicated.

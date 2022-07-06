@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/plan"
 )
 
 func TestRegionPengdingFilter(t *testing.T) {
@@ -36,9 +37,9 @@ func TestRegionPengdingFilter(t *testing.T) {
 		{StoreId: 2, Id: 2},
 		{StoreId: 3, Id: 3},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.True(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusOK)
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{{StoreId: 2, Id: 2}}))
-	re.False(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusRegionUnhealthy)
 }
 
 func TestRegionDownFilter(t *testing.T) {
@@ -50,13 +51,13 @@ func TestRegionDownFilter(t *testing.T) {
 		{StoreId: 2, Id: 2},
 		{StoreId: 3, Id: 3},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.True(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusOK)
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(3),
 		DownSeconds: 24 * 60 * 60,
 	}
 	region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
-	re.False(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusRegionUnhealthy)
 }
 
 func TestRegionReplicatedFilter(t *testing.T) {
@@ -73,12 +74,12 @@ func TestRegionReplicatedFilter(t *testing.T) {
 		{StoreId: 2, Id: 2},
 		{StoreId: 3, Id: 3},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.True(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusOK)
 	region = core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.False(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusIsolationNotMatch)
 }
 
 func TestRegionEmptyFilter(t *testing.T) {
@@ -95,7 +96,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 		{StoreId: 2, Id: 2},
 		{StoreId: 3, Id: 3},
 	}}, &metapb.Peer{StoreId: 1, Id: 1}, core.SetApproximateSize(30))
-	re.True(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusOK)
 
 	region = region.Clone(core.SetApproximateSize(0))
 	for i := uint64(0); i < 100; i++ {
@@ -107,5 +108,5 @@ func TestRegionEmptyFilter(t *testing.T) {
 			EndKey:   []byte(fmt.Sprintf("%3dz", i+1)),
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
-	re.False(filter.Select(region))
+	re.Equal(filter.Select(region), plan.StatusRegionEmpty)
 }
