@@ -241,7 +241,7 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 	var better bool
 
 	for binaryInt := (1<<count - 1); binaryInt <= limit; binaryInt++ {
-		// there should be exactly `count` number in current binary number `m`
+		// there should be exactly `count` number in current binary number `binaryInt`
 		if !seletedBitEqualsTo(binaryInt, count) {
 			continue
 		}
