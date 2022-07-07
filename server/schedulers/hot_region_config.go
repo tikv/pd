@@ -51,7 +51,7 @@ const (
 
 var defaultConfig = prioritiesConfig{
 	read:        []string{QueryPriority, BytePriority},
-	writeLeader: []string{KeyPriority, BytePriority},
+	writeLeader: []string{QueryPriority, BytePriority},
 	writePeer:   []string{BytePriority, KeyPriority},
 }
 
@@ -65,9 +65,9 @@ var compatibleConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
-		MinHotByteRate:         100,
-		MinHotKeyRate:          10,
-		MinHotQueryRate:        10,
+		MinHotByteRate:         65536,
+		MinHotKeyRate:          1024,
+		MinHotQueryRate:        32,
 		MaxZombieRounds:        3,
 		MaxPeerNum:             1000,
 		ByteRateRankStepRatio:  0.05,
@@ -78,7 +78,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		MinorDecRatio:          0.99,
 		SrcToleranceRatio:      1.05, // Tolerate 5% difference
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		StrictPickingStore:     true,
+		StrictPickingStore:     false,
 		EnableForTiFlash:       true,
 		ForbidRWType:           "none",
 	}
