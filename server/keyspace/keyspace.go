@@ -34,6 +34,7 @@ var (
 	ErrKeyspaceNotFound    = errors.New("Keyspace does not exist")
 	ErrKeyspaceNameExists  = errors.New("Keyspace name already in use")
 	errArchiveNotSupported = errors.New("Archiving keyspace not supported currently")
+	errIDUsedUp            = errors.New("Keyspace ID too large")
 )
 
 // Manager manages keyspace related data.
@@ -73,18 +74,29 @@ type UpdateKeyspaceRequest struct {
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
-func NewKeyspaceManager(store endpoint.KeyspaceStorage) *Manager {
-	// TODO: initialize a keyspace id allocator that start from 1 with limit
-	return &Manager{store: store}
+func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator) *Manager {
+	return &Manager{
+		store:       store,
+		idAllocator: idAllocator,
+	}
 }
 
 // allocID allocate a new keyspace id.
 func (manager *Manager) allocID() (uint32, error) {
-	newID, err := manager.idAllocator.Alloc()
+	id64, err := manager.idAllocator.Alloc()
 	if err != nil {
 		return 0, err
 	}
-	return uint32(newID), nil
+	// id allocated id too small, keep allocating
+	id32 := uint32(id64)
+	if id32 == spaceIDMin {
+		return manager.allocID()
+	}
+	// if allocated id too big, return error
+	if id32 > spaceIDMax {
+		return 0, errIDUsedUp
+	}
+	return id32, nil
 }
 
 // createNameToID create a keyspace name to ID lookup entry.

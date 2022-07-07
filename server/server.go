@@ -408,6 +408,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	keyspaceIDAllocator := id.NewAllocator(s.client, s.rootPath, endpoint.KeyspaceIDAlloc(), "keyspace-idAlloc", s.member.MemberValue())
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
