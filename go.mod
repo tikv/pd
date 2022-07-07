@@ -3,7 +3,7 @@ module github.com/tikv/pd
 go 1.16
 
 // TODO: Remove after kvproto merge
-replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220704092113-f8d176ab7cb4
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220707065914-b0848f38449c
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0

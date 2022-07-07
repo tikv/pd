@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -55,6 +56,7 @@ import (
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
@@ -130,6 +132,8 @@ type Server struct {
 	storage storage.Storage
 	// safepoint manager
 	gcSafePointManager *gc.SafePointManager
+	// keyspace manager
+	keyspaceManager *keyspace.Manager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -276,6 +280,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
+		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{Server: s})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
