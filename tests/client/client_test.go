@@ -91,6 +91,7 @@ func TestClientClusterIDCheck(t *testing.T) {
 		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
+	re.Contains(err.Error(), "ErrClientGetLeader")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
 }
