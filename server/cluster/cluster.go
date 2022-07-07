@@ -887,10 +887,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	leaderCount := c.core.GetStoreLeaderCount(id)
 	regionCount := c.core.GetStoreRegionCount(id)
+	witnessCount := c.core.GetStoreWitnessCount(id)
 	pendingPeerCount := c.core.GetStorePendingPeerCount(id)
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
 	regionSize := c.core.GetStoreRegionSize(id)
-	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
+	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, witnessCount)
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {

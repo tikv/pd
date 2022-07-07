@@ -187,10 +187,10 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
 	bc.Lock()
 	defer bc.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize, witnessCount)
 }
 
 const randomRegionMaxRetry = 10
@@ -279,6 +279,12 @@ func (bc *BasicCluster) GetStorePendingPeerCount(storeID uint64) int {
 	bc.RLock()
 	defer bc.RUnlock()
 	return bc.Regions.GetStorePendingPeerCount(storeID)
+}
+
+func (bc *BasicCluster) GetStoreWitnessCount(storeID uint64) int {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetStoreWitnessCount(storeID)
 }
 
 // GetStoreLeaderRegionSize get total size of store's leader regions.

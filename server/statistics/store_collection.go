@@ -43,6 +43,7 @@ type storeStatistics struct {
 	StorageCapacity uint64
 	RegionCount     int
 	LeaderCount     int
+	WitnessCount    int
 	LabelCounter    map[string]int
 	Preparing       int
 	Serving         int
@@ -109,6 +110,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.StorageCapacity += store.GetCapacity()
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
+	s.WitnessCount += store.GetWitnessCount()
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
@@ -116,6 +118,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_count").Set(float64(store.GetRegionCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_count").Set(float64(store.GetLeaderCount()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "witness_count").Set(float64(store.GetWitnessCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
@@ -168,6 +171,7 @@ func (s *storeStatistics) Collect() {
 	metrics["store_removed_count"] = float64(s.Removed)
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
+	metrics["witness_count"] = float64(s.WitnessCount)
 	metrics["storage_size"] = float64(s.StorageSize)
 	metrics["storage_capacity"] = float64(s.StorageCapacity)
 
@@ -238,6 +242,7 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"region_count",
 		"leader_size",
 		"leader_count",
+		"witness_count",
 		"store_available",
 		"store_used",
 		"store_capacity",
