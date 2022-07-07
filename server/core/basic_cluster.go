@@ -281,6 +281,7 @@ func (bc *BasicCluster) GetStorePendingPeerCount(storeID uint64) int {
 	return bc.Regions.GetStorePendingPeerCount(storeID)
 }
 
+// GetStoreWitnessCount gets the total count of a store's witness RegionInfo.
 func (bc *BasicCluster) GetStoreWitnessCount(storeID uint64) int {
 	bc.RLock()
 	defer bc.RUnlock()
