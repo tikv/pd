@@ -18,6 +18,7 @@ import (
 	"path"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/syncutil"
@@ -45,14 +46,24 @@ type allocatorImpl struct {
 	base uint64
 	end  uint64
 
-	client   *clientv3.Client
-	rootPath string
-	member   string
+	client    *clientv3.Client
+	rootPath  string
+	allocPath string
+	label     string
+	metric    prometheus.Gauge
+	member    string
 }
 
 // NewAllocator creates a new ID Allocator.
-func NewAllocator(client *clientv3.Client, rootPath string, member string) Allocator {
-	return &allocatorImpl{client: client, rootPath: rootPath, member: member}
+func NewAllocator(client *clientv3.Client, rootPath, allocPath, label, member string) Allocator {
+	return &allocatorImpl{
+		client:    client,
+		rootPath:  rootPath,
+		allocPath: allocPath,
+		label:     label,
+		metric:    idGauge.WithLabelValues(label),
+		member:    member,
+	}
 }
 
 // Alloc returns a new id.
@@ -119,13 +130,13 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
-	log.Info("idAllocator allocates a new id", zap.Uint64("alloc-id", end))
-	idallocGauge.Set(float64(end))
+	log.Info("idAllocator allocates a new id", zap.String("label", alloc.label), zap.Uint64("alloc-id", end))
+	alloc.metric.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - allocStep
 	return nil
 }
 
 func (alloc *allocatorImpl) getAllocIDPath() string {
-	return path.Join(alloc.rootPath, "alloc_id")
+	return path.Join(alloc.rootPath, alloc.allocPath)
 }
