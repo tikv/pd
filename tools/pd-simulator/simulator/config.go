@@ -16,11 +16,11 @@ package simulator
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/metricutil"
 	"os"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
