@@ -289,8 +289,8 @@ func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool 
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
-	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
-	router.HandleFunc("/config", conf.handleSetConfig).Methods("POST")
+	router.HandleFunc("/list", conf.handleGetConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", conf.handleSetConfig).Methods(http.MethodPost)
 	router.ServeHTTP(w, r)
 }
 

@@ -217,8 +217,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 2. Role match, or can match after transformed.
 		// 3. Not selected by other rules.
 		for _, p := range w.peers {
-			if MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) &&
-				!p.selected {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) {
 				candidates = append(candidates, p)
 			}
 		}
@@ -242,7 +241,10 @@ func (w *fitWorker) enumPeers(candidates, selected []*fitPeer, index int, count 
 	}
 
 	var better bool
-	for i, p := range candidates {
+	// make sure the left number of candidates should be enough.
+	indexLimit := len(candidates) - (count - len(selected))
+	for i := 0; i <= indexLimit; i++ {
+		p := candidates[i]
 		p.selected = true
 		better = w.enumPeers(candidates[i+1:], append(selected, p), index, count) || better
 		p.selected = false

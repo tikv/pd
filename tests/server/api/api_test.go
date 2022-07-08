@@ -151,7 +151,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	}
 	data, err := json.Marshal(input)
 	suite.NoError(err)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
@@ -179,7 +179,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	}
 	data, err = json.Marshal(input)
 	suite.NoError(err)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
@@ -202,7 +202,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -224,7 +224,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -237,10 +237,174 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 
 func doTestRequest(srv *tests.TestServer) {
 	timeUnix := time.Now().Unix() - 20
-	req, _ := http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
 	req.Header.Set("component", "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
+}
+
+func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	input := map[string]interface{}{
+		"enable-rate-limit": "true",
+	}
+	data, err := json.Marshal(input)
+	suite.NoError(err)
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, err := dialClient.Do(req)
+	suite.NoError(err)
+	resp.Body.Close()
+	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
+
+	// returns StatusOK when no rate-limit config
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+	resp, err = dialClient.Do(req)
+	suite.NoError(err)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	suite.NoError(err)
+	suite.Equal(resp.StatusCode, http.StatusOK)
+	input = make(map[string]interface{})
+	input["type"] = "label"
+	input["label"] = "SetLogLevel"
+	input["qps"] = 0.5
+	input["concurrency"] = 1
+	jsonBody, err := json.Marshal(input)
+	suite.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config/rate-limit", bytes.NewBuffer(jsonBody))
+	resp, err = dialClient.Do(req)
+	suite.NoError(err)
+	_, err = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	suite.NoError(err)
+	suite.Equal(resp.StatusCode, http.StatusOK)
+
+	for i := 0; i < 3; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		if i > 0 {
+			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+		} else {
+			suite.Equal(resp.StatusCode, http.StatusOK)
+		}
+	}
+
+	// qps = 0.5, so sleep 2s
+	time.Sleep(time.Second * 2)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		if i > 0 {
+			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+		} else {
+			suite.Equal(resp.StatusCode, http.StatusOK)
+		}
+	}
+
+	// test only sleep 1s
+	time.Sleep(time.Second)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+	}
+
+	// resign leader
+	oldLeaderName := leader.GetServer().Name()
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
+	var servers []*server.Server
+	for _, s := range suite.cluster.GetServers() {
+		servers = append(servers, s.GetServer())
+	}
+	server.MustWaitLeader(suite.Require(), servers)
+	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
+	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
+	suite.Equal(ok, true)
+	suite.Equal(cfg.ConcurrencyLimit, uint64(1))
+	suite.Equal(cfg.QPS, 0.5)
+	suite.Equal(cfg.QPSBurst, 1)
+
+	for i := 0; i < 3; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		if i > 0 {
+			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+		} else {
+			suite.Equal(resp.StatusCode, http.StatusOK)
+		}
+	}
+
+	// qps = 0.5, so sleep 2s
+	time.Sleep(time.Second * 2)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		if i > 0 {
+			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+		} else {
+			suite.Equal(resp.StatusCode, http.StatusOK)
+		}
+	}
+
+	// test only sleep 1s
+	time.Sleep(time.Second)
+	for i := 0; i < 2; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		data, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
+	}
+
+	input = map[string]interface{}{
+		"enable-rate-limit": "false",
+	}
+	data, err = json.Marshal(input)
+	suite.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, err = dialClient.Do(req)
+	suite.NoError(err)
+	resp.Body.Close()
+	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), false)
+
+	for i := 0; i < 3; i++ {
+		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+		resp, err = dialClient.Do(req)
+		suite.NoError(err)
+		_, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		suite.NoError(err)
+		suite.Equal(resp.StatusCode, http.StatusOK)
+	}
 }
 
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
@@ -250,20 +414,20 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	}
 	data, err := json.Marshal(input)
 	suite.NoError(err)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
 	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 	timeUnix := time.Now().Unix() - 20
-	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
@@ -282,14 +446,14 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 
 	timeUnix = time.Now().Unix() - 20
-	req, _ = http.NewRequest("GET", fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest("GET", leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
@@ -302,7 +466,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	}
 	data, err = json.Marshal(input)
 	suite.NoError(err)
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
@@ -322,13 +486,13 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	}
 	data, err := json.Marshal(input)
 	suite.NoError(err)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
 	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
-	req, _ = http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
@@ -352,7 +516,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
@@ -374,7 +538,7 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()

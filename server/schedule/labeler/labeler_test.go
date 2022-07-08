@@ -160,17 +160,17 @@ func TestIndex(t *testing.T) {
 		{"abcd", "cd12", map[string]string{"k1": "v0", "k2": "v2"}},
 		{"cdef", "efef", map[string]string{"k1": "v0", "k2": "v3"}},
 	}
-	for _, tc := range testCases {
-		start, _ := hex.DecodeString(tc.start)
-		end, _ := hex.DecodeString(tc.end)
+	for _, testCase := range testCases {
+		start, _ := hex.DecodeString(testCase.start)
+		end, _ := hex.DecodeString(testCase.end)
 		region := core.NewTestRegionInfo(start, end)
 		labels := labeler.GetRegionLabels(region)
-		re.Len(labels, len(tc.labels))
+		re.Len(labels, len(testCase.labels))
 		for _, l := range labels {
-			re.Equal(tc.labels[l.Key], l.Value)
+			re.Equal(testCase.labels[l.Key], l.Value)
 		}
 		for _, k := range []string{"k1", "k2"} {
-			re.Equal(tc.labels[k], labeler.GetRegionLabel(region, k))
+			re.Equal(testCase.labels[k], labeler.GetRegionLabel(region, k))
 		}
 	}
 }
@@ -246,17 +246,17 @@ func TestKeyRange(t *testing.T) {
 		{"cd12", "dddd", map[string]string{"k3": "v3"}},
 		{"ffee", "ffff", map[string]string{}},
 	}
-	for _, tc := range testCases {
-		start, _ := hex.DecodeString(tc.start)
-		end, _ := hex.DecodeString(tc.end)
+	for _, testCase := range testCases {
+		start, _ := hex.DecodeString(testCase.start)
+		end, _ := hex.DecodeString(testCase.end)
 		region := core.NewTestRegionInfo(start, end)
 		labels := labeler.GetRegionLabels(region)
-		re.Len(labels, len(tc.labels))
+		re.Len(labels, len(testCase.labels))
 		for _, l := range labels {
-			re.Equal(l.Value, tc.labels[l.Key])
+			re.Equal(l.Value, testCase.labels[l.Key])
 		}
 		for _, k := range []string{"k1", "k2", "k3"} {
-			re.Equal(tc.labels[k], labeler.GetRegionLabel(region, k))
+			re.Equal(testCase.labels[k], labeler.GetRegionLabel(region, k))
 		}
 	}
 }

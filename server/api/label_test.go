@@ -141,7 +141,7 @@ func (suite *labelsStoreTestSuite) TestLabelsGet() {
 }
 
 func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
-	var table = []struct {
+	var testCases = []struct {
 		name, value string
 		want        []*metapb.Store
 	}{
@@ -175,12 +175,12 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 		},
 	}
 	re := suite.Require()
-	for _, t := range table {
-		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, t.name, t.value)
+	for _, testCase := range testCases {
+		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, testCase.name, testCase.value)
 		info := new(StoresInfo)
 		err := tu.ReadGetJSON(re, testDialClient, url, info)
 		suite.NoError(err)
-		checkStoresInfo(re, info.Stores, t.want)
+		checkStoresInfo(re, info.Stores, testCase.want)
 	}
 	_, err := newStoresLabelFilter("test", ".[test")
 	suite.Error(err)
