@@ -30,21 +30,20 @@ const (
 )
 
 var (
-	errKeyspaceArchived    = errors.New("Keyspace already archived")
-	ErrKeyspaceNotFound    = errors.New("Keyspace does not exist")
-	ErrKeyspaceNameExists  = errors.New("Keyspace name already in use")
-	errArchiveNotSupported = errors.New("Archiving keyspace not supported currently")
-	errIDUsedUp            = errors.New("Keyspace ID too large")
+	errKeyspaceArchived   = errors.New("Keyspace already archived")
+	ErrKeyspaceNotFound   = errors.New("Keyspace does not exist")
+	ErrKeyspaceNameExists = errors.New("Keyspace name already in use")
+	errIllegalID          = errors.New("Cannot create keyspace with that ID")
+	errIllegalName        = errors.New("Cannot create keyspace with that name")
 )
 
 // Manager manages keyspace related data.
 // It validates requests and provides concurrency control.
 type Manager struct {
-	// idLock guards keyspace name to id lookup.
+	// idLock guards keyspace name to id lookup entries.
 	idLock syncutil.Mutex
-
-	keyspaceLock syncutil.Mutex
-
+	// metaLock guards keyspace meta.
+	metaLock syncutil.Mutex
 	// idAllocator allocates keyspace id.
 	idAllocator id.Allocator
 	// store is the storage for keyspace related information.
@@ -53,9 +52,9 @@ type Manager struct {
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
 type CreateKeyspaceRequest struct {
-	name          string
-	initialConfig map[string]string
-	now           time.Time
+	Name          string
+	InitialConfig map[string]string
+	Now           time.Time
 }
 
 // UpdateKeyspaceRequest represents necessary arguments to update keyspace.
@@ -87,14 +86,14 @@ func (manager *Manager) allocID() (uint32, error) {
 	if err != nil {
 		return 0, err
 	}
-	// id allocated id too small, keep allocating
 	id32 := uint32(id64)
-	if id32 == spaceIDMin {
+	// skip id 0
+	if id32 < spaceIDMin {
 		return manager.allocID()
 	}
 	// if allocated id too big, return error
 	if id32 > spaceIDMax {
-		return 0, errIDUsedUp
+		return 0, errIllegalID
 	}
 	return id32, nil
 }
@@ -115,7 +114,7 @@ func (manager *Manager) createNameToID(spaceID uint32, name string) error {
 	return manager.store.SaveKeyspaceID(spaceID, name)
 }
 
-// CreateKeyspace create a keyspace meta with initial config.
+// CreateKeyspace create a keyspace meta with initial config and save it to storage.
 func (manager *Manager) CreateKeyspace(request CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	// allocate new id
 	newID, err := manager.allocID()
@@ -123,20 +122,24 @@ func (manager *Manager) CreateKeyspace(request CreateKeyspaceRequest) (*keyspace
 		return nil, err
 	}
 	// bind name to that id
-	if err = manager.createNameToID(newID, request.name); err != nil {
+	if err = manager.createNameToID(newID, request.Name); err != nil {
 		return nil, err
 	}
-	// TODO: use single flight for more fine grain locking
-	manager.keyspaceLock.Lock()
-	defer manager.keyspaceLock.Unlock()
+
+	if request.Name == "" {
+		return nil, errIllegalName
+	}
+
+	manager.metaLock.Lock()
+	defer manager.metaLock.Unlock()
 
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
-		Name:           request.name,
+		Name:           request.Name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      request.now.Unix(),
-		StateChangedAt: request.now.Unix(),
-		Config:         request.initialConfig,
+		CreatedAt:      request.Now.Unix(),
+		StateChangedAt: request.Now.Unix(),
+		Config:         request.InitialConfig,
 	}
 	if err := manager.store.SaveKeyspace(keyspace); err != nil {
 		return nil, err
@@ -178,8 +181,8 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 // UpdateKeyspace update keyspace's state and config according to request.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspace(request UpdateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
-	manager.keyspaceLock.Lock()
-	defer manager.keyspaceLock.Unlock()
+	manager.metaLock.Lock()
+	defer manager.metaLock.Unlock()
 	// load keyspace by id
 	keyspace, err := manager.LoadKeyspace(request.Name)
 	if err != nil {
@@ -219,10 +222,6 @@ func changeKeyspaceState(keyspace *keyspacepb.KeyspaceMeta, newState keyspacepb.
 	// ARCHIVED is the terminal state that cannot be changed from.
 	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
 		return errKeyspaceArchived
-	}
-	// TODO: support changing keyspace state to ARCHIVED and gc it.
-	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
-		return errArchiveNotSupported
 	}
 
 	keyspace.StateChangedAt = now.Unix()
