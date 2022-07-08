@@ -218,7 +218,7 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 	operator := mustReadURL(re, regionURL)
 	suite.Contains(operator, "operator not found")
 
-	tt := []struct {
+	testCases := []struct {
 		name                string
 		placementRuleEnable bool
 		rules               []*placement.Rule
@@ -371,33 +371,33 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			}, ", "),
 		},
 	}
-	for _, tc := range tt {
-		suite.T().Log(tc.name)
-		suite.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(tc.placementRuleEnable)
-		if tc.placementRuleEnable {
+	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
+		suite.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		if testCase.placementRuleEnable {
 			err := suite.svr.GetRaftCluster().GetRuleManager().Initialize(
 				suite.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
 				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels())
 			suite.NoError(err)
 		}
-		if len(tc.rules) > 0 {
+		if len(testCase.rules) > 0 {
 			// add customized rule first and then remove default rule
-			err := suite.svr.GetRaftCluster().GetRuleManager().SetRules(tc.rules)
+			err := suite.svr.GetRaftCluster().GetRuleManager().SetRules(testCase.rules)
 			suite.NoError(err)
 			err = suite.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
 			suite.NoError(err)
 		}
 		var err error
-		if tc.expectedError == nil {
-			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), tc.input, tu.StatusOK(re))
+		if testCase.expectedError == nil {
+			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), testCase.input, tu.StatusOK(re))
 		} else {
-			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), tc.input,
-				tu.StatusNotOK(re), tu.StringContain(re, tc.expectedError.Error()))
+			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), testCase.input,
+				tu.StatusNotOK(re), tu.StringContain(re, testCase.expectedError.Error()))
 		}
 		suite.NoError(err)
-		if len(tc.expectSteps) > 0 {
+		if len(testCase.expectSteps) > 0 {
 			operator = mustReadURL(re, regionURL)
-			suite.Contains(operator, tc.expectSteps)
+			suite.Contains(operator, testCase.expectSteps)
 		}
 		_, err = apiutil.DoDelete(testDialClient, regionURL)
 		suite.NoError(err)

@@ -50,15 +50,15 @@ func TestDistinctScoreFilter(t *testing.T) {
 		{[]uint64{1, 3, 4}, 1, 2, true, false},
 		{[]uint64{1, 4, 6}, 4, 2, false, false},
 	}
-	for _, tc := range testCases {
+	for _, testCase := range testCases {
 		var stores []*core.StoreInfo
-		for _, id := range tc.stores {
+		for _, id := range testCase.stores {
 			stores = append(stores, allStores[id-1])
 		}
-		ls := NewLocationSafeguard("", labels, stores, allStores[tc.source-1])
-		li := NewLocationImprover("", labels, stores, allStores[tc.source-1])
-		re.Equal(tc.safeGuardRes, ls.Target(config.NewTestOptions(), allStores[tc.target-1]))
-		re.Equal(tc.improverRes, li.Target(config.NewTestOptions(), allStores[tc.target-1]))
+		ls := NewLocationSafeguard("", labels, stores, allStores[testCase.source-1])
+		li := NewLocationImprover("", labels, stores, allStores[testCase.source-1])
+		re.Equal(testCase.safeGuardRes, ls.Target(config.NewTestOptions(), allStores[testCase.target-1]))
+		re.Equal(testCase.improverRes, li.Target(config.NewTestOptions(), allStores[testCase.target-1]))
 	}
 }
 
@@ -87,9 +87,9 @@ func TestLabelConstraintsFilter(t *testing.T) {
 		{"id", "notExists", []string{}, false},
 		{"_id", "notExists", []string{}, true},
 	}
-	for _, tc := range testCases {
-		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: tc.key, Op: placement.LabelConstraintOp(tc.op), Values: tc.values}})
-		re.Equal(tc.res, filter.Source(testCluster.GetOpts(), store))
+	for _, testCase := range testCases {
+		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
+		re.Equal(testCase.res, filter.Source(testCluster.GetOpts(), store))
 	}
 }
 
@@ -124,13 +124,13 @@ func TestRuleFitFilter(t *testing.T) {
 		{6, 1, map[string]string{"zone": "z4"}, true, true},
 	}
 	// Init cluster
-	for _, tc := range testCases {
-		testCluster.AddLabelsStore(tc.storeID, tc.regionCount, tc.labels)
+	for _, testCase := range testCases {
+		testCluster.AddLabelsStore(testCase.storeID, testCase.regionCount, testCase.labels)
 	}
-	for _, tc := range testCases {
+	for _, testCase := range testCases {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1)
-		re.Equal(tc.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)))
-		re.Equal(tc.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(tc.storeID)))
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)))
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)))
 	}
 }
 
@@ -152,9 +152,9 @@ func TestStoreStateFilter(t *testing.T) {
 	}
 
 	check := func(store *core.StoreInfo, testCases []testCase) {
-		for _, tc := range testCases {
-			re.Equal(tc.sourceRes, filters[tc.filterIdx].Source(opt, store))
-			re.Equal(tc.targetRes, filters[tc.filterIdx].Target(opt, store))
+		for _, testCase := range testCases {
+			re.Equal(testCase.sourceRes, filters[testCase.filterIdx].Source(opt, store))
+			re.Equal(testCase.targetRes, filters[testCase.filterIdx].Target(opt, store))
 		}
 	}
 
@@ -248,11 +248,11 @@ func TestIsolationFilter(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		filter := NewIsolationFilter("", tc.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(tc.region))
+	for _, testCase := range testCases {
+		filter := NewIsolationFilter("", testCase.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(testCase.region))
 		for idx, store := range allStores {
-			re.Equal(tc.sourceRes[idx], filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)))
-			re.Equal(tc.targetRes[idx], filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)))
+			re.Equal(testCase.sourceRes[idx], filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)))
+			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)))
 		}
 	}
 }
@@ -283,6 +283,35 @@ func TestPlacementGuard(t *testing.T) {
 	testCluster.SetEnablePlacementRules(true)
 	re.IsType(newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1),
 		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store))
+}
+
+func TestSpecialUseFilter(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := config.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+
+	testCases := []struct {
+		label     map[string]string
+		allowUse  []string
+		sourceRes bool
+		targetRes bool
+	}{
+		{nil, []string{""}, true, true},
+		{map[string]string{SpecialUseKey: SpecialUseHotRegion}, []string{""}, false, false},
+		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{""}, false, false},
+		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{SpecialUseReserved}, true, true},
+		{map[string]string{core.EngineKey: core.EngineTiFlash}, []string{""}, true, true},
+		{map[string]string{core.EngineKey: core.EngineTiKV}, []string{""}, true, true},
+	}
+	for _, testCase := range testCases {
+		store := core.NewStoreInfoWithLabel(1, 1, testCase.label)
+		filter := NewSpecialUseFilter("", testCase.allowUse...)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store))
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store))
+	}
 }
 
 func BenchmarkCloneRegionTest(b *testing.B) {

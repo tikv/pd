@@ -274,3 +274,65 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		fitRegion(storesSet.GetStores(), region, rules)
 	}
 }
+
+func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
+	region := mockRegion(5, 0)
+	rules := []*Rule{}
+	// create 100 rules, with each rule has 101 LabelConstraints.
+	for i := 0; i < 100; i++ {
+		rule := &Rule{
+			GroupID:          "pd",
+			ID:               fmt.Sprintf("%v", i),
+			Role:             Follower,
+			Count:            3,
+			LocationLabels:   []string{},
+			LabelConstraints: []LabelConstraint{},
+		}
+		values := []string{}
+		for id := 1; id < 100; id++ {
+			values = append(values, fmt.Sprintf("value_%08d", id))
+			labelContaint := LabelConstraint{
+				Key:    fmt.Sprintf("key_%08d", id),
+				Op:     NotIn,
+				Values: values,
+			}
+			rule.LabelConstraints = append(rule.LabelConstraints, labelContaint)
+		}
+		// add an exclusive containt.
+		values = append(values, "exclusive")
+		labelContaint := LabelConstraint{
+			Key:    "exclusive",
+			Op:     In,
+			Values: values,
+		}
+		rule.LabelConstraints = append(rule.LabelConstraints, labelContaint)
+		rules = append(rules, rule)
+	}
+	// create stores, with each stores has 101 labels(1 exclusive label).
+	lists := make([]*core.StoreInfo, 0)
+	for _, peer := range region.GetPeers() {
+		storeID := peer.StoreId
+		labels := []*metapb.StoreLabel{}
+		for labID := 0; labID < 100; labID++ {
+			label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
+			labels = append(labels, label)
+		}
+		label := &metapb.StoreLabel{Key: "exclusive", Value: "exclusive"}
+		labels = append(labels, label)
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(labels))
+		lists = append(lists, store)
+	}
+	mm := make(map[uint64]*core.StoreInfo)
+	for _, store := range lists {
+		mm[store.GetID()] = store
+	}
+	storesSet := mockStoresSet{
+		stores:     mm,
+		storelists: lists,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fitRegion(storesSet.GetStores(), region, rules)
+	}
+}

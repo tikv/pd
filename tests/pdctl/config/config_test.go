@@ -261,6 +261,16 @@ func TestConfig(t *testing.T) {
 	args1 = []string{"-u", pdAddr, "config", "set", "enable-placement-rules", "true"}
 	_, err = pdctl.ExecuteCommand(cmd, args1...)
 	re.NoError(err)
+
+	// test invalid value
+	argsInvalid := []string{"-u", pdAddr, "config", "set", "leader-schedule-policy", "aaa"}
+	output, err = pdctl.ExecuteCommand(cmd, argsInvalid...)
+	re.NoError(err)
+	re.Contains(string(output), "is invalid")
+	argsInvalid = []string{"-u", pdAddr, "config", "set", "key-type", "aaa"}
+	output, err = pdctl.ExecuteCommand(cmd, argsInvalid...)
+	re.NoError(err)
+	re.Contains(string(output), "is invalid")
 }
 
 func TestPlacementRules(t *testing.T) {
