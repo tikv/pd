@@ -55,7 +55,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	}
 	data, err := json.Marshal(input)
 	re.NoError(err)
-	req, _ := http.NewRequest("POST", leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()

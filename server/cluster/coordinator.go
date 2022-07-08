@@ -892,7 +892,7 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		}
 		cacheCluster := newCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if ops := s.Scheduler.Schedule(cacheCluster); len(ops) > 0 {
+		if ops, _ := s.Scheduler.Schedule(cacheCluster, false); len(ops) > 0 {
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return ops
 		}
