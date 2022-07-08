@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -943,21 +942,19 @@ func (s *scheduleController) GetDelayUntil() int64 {
 	return 0
 }
 
+const MaxDiagnosisResultNum = 6
+
 type diagnosisManager struct {
-	cluster        *RaftCluster
-	schedulers     map[string]*scheduleController
-	enableDiganose map[string]bool
-	dryRunResult   map[string]*diagnosisResult
+	cluster      *RaftCluster
+	schedulers   map[string]*scheduleController
+	dryRunResult map[string]*cache.FIFO
 }
 
 func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosisManager {
 	return &diagnosisManager{
-		cluster:    cluster,
-		schedulers: schedulerControllers,
-		enableDiganose: map[string]bool{
-			schedulers.BalanceRegionName: true,
-		},
-		dryRunResult: make(map[string]*diagnosisResult),
+		cluster:      cluster,
+		schedulers:   schedulerControllers,
+		dryRunResult: make(map[string]*cache.FIFO),
 	}
 }
 
@@ -965,22 +962,37 @@ func (d *diagnosisManager) diagnosisDryRun(name string) error {
 	if _, ok := d.schedulers[name]; !ok {
 		return errors.Errorf("no scheduler named %s", name)
 	}
-	ok := d.enableDiganose[name]
-	if !ok {
-		return errors.Errorf("scheduler %s does not support diagnosis", name)
-	}
 	ops, plans := d.schedulers[name].DiagnoseDryRun()
-	d.dryRunResult[name] = newDiagnosisResult(plans, ops)
+	result := newDiagnosisResult(ops, plans)
+	if _, ok := d.dryRunResult[name]; !ok {
+		d.dryRunResult[name] = cache.NewFIFO(MaxDiagnosisResultNum)
+	}
+	queue := d.dryRunResult[name]
+	queue.Put(result.timestamp, result)
 	return nil
 }
 
 type diagnosisResult struct {
-	result []plan.Plan
-	ops    []*operator.Operator
+	timestamp       uint64
+	plans           []plan.Plan
+	schedulablePlan []plan.Plan
 }
 
-func newDiagnosisResult(result []plan.Plan, ops []*operator.Operator) *diagnosisResult {
-	return &diagnosisResult{result: result, ops: ops}
+func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
+	index := len(ops)
+	if len(ops) > 0 {
+		if ops[0].Kind()&operator.OpMerge != 0 {
+			index = index / 2
+		}
+	}
+	if index > len(result) {
+		return nil
+	}
+	return &diagnosisResult{
+		timestamp:       uint64(time.Now().Unix()),
+		plans:           result[index:],
+		schedulablePlan: result[:index],
+	}
 }
 
 func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
