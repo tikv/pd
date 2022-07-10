@@ -181,7 +181,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToAdd
 	}
-	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -266,6 +266,15 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
 		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
 	}
+	if core.IsVoter(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
+		checkerCounter.WithLabelValues("rule_checker", "set-voter-non-witness").Inc()
+		return operator.CreateNonWitessVoterOperator("fix-demote-voter", c.cluster, region, peer)
+	}
+	if core.IsLearner(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
+		checkerCounter.WithLabelValues("rule_checker", "set-voter-non-witness").Inc()
+		return operator.CreateNonWitessLeaderOperator("fix-demote-voter", c.cluster, region, peer)
+	}
+
 	return nil, nil
 }
 

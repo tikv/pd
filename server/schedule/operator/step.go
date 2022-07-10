@@ -134,6 +134,7 @@ func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *
 type AddPeer struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -202,6 +203,7 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -274,6 +276,7 @@ func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
 type PromoteLearner struct {
 	ToStore, PeerID uint64
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.

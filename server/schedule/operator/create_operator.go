@@ -282,3 +282,19 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 	b.execChangePeerV2(false, true)
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
 }
+
+// CreateNonWitessVoterOperator creates an operator that set a peer with non-witness
+func CreateNonWitessVoterOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		DemoteVoter(peer.GetStoreId()).
+		NonWitness(peer.GetStoreId()).
+		Build(0)
+}
+
+// CreateNonWitessLeaderOperator creates an operator that set a peer with non-witness
+func CreateNonWitessLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		RemovePeer(peer.GetStoreId()).
+		AddPeer(&metapb.Peer{Id: peer.GetId(), StoreId: peer.GetStoreId(), Role: metapb.PeerRole_Learner, IsWitness: false}).
+		Build(0)
+}

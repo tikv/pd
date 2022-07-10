@@ -59,6 +59,14 @@ func IsLearnerOrDemotingVoter(peer *metapb.Peer) bool {
 	return false
 }
 
+// IsWitness judges whether the Peer is a witness
+func IsWitness(peer *metapb.Peer) bool {
+	if peer == nil {
+		return false
+	}
+	return peer.GetIsWitness()
+}
+
 // IsInJointState judges whether the Peer is in joint state.
 func IsInJointState(peers ...*metapb.Peer) bool {
 	for _, peer := range peers {
