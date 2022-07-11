@@ -51,7 +51,7 @@ func (s *KeyspaceServer) notBootstrappedHeader() *pdpb.ResponseHeader {
 // getErrorHeader returns corresponding ResponseHeader based on err.
 func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
-	case keyspace.ErrKeyspaceNameExists:
+	case keyspace.ErrKeyspaceExists:
 		return s.errorHeader(&pdpb.Error{
 			Type:    pdpb.ErrorType_DUPLICATED_ENTRY,
 			Message: err.Error(),
@@ -76,20 +76,14 @@ func (s *KeyspaceServer) UpdateKeyspaceConfig(ctx context.Context, request *keys
 	}
 
 	manager := s.keyspaceManager
-	updateRequest := &keyspace.UpdateKeyspaceRequest{
-		Name:        request.Name,
-		UpdateState: false,
-		ToPut:       request.Put,
-		ToDelete:    request.Delete,
-	}
-	keyspaceMeta, err := manager.UpdateKeyspace(updateRequest)
+	updatedMeta, err := manager.UpdateKeyspaceConfig(request.Name, request.Mutations)
 	if err != nil {
 		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.getErrorHeader(err)}, err
 	}
 
 	return &keyspacepb.UpdateKeyspaceConfigResponse{
 		Header:   s.header(),
-		Keyspace: keyspaceMeta,
+		Keyspace: updatedMeta,
 	}, nil
 }
 
@@ -134,11 +128,11 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 				if event.Type != clientv3.EventTypePut {
 					continue
 				}
-				keyspace := &keyspacepb.KeyspaceMeta{}
-				if err = proto.Unmarshal(event.Kv.Value, keyspace); err != nil {
+				meta := &keyspacepb.KeyspaceMeta{}
+				if err = proto.Unmarshal(event.Kv.Value, meta); err != nil {
 					return err
 				}
-				keyspaces = append(keyspaces, keyspace)
+				keyspaces = append(keyspaces, meta)
 			}
 			if len(keyspaces) > 0 {
 				if err = stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces}); err != nil {
@@ -154,11 +148,11 @@ func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspac
 	if err != nil {
 		return err
 	}
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
+	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
 	for i, kv := range getResp.Kvs {
-		if err = proto.Unmarshal(kv.Value, keyspaces[i]); err != nil {
+		if err = proto.Unmarshal(kv.Value, metas[i]); err != nil {
 			return err
 		}
 	}
-	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces})
+	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
 }

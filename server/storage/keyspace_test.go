@@ -20,13 +20,14 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
-func TestKeyspace(t *testing.T) {
+func TestSaveLoadKeyspace(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	keyspaces := testKeyspaces()
+	keyspaces := makeTestKeyspaces()
 	for _, keyspace := range keyspaces {
 		re.NoError(storage.SaveKeyspace(keyspace))
 	}
@@ -53,22 +54,22 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	keyspaces := testKeyspaces()
+	keyspaces := makeTestKeyspaces()
 	for _, keyspace := range keyspaces {
 		re.NoError(storage.SaveKeyspace(keyspace))
 	}
 
-	// load all keyspaces.
+	// Load all keyspaces.
 	loadedKeyspaces, err := storage.LoadRangeKeyspace(keyspaces[0].GetId(), 0)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces, loadedKeyspaces)
 
-	// load keyspaces that with id no less than second test keyspace.
+	// Load keyspaces with id >= second test keyspace's id.
 	loadedKeyspaces2, err := storage.LoadRangeKeyspace(keyspaces[1].GetId(), 0)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces[1:], loadedKeyspaces2)
 
-	// load keyspace with the smallest id.
+	// Load keyspace with the smallest id.
 	loadedKeyspace3, err := storage.LoadRangeKeyspace(1, 1)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
@@ -81,27 +82,27 @@ func TestSaveLoadKeyspaceID(t *testing.T) {
 	ids := []uint32{100, 200, 300}
 	names := []string{"keyspace1", "keyspace2", "keyspace3"}
 	for i := range ids {
-		re.NoError(storage.SaveKeyspaceID(ids[i], names[i]))
+		re.NoError(storage.SaveKeyspaceIDByName(ids[i], names[i]))
 	}
 
 	for i := range names {
-		success, id, err := storage.LoadKeyspaceID(names[i])
+		success, id, err := storage.LoadKeyspaceIDByName(names[i])
 		re.NoError(err)
 		re.True(success)
 		re.Equal(ids[i], id)
 	}
-	// loading non-existing id should return false, 0, nil
-	success, id, err := storage.LoadKeyspaceID("non-existing")
+	// Loading non-existing id should return false, 0, nil.
+	success, id, err := storage.LoadKeyspaceIDByName("non-existing")
 	re.NoError(err)
 	re.False(success)
 	re.Equal(uint32(0), id)
 }
 
-func testKeyspaces() []*keyspacepb.KeyspaceMeta {
+func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	return []*keyspacepb.KeyspaceMeta{
 		{
-			Id:             500,
+			Id:             10,
 			Name:           "keyspace1",
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -112,7 +113,7 @@ func testKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             700,
+			Id:             11,
 			Name:           "keyspace2",
 			State:          keyspacepb.KeyspaceState_ARCHIVED,
 			CreatedAt:      now + 300,
@@ -123,7 +124,7 @@ func testKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             800,
+			Id:             100,
 			Name:           "keyspace3",
 			State:          keyspacepb.KeyspaceState_DISABLED,
 			CreatedAt:      now + 500,
@@ -134,4 +135,14 @@ func testKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 	}
+}
+
+// TestEncodeSpaceID test spaceID encoding.
+func TestEncodeSpaceID(t *testing.T) {
+	re := require.New(t)
+	re.Equal("keyspaces/meta/00000000", endpoint.KeyspaceMetaPath(0))
+	re.Equal("keyspaces/meta/16777215", endpoint.KeyspaceMetaPath(1<<24-1))
+	re.Equal("keyspaces/meta/00000100", endpoint.KeyspaceMetaPath(100))
+	re.Equal("keyspaces/meta/00000011", endpoint.KeyspaceMetaPath(11))
+	re.Equal("keyspaces/meta/00000010", endpoint.KeyspaceMetaPath(10))
 }
