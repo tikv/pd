@@ -32,7 +32,7 @@ func TestDurationJSON(t *testing.T) {
 	example := &example{}
 
 	text := []byte(`{"interval":"1h1m1s"}`)
-	re.Nil(json.Unmarshal(text, example))
+	re.NoError(json.Unmarshal(text, example))
 	re.Equal(float64(60*60+60+1), example.Interval.Seconds())
 
 	b, err := json.Marshal(example)

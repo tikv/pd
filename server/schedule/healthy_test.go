@@ -16,31 +16,20 @@ package schedule
 
 import (
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testRegionHealthySuite{})
-
-type testRegionHealthySuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testRegionHealthySuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testRegionHealthySuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
+func TestIsRegionHealthy(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	peers := func(ids ...uint64) []*metapb.Peer {
 		var peers []*metapb.Peer
 		for _, id := range ids {
@@ -70,7 +59,7 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	}
 
 	// healthy only check down peer and pending peer
-	cases := []testCase{
+	testCases := []testCase{
 		{region(peers(1, 2, 3)), true, true, true, true, true, true},
 		{region(peers(1, 2, 3), core.WithPendingPeers(peers(1))), false, true, true, false, true, true},
 		{region(peers(1, 2, 3), core.WithLearners(peers(1))), true, true, false, true, true, false},
@@ -80,19 +69,19 @@ func (s *testRegionHealthySuite) TestIsRegionHealthy(c *C) {
 	}
 
 	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(s.ctx, opt)
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(3, 1)
 	tc.AddRegionStore(4, 1)
-	for _, t := range cases {
+	for _, testCase := range testCases {
 		tc.SetEnablePlacementRules(false)
-		c.Assert(IsRegionHealthy(t.region), Equals, t.healthy1)
-		c.Assert(IsRegionHealthyAllowPending(t.region), Equals, t.healthyAllowPending1)
-		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated1)
+		re.Equal(testCase.healthy1, IsRegionHealthy(testCase.region))
+		re.Equal(testCase.healthyAllowPending1, IsRegionHealthyAllowPending(testCase.region))
+		re.Equal(testCase.replicated1, IsRegionReplicated(tc, testCase.region))
 		tc.SetEnablePlacementRules(true)
-		c.Assert(IsRegionHealthy(t.region), Equals, t.healthy2)
-		c.Assert(IsRegionHealthyAllowPending(t.region), Equals, t.healthyAllowPending2)
-		c.Assert(IsRegionReplicated(tc, t.region), Equals, t.replicated2)
+		re.Equal(testCase.healthy2, IsRegionHealthy(testCase.region))
+		re.Equal(testCase.healthyAllowPending2, IsRegionHealthyAllowPending(testCase.region))
+		re.Equal(testCase.replicated2, IsRegionReplicated(tc, testCase.region))
 	}
 }

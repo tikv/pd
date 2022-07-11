@@ -21,12 +21,10 @@ import (
 	"sort"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
@@ -44,9 +42,9 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 }
 
 // CheckStoresInfo is used to check the test results.
-// CheckStoresInfo will not check Store.State because this field has been omitted pdctl output
+// CheckStoresInfo will not check Store.State because this field has been omitted pd-ctl output
 func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*api.StoreInfo) {
-	re.Equal(len(want), len(stores))
+	re.Len(stores, len(want))
 	mapWant := make(map[uint64]*api.StoreInfo)
 	for _, s := range want {
 		if _, ok := mapWant[s.Store.Id]; !ok {
@@ -71,7 +69,7 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 
 // CheckRegionInfo is used to check the test results.
 func CheckRegionInfo(re *require.Assertions, output *api.RegionInfo, expected *core.RegionInfo) {
-	region := api.NewRegionInfo(expected)
+	region := api.NewAPIRegionInfo(expected)
 	output.Adjust()
 	re.Equal(region, output)
 }
@@ -105,20 +103,6 @@ func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Stor
 	re.NoError(err)
 }
 
-// MustPutStoreWithCheck is a temporary function for test purpose.
-func MustPutStoreWithCheck(c *check.C, svr *server.Server, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
-	if len(store.Version) == 0 {
-		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
-	}
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store:  store,
-	})
-	c.Assert(err, check.IsNil)
-}
-
 // MustPutRegion is used for test purpose.
 func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
 	leader := &metapb.Peer{
@@ -136,33 +120,4 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 	err := cluster.HandleRegionHeartbeat(r)
 	re.NoError(err)
 	return r
-}
-
-// MustPutRegionWithCheck is a temporary function for test purpose.
-func MustPutRegionWithCheck(c *check.C, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
-	leader := &metapb.Peer{
-		Id:      regionID,
-		StoreId: storeID,
-	}
-	metaRegion := &metapb.Region{
-		Id:          regionID,
-		StartKey:    start,
-		EndKey:      end,
-		Peers:       []*metapb.Peer{leader},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-	}
-	r := core.NewRegionInfo(metaRegion, leader, opts...)
-	err := cluster.HandleRegionHeartbeat(r)
-	c.Assert(err, check.IsNil)
-	return r
-}
-
-func checkerWithNilAssert(re *require.Assertions) *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
-		re.FailNow("should be nil")
-	})
-	checker.IsNil = func(obtained interface{}) {
-		re.Nil(obtained)
-	}
-	return checker
 }

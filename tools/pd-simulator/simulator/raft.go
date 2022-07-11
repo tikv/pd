@@ -146,7 +146,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
-		core.WithNewPeerIds(ids[0:len(ids)-1]...),
+		core.WithNewPeerIDs(ids[0:len(ids)-1]...),
 		core.WithIncVersion(),
 		core.SetApproximateKeys(region.GetApproximateKeys()/2),
 		core.SetApproximateSize(region.GetApproximateSize()/2),
@@ -196,7 +196,7 @@ func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
 		core.SetApproximateSize(region.GetApproximateSize()+size),
 		core.SetWrittenBytes(uint64(size)),
 	)
-	storeIDs := region.GetStoreIds()
+	storeIDs := region.GetStoreIDs()
 	for storeID := range storeIDs {
 		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
@@ -220,7 +220,7 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 		unhealthy        int
 		newLeaderStoreID uint64
 	)
-	ids := region.GetStoreIds()
+	ids := region.GetStoreIDs()
 	for id := range ids {
 		if r.conn.nodeHealth(id) {
 			newLeaderStoreID = id

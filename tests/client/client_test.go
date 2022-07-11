@@ -63,6 +63,39 @@ type client interface {
 	GetAllocatorLeaderURLs() map[string]string
 }
 
+func TestClientClusterIDCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Create the cluster #1.
+	cluster1, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster1.Destroy()
+	endpoints1 := runServer(re, cluster1)
+	// Create the cluster #2.
+	cluster2, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster2.Destroy()
+	endpoints2 := runServer(re, cluster2)
+	// Try to create a client with the mixed endpoints.
+	_, err = pd.NewClientWithContext(
+		ctx, append(endpoints1, endpoints2...),
+		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+	)
+	re.Error(err)
+	re.Contains(err.Error(), "unmatched cluster id")
+	// updateMember should fail due to unmatched cluster ID found.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipClusterIDCheck", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipFirstUpdateMember", `return(true)`))
+	_, err = pd.NewClientWithContext(ctx, []string{endpoints1[0], endpoints2[0]},
+		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+	)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrClientGetLeader")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
+}
+
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -192,11 +225,11 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 		return err == nil
 	})
 	// Transfer leader to trigger the TSO resetting.
-	re.Nil(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
 	oldLeaderName := cluster.WaitLeader()
 	err = cluster.GetServer(oldLeaderName).ResignLeader()
 	re.NoError(err)
-	re.Nil(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
 	// Request a new TSO.
@@ -205,7 +238,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 		return err == nil
 	})
 	// Transfer leader back.
-	re.Nil(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
 	err = cluster.GetServer(newLeaderName).ResignLeader()
 	re.NoError(err)
 	// Should NOT panic here.
@@ -213,7 +246,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
-	re.Nil(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
 }
 
 func TestTSOAllocatorLeader(t *testing.T) {
@@ -235,7 +268,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	var (
 		testServers  = cluster.GetServers()
@@ -347,7 +380,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NoError(err)
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
-	cluster.WaitAllLeadersWithTestify(re, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	// Test a nonexistent dc-location for Local TSO
 	p, l, err := cli.GetLocalTS(context.TODO(), "nonexistent-dc")
@@ -360,7 +393,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	requestGlobalAndLocalTSO(re, wg, dcLocationConfig, cli)
 
 	// assert global tso after resign leader
-	re.Nil(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`))
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -369,7 +402,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.True(pd.IsLeaderChange(err))
 	_, _, err = cli.GetTS(ctx)
 	re.NoError(err)
-	re.Nil(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
 
 	// Test the TSO follower proxy while enabling the Local TSO.
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
@@ -424,14 +457,14 @@ func TestCustomTimeout(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(1*time.Second))
+	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(time.Second))
 
 	start := time.Now()
-	re.Nil(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/customTimeout", "return(true)"))
 	_, err = cli.GetAllStores(context.TODO())
-	re.Nil(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/customTimeout"))
 	re.Error(err)
-	re.GreaterOrEqual(time.Since(start), 1*time.Second)
+	re.GreaterOrEqual(time.Since(start), time.Second)
 	re.Less(time.Since(start), 2*time.Second)
 }
 
@@ -447,13 +480,13 @@ func TestGetRegionFromFollowerClient(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
 
-	re.Nil(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
 
-	re.Nil(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 	time.Sleep(200 * time.Millisecond)
 	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
@@ -473,7 +506,7 @@ func TestGetTsoFromFollowerClient1(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
 
-	re.Nil(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -486,7 +519,7 @@ func TestGetTsoFromFollowerClient1(t *testing.T) {
 	})
 
 	lastTS = checkTS(re, cli, lastTS)
-	re.Nil(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
 	time.Sleep(2 * time.Second)
 	checkTS(re, cli, lastTS)
 }
@@ -504,7 +537,7 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
 
-	re.Nil(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -521,7 +554,7 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 	cluster.WaitLeader()
 	lastTS = checkTS(re, cli, lastTS)
 
-	re.Nil(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
 	time.Sleep(5 * time.Second)
 	checkTS(re, cli, lastTS)
 }
@@ -690,12 +723,12 @@ func TestClientTestSuite(t *testing.T) {
 func (suite *clientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(suite.checkerWithNilAssert())
+	suite.srv, suite.cleanup, err = server.NewTestServer(assertutil.CheckerWithNilAssert(re))
 	suite.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClientWithTestify(re, suite.srv.GetAddr())
+	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	suite.mustWaitLeader(map[string]*server.Server{suite.srv.GetAddr(): suite.srv})
+	server.MustWaitLeader(re, []*server.Server{suite.srv})
 	suite.bootstrapServer(newHeader(suite.srv), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
@@ -726,29 +759,6 @@ func (suite *clientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
 	suite.cleanup()
-}
-
-func (suite *clientTestSuite) checkerWithNilAssert() *assertutil.Checker {
-	checker := assertutil.NewChecker(func() {
-		suite.FailNow("should be nil")
-	})
-	checker.IsNil = func(obtained interface{}) {
-		suite.Nil(obtained)
-	}
-	return checker
-}
-
-func (suite *clientTestSuite) mustWaitLeader(svrs map[string]*server.Server) *server.Server {
-	for i := 0; i < 500; i++ {
-		for _, s := range svrs {
-			if !s.IsClosed() && s.GetMember().IsLeader() {
-				return s
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	suite.FailNow("no leader")
-	return nil
 }
 
 func newHeader(srv *server.Server) *pdpb.RequestHeader {
@@ -1316,7 +1326,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(time.Second))
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
@@ -1333,5 +1343,5 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithSleepInterval(1*time.Second))
+	}, testutil.WithTickInterval(time.Second))
 }

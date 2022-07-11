@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
@@ -114,4 +116,22 @@ func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
 	}
 
 	return cfgs
+}
+
+// MustWaitLeader return the leader until timeout.
+func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
+	var leader *Server
+	testutil.Eventually(re, func() bool {
+		for _, svr := range svrs {
+			// All servers' GetLeader should return the same leader.
+			if svr.GetLeader() == nil || (leader != nil && svr.GetLeader().GetMemberId() != leader.GetLeader().GetMemberId()) {
+				return false
+			}
+			if leader == nil && !svr.IsClosed() {
+				leader = svr
+			}
+		}
+		return true
+	})
+	return leader
 }

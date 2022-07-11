@@ -187,7 +187,7 @@ func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	regions := raft.GetRegions()
 	for _, region := range regions {
-		storeIDs := region.GetStoreIds()
+		storeIDs := region.GetStoreIDs()
 		if _, ok := storeIDs[id]; ok {
 			downPeer := &pdpb.PeerStats{
 				Peer:        region.GetStorePeer(id),

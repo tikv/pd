@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
@@ -123,8 +124,10 @@ func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
+	newStoreIDs := make([]uint64, len(conf.StoreIDs))
+	copy(newStoreIDs, conf.StoreIDs)
 	return &grantHotRegionSchedulerConfig{
-		StoreIDs:      conf.StoreIDs,
+		StoreIDs:      newStoreIDs,
 		StoreLeaderID: conf.StoreLeaderID,
 	}
 }
@@ -267,10 +270,10 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	i := s.r.Int() % len(s.types)
-	return s.dispatch(s.types[i], cluster)
+	return s.dispatch(s.types[i], cluster), nil
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
@@ -359,7 +362,7 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 		candidate = []uint64{s.conf.GetStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIds(), srcRegion.GetStoreIds()))
+			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = s.conf.StoreIDs
 	}
 	for _, storeID := range candidate {

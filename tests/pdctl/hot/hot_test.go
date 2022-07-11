@@ -336,7 +336,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &hotRegions))
-	re.Len(hotRegions.HistoryHotRegion, 0)
+	re.Empty(hotRegions.HistoryHotRegion)
 	args = []string{"-u", pdAddr, "hot", "history"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
