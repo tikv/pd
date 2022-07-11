@@ -16,6 +16,7 @@ package placement
 
 import (
 	"math"
+	"math/bits"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -237,12 +238,13 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 	// map the candidates to binary numbers with len(candidates) bits,
 	// each bit can be 1 or 0, 1 means a picked candidate
 	// the binary numbers with `count` 1 means a choose for the current rule.
-	limit := 1<<len(candidates) - 1
-	var better bool
 
-	for binaryInt := (1<<count - 1); binaryInt <= limit; binaryInt++ {
+	var better bool
+	limit := uint(1<<len(candidates) - 1)
+	binaryInt := uint(1<<count - 1)
+	for ; binaryInt <= limit; binaryInt++ {
 		// there should be exactly `count` number in current binary number `binaryInt`
-		if !seletedBitEqualsTo(binaryInt, count) {
+		if bits.OnesCount(binaryInt) != count {
 			continue
 		}
 		selected := pickPeersFromBinaryInt(candidates, binaryInt)
@@ -256,24 +258,10 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 	return better
 }
 
-// seletedBitEqualsTo returns true when the number of 1 in the `binaryNumber` equals to `expectCount`.
-// binaryNumber = 5, the related binary is 101, the count of `1` should be 2, which means return false if the `expetedCount`` is not 2.
-// binaryNumber = 7, the related binary is 111, the count of `1` should be 3.
-func seletedBitEqualsTo(binaryNumber int, expectCount int) bool {
-	num := 0
-	for ; binaryNumber > 0; binaryNumber >>= 1 {
-		num += (binaryNumber & 1)
-		if num > expectCount {
-			return false
-		}
-	}
-	return num == expectCount
-}
-
 // pickPeersFromBinaryInt picks the candidates with the related index at the position of binary for the `binaryNumber`` is `1`.
 // binaryNumber = 5, which means the related binary is 101, it will returns {candidates[0],candidates[2]}
 // binaryNumber = 6, which means the related binary is 110, it will returns {candidates[1],candidates[2]}
-func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber int) []*fitPeer {
+func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber uint) []*fitPeer {
 	selected := make([]*fitPeer, 0)
 	for _, p := range candidates {
 		if binaryNumber&1 == 1 {

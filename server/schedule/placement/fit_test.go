@@ -187,3 +187,36 @@ func TestIsolationScore(t *testing.T) {
 		testCase.checker(score1, score2)
 	}
 }
+
+func TestPickPeersFromBinaryInt(t *testing.T) {
+	re := require.New(t)
+	var candidates []*fitPeer
+	for id := uint64(1); id <= 10; id++ {
+		candidates = append(candidates, &fitPeer{
+			Peer: &metapb.Peer{Id: id},
+		})
+	}
+	testCases := []struct {
+		binary        string
+		expectedPeers []uint64
+	}{
+		{"0", []uint64{}},
+		{"1", []uint64{1}},
+		{"101", []uint64{1, 3}},
+		{"111", []uint64{1, 2, 3}},
+		{"1011", []uint64{1, 2, 4}},
+		{"100011", []uint64{1, 2, 6}},
+		{"1000001111", []uint64{1, 2, 3, 4, 10}},
+	}
+
+	for _, c := range testCases {
+		binaryNumber, err := strconv.ParseUint(c.binary, 2, 64)
+		re.Nil(err)
+		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
+		re.Len(selected, len(c.expectedPeers))
+		for id := 0; id < len(selected); id++ {
+			re.Equal(selected[id].Id, c.expectedPeers[id])
+		}
+	}
+
+}
