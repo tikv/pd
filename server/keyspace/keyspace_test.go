@@ -16,17 +16,20 @@ package keyspace
 
 import (
 	"fmt"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"math/rand"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 )
+
+const testConfig = "test config"
 
 func newKeyspaceManager() *Manager {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
@@ -55,22 +58,15 @@ func TestCreateKeyspace(t *testing.T) {
 	requests := createKeyspaceRequests(10)
 
 	for i, request := range requests {
-		expected := &keyspacepb.KeyspaceMeta{
-			Id:             uint32(i + 1),
-			Name:           request.Name,
-			State:          keyspacepb.KeyspaceState_ENABLED,
-			CreatedAt:      request.Now.Unix(),
-			StateChangedAt: request.Now.Unix(),
-			Config:         request.InitialConfig,
-		}
-
 		created, err := manager.CreateKeyspace(request)
 		re.NoError(err)
-		re.Equal(expected, created)
+		re.Equal(uint32(i+1), created.Id)
+		matchCreateRequest(re, request, created)
 
 		loaded, err := manager.LoadKeyspace(request.Name)
 		re.NoError(err)
-		re.Equal(expected, loaded)
+		re.Equal(uint32(i+1), loaded.Id)
+		matchCreateRequest(re, request, loaded)
 	}
 
 	// create a keyspace with existing name must return error
@@ -85,7 +81,7 @@ func TestCreateKeyspace(t *testing.T) {
 func TestUpdateKeyspace(t *testing.T) {
 	re := require.New(t)
 	manager := newKeyspaceManager()
-	requests := createKeyspaceRequests(10)
+	requests := createKeyspaceRequests(5)
 	for i, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
@@ -104,21 +100,7 @@ func TestUpdateKeyspace(t *testing.T) {
 
 		updated, err := manager.UpdateKeyspace(updateRequest)
 		re.NoError(err)
-
-		re.Equal(updateRequest.NewState, updated.State)
-		if updateRequest.NewState != keyspacepb.KeyspaceState_ENABLED {
-			// if state changed, then new state change time must be recorded
-			re.Equal(updateRequest.Now.Unix(), updated.StateChangedAt)
-		} else {
-			// otherwise state change time should not change
-			re.Equal(createRequest.Now.Unix(), updated.StateChangedAt)
-		}
-		// check for puts
-		re.Equal(strconv.Itoa(i), updated.Config["config_entry_1"])
-		re.Equal(strconv.Itoa(i), updated.Config["additional_config"])
-		// deleted key must be deleted after put
-		_, ok := updated.Config["config_entry_2"]
-		re.False(ok)
+		matchUpdateRequest(re, updateRequest, updated)
 	}
 }
 
@@ -127,8 +109,9 @@ func TestLoadRangeKeyspace(t *testing.T) {
 	manager := newKeyspaceManager()
 	requests := createKeyspaceRequests(10)
 
-	// force keyspace id start with 100
-	for i := 0; i < 100; i++ {
+	startID := 100
+	// force keyspace id start with startID
+	for i := 0; i < startID-1; i++ {
 		_, _ = manager.idAllocator.Alloc()
 	}
 	for _, createRequest := range requests {
@@ -136,8 +119,111 @@ func TestLoadRangeKeyspace(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// load all 10 of them
-	keyspaces, err := manager.LoadRangeKeyspace(100, 10)
+	// load all of them
+	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
 	re.Equal(10, len(keyspaces))
+	for i := range keyspaces {
+		re.Equal(uint32(startID+i), keyspaces[i].Id)
+		matchCreateRequest(re, requests[i], keyspaces[i])
+	}
+
+	// load first 3
+	keyspaces, err = manager.LoadRangeKeyspace(0, 3)
+	re.NoError(err)
+	re.Equal(3, len(keyspaces))
+	for i := range keyspaces {
+		re.Equal(uint32(startID+i), keyspaces[i].Id)
+		matchCreateRequest(re, requests[i], keyspaces[i])
+	}
+
+	// load 3 starting with startID + 5
+	loadStart := startID + 5
+	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 3)
+	re.NoError(err)
+	re.Equal(3, len(keyspaces))
+	for i := range keyspaces {
+		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+		matchCreateRequest(re, requests[i+5], keyspaces[i])
+	}
+}
+
+// TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously
+// will be successful.
+func TestUpdateMultipleKeyspace(t *testing.T) {
+	re := require.New(t)
+	manager := newKeyspaceManager()
+	requests := createKeyspaceRequests(5)
+	for _, createRequest := range requests {
+		_, err := manager.CreateKeyspace(createRequest)
+		re.NoError(err)
+	}
+
+	// concurrently update all keyspaces' testConfig sequentially.
+	end := 100
+	wg := sync.WaitGroup{}
+	for _, request := range requests {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			updateKeyspaceConfig(re, manager, name, end)
+		}(request.Name)
+	}
+	wg.Wait()
+
+	// check that eventually all test keyspaces' test config reaches end
+	for _, request := range requests {
+		keyspace, err := manager.LoadKeyspace(request.Name)
+		re.NoError(err)
+		re.Equal(keyspace.Config[testConfig], strconv.Itoa(end))
+	}
+}
+
+// matchCreateRequest verifies a keyspace meta matches a create request.
+func matchCreateRequest(re *require.Assertions, request CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
+	re.Equal(request.Name, meta.Name)
+	re.Equal(request.Now.Unix(), meta.CreatedAt)
+	re.Equal(request.Now.Unix(), meta.StateChangedAt)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
+	re.Equal(request.InitialConfig, meta.Config)
+}
+
+// matchUpdateRequest verifies a keyspace meta could be the immediate result of an update request.
+func matchUpdateRequest(re *require.Assertions, request UpdateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
+	re.Equal(request.Name, meta.Name)
+	if request.UpdateState {
+		re.Equal(request.NewState, meta.State)
+		// keyspace's state change time at must be less (state changed) or equal (no change) than request's.
+		re.GreaterOrEqual(request.Now.Unix(), meta.StateChangedAt)
+	}
+	// checkMap represent kvs to check in the meta.
+	checkMap := make(map[string]string)
+	for put, putVal := range request.ToPut {
+		checkMap[put] = putVal
+	}
+	for _, toDelete := range request.ToDelete {
+		delete(checkMap, toDelete)
+		// must delete key from config
+		_, ok := meta.Config[toDelete]
+		re.False(ok)
+	}
+	// check that meta contains target kvs.
+	for checkKey, checkValue := range checkMap {
+		v, ok := meta.Config[checkKey]
+		re.True(ok)
+		re.Equal(checkValue, v)
+	}
+}
+
+// updateKeyspaceConfig sequentially updates given keyspace's entry.
+func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string, end int) {
+	for i := 0; i <= end; i++ {
+		request := UpdateKeyspaceRequest{
+			Name:  name,
+			ToPut: map[string]string{testConfig: strconv.Itoa(i)},
+		}
+		updated, err := manager.UpdateKeyspace(request)
+		re.NoError(err)
+		matchUpdateRequest(re, request, updated)
+	}
 }
