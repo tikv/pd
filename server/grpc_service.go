@@ -805,6 +805,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 	for {
 		request, err := server.Recv()
+		regionHeartbeatCounter.WithLabelValues("fake", "fake", "report", "pending").Inc()
 		if err == io.EOF {
 			return nil
 		}
