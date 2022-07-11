@@ -942,8 +942,9 @@ func (s *scheduleController) GetDelayUntil() int64 {
 	return 0
 }
 
-const MaxDiagnosisResultNum = 6
+const maxDiagnosisResultNum = 6
 
+// diagnosisManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
 type diagnosisManager struct {
 	cluster      *RaftCluster
 	schedulers   map[string]*scheduleController
@@ -965,7 +966,7 @@ func (d *diagnosisManager) diagnosisDryRun(name string) error {
 	ops, plans := d.schedulers[name].DiagnoseDryRun()
 	result := newDiagnosisResult(ops, plans)
 	if _, ok := d.dryRunResult[name]; !ok {
-		d.dryRunResult[name] = cache.NewFIFO(MaxDiagnosisResultNum)
+		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosisResultNum)
 	}
 	queue := d.dryRunResult[name]
 	queue.Put(result.timestamp, result)
@@ -973,25 +974,25 @@ func (d *diagnosisManager) diagnosisDryRun(name string) error {
 }
 
 type diagnosisResult struct {
-	timestamp       uint64
-	plans           []plan.Plan
-	schedulablePlan []plan.Plan
+	timestamp          uint64
+	unschedulablePlans []plan.Plan
+	schedulablePlans   []plan.Plan
 }
 
 func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
 	index := len(ops)
 	if len(ops) > 0 {
 		if ops[0].Kind()&operator.OpMerge != 0 {
-			index = index / 2
+			index /= 2
 		}
 	}
 	if index > len(result) {
 		return nil
 	}
 	return &diagnosisResult{
-		timestamp:       uint64(time.Now().Unix()),
-		plans:           result[index:],
-		schedulablePlan: result[:index],
+		timestamp:          uint64(time.Now().Unix()),
+		unschedulablePlans: result[index:],
+		schedulablePlans:   result[:index],
 	}
 }
 
