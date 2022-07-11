@@ -184,11 +184,9 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 
 	matchRules := make(map[int]map[int]bool, len(rules))
 	for id, rule := range rules {
-		matchPeers := make(map[int]bool, 0)
 		if checkRule(rule, stores) {
 			matchRules[id] = make(map[int]bool)
 		}
-		matchRules[id] = matchPeers
 	}
 
 	return &fitWorker{
