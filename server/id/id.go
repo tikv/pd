@@ -55,7 +55,7 @@ type allocatorImpl struct {
 }
 
 // NewAllocator creates a new ID Allocator.
-func NewAllocator(client *clientv3.Client, rootPath, allocPath, label, member string) Allocator {
+func NewAllocator(client *clientv3.Client, rootPath string, allocPath string, label string, member string) Allocator {
 	return &allocatorImpl{
 		client:    client,
 		rootPath:  rootPath,
