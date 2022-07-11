@@ -295,66 +295,126 @@ func (f *StoreStateFilter) Type() string {
 type conditionFunc func(*config.PersistOptions, *core.StoreInfo) bool
 
 func (f *StoreStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "tombstone"
-	return store.IsRemoved()
+	isRemoved := store.IsRemoved()
+	if isRemoved {
+		f.Reason = "tombstone"
+	} else {
+		f.Reason = ""
+	}
+	return isRemoved
 }
 
 func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "down"
-	return store.DownTime() > opt.GetMaxStoreDownTime()
+	isDown := store.DownTime() > opt.GetMaxStoreDownTime()
+	if isDown {
+		f.Reason = "down"
+	} else {
+		f.Reason = ""
+	}
+	return isDown
 }
 
 func (f *StoreStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "offline"
-	return store.IsRemoving()
+	isRemoving := store.IsRemoving()
+	if isRemoving {
+		f.Reason = "offline"
+	} else {
+		f.Reason = ""
+	}
+	return isRemoving
 }
 
 func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "pause-leader"
-	return !store.AllowLeaderTransfer()
+	isPauseLeaderTransfer := !store.AllowLeaderTransfer()
+	if isPauseLeaderTransfer {
+		f.Reason = "pause-leader"
+	} else {
+		f.Reason = ""
+	}
+	return isPauseLeaderTransfer
 }
 
 func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "slow-store"
-	return store.EvictedAsSlowStore()
+	isSlowStoreEvicted := store.EvictedAsSlowStore()
+	if isSlowStoreEvicted {
+		f.Reason = "slow-store"
+	} else {
+		f.Reason = ""
+	}
+	return isSlowStoreEvicted
 }
 
 func (f *StoreStateFilter) isDisconnected(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "disconnected"
-	return !f.AllowTemporaryStates && store.IsDisconnected()
+	isDisconnected := !f.AllowTemporaryStates && store.IsDisconnected()
+	if isDisconnected {
+		f.Reason = "disconnected"
+	} else {
+		f.Reason = ""
+	}
+	return isDisconnected
 }
 
 func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "busy"
-	return !f.AllowTemporaryStates && store.IsBusy()
+	isBusy := !f.AllowTemporaryStates && store.IsBusy()
+	if isBusy {
+		f.Reason = "busy"
+	} else {
+		f.Reason = ""
+	}
+	return isBusy
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-remove-limit"
-	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
+	isExceedRemoveLimit := !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer)
+	if isExceedRemoveLimit {
+		f.Reason = "exceed-remove-limit"
+	} else {
+		f.Reason = ""
+	}
+	return isExceedRemoveLimit
 }
 
 func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "exceed-add-limit"
-	return !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
+	isExceedAddLimit := !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer)
+	if isExceedAddLimit {
+		f.Reason = "exceed-add-limit"
+	} else {
+		f.Reason = ""
+	}
+	return isExceedAddLimit
 }
 
 func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-snapshot"
-	return !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
+	isTooManySnapshots := !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount())
+	if isTooManySnapshots {
+		f.Reason = "too-many-snapshot"
+	} else {
+		f.Reason = ""
+	}
+	return isTooManySnapshots
 }
 
 func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "too-many-pending-peer"
-	return !f.AllowTemporaryStates &&
+	isTooManyPendingPeers := !f.AllowTemporaryStates &&
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount())
+	if isTooManyPendingPeers {
+		f.Reason = "too-many-pending-peer"
+	} else {
+		f.Reason = ""
+	}
+	return isTooManyPendingPeers
 }
 
 func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) bool {
-	f.Reason = "reject-leader"
-	return opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
+	isHasRejectLeaderProperty := opts.CheckLabelProperty(config.RejectLeader, store.GetLabels())
+	if isHasRejectLeaderProperty {
+		f.Reason = "reject-leader"
+	} else {
+		f.Reason = ""
+	}
+	return isHasRejectLeaderProperty
 }
 
 // The condition table.
