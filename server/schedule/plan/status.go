@@ -37,11 +37,11 @@ const (
 	StatusStoreDraining
 	// StatusStoreBlocked represents the store is restricted by the special configuration.
 	StatusStoreBlocked
+	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
+	StatusStoreExcluded
 
 	// StatusRegionHot represents the region cannot be selected due to the heavy load.
 	StatusRegionHot
-	// StatusRegionExisted represents there has already had a region peer on the store.
-	StatusRegionExisted
 	// StatusRegionUnhealthy represents the region cannot be selected due to the region health.
 	StatusRegionUnhealthy
 	// StatusRegionEmpty represents the region cannot be selected due to the region is empty.
@@ -53,6 +53,8 @@ const (
 	StatusRuleNotMatch
 	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
 	StatusIsolationNotMatch
+
+	// TODO: The below status is not used for now. Once it is used, Please remove this comment.
 
 	// StatusStoreNotExisted represents the store cannot be found in PD.
 	StatusStoreNotExisted
@@ -73,10 +75,10 @@ var statusText = map[StatusCode]string{
 	StatusStoreLowSpace:    "Store Low Space",
 	StatusStoreDraining:    "Store Draining",
 	StatusStoreBlocked:     "Store Blocked",
+	StatusStoreExcluded:    "Region Excluded",
 
 	// region
 	StatusRegionHot:       "Region Hot",
-	StatusRegionExisted:   "Region Existed",
 	StatusRegionUnhealthy: "Region Unhealthy",
 	StatusRegionEmpty:     "Region Empty",
 

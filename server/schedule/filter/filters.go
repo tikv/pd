@@ -39,7 +39,7 @@ var (
 	busyStatus               = plan.NewStatus(plan.StatusStoreUnavailable, "store is busy")
 	offlineStatus            = plan.NewStatus(plan.StatusStoreDraining, "store is in the process of offline")
 	lowSpaceStatus           = plan.NewStatus(plan.StatusStoreLowSpace, "store space is not enough, please scale out or change 'low-space-ratio' setting")
-	regionExistedStatus      = plan.NewStatus(plan.StatusRegionExisted, "there has already had a replica in the store")
+	excludedStatus           = plan.NewStatus(plan.StatusStoreExcluded, "there has already had a peer or the peer is unhealthy in the store")
 	isolationStatus          = plan.NewStatus(plan.StatusIsolationNotMatch)
 	tooManySnapshotStatus    = plan.NewStatus(plan.StatusStoreThrottled, "store snapshot has been piled up, the related setting is 'max-snapshot-count'")
 	tooManyPendingPeerStatus = plan.NewStatus(plan.StatusStoreThrottled, "store has too many pending peers, the related setting is 'max-pending-peer-count'")
@@ -177,14 +177,14 @@ func (f *excludedFilter) Type() string {
 
 func (f *excludedFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if _, ok := f.sources[store.GetID()]; ok {
-		return regionExistedStatus
+		return excludedStatus
 	}
 	return okStatus
 }
 
 func (f *excludedFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if _, ok := f.targets[store.GetID()]; ok {
-		return regionExistedStatus
+		return excludedStatus
 	}
 	return okStatus
 }
