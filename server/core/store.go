@@ -318,6 +318,11 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 	}
 }
 
+// WitnessScore returns the store's witness score.
+func (s *StoreInfo) WitnessScore(delta int64) float64 {
+	return float64(int64(s.GetWitnessCount()) + delta)
+}
+
 // RegionScore returns the store's region score.
 // Deviation It is used to control the direction of the deviation considered
 // when calculating the region score. It is set to -1 when it is the source

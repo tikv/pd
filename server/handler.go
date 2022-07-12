@@ -298,6 +298,11 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
 }
 
+// AddBalanceLeaderScheduler adds a balance-leader-scheduler.
+func (h *Handler) AddBalanceWitnessScheduler() error {
+	return h.AddScheduler(schedulers.BalanceWitnessType)
+}
+
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
 	return h.AddScheduler(schedulers.BalanceRegionType)

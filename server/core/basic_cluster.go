@@ -103,6 +103,19 @@ func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	return Stores
 }
 
+// GetNonWitnessStores returns all Stores that contains the non-witness's peer.
+func (bc *BasicCluster) GetNonWitnessStores(region *RegionInfo) []*StoreInfo {
+	bc.RLock()
+	defer bc.RUnlock()
+	var Stores []*StoreInfo
+	for id := range region.GetStoreIDs() {
+		if store := bc.Stores.GetStore(id); store != nil {
+			Stores = append(Stores, store)
+		}
+	}
+	return Stores
+}
+
 // GetFollowerStores returns all Stores that contains the region's follower peer.
 func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
 	bc.RLock()
@@ -223,6 +236,14 @@ func (bc *BasicCluster) RandPendingRegion(storeID uint64, ranges []KeyRange, opt
 func (bc *BasicCluster) RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
 	bc.RLock()
 	regions := bc.Regions.RandLearnerRegions(storeID, ranges, randomRegionMaxRetry)
+	bc.RUnlock()
+	return bc.selectRegion(regions, opts...)
+}
+
+// RandWitnessRegion returns a random region that has a witness on the store.
+func (bc *BasicCluster) RandWitnessRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+	bc.RLock()
+	regions := bc.Regions.RandWitnessRegions(storeID, ranges, randomRegionMaxRetry)
 	bc.RUnlock()
 	return bc.selectRegion(regions, opts...)
 }
@@ -487,6 +508,7 @@ type RegionSetInformer interface {
 	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandWitnessRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
@@ -502,6 +524,7 @@ type StoreSetInformer interface {
 	GetStore(id uint64) *StoreInfo
 
 	GetRegionStores(region *RegionInfo) []*StoreInfo
+	GetNonWitnessStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
 }

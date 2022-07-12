@@ -15,7 +15,7 @@ require (
 	github.com/gin-gonic/gin v1.7.4
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
-	github.com/golang/protobuf v1.3.4
+	github.com/golang/protobuf v1.5.0
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/gorilla/websocket v1.4.1 // indirect
@@ -55,6 +55,7 @@ require (
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65
 	golang.org/x/tools v0.1.10
 	google.golang.org/grpc v1.26.0
+	google.golang.org/protobuf v1.28.0 // indirect
 	gotest.tools/gotestsum v1.7.0
 )
 

@@ -16,8 +16,10 @@ package operator
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/logutil"
 	"math/rand"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/tikv/pd/pkg/logutil"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -92,6 +94,18 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
+		Build(kind)
+}
+
+// CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
+func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+	source := proto.Clone(region.GetStorePeer(sourceStoreID)).(*metapb.Peer)
+	source.IsWitness = false
+	target := proto.Clone(region.GetStorePeer(targetStoreID)).(*metapb.Peer)
+	target.IsWitness = true
+	return NewBuilder(desc, ci, region).
+		AddPeer(source).
+		AddPeer(target).
 		Build(kind)
 }
 

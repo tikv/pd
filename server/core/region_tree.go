@@ -31,6 +31,8 @@ var _ rangetree.RangeItem = &regionItem{}
 
 type regionItem struct {
 	region *RegionInfo
+	// it may be 0 if it's not in store dedicated region tree
+	storeID uint64
 }
 
 // GetStartKey returns the start key of the region.
@@ -102,7 +104,7 @@ func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 // insert the region.
 func (t *regionTree) update(item *regionItem) []*RegionInfo {
 	region := item.region
-	t.totalSize += region.approximateSize
+	t.totalSize += region.GetStorePeerApproximateSize(item.storeID)
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
@@ -116,7 +118,7 @@ func (t *regionTree) update(item *regionItem) []*RegionInfo {
 			zap.Uint64("region-id", old.GetID()),
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		t.totalSize -= old.approximateSize
+		t.totalSize -= old.GetStorePeerApproximateSize(overlap.(*regionItem).storeID)
 		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
 		t.totalWriteBytesRate -= regionWriteBytesRate
 		t.totalWriteKeysRate -= regionWriteKeysRate
@@ -127,12 +129,12 @@ func (t *regionTree) update(item *regionItem) []*RegionInfo {
 
 // updateStat is used to update statistics when regionItem.region is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
-	t.totalSize += region.approximateSize
+	t.totalSize += region.GetApproximateSize()
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 
-	t.totalSize -= origin.approximateSize
+	t.totalSize -= origin.GetApproximateSize()
 	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
@@ -146,13 +148,13 @@ func (t *regionTree) remove(region *RegionInfo) {
 		return
 	}
 	item := &regionItem{region: region}
-	result := t.tree.Find(item)
-	if result == nil || result.(*regionItem).region.GetID() != region.GetID() {
+	result := t.tree.Find(item).(*regionItem)
+	if result == nil || result.region.GetID() != region.GetID() {
 		return
 	}
 
-	t.totalSize -= region.approximateSize
-	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalSize -= result.region.GetStorePeerApproximateSize(result.storeID)
+	regionWriteBytesRate, regionWriteKeysRate := result.region.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	t.tree.Remove(result)

@@ -373,8 +373,10 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, 
 const (
 	leaderSource = iota
 	regionSource
+	witnessSource
 	leaderTarget
 	regionTarget
+	witnessTarget
 	scatterRegionTarget
 )
 
@@ -385,12 +387,16 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
+	case witnessSource:
+		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
 			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+	case witnessTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case scatterRegionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
@@ -574,6 +580,18 @@ func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *co
 func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
 	if opt.IsPlacementRulesEnabled() {
 		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
+	}
+	return nil
+}
+
+// NewPlacementWitnessSafeguard creates a filter that ensures after transfer a witness with
+// existed peer, the placement restriction will not become worse.
+// Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
+func NewPlacementWitnessSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+	if opt.IsPlacementRulesEnabled() {
+		return nil
+		// TODO:
+		// return newRuleWitnessFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
 	}
 	return nil
 }

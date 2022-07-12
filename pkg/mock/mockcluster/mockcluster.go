@@ -299,6 +299,23 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 	mc.PutStore(store)
 }
 
+// AddWitnessStore adds store with specified count of witness.
+func (mc *Cluster) AddWitnessStore(storeID uint64, witnessCount int) {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = defaultStoreCapacity
+	stats.UsedSize = uint64(witnessCount) * defaultRegionSize
+	stats.Available = stats.Capacity - uint64(witnessCount)*defaultRegionSize
+	store := core.NewStoreInfo(
+		&metapb.Store{Id: storeID},
+		core.SetStoreStats(stats),
+		core.SetWitnessCount(witnessCount),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	mc.PutStore(store)
+}
+
 // AddRegionStoreWithLeader adds store with specified count of region and leader.
 func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, leaderCounts ...int) {
 	leaderCount := regionCount

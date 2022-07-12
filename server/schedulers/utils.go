@@ -113,6 +113,10 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 		sourceDelta, targetDelta := sourceInfluence*influenceAmp-tolerantResource, targetInfluence*influenceAmp+tolerantResource
 		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
 		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+	case core.WitnessKind:
+		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
+		p.sourceScore = p.source.WitnessScore(sourceDelta)
+		p.targetScore = p.target.WitnessScore(targetDelta)
 	}
 	if opts.IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))

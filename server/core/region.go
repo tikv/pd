@@ -413,6 +413,18 @@ func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	return res
 }
 
+// GetNonWitnesses returns a map indicate the non-witness peers distributed.
+func (r *RegionInfo) GetNonWitnesses() map[uint64]*metapb.Peer {
+	peers := r.GetVoters()
+	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
+	for _, peer := range peers {
+		if !peer.IsWitness {
+			nonWitnesses[peer.GetStoreId()] = peer
+		}
+	}
+	return nonWitnesses
+}
+
 // GetID returns the ID of the region.
 func (r *RegionInfo) GetID() uint64 {
 	return r.meta.GetId()
@@ -463,9 +475,25 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 	return (*metapb.Buckets)(buckets)
 }
 
+// GetStorePeerApproximateSize returns the approximate size of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
+	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+		return 0
+	}
+	return r.approximateSize
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
+}
+
+// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
+	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+		return 0
+	}
+	return r.approximateKeys
 }
 
 // GetApproximateKeys returns the approximate keys of the region.
@@ -771,13 +799,14 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
 
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item regionItem) {
 		store, ok := peersMap[storeID]
 		if !ok {
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		store.update(item)
+		item.storeID = storeID
+		store.update(&item)
 	}
 
 	// Add to leaders and followers.
@@ -785,17 +814,17 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, *item)
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, *item)
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, *item)
 		}
 	}
 	// Add to learners.
@@ -1087,6 +1116,16 @@ func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *Regi
 // RandLearnerRegions randomly gets a store's n learner regions.
 func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
 	return r.learners[storeID].RandomRegions(n, ranges)
+}
+
+// RandWitnessRegion randomly gets a store's learner region.
+func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+	return r.witnesses[storeID].RandomRegion(ranges)
+}
+
+// RandWitnessRegions randomly gets a store's n learner regions.
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+	return r.witnesses[storeID].RandomRegions(n, ranges)
 }
 
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
