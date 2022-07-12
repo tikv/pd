@@ -115,6 +115,11 @@ func NewStatus(statusCode StatusCode, reason ...string) Status {
 	}
 }
 
+// IsOK returns true if the status code is StatusOK.
+func (s Status) IsOK() bool {
+	return s.StatusCode == StatusOK
+}
+
 func (s Status) String() string {
 	return fmt.Sprintf("%s, %s", StatusText(s.StatusCode), s.DetailedReason)
 }
