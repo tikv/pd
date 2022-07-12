@@ -99,10 +99,10 @@ func TestConfigClone(t *testing.T) {
 
 	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
 	con2 := emptyConf.Clone()
-	re.NotEmpty(emptyConf.getKeyRangesByID(1))
+	re.Empty(emptyConf.getKeyRangesByID(1))
 	re.NoError(con2.BuildWithArgs([]string{"1"}))
 	re.NotEmpty(con2.getKeyRangesByID(1))
-	re.NotEmpty(emptyConf.getKeyRangesByID(1))
+	re.Empty(emptyConf.getKeyRangesByID(1))
 
 	con3 := con2.Clone()
 	con3.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})

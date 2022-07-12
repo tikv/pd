@@ -1246,7 +1246,7 @@ func TestScatterRangeBalance(t *testing.T) {
 		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
 		re.LessOrEqual(leaderCount, 12)
 		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
-		re.LessOrEqual(regionCount, 12)
+		re.LessOrEqual(regionCount, 32)
 	}
 }
 
@@ -1324,7 +1324,7 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			maxLeaderCount = leaderCount
 		}
 		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
-		re.LessOrEqual(regionCount, 12)
+		re.LessOrEqual(regionCount, 32)
 	}
 	re.Greater(maxLeaderCount-minLeaderCount, 10)
 }
