@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/plan"
 	"go.uber.org/zap"
 )
 
@@ -283,7 +282,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		if store == nil {
 			return nil
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).StatusCode == plan.StatusOK {
+		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
@@ -472,7 +471,7 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		if store == nil {
 			continue
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).StatusCode == plan.StatusOK {
+		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),
