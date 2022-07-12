@@ -92,7 +92,6 @@ func TestGCPendingOpInfos(t *testing.T) {
 		}
 		re.NoError(err)
 		re.NotNil(op)
-
 		op.Start()
 		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))

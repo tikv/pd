@@ -44,6 +44,8 @@ type testBalanceSpeedCase struct {
 }
 
 func TestShouldBalance(t *testing.T) {
+	// store size = 100GiB
+	// region size = 96MiB
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

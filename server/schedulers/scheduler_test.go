@@ -410,6 +410,9 @@ func TestSpecialUseReserved(t *testing.T) {
 }
 
 func TestBalanceLeaderWithConflictRule(t *testing.T) {
+	// Stores:     1    2    3
+	// Leaders:    1    0    0
+	// Region1:    L    F    F
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := config.NewTestOptions()
