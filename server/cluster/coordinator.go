@@ -961,7 +961,7 @@ func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*
 
 func (d *diagnosisManager) diagnosisDryRun(name string) error {
 	if _, ok := d.schedulers[name]; !ok {
-		return errors.Errorf("no scheduler named %s", name)
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	ops, plans := d.schedulers[name].DiagnoseDryRun()
 	result := newDiagnosisResult(ops, plans)
