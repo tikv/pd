@@ -144,10 +144,10 @@ func (s *snapshotStatistics) getStatistics() map[string]int {
 	minReceive := getMin(s.receive)
 
 	stats := make(map[string]int)
-	stats["Generate Maximum (snapshot)"] = maxSend
+	stats["Send Maximum (snapshot)"] = maxSend
 	stats["Receive Maximum (snapshot)"] = maxReceive
 	if minSend != math.MaxInt32 {
-		stats["Generate Minimum (snapshot)"] = minSend
+		stats["Send Minimum (snapshot)"] = minSend
 	}
 	if minReceive != math.MaxInt32 {
 		stats["Receive Minimum (snapshot)"] = minReceive

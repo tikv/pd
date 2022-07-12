@@ -17,7 +17,6 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"math/rand"
 	"sync"
 	"time"
@@ -50,7 +49,7 @@ type Node struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
-	limiter                  *ratelimit.RateLimiter
+	ioRate                   int64
 	sizeMutex                sync.Mutex
 }
 
@@ -78,7 +77,6 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		cancel()
 		return nil, err
 	}
-	speed := ioRate * cases.MB
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
@@ -87,7 +85,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		cancel:                   cancel,
 		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
-		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
+		ioRate:                   ioRate * cases.MB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
@@ -144,7 +142,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Debug("task status",
+			simutil.Logger.Debug("task finished",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
 				zap.String("task", task.Desc()))
