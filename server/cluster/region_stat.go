@@ -15,67 +15,79 @@
 package cluster
 
 import (
-	"sync"
 	"time"
 
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
 )
 
+// clearThreadhold indicates when we do cleanup operations.
+// When the number of times the collect() function is executed is over than this threshold,
+// regions that are not in region tree will be deleted.
+const clearThreshold = 10
+
 // regionStateType represents the type of region's state.
-type regionStateType uint32
+type regionStateType int
 
 // region state type
 const (
-	RegionStateDown regionStateType = 1 << iota
+	regionStateDown regionStateType = iota
+	regionStateTypeLen
 )
 
 // regionState is used to record abnormal regions.
 type regionState struct {
-	sync.RWMutex
-	opt    *config.PersistOptions
-	states map[regionStateType]map[uint64]*core.RegionInfo
+	cluster schedule.Cluster
+	states  [regionStateTypeLen]map[uint64]*core.RegionInfo
+	count   int
 }
 
 // newRegionState creates a new regionState.
-func newRegionState(opt *config.PersistOptions) *regionState {
+func newRegionState(cluster schedule.Cluster) *regionState {
 	r := &regionState{
-		opt:    opt,
-		states: make(map[regionStateType]map[uint64]*core.RegionInfo),
+		cluster: cluster,
+		count:   0,
 	}
-	r.states[RegionStateDown] = make(map[uint64]*core.RegionInfo)
+	for rst := regionStateType(0); rst < regionStateTypeLen; rst++ {
+		r.states[rst] = map[uint64]*core.RegionInfo{}
+	}
 	return r
 }
 
-// GetRegionStateByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
-func (r *regionState) getRegionStateByType(typ regionStateType) []*core.RegionInfo {
-	r.RLock()
-	defer r.RUnlock()
-	res := make([]*core.RegionInfo, 0, len(r.states[typ]))
-	for _, r := range r.states[typ] {
-		res = append(res, r.Clone())
-	}
-	return res
-}
-
 // Check verifies a region's state, recording it if need.
-func (r *regionState) observe(region *core.RegionInfo) {
-	r.Lock()
-	defer r.Unlock()
-	regionID := region.GetID()
-
-	// check down region
-	if time.Now().UnixNano()-int64(region.GetInterval().GetEndTimestamp()) >= r.opt.GetMaxStoreDownTime().Nanoseconds() {
-		_, exist := r.states[RegionStateDown][regionID]
-		if !exist {
-			r.states[RegionStateDown][regionID] = region
+func (r *regionState) observe(regions []*core.RegionInfo) {
+	now := time.Now().UnixNano()
+	expireTime := r.cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds()
+	for _, region := range regions {
+		regionID := region.GetID()
+		// check down region
+		if now-int64(region.GetInterval().GetEndTimestamp()) >= expireTime {
+			_, exist := r.states[regionStateDown][regionID]
+			if !exist {
+				r.states[regionStateDown][regionID] = region
+			}
 		}
 	}
 }
 
 // Collect collects the metrics of the regions' states.
 func (r *regionState) collect() {
-	r.Lock()
-	defer r.Unlock()
-	regionStateGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[RegionStateDown])))
+	regionStateGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[regionStateDown])))
+	r.count++
+	if r.count == clearThreshold {
+		r.count = 0
+		r.clearNotExistRegion()
+	}
+}
+
+func (r *regionState) clearNotExistRegion() {
+	bc := r.cluster.GetBasicCluster()
+	for typ := regionStateType(0); typ < regionStateTypeLen; typ++ {
+		for _, region := range r.states[typ] {
+			regionID := region.GetID()
+			if bc.GetRegion(regionID) == nil {
+				delete(r.states[typ], regionID)
+			}
+		}
+	}
 }

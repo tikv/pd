@@ -32,7 +32,7 @@ func TestRegionState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-	rsc := newRegionState(cluster.GetOpts())
+	rsc := newRegionState(cluster)
 	endTimestamp := time.Now().UnixNano()
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(
@@ -63,8 +63,15 @@ func TestRegionState(t *testing.T) {
 		),
 	}
 
-	for _, region := range regions {
-		rsc.observe(region)
+	rsc.observe(regions)
+	re.Len(rsc.getRegionStateByType(regionStateDown), 1)
+}
+
+// GetRegionStateByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
+func (r *regionState) getRegionStateByType(typ regionStateType) []*core.RegionInfo {
+	res := make([]*core.RegionInfo, 0, len(r.states[typ]))
+	for _, r := range r.states[typ] {
+		res = append(res, r.Clone())
 	}
-	re.Len(rsc.getRegionStateByType(RegionStateDown), 1)
+	return res
 }

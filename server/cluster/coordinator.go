@@ -91,7 +91,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		opController:    opController,
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
-		regionState:     newRegionState(cluster.GetOpts()),
+		regionState:     newRegionState(cluster),
 	}
 }
 
@@ -142,10 +142,10 @@ func (c *coordinator) patrolRegions() {
 			continue
 		}
 
-		for _, region := range regions {
-			// Records the region if it is in abnormal state.
-			c.regionState.observe(region)
+		// Records the region if it is in abnormal state.
+		c.regionState.observe(regions)
 
+		for _, region := range regions {
 			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
 				continue
