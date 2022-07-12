@@ -15,40 +15,39 @@
 package testutil
 
 import (
-	"github.com/pingcap/check"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
 // CheckTransferLeader checks if the operator is to transfer leader between the specified source and target stores.
-func CheckTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 1)
-	c.Assert(op.Step(0), check.DeepEquals, operator.TransferLeader{FromStore: sourceID, ToStore: targetID})
+func CheckTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
+	re.Equal(op.Len(), 1)
+	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
 	kind |= operator.OpLeader
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckTransferLeaderFrom checks if the operator is to transfer leader out of the specified store.
-func CheckTransferLeaderFrom(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
-	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 1)
-	c.Assert(op.Step(0).(operator.TransferLeader).FromStore, check.Equals, sourceID)
+func CheckTransferLeaderFrom(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
+	re.NotNil(op)
+	re.Equal(op.Len(), 1)
+	re.Equal(sourceID, op.Step(0).(operator.TransferLeader).FromStore)
 	kind |= operator.OpLeader
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckMultiTargetTransferLeader checks if the operator is to transfer leader from the specified source to one of the target stores.
-func CheckMultiTargetTransferLeader(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
-	c.Assert(op, check.NotNil)
-	c.Assert(op.Len(), check.Equals, 1)
+func CheckMultiTargetTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
+	re.NotNil(op)
+	re.Equal(op.Len(), 1)
 	expectedOps := make([]interface{}, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
 		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
 	}
-	c.Assert(op.Step(0), check.DeepEqualsIn, expectedOps)
+	re.Contains(expectedOps, op.Step(0))
 	kind |= operator.OpLeader
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 func trimTransferLeaders(op *operator.Operator) (steps []operator.OpStep, lastLeader uint64) {
@@ -64,61 +63,57 @@ func trimTransferLeaders(op *operator.Operator) (steps []operator.OpStep, lastLe
 }
 
 // CheckTransferPeer checks if the operator is to transfer peer between the specified source and target stores.
-func CheckTransferPeer(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	c.Assert(op, check.NotNil)
-
+func CheckTransferPeer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
 	steps, _ := trimTransferLeaders(op)
-	c.Assert(steps, check.HasLen, 3)
-	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
-	c.Assert(steps[1], check.FitsTypeOf, operator.PromoteLearner{})
-	c.Assert(steps[2].(operator.RemovePeer).FromStore, check.Equals, sourceID)
+	re.Len(steps, 3)
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, steps[1])
+	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
 	kind |= operator.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckTransferLearner checks if the operator is to transfer learner between the specified source and target stores.
-func CheckTransferLearner(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	c.Assert(op, check.NotNil)
-
+func CheckTransferLearner(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
 	steps, _ := trimTransferLeaders(op)
-	c.Assert(steps, check.HasLen, 2)
-	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
-	c.Assert(steps[1].(operator.RemovePeer).FromStore, check.Equals, sourceID)
+	re.Len(steps, 2)
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	re.Equal(sourceID, steps[1].(operator.RemovePeer).FromStore)
 	kind |= operator.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckTransferPeerWithLeaderTransfer checks if the operator is to transfer
 // peer between the specified source and target stores and it meanwhile
 // transfers the leader out of source store.
-func CheckTransferPeerWithLeaderTransfer(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	c.Assert(op, check.NotNil)
-
+func CheckTransferPeerWithLeaderTransfer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
+	re.NotNil(op)
 	steps, lastLeader := trimTransferLeaders(op)
-	c.Assert(steps, check.HasLen, 3)
-	c.Assert(steps[0].(operator.AddLearner).ToStore, check.Equals, targetID)
-	c.Assert(steps[1], check.FitsTypeOf, operator.PromoteLearner{})
-	c.Assert(steps[2].(operator.RemovePeer).FromStore, check.Equals, sourceID)
-	c.Assert(lastLeader, check.Not(check.Equals), uint64(0))
-	c.Assert(lastLeader, check.Not(check.Equals), sourceID)
+	re.Len(steps, 3)
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	re.IsType(operator.PromoteLearner{}, steps[1])
+	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	re.NotEqual(uint64(0), lastLeader)
+	re.NotEqual(sourceID, lastLeader)
 	kind |= operator.OpRegion
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckTransferPeerWithLeaderTransferFrom checks if the operator is to transfer
 // peer out of the specified store and it meanwhile transfers the leader out of
 // the store.
-func CheckTransferPeerWithLeaderTransferFrom(c *check.C, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
-	c.Assert(op, check.NotNil)
-
+func CheckTransferPeerWithLeaderTransferFrom(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
+	re.NotNil(op)
 	steps, lastLeader := trimTransferLeaders(op)
-	c.Assert(steps[0], check.FitsTypeOf, operator.AddLearner{})
-	c.Assert(steps[1], check.FitsTypeOf, operator.PromoteLearner{})
-	c.Assert(steps[2].(operator.RemovePeer).FromStore, check.Equals, sourceID)
-	c.Assert(lastLeader, check.Not(check.Equals), uint64(0))
-	c.Assert(lastLeader, check.Not(check.Equals), sourceID)
+	re.IsType(operator.AddLearner{}, steps[0])
+	re.IsType(operator.PromoteLearner{}, steps[1])
+	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	re.NotEqual(uint64(0), lastLeader)
+	re.NotEqual(sourceID, lastLeader)
 	kind |= operator.OpRegion | operator.OpLeader
-	c.Assert(op.Kind()&kind, check.Equals, kind)
+	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckAddPeer checks if the operator is to add peer on specified store.
