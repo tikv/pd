@@ -35,7 +35,7 @@ const (
 )
 
 // TestMultipleAllocator tests situation where multiple allocators that
-// share rootPath and member val can update their id concurrently.
+// share rootPath and member val update their ids concurrently.
 func TestMultipleAllocator(t *testing.T) {
 	re := require.New(t)
 	cfg := etcdutil.NewTestSingleConfig(t)
@@ -53,7 +53,7 @@ func TestMultipleAllocator(t *testing.T) {
 
 	<-etcd.Server.ReadyNotify()
 
-	// put memberValue to leaderPath to simulate an election success.
+	// Put memberValue to leaderPath to simulate an election success.
 	_, err = client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 
@@ -61,7 +61,7 @@ func TestMultipleAllocator(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		iStr := strconv.Itoa(i)
 		wg.Add(1)
-		// allocators share rootPath and memberVal, but have different allocPaths and labels
+		// All allocators share rootPath and memberVal, but they have different allocPaths and labels.
 		allocator := NewAllocator(client, rootPath, allocPath+iStr, label+iStr, memberVal)
 		go func(re *require.Assertions, allocator Allocator) {
 			defer wg.Done()
@@ -71,11 +71,11 @@ func TestMultipleAllocator(t *testing.T) {
 	wg.Wait()
 }
 
-// testAllocator keep updated given allocator and check if values are expected
+// testAllocator sequentially updates given allocator and check if values are expected.
 func testAllocator(re *require.Assertions, allocator Allocator) {
 	startID, err := allocator.Alloc()
 	re.NoError(err)
-	for i := startID + 1; i < startID+allocStep*2; i++ {
+	for i := startID + 1; i < startID+allocStep*20; i++ {
 		id, err := allocator.Alloc()
 		re.NoError(err)
 		re.Equal(i, id)
