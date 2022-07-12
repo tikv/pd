@@ -76,7 +76,7 @@ func (s *KeyspaceServer) UpdateKeyspaceConfig(ctx context.Context, request *keys
 	}
 
 	manager := s.keyspaceManager
-	updateRequest := keyspace.UpdateKeyspaceRequest{
+	updateRequest := &keyspace.UpdateKeyspaceRequest{
 		Name:        request.Name,
 		UpdateState: false,
 		ToPut:       request.Put,
