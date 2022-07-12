@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
@@ -769,11 +768,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
-<<<<<<< HEAD
 	if !stateFilter.Target(b.GetOpts(), store).IsOK() {
-=======
-	if stateFilter.Target(b.GetOpts(), store).StatusCode != plan.StatusOK {
->>>>>>> b9585e467 (define plan status)
 		return false
 	}
 
