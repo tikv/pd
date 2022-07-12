@@ -268,11 +268,11 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if core.IsVoter(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
 		checkerCounter.WithLabelValues("rule_checker", "set-voter-non-witness").Inc()
-		return operator.CreateNonWitessVoterOperator("fix-demote-voter", c.cluster, region, peer)
+		return operator.CreateNonWitnessVoterOperator("fix-non-witness-voter", c.cluster, region, peer)
 	}
 	if core.IsLearner(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
-		checkerCounter.WithLabelValues("rule_checker", "set-voter-non-witness").Inc()
-		return operator.CreateNonWitessLeaderOperator("fix-demote-voter", c.cluster, region, peer)
+		checkerCounter.WithLabelValues("rule_checker", "set-learner-non-witness").Inc()
+		return operator.CreateNonWitnessLearnerOperator("fix-non-witness-learner", c.cluster, region, peer)
 	}
 
 	return nil, nil

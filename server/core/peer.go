@@ -36,9 +36,6 @@ func IsVoter(peer *metapb.Peer) bool {
 // IsVoterOrIncomingVoter judges whether peer role will become Voter.
 // The peer is not nil and the role is equal to IncomingVoter or Voter.
 func IsVoterOrIncomingVoter(peer *metapb.Peer) bool {
-	if peer == nil {
-		return false
-	}
 	switch peer.GetRole() {
 	case metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter:
 		return true
@@ -49,9 +46,6 @@ func IsVoterOrIncomingVoter(peer *metapb.Peer) bool {
 // IsLearnerOrDemotingVoter judges whether peer role will become Learner.
 // The peer is not nil and the role is equal to DemotingVoter or Learner.
 func IsLearnerOrDemotingVoter(peer *metapb.Peer) bool {
-	if peer == nil {
-		return false
-	}
 	switch peer.GetRole() {
 	case metapb.PeerRole_DemotingVoter, metapb.PeerRole_Learner:
 		return true
@@ -61,9 +55,6 @@ func IsLearnerOrDemotingVoter(peer *metapb.Peer) bool {
 
 // IsWitness judges whether the Peer is a witness
 func IsWitness(peer *metapb.Peer) bool {
-	if peer == nil {
-		return false
-	}
 	return peer.GetIsWitness()
 }
 

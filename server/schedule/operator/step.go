@@ -154,6 +154,9 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
 			return false
 		}
+		if peer.GetIsWitness() != ap.IsWitness {
+			return false
+		}
 		return region.GetPendingVoter(peer.GetId()) == nil
 	}
 	return false
@@ -221,6 +224,9 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
 		if peer.GetId() != al.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
+		}
+		if peer.GetIsWitness() != al.IsWitness {
 			return false
 		}
 		return region.GetPendingLearner(peer.GetId()) == nil

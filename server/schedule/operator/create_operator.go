@@ -283,18 +283,14 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
 }
 
-// CreateNonWitessVoterOperator creates an operator that set a peer with non-witness
-func CreateNonWitessVoterOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		DemoteVoter(peer.GetStoreId()).
-		NonWitness(peer.GetStoreId()).
-		Build(0)
+// CreateNonWitnessVoterOperator creates an operator that set a peer with non-witness
+func CreateNonWitnessVoterOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	// TODO
+	return nil, nil
 }
 
-// CreateNonWitessLeaderOperator creates an operator that set a peer with non-witness
-func CreateNonWitessLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		RemovePeer(peer.GetStoreId()).
-		AddPeer(&metapb.Peer{Id: peer.GetId(), StoreId: peer.GetStoreId(), Role: metapb.PeerRole_Learner, IsWitness: false}).
-		Build(0)
+// CreateNonWitnessLearnerOperator creates an operator that set a peer with non-witness
+func CreateNonWitnessLearnerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	// TODO
+	return nil, nil
 }
