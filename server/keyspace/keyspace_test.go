@@ -37,11 +37,11 @@ func newKeyspaceManager() *Manager {
 	return NewKeyspaceManager(store, allocator)
 }
 
-func createKeyspaceRequests(count int) []CreateKeyspaceRequest {
+func createKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	now := time.Now()
-	requests := make([]CreateKeyspaceRequest, count)
+	requests := make([]*CreateKeyspaceRequest, count)
 	for i := 0; i < count; i++ {
-		requests[i] = CreateKeyspaceRequest{
+		requests[i] = &CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace%d", i),
 			InitialConfig: map[string]string{
 				"config_entry_1": "100",
@@ -74,7 +74,7 @@ func TestCreateKeyspace(t *testing.T) {
 	re.Error(err)
 
 	// create a keyspace with empty name must return error
-	_, err = manager.CreateKeyspace(CreateKeyspaceRequest{Name: ""})
+	_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{Name: ""})
 	re.Error(err)
 }
 
@@ -85,7 +85,7 @@ func TestUpdateKeyspace(t *testing.T) {
 	for i, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
-		updateRequest := UpdateKeyspaceRequest{
+		updateRequest := &UpdateKeyspaceRequest{
 			Name:        createRequest.Name,
 			UpdateState: true,
 			NewState:    keyspacepb.KeyspaceState(rand.Int31n(3)),
@@ -180,7 +180,7 @@ func TestUpdateMultipleKeyspace(t *testing.T) {
 }
 
 // matchCreateRequest verifies a keyspace meta matches a create request.
-func matchCreateRequest(re *require.Assertions, request CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
+func matchCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
 	re.Equal(request.Now.Unix(), meta.CreatedAt)
 	re.Equal(request.Now.Unix(), meta.StateChangedAt)
@@ -189,7 +189,7 @@ func matchCreateRequest(re *require.Assertions, request CreateKeyspaceRequest, m
 }
 
 // matchUpdateRequest verifies a keyspace meta could be the immediate result of an update request.
-func matchUpdateRequest(re *require.Assertions, request UpdateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
+func matchUpdateRequest(re *require.Assertions, request *UpdateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
 	if request.UpdateState {
 		re.Equal(request.NewState, meta.State)
@@ -218,7 +218,7 @@ func matchUpdateRequest(re *require.Assertions, request UpdateKeyspaceRequest, m
 // updateKeyspaceConfig sequentially updates given keyspace's entry.
 func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string, end int) {
 	for i := 0; i <= end; i++ {
-		request := UpdateKeyspaceRequest{
+		request := &UpdateKeyspaceRequest{
 			Name:  name,
 			ToPut: map[string]string{testConfig: strconv.Itoa(i)},
 		}

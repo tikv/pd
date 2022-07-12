@@ -115,7 +115,7 @@ func (manager *Manager) createNameToID(spaceID uint32, name string) error {
 }
 
 // CreateKeyspace create a keyspace meta with initial config and save it to storage.
-func (manager *Manager) CreateKeyspace(request CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	// allocate new id
 	newID, err := manager.allocID()
 	if err != nil {
@@ -180,7 +180,7 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 
 // UpdateKeyspace update keyspace's state and config according to request.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
-func (manager *Manager) UpdateKeyspace(request UpdateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) UpdateKeyspace(request *UpdateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	manager.metaLock.Lock()
 	defer manager.metaLock.Unlock()
 	// load keyspace by id
