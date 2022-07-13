@@ -18,7 +18,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/tikv/pd/pkg/metricutil"
+
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -88,6 +90,7 @@ func run(simCase string) {
 	}
 
 	if *pdAddr != "" {
+		go RunMetrics()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -103,6 +106,11 @@ func run(simCase string) {
 		}
 		simStart(local.GetAddr(), simCase, simConfig, clean)
 	}
+}
+
+func RunMetrics() {
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(":20180", nil)
 }
 
 // NewSingleServer creates a pd server for simulator.
@@ -147,7 +155,6 @@ func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, cle
 	if err != nil {
 		simutil.Logger.Fatal("simulator prepare error", zap.Error(err))
 	}
-	metricutil.Push(&simConfig.MetricsConfig)
 	tickInterval := simConfig.SimTickInterval.Duration
 
 	tick := time.NewTicker(tickInterval)

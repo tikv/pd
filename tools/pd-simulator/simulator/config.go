@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -52,8 +51,7 @@ type SimConfig struct {
 	StoreIOMBPerSecond int64  `toml:"store-io-per-second"`
 	StoreVersion       string `toml:"store-version"`
 	// server
-	ServerConfig  *config.Config          `toml:"server"`
-	MetricsConfig metricutil.MetricConfig `toml:"metrics-config"`
+	ServerConfig *config.Config `toml:"server"`
 }
 
 // NewSimConfig create a new configuration of the simulator.
