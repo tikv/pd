@@ -103,12 +103,12 @@ func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	return Stores
 }
 
-// GetNonWitnessStores returns all Stores that contains the non-witness's peer.
-func (bc *BasicCluster) GetNonWitnessStores(region *RegionInfo) []*StoreInfo {
+// GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
+func (bc *BasicCluster) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	var Stores []*StoreInfo
-	for id := range region.GetStoreIDs() {
+	for id := range region.GetNonWitnessVoters() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
 		}
@@ -524,7 +524,7 @@ type StoreSetInformer interface {
 	GetStore(id uint64) *StoreInfo
 
 	GetRegionStores(region *RegionInfo) []*StoreInfo
-	GetNonWitnessStores(region *RegionInfo) []*StoreInfo
+	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
 }

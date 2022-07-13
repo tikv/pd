@@ -140,7 +140,7 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 }
 
 func (p *balancePlan) getTolerantResource() int64 {
-	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
+	if (p.kind.Resource == core.LeaderKind || p.kind.Resource == core.WitnessKind) && p.kind.Policy == core.ByCount {
 		return int64(p.tolerantSizeRatio)
 	}
 	regionSize := p.region.GetApproximateSize()

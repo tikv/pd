@@ -413,8 +413,8 @@ func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	return res
 }
 
-// GetNonWitnesses returns a map indicate the non-witness peers distributed.
-func (r *RegionInfo) GetNonWitnesses() map[uint64]*metapb.Peer {
+// GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
+func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
 	peers := r.GetVoters()
 	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
 	for _, peer := range peers {

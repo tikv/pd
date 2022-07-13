@@ -303,8 +303,8 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 func (mc *Cluster) AddWitnessStore(storeID uint64, witnessCount int) {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
-	stats.UsedSize = uint64(witnessCount) * defaultRegionSize
-	stats.Available = stats.Capacity - uint64(witnessCount)*defaultRegionSize
+	stats.UsedSize = 0
+	stats.Available = stats.Capacity
 	store := core.NewStoreInfo(
 		&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
@@ -358,6 +358,14 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+	return region
+}
+
+// AddLeaderRegionWithWitness adds region with specified leader and followers, .
+func (mc *Cluster) AddLeaderRegionWithWitness(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs []uint64, witnessStoreID uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10), core.WithWitness(origin.GetStorePeer(witnessStoreID).Id))
 	mc.PutRegion(region)
 	return region
 }
@@ -563,6 +571,15 @@ func (mc *Cluster) UpdateSnapshotCount(storeID uint64, snapshotCount int) {
 func (mc *Cluster) UpdatePendingPeerCount(storeID uint64, pendingPeerCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(core.SetPendingPeerCount(pendingPeerCount))
+	mc.PutStore(newStore)
+}
+
+// UpdateWitnessCount updates store witness count.
+func (mc *Cluster) UpdateWitnessCount(storeID uint64, leaderCount int) {
+	store := mc.GetStore(storeID)
+	newStore := store.Clone(
+		core.SetWitnessCount(leaderCount),
+	)
 	mc.PutStore(newStore)
 }
 

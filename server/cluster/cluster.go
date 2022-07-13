@@ -990,9 +990,9 @@ func (c *RaftCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo
 	return c.core.GetRegionStores(region)
 }
 
-// GetNonWitnessStores returns all stores that contains the region's non-witness peer.
-func (c *RaftCluster) GetNonWitnessStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetNonWitnessStores(region)
+// GetNonWitnessVoterStores returns all stores that contains the region's non-witness voter peer.
+func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.StoreInfo {
+	return c.core.GetNonWitnessVoterStores(region)
 }
 
 // GetStoreCount returns the count of stores.

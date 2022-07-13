@@ -305,6 +305,17 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 	}
 }
 
+// WithWitness sets the witness for the region.
+func WithWitness(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.IsWitness = true
+			}
+		}
+	}
+}
+
 // WithReplacePeerStore replaces a peer's storeID with another ID.
 func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {

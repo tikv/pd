@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/tikv/pd/pkg/logutil"
 
 	"github.com/pingcap/errors"
@@ -99,13 +98,11 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 
 // CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
 func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
-	source := proto.Clone(region.GetStorePeer(sourceStoreID)).(*metapb.Peer)
-	source.IsWitness = false
-	target := proto.Clone(region.GetStorePeer(targetStoreID)).(*metapb.Peer)
-	target.IsWitness = true
+	// TODO: remove then add is a workaround for simplicity.
 	return NewBuilder(desc, ci, region).
-		AddPeer(source).
-		AddPeer(target).
+		RemovePeer(sourceStoreID).
+		AddPeer(&metapb.Peer{StoreId: sourceStoreID}).
+		BecomeWitness(targetStoreID).
 		Build(kind)
 }
 

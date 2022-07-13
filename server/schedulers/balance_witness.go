@@ -319,7 +319,7 @@ func (l *BalanceWitnessScheduler) transferWitnessOut(plan *balancePlan) *operato
 		schedulerCounter.WithLabelValues(l.GetName(), "no-witness-region").Inc()
 		return nil
 	}
-	targets := plan.GetNonWitnessStores(plan.region)
+	targets := plan.GetNonWitnessVoterStores(plan.region)
 	finalFilters := l.filters
 	opts := plan.GetOpts()
 	if witnessFilter := filter.NewPlacementWitnessSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); witnessFilter != nil {
