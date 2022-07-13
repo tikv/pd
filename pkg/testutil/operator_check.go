@@ -95,7 +95,7 @@ func CheckTransferPeerWithLeaderTransfer(re *require.Assertions, op *operator.Op
 	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
 	re.IsType(operator.PromoteLearner{}, steps[1])
 	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
-	re.NotEqual(uint64(0), lastLeader)
+	re.NotZero(lastLeader)
 	re.NotEqual(sourceID, lastLeader)
 	kind |= operator.OpRegion
 	re.Equal(kind, op.Kind()&kind)
@@ -110,7 +110,7 @@ func CheckTransferPeerWithLeaderTransferFrom(re *require.Assertions, op *operato
 	re.IsType(operator.AddLearner{}, steps[0])
 	re.IsType(operator.PromoteLearner{}, steps[1])
 	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
-	re.NotEqual(uint64(0), lastLeader)
+	re.NotZero(lastLeader)
 	re.NotEqual(sourceID, lastLeader)
 	kind |= operator.OpRegion | operator.OpLeader
 	re.Equal(kind, op.Kind()&kind)
@@ -162,7 +162,7 @@ func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator,
 
 // CheckSteps checks if the operator matches the given steps.
 func CheckSteps(re *require.Assertions, op *operator.Operator, steps []operator.OpStep) {
-	re.NotEqual(0, op.Kind()&operator.OpMerge)
+	re.NotZero(op.Kind() & operator.OpMerge)
 	re.NotNil(steps)
 	re.Len(steps, op.Len())
 	for i := range steps {

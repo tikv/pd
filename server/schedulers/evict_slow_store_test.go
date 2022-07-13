@@ -102,7 +102,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	suite.True(ok)
-	suite.Equal(uint64(0), es2.conf.evictStore())
+	suite.Zero(es2.conf.evictStore())
 
 	// check the value from storage.
 	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
@@ -118,13 +118,13 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	err = json.Unmarshal([]byte(valueStr), &persistValue)
 	suite.NoError(err)
 	suite.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
-	suite.Equal(uint64(0), persistValue.evictStore())
+	suite.Zero(persistValue.evictStore())
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	suite.True(ok)
-	suite.Equal(uint64(0), es2.conf.evictStore())
+	suite.Zero(es2.conf.evictStore())
 	// prepare with no evict store.
 	suite.es.Prepare(suite.tc)
 

@@ -357,7 +357,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestTransferLeaderOut() {
 	}
 	suite.Len(regions, 3)
 	for _, count := range targets {
-		suite.Equal(uint64(0), count)
+		suite.Zero(count)
 	}
 }
 
@@ -645,17 +645,17 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
 
 	// store 1 should in pos 0
 	store1 := stores[0]
-	suite.Equal(0, cs.binarySearch(store1))
+	suite.Zero(cs.binarySearch(store1))
 	deltaMap[store1.GetID()] = -1 // store 1
 	cs.resortStoreWithPos(0)
 	// store 1 should still in pos 0.
 	suite.Equal(uint64(1), cs.stores[0].GetID())
-	curIndx := cs.binarySearch(store1)
-	suite.Equal(curIndx, 0)
+	curIndex := cs.binarySearch(store1)
+	suite.Zero(curIndex)
 	deltaMap[1] = -4
 	// store 1 update the scores to 104-4=100
 	// the order stores should be:5(100),4(100),1(100),6,3,2
-	cs.resortStoreWithPos(curIndx)
+	cs.resortStoreWithPos(curIndex)
 	suite.Equal(uint64(1), cs.stores[2].GetID())
 	suite.Equal(2, cs.binarySearch(store1))
 	// the top store is : 5(100)
@@ -1176,8 +1176,8 @@ func TestRandomMergeSchedule(t *testing.T) {
 	tc.SetMaxReplicas(1)
 	ops, _ = mb.Schedule(tc, false)
 	re.Len(ops, 2)
-	re.NotEqual(0, ops[0].Kind()&operator.OpMerge)
-	re.NotEqual(0, ops[1].Kind()&operator.OpMerge)
+	re.NotZero(ops[0].Kind() & operator.OpMerge)
+	re.NotZero(ops[1].Kind() & operator.OpMerge)
 
 	oc.AddWaitingOperator(ops...)
 	re.False(mb.IsScheduleAllowed(tc))
