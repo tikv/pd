@@ -31,5 +31,5 @@ func TestNilFail(t *testing.T) {
 	}
 	re.Nil(checker.IsNil)
 	checker.AssertNil(nil)
-	re.NotNil(failErr)
+	re.NoError(failErr)
 }
