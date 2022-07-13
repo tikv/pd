@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-
 	"fmt"
 	"net/http"
 	"os"
@@ -56,6 +55,7 @@ var (
 )
 
 func main() {
+	// ignore some undefined flag
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
@@ -66,19 +66,6 @@ func main() {
 		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
-	if *caseName == "" {
-		if *pdAddr != "" {
-			simutil.Logger.Fatal("need to specify one config name")
-		}
-		for simCase := range cases.CaseMap {
-			run(simCase)
-		}
-	} else {
-		run(*caseName)
-	}
-}
-
-func run(simCase string) {
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
 	var meta toml.MetaData
 	var err error
@@ -90,13 +77,29 @@ func run(simCase string) {
 	if err = simConfig.Adjust(&meta); err != nil {
 		simutil.Logger.Fatal("failed to adjust simulator configuration", zap.Error(err))
 	}
+	if len(*caseName) == 0 {
+		*caseName = simConfig.CaseName
+	}
 
+	if *caseName == "" {
+		if *pdAddr != "" {
+			simutil.Logger.Fatal("need to specify one config name")
+		}
+		for simCase := range cases.CaseMap {
+			run(simCase, simConfig)
+		}
+	} else {
+		run(*caseName, simConfig)
+	}
+}
+
+func run(simCase string, simConfig *simulator.SimConfig) {
 	if *pdAddr != "" {
 		go RunMetrics()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
-		err = local.Run()
+		err := local.Run()
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
