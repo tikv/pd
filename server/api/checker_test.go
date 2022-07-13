@@ -68,8 +68,8 @@ func (suite *checkerTestSuite) TestAPI() {
 		{name: "joint-state"},
 	}
 	for _, testCase := range testCases {
-		suite.testGetStatus(testCases.name)
-		suite.testPauseOrResume(testCases.name)
+		suite.testGetStatus(testCase.name)
+		suite.testPauseOrResume(testCase.name)
 	}
 }
 
