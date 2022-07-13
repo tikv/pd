@@ -22,11 +22,20 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
+var (
+	statusRegionOK          = plan.NewStatus(plan.StatusOK)
+	statusRegionPendingPeer = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionDownPeer    = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionEmpty       = plan.NewStatus(plan.StatusRegionEmpty)
+	statusRegionIsolation   = plan.NewStatus(plan.StatusIsolationNotMatch)
+	statusRegionRule        = plan.NewStatus(plan.StatusRuleNotMatch)
+)
+
 // SelectRegions selects regions that be selected from the list.
 func SelectRegions(regions []*core.RegionInfo, filters ...RegionFilter) []*core.RegionInfo {
 	return filterRegionsBy(regions, func(r *core.RegionInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
-			return filters[i].Select(r) == plan.StatusOK
+			return filters[i].Select(r).IsOK()
 		})
 	})
 }
@@ -43,7 +52,7 @@ func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo)
 // SelectOneRegion selects one region that be selected from the list.
 func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
-		if slice.AllOf(filters, func(i int) bool { return filters[i].Select(r) == plan.StatusOK }) {
+		if slice.AllOf(filters, func(i int) bool { return filters[i].Select(r).IsOK() }) {
 			return r
 		}
 	}
@@ -57,7 +66,7 @@ type RegionFilter interface {
 	Type() string
 	Reason() string
 	// Return true if the region can be used to schedule.
-	Select(region *core.RegionInfo) plan.StatusCode
+	Select(region *core.RegionInfo) plan.Status
 }
 
 type regionPengdingFilter struct {
@@ -83,9 +92,9 @@ func (f *regionPengdingFilter) Reason() string {
 
 func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
 	if len(region.GetPendingPeers()) > 0 {
-		return plan.StatusRegionUnhealthy
+		return statusRegionPendingPeer
 	}
-	return plan.StatusOK
+	return statusRegionOK
 }
 
 type regionDownFilter struct {
@@ -111,9 +120,9 @@ func (f *regionDownFilter) Reason() string {
 
 func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
 	if len(region.GetDownPeers()) > 0 {
-		return plan.StatusRegionUnhealthy
+		return statusRegionDownPeer
 	}
-	return plan.StatusOK
+	return statusRegionOK
 }
 
 type regionReplicatedFilter struct {
@@ -144,14 +153,14 @@ func (f *regionReplicatedFilter) Reason() string {
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		if !f.cluster.GetRuleManager().FitRegion(f.cluster, region).IsSatisfied() {
-			return plan.StatusRuleNotMatch
+			return statusRegionRule
 		}
-		return plan.StatusOK
+		return statusRegionOK
 	}
 	if !(len(region.GetLearners()) == 0 && len(region.GetPeers()) == f.cluster.GetOpts().GetMaxReplicas()) {
-		return plan.StatusIsolationNotMatch
+		return statusRegionIsolation
 	}
-	return plan.StatusOK
+	return statusRegionOK
 }
 
 type regionEmptyFilter struct {
@@ -178,9 +187,9 @@ func (f *regionEmptyFilter) Reason() string {
 
 func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
 	if !isEmptyRegionAllowBalance(f.cluster, region) {
-		return plan.StatusRegionEmpty
+		return statusRegionEmpty
 	}
-	return plan.StatusOK
+	return statusRegionOK
 }
 
 // isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
