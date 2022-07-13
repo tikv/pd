@@ -17,9 +17,10 @@ package schedulers
 import (
 	"context"
 	"fmt"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -28,14 +29,11 @@ import (
 	"github.com/tikv/pd/server/statistics/buckets"
 )
 
-var _ = Suite(&testSplitBucketSuite{})
-
-type testSplitBucketSuite struct {
-}
-
-func (s *testSplitBucketSuite) TestSplitBucket(c *C) {
+func TestSplitBucket(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(10, 10)
@@ -87,29 +85,29 @@ func (s *testSplitBucketSuite) TestSplitBucket(c *C) {
 		conf:               conf,
 	}
 	ops := scheduler.splitBucket(plan)
-	c.Assert(ops, HasLen, 1)
+	re.Len(ops, 1)
 	step := ops[0].Step(0).(operator.SplitRegion)
-	c.Assert(step.SplitKeys, HasLen, 1)
-	c.Assert(step.SplitKeys[0], BytesEquals, []byte(fmt.Sprintf("%20d", 2)))
+	re.Len(step.SplitKeys, 1)
+	re.Equal([]byte(fmt.Sprintf("%20d", 2)), step.SplitKeys[0])
 
 	// case 2: the key range of the hot bucket stat is [1 10] and the region is [1 10],
 	// it can't be split.
 	hotBuckets[0][0].EndKey = []byte(fmt.Sprintf("%20d", 10))
 	ops = scheduler.splitBucket(plan)
-	c.Assert(ops, HasLen, 0)
+	re.Empty(ops)
 
 	// case 3: the key range of the hot bucket stat is [0 9], the key range is not less
 	// than the region [1 10], it will have no operator.
 	hotBuckets[0][0].StartKey = []byte(fmt.Sprintf("%20d", 0))
 	hotBuckets[0][0].EndKey = []byte(fmt.Sprintf("%20d", 9))
 	ops = scheduler.splitBucket(plan)
-	c.Assert(ops, HasLen, 0)
+	re.Empty(ops)
 
 	// case 3: the key range of the hot bucket stat is [3 9]
 	// it can split by [2 3],[3 9],[9 10]
 	hotBuckets[0][0].StartKey = []byte(fmt.Sprintf("%20d", 3))
 	ops = scheduler.splitBucket(plan)
-	c.Assert(ops, HasLen, 1)
+	re.Len(ops, 1)
 	step = ops[0].Step(0).(operator.SplitRegion)
-	c.Assert(step.SplitKeys, HasLen, 2)
+	re.Len(step.SplitKeys, 2)
 }

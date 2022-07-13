@@ -33,13 +33,13 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-type testItem struct {
+type testCase struct {
 	name  string
 	value interface{}
 	read  func(scheduleConfig *config.ScheduleConfig) interface{}
 }
 
-func (t *testItem) judge(re *require.Assertions, scheduleConfigs ...*config.ScheduleConfig) {
+func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*config.ScheduleConfig) {
 	value := t.value
 	for _, scheduleConfig := range scheduleConfigs {
 		re.NotNil(scheduleConfig)
@@ -211,7 +211,7 @@ func TestConfig(t *testing.T) {
 	re.Equal(typeutil.NewDuration(0), svr.GetScheduleConfig().MaxStorePreparingTime)
 
 	// test config read and write
-	testItems := []testItem{
+	testCases := []testCase{
 		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.LeaderScheduleLimit
 		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
@@ -229,9 +229,9 @@ func TestConfig(t *testing.T) {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}
-	for _, item := range testItems {
+	for _, testCase := range testCases {
 		// write
-		args1 = []string{"-u", pdAddr, "config", "set", item.name, reflect.TypeOf(item.value).String()}
+		args1 = []string{"-u", pdAddr, "config", "set", testCase.name, reflect.TypeOf(testCase.value).String()}
 		_, err = pdctl.ExecuteCommand(cmd, args1...)
 		re.NoError(err)
 		// read
@@ -241,7 +241,7 @@ func TestConfig(t *testing.T) {
 		cfg = config.Config{}
 		re.NoError(json.Unmarshal(output, &cfg))
 		// judge
-		item.judge(re, &cfg.Schedule, svr.GetScheduleConfig())
+		testCase.judge(re, &cfg.Schedule, svr.GetScheduleConfig())
 	}
 
 	// test error or deprecated config name
