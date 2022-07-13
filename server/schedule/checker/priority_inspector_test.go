@@ -56,7 +56,7 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	pc.Inspect(region)
 	re.Equal(1, pc.queue.Len())
 	// the region will not rerun after it checks
-	re.Len(pc.GetPriorityRegions(), 0)
+	re.Empty(pc.GetPriorityRegions())
 
 	// case3: inspect region 3, it will has high priority
 	region = tc.GetRegion(3)

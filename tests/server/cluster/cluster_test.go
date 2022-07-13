@@ -869,7 +869,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	err = svr.SetReplicationConfig(rep)
 	re.NoError(err)
-	re.Equal(0, len(svr.GetScheduleConfig().StoreLimit))
+	re.Empty(svr.GetScheduleConfig().StoreLimit)
 }
 
 func TestReplicationModeStatus(t *testing.T) {
