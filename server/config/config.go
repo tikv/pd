@@ -207,7 +207,7 @@ const (
 
 	// The default max bytes for grpc message
 	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
-	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
 	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
 
 	defaultName                = "pd"
@@ -963,6 +963,9 @@ func (c *ScheduleConfig) Validate() error {
 	if c.LowSpaceRatio <= c.HighSpaceRatio {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
 	}
+	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
+		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
+	}
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
@@ -1201,6 +1204,9 @@ func (c *PDServerConfig) Validate() error {
 		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
 			return err
 		}
+	}
+	if c.KeyType != "table" && c.KeyType != "raw" && c.KeyType != "txn" {
+		return errors.Errorf("key-type %v is invalid", c.KeyType)
 	}
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
