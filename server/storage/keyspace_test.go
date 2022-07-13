@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSaveLoadKeyspace(t *testing.T) {
+func TestKeyspace(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
@@ -34,10 +34,18 @@ func TestSaveLoadKeyspace(t *testing.T) {
 	for _, keyspace := range keyspaces {
 		spaceID := keyspace.GetId()
 		loadedKeyspace := &keyspacepb.KeyspaceMeta{}
+		// Test load keyspace.
 		success, err := storage.LoadKeyspace(spaceID, loadedKeyspace)
 		re.True(success)
 		re.NoError(err)
 		re.Equal(keyspace, loadedKeyspace)
+		// Test remove keyspace.
+		re.NoError(storage.RemoveKeyspace(spaceID))
+		success, err = storage.LoadKeyspace(spaceID, loadedKeyspace)
+		// Loading a non-existing keyspace should be unsuccessful.
+		re.False(success)
+		// Loading a non-existing keyspace should not return error.
+		re.NoError(err)
 	}
 }
 

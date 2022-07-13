@@ -29,6 +29,8 @@ type KeyspaceStorage interface {
 	SaveKeyspace(*keyspacepb.KeyspaceMeta) error
 	// LoadKeyspace loads keyspace specified by spaceID.
 	LoadKeyspace(spaceID uint32, keyspace *keyspacepb.KeyspaceMeta) (bool, error)
+	// RemoveKeyspace removes target keyspace specified by spaceID.
+	RemoveKeyspace(spaceID uint32) error
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	// SaveKeyspaceID saves keyspace name to ID lookup information.
@@ -49,6 +51,12 @@ func (se *StorageEndpoint) SaveKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 func (se *StorageEndpoint) LoadKeyspace(spaceID uint32, keyspace *keyspacepb.KeyspaceMeta) (bool, error) {
 	key := KeyspaceMetaPath(spaceID)
 	return se.loadProto(key, keyspace)
+}
+
+// RemoveKeyspace removes target keyspace specified by spaceID.
+func (se *StorageEndpoint) RemoveKeyspace(spaceID uint32) error {
+	key := KeyspaceMetaPath(spaceID)
+	return se.Remove(key)
 }
 
 // LoadRangeKeyspace loads keyspaces starting at startID.
