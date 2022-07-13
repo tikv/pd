@@ -200,10 +200,10 @@ func TestDispatch(t *testing.T) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeerWithTestify(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	waitOperator(re, co, 2)
-	testutil.CheckTransferLeaderWithTestify(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
+	testutil.CheckTransferLeader(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -502,7 +502,7 @@ func TestCheckCache(t *testing.T) {
 	co.patrolRegions()
 	oc := co.opController
 	re.Len(oc.GetOperators(), 1)
-	re.Len(co.checkers.GetWaitingRegions(), 0)
+	re.Empty(co.checkers.GetWaitingRegions())
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
@@ -517,7 +517,7 @@ func TestCheckCache(t *testing.T) {
 	co.wg.Add(1)
 	co.patrolRegions()
 	re.Len(oc.GetOperators(), 1)
-	re.Len(co.checkers.GetWaitingRegions(), 0)
+	re.Empty(co.checkers.GetWaitingRegions())
 
 	co.wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"))
@@ -540,7 +540,7 @@ func TestPeerState(t *testing.T) {
 
 	// Wait for schedule.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeerWithTestify(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
 	region := tc.GetRegion(1).Clone()
 
@@ -671,7 +671,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
-	re.Len(co.schedulers, 0)
+	re.Empty(co.schedulers)
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -861,8 +861,8 @@ func TestRemoveScheduler(t *testing.T) {
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
-	re.Len(sches, 0)
-	re.Len(co.schedulers, 0)
+	re.Empty(sches)
+	re.Empty(co.schedulers)
 	re.NoError(co.cluster.opt.Persist(co.cluster.storage))
 	co.stop()
 	co.wg.Wait()
@@ -874,7 +874,7 @@ func TestRemoveScheduler(t *testing.T) {
 	tc.RaftCluster.opt = newOpt
 	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	re.Len(co.schedulers, 0)
+	re.Empty(co.schedulers)
 	// the option remains default scheduler
 	re.Len(co.cluster.opt.GetSchedulers(), 4)
 	co.stop()
@@ -1053,7 +1053,7 @@ func TestStoreOverloaded(t *testing.T) {
 		if time.Since(start) > time.Second {
 			break
 		}
-		re.Len(ops, 0)
+		re.Empty(ops)
 	}
 
 	// reset all stores' limit
@@ -1103,7 +1103,7 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	re.False(oc.AddOperator(op3))
 	ops, _ := lb.Schedule(tc, false /* dryRun */)
-	re.Len(ops, 0)
+	re.Empty(ops)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
 	ops, _ = lb.Schedule(tc, false /* dryRun */)
@@ -1186,7 +1186,7 @@ func TestController(t *testing.T) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		re.Equal(i, sc.GetInterval())
-		re.Len(sc.Schedule(), 0)
+		re.Empty(sc.Schedule())
 	}
 	// limit = 2
 	lb.limit = 2
@@ -1269,7 +1269,7 @@ func TestInterval(t *testing.T) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			re.Len(sc.Schedule(), 0)
+			re.Empty(sc.Schedule())
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
 	}

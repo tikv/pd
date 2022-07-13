@@ -57,7 +57,7 @@ func (suite *checkerTestSuite) TearDownSuite() {
 func (suite *checkerTestSuite) TestAPI() {
 	suite.testErrCases()
 
-	cases := []struct {
+	testCases := []struct {
 		name string
 	}{
 		{name: "learner"},
@@ -67,9 +67,9 @@ func (suite *checkerTestSuite) TestAPI() {
 		{name: "merge"},
 		{name: "joint-state"},
 	}
-	for _, ca := range cases {
-		suite.testGetStatus(ca.name)
-		suite.testPauseOrResume(ca.name)
+	for _, testCase := range testCases {
+		suite.testGetStatus(testCases.name)
+		suite.testPauseOrResume(testCases.name)
 	}
 }
 
