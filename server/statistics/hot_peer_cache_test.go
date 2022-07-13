@@ -530,15 +530,15 @@ func TestCoolDownTransferLeader(t *testing.T) {
 		checkAndUpdate(re, cache, region)
 		checkCoolDown(re, cache, region, false)
 	}
-	cases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
-	for _, runCase := range cases {
+	testCases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
+	for _, testCase := range testCases {
 		cache = NewHotPeerCache(Read)
 		region = buildRegion(Read, 3, 60)
 		for i := 1; i <= 200; i++ {
 			checkAndUpdate(re, cache, region)
 		}
 		checkCoolDown(re, cache, region, false)
-		runCase()
+		testCase()
 	}
 }
 
@@ -600,7 +600,7 @@ func checkMovingAverage(re *require.Assertions, testCase *testMovingAverageCase)
 
 func TestUnstableData(t *testing.T) {
 	re := require.New(t)
-	cases := []*testMovingAverageCase{
+	testCases := []*testMovingAverageCase{
 		{
 			report: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
 			expect: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
@@ -626,8 +626,8 @@ func TestUnstableData(t *testing.T) {
 			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
 		},
 	}
-	for i := range cases {
-		checkMovingAverage(re, cases[i])
+	for _, testCase := range testCases {
+		checkMovingAverage(re, testCase)
 	}
 }
 
