@@ -16,9 +16,8 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,6 +27,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -52,9 +52,11 @@ var (
 	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
 	storeNum                    = flag.Int("storeNum", 0, "storeNum")
 	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
+	statusAddress               = flag.String("status-addr", "0.0.0.0:20180", "status address")
 )
 
 func main() {
+	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
@@ -110,7 +112,7 @@ func run(simCase string) {
 
 func RunMetrics() {
 	http.Handle("/metrics", promhttp.Handler())
-	http.ListenAndServe(":20180", nil)
+	http.ListenAndServe(*statusAddress, nil)
 }
 
 // NewSingleServer creates a pd server for simulator.
