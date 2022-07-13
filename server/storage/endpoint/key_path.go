@@ -155,6 +155,7 @@ func KeyspaceMetaPath(spaceID uint32) string {
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.
+// Path: /keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
 	return path.Join(keyspacePrefix, keyspaceID, name)
 }
