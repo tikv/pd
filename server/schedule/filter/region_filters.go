@@ -127,11 +127,11 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
 
 type regionReplicatedFilter struct {
 	scope   string
-	cluster Cluster
+	cluster regionFilterCluster
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(scope string, cluster Cluster) RegionFilter {
+func NewRegionReplicatedFilter(scope string, cluster regionFilterCluster) RegionFilter {
 	return &regionReplicatedFilter{scope: scope, cluster: cluster}
 }
 
@@ -165,11 +165,11 @@ func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 
 type regionEmptyFilter struct {
 	scope   string
-	cluster Cluster
+	cluster regionFilterCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(scope string, cluster Cluster) RegionFilter {
+func NewRegionEmptyFilter(scope string, cluster regionFilterCluster) RegionFilter {
 	return &regionEmptyFilter{scope: scope, cluster: cluster}
 }
 
@@ -192,13 +192,13 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
 	return statusRegionOK
 }
 
-// isEmptyRegionAllowBalance checks if a region is an empty region and can be balanced.
-func isEmptyRegionAllowBalance(cluster Cluster, region *core.RegionInfo) bool {
+// isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
+func isEmptyRegionAllowBalance(cluster regionFilterCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
 }
 
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
+// cluster provides an overview of a cluster's regions distribution.
+type regionFilterCluster interface {
 	core.StoreSetInformer
 	core.StoreSetController
 	core.RegionSetInformer

@@ -22,16 +22,13 @@ import (
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
 // region does not have any down or pending peers.
 func IsRegionHealthy(region *core.RegionInfo) bool {
-	pendingFilter := filter.NewRegionPengdingFilter("option")
-	downFilter := filter.NewRegionDownFilter("option")
-	return pendingFilter.Select(region).IsOK() && downFilter.Select(region).IsOK()
+	return IsRegionHealthyAllowPending(region) && len(region.GetPendingPeers()) == 0
 }
 
 // IsRegionHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
 func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
-	downFilter := filter.NewRegionDownFilter("option")
-	return downFilter.Select(region).IsOK()
+	return len(region.GetDownPeers()) == 0
 }
 
 // IsRegionReplicated checks if a region is fully replicated. When placement
