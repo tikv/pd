@@ -63,6 +63,39 @@ type client interface {
 	GetAllocatorLeaderURLs() map[string]string
 }
 
+func TestClientClusterIDCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Create the cluster #1.
+	cluster1, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster1.Destroy()
+	endpoints1 := runServer(re, cluster1)
+	// Create the cluster #2.
+	cluster2, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster2.Destroy()
+	endpoints2 := runServer(re, cluster2)
+	// Try to create a client with the mixed endpoints.
+	_, err = pd.NewClientWithContext(
+		ctx, append(endpoints1, endpoints2...),
+		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+	)
+	re.Error(err)
+	re.Contains(err.Error(), "unmatched cluster id")
+	// updateMember should fail due to unmatched cluster ID found.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipClusterIDCheck", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipFirstUpdateMember", `return(true)`))
+	_, err = pd.NewClientWithContext(ctx, []string{endpoints1[0], endpoints2[0]},
+		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+	)
+	re.Error(err)
+	re.Contains(err.Error(), "ErrClientGetLeader")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
+}
+
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

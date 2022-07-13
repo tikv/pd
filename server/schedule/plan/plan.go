@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package assertutil
+package plan
 
-import (
-	"errors"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-)
-
-func TestNilFail(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
-	var failErr error
-	checker := NewChecker()
-	checker.FailNow = func() {
-		failErr = errors.New("called assert func not exist")
-	}
-	re.Nil(checker.IsNil)
-	checker.AssertNil(nil)
-	re.Error(failErr)
-}
+// Plan is the basic unit for both scheduling and diagnosis.
+// TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
+type Plan interface{}

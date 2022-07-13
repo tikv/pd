@@ -16,6 +16,7 @@ package requestutil
 
 import (
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
@@ -32,7 +33,7 @@ func TestRequestInfo(t *testing.T) {
 	ctx = WithRequestInfo(ctx,
 		RequestInfo{
 			ServiceLabel:   "test label",
-			Method:         "POST",
+			Method:         http.MethodPost,
 			Component:      "pdctl",
 			IP:             "localhost",
 			URLParam:       "{\"id\"=1}",
@@ -43,7 +44,7 @@ func TestRequestInfo(t *testing.T) {
 	re.NotNil(result)
 	re.True(ok)
 	re.Equal("test label", result.ServiceLabel)
-	re.Equal("POST", result.Method)
+	re.Equal(http.MethodPost, result.Method)
 	re.Equal("pdctl", result.Component)
 	re.Equal("localhost", result.IP)
 	re.Equal("{\"id\"=1}", result.URLParam)
