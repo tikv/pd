@@ -50,18 +50,23 @@ type allocatorImpl struct {
 	rootPath  string
 	allocPath string
 	label     string
-	metric    prometheus.Gauge
+	metrics   *metrics
 	member    string
 }
 
+// metrics is a collection of idAllocator's metrics
+type metrics struct {
+	idGauge prometheus.Gauge
+}
+
 // NewAllocator creates a new ID Allocator.
-func NewAllocator(client *clientv3.Client, rootPath string, allocPath string, label string, member string) Allocator {
+func NewAllocator(client *clientv3.Client, rootPath, allocPath, label, member string) Allocator {
 	return &allocatorImpl{
 		client:    client,
 		rootPath:  rootPath,
 		allocPath: allocPath,
 		label:     label,
-		metric:    idGauge.WithLabelValues(label),
+		metrics:   &metrics{idGauge: idGauge.WithLabelValues(label)},
 		member:    member,
 	}
 }
@@ -131,7 +136,7 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 	}
 
 	log.Info("idAllocator allocates a new id", zap.String("label", alloc.label), zap.Uint64("alloc-id", end))
-	alloc.metric.Set(float64(end))
+	alloc.metrics.idGauge.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - allocStep
 	return nil
