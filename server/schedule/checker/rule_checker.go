@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/plan"
 	"go.uber.org/zap"
 )
 
@@ -71,9 +72,9 @@ func (c *RuleChecker) GetType() string {
 
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
-func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+func (c *RuleChecker) Check(region *core.RegionInfo) (*operator.Operator, plan.Plan) {
 	fit := c.cluster.GetRuleManager().FitRegion(c.cluster, region)
-	return c.CheckWithFit(region, fit)
+	return c.CheckWithFit(region, fit), nil
 }
 
 // CheckWithFit is similar with Checker with placement.RegionFit

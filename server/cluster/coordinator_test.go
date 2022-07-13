@@ -1148,7 +1148,7 @@ func TestDownStoreLimit(t *testing.T) {
 	tc.putRegion(region)
 	for i := uint64(1); i < 20; i++ {
 		tc.addRegionStore(i+3, 100)
-		op := rc.Check(region)
+		op, _ := rc.Check(region)
 		re.NotNil(op)
 		re.True(oc.AddOperator(op))
 		oc.RemoveOperator(op)
@@ -1158,7 +1158,7 @@ func TestDownStoreLimit(t *testing.T) {
 	tc.putRegion(region)
 	for i := uint64(20); i < 25; i++ {
 		tc.addRegionStore(i+3, 100)
-		op := rc.Check(region)
+		op, _ := rc.Check(region)
 		re.NotNil(op)
 		re.True(oc.AddOperator(op))
 		oc.RemoveOperator(op)

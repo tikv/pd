@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/plan"
 )
 
 // DefaultCacheSize is the default length of waiting list.
@@ -117,7 +118,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		allowed := opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
-		} else if ops := c.mergeChecker.Check(region); ops != nil {
+		} else if ops, _ := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
 			return ops
 		}
@@ -228,4 +229,30 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	default:
 		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}
+}
+
+// DiagnoseDryRun is used to dry run the checker.
+func (c *Controller) DiagnoseDryRun(name string, regions []*core.RegionInfo) ([]*operator.Operator, []plan.Plan) {
+	var (
+		ops   []*operator.Operator
+		plans []plan.Plan
+	)
+
+	switch name {
+	case "merge-checker":
+		for _, region := range regions {
+			op, plan := c.mergeChecker.Check(region)
+			ops = append(ops, op...)
+			plans = append(plans, plan)
+		}
+	case "rule-checker":
+		for _, region := range regions {
+			op, plan := c.ruleChecker.Check(region)
+			ops = append(ops, op)
+			plans = append(plans, plan)
+		}
+	default:
+		return nil, nil
+	}
+	return ops, plans
 }
