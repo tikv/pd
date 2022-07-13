@@ -1340,7 +1340,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	stats = tc.RegionStats(statistics.Read, 0)
 	re.Len(stats[4], 2)
 	re.Len(stats[5], 1)
-	re.Len(stats[6], 0)
+	re.Empty(stats[6])
 }
 
 func TestHotCacheKeyThresholds(t *testing.T) {

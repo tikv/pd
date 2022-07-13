@@ -22,7 +22,7 @@ import (
 // CheckTransferLeader checks if the operator is to transfer leader between the specified source and target stores.
 func CheckTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
-	re.Equal(op.Len(), 1)
+	re.Equal(1, op.Len())
 	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
 	kind |= operator.OpLeader
 	re.Equal(kind, op.Kind()&kind)
@@ -31,7 +31,7 @@ func CheckTransferLeader(re *require.Assertions, op *operator.Operator, kind ope
 // CheckTransferLeaderFrom checks if the operator is to transfer leader out of the specified store.
 func CheckTransferLeaderFrom(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
 	re.NotNil(op)
-	re.Equal(op.Len(), 1)
+	re.Equal(1, op.Len())
 	re.Equal(sourceID, op.Step(0).(operator.TransferLeader).FromStore)
 	kind |= operator.OpLeader
 	re.Equal(kind, op.Kind()&kind)
@@ -40,7 +40,7 @@ func CheckTransferLeaderFrom(re *require.Assertions, op *operator.Operator, kind
 // CheckMultiTargetTransferLeader checks if the operator is to transfer leader from the specified source to one of the target stores.
 func CheckMultiTargetTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
 	re.NotNil(op)
-	re.Equal(op.Len(), 1)
+	re.Equal(1, op.Len())
 	expectedOps := make([]interface{}, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
 		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
@@ -136,28 +136,6 @@ func CheckRemovePeer(re *require.Assertions, op *operator.Operator, storeID uint
 		re.Equal(storeID, op.Step(0).(operator.TransferLeader).FromStore)
 		re.Equal(storeID, op.Step(1).(operator.RemovePeer).FromStore)
 	}
-}
-
-// CheckTransferLeaderWithTestify checks if the operator is to transfer leader between the specified source and target stores.
-func CheckTransferLeaderWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	re.NotNil(op)
-	re.Equal(1, op.Len())
-	re.Equal(operator.TransferLeader{FromStore: sourceID, ToStore: targetID}, op.Step(0))
-	kind |= operator.OpLeader
-	re.Equal(kind, op.Kind()&kind)
-}
-
-// CheckTransferPeerWithTestify checks if the operator is to transfer peer between the specified source and target stores.
-func CheckTransferPeerWithTestify(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
-	re.NotNil(op)
-
-	steps, _ := trimTransferLeaders(op)
-	re.Len(steps, 3)
-	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
-	re.IsType(operator.PromoteLearner{}, steps[1])
-	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
-	kind |= operator.OpRegion
-	re.Equal(kind, op.Kind()&kind)
 }
 
 // CheckSteps checks if the operator matches the given steps.

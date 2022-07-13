@@ -51,7 +51,7 @@ func TestShouldBalance(t *testing.T) {
 	defer cancel()
 
 	const R = 96
-	tests := []testBalanceSpeedCase{
+	testCases := []testBalanceSpeedCase{
 		// target size is zero
 		{2, 0, R / 10, true, core.BySize},
 		{2, 0, R, false, core.BySize},
@@ -109,28 +109,28 @@ func TestShouldBalance(t *testing.T) {
 	// create a region to control average region size.
 	tc.AddLeaderRegion(1, 1, 2)
 
-	for _, t := range tests {
-		tc.AddLeaderStore(1, int(t.sourceCount))
-		tc.AddLeaderStore(2, int(t.targetCount))
-		region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
+	for _, testCase := range testCases {
+		tc.AddLeaderStore(1, int(testCase.sourceCount))
+		tc.AddLeaderStore(2, int(testCase.targetCount))
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 		tc.PutRegion(region)
-		tc.SetLeaderSchedulePolicy(t.kind.String())
-		kind := core.NewScheduleKind(core.LeaderKind, t.kind)
+		tc.SetLeaderSchedulePolicy(testCase.kind.String())
+		kind := core.NewScheduleKind(core.LeaderKind, testCase.kind)
 		plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
 		plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-		re.Equal(t.expectedResult, plan.shouldBalance(""))
+		re.Equal(testCase.expectedResult, plan.shouldBalance(""))
 	}
 
-	for _, t := range tests {
-		if t.kind.String() == core.BySize.String() {
-			tc.AddRegionStore(1, int(t.sourceCount))
-			tc.AddRegionStore(2, int(t.targetCount))
-			region := tc.GetRegion(1).Clone(core.SetApproximateSize(t.regionSize))
+	for _, testCase := range testCases {
+		if testCase.kind.String() == core.BySize.String() {
+			tc.AddRegionStore(1, int(testCase.sourceCount))
+			tc.AddRegionStore(2, int(testCase.targetCount))
+			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 			tc.PutRegion(region)
-			kind := core.NewScheduleKind(core.RegionKind, t.kind)
+			kind := core.NewScheduleKind(core.RegionKind, testCase.kind)
 			plan := newBalancePlan(kind, tc, oc.GetOpInfluence(tc))
 			plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-			re.Equal(t.expectedResult, plan.shouldBalance(""))
+			re.Equal(testCase.expectedResult, plan.shouldBalance(""))
 		}
 	}
 }

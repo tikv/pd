@@ -205,11 +205,11 @@ func TestStoreStateFilterReason(t *testing.T) {
 	}
 
 	check := func(store *core.StoreInfo, testCases []testCase) {
-		for _, tc := range testCases {
-			filters[tc.filterIdx].Source(opt, store)
-			re.Equal(tc.sourceReason, filters[tc.filterIdx].(*StoreStateFilter).Reason)
-			filters[tc.filterIdx].Source(opt, store)
-			re.Equal(tc.targetReason, filters[tc.filterIdx].(*StoreStateFilter).Reason)
+		for _, testCase := range testCases {
+			filters[testCase.filterIdx].Source(opt, store)
+			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			filters[testCase.filterIdx].Source(opt, store)
+			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
 		}
 	}
 
