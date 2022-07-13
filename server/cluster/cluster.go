@@ -949,22 +949,22 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
 }
 
-// RandLeaderRegion returns a random region that has leader on the store.
+// RandLeaderRegions returns some random regions that has leader on the store.
 func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return c.core.RandLeaderRegions(storeID, ranges)
 }
 
-// RandFollowerRegion returns a random region that has a follower on the store.
+// RandFollowerRegions returns some random regions that has a follower on the store.
 func (c *RaftCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return c.core.RandFollowerRegions(storeID, ranges)
 }
 
-// RandPendingRegion returns a random region that has a pending peer on the store.
+// RandPendingRegions returns some random regions that has a pending peer on the store.
 func (c *RaftCluster) RandPendingRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return c.core.RandPendingRegions(storeID, ranges)
 }
 
-// RandLearnerRegion returns a random region that has a learner peer on the store.
+// RandLearnerRegions returns some random regions that has a learner peer on the store.
 func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return c.core.RandLearnerRegions(storeID, ranges)
 }

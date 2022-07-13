@@ -60,85 +60,88 @@ type RegionFilter interface {
 	Select(region *core.RegionInfo) plan.StatusCode
 }
 
-type RegionPengdingFilter struct {
+type regionPengdingFilter struct {
 	scope string
 }
 
+// NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
 func NewRegionPengdingFilter(scope string) RegionFilter {
-	return &RegionPengdingFilter{scope: scope}
+	return &regionPengdingFilter{scope: scope}
 }
 
-func (f *RegionPengdingFilter) Scope() string {
+func (f *regionPengdingFilter) Scope() string {
 	return f.scope
 }
 
-func (f *RegionPengdingFilter) Type() string {
+func (f *regionPengdingFilter) Type() string {
 	return "Unhealthy"
 }
 
-func (f *RegionPengdingFilter) Reason() string {
+func (f *regionPengdingFilter) Reason() string {
 	return "This region has too many pending pees."
 }
 
-func (f *RegionPengdingFilter) Select(region *core.RegionInfo) plan.StatusCode {
+func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
 	if len(region.GetPendingPeers()) > 0 {
 		return plan.StatusRegionUnhealthy
 	}
 	return plan.StatusOK
 }
 
-type RegionDownFilter struct {
+type regionDownFilter struct {
 	scope string
 }
 
+// NewRegionDownFilter creates a RegionFilter that filters all regions with down peers.
 func NewRegionDownFilter(scope string) RegionFilter {
-	return &RegionDownFilter{scope: scope}
+	return &regionDownFilter{scope: scope}
 }
 
-func (f *RegionDownFilter) Scope() string {
+func (f *regionDownFilter) Scope() string {
 	return f.scope
 }
 
-func (f *RegionDownFilter) Type() string {
+func (f *regionDownFilter) Type() string {
 	return "Unhealthy"
 }
 
-func (f *RegionDownFilter) Reason() string {
+func (f *regionDownFilter) Reason() string {
 	return "This region has too many down pees."
 }
 
-func (f *RegionDownFilter) Select(region *core.RegionInfo) plan.StatusCode {
+func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
 	if len(region.GetDownPeers()) > 0 {
 		return plan.StatusRegionUnhealthy
 	}
 	return plan.StatusOK
 }
 
-type RegionReplicatedFilter struct {
+type regionReplicatedFilter struct {
 	scope   string
 	cluster Cluster
 }
 
+// NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
 func NewRegionReplicatedFilter(scope string, cluster Cluster) RegionFilter {
-	return &RegionReplicatedFilter{scope: scope, cluster: cluster}
+	return &regionReplicatedFilter{scope: scope, cluster: cluster}
 }
 
-func (f *RegionReplicatedFilter) Scope() string {
+func (f *regionReplicatedFilter) Scope() string {
 	return f.scope
 }
 
-func (f *RegionReplicatedFilter) Type() string {
+func (f *regionReplicatedFilter) Type() string {
 	return "NotReplicated"
 }
 
-func (f *RegionReplicatedFilter) Reason() string {
+func (f *regionReplicatedFilter) Reason() string {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		return "This region does not fit placement rule."
 	}
 	return "This region is not replicated"
 }
 
-func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) plan.StatusCode {
+func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		if !f.cluster.GetRuleManager().FitRegion(f.cluster, region).IsSatisfied() {
 			return plan.StatusRuleNotMatch
@@ -151,28 +154,29 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) plan.StatusCode
 	return plan.StatusOK
 }
 
-type RegionEmptyFilter struct {
+type regionEmptyFilter struct {
 	scope   string
 	cluster Cluster
 }
 
+// NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
 func NewRegionEmptyFilter(scope string, cluster Cluster) RegionFilter {
-	return &RegionEmptyFilter{scope: scope, cluster: cluster}
+	return &regionEmptyFilter{scope: scope, cluster: cluster}
 }
 
-func (f *RegionEmptyFilter) Scope() string {
+func (f *regionEmptyFilter) Scope() string {
 	return f.scope
 }
 
-func (f *RegionEmptyFilter) Type() string {
+func (f *regionEmptyFilter) Type() string {
 	return "EmptyRegion"
 }
 
-func (f *RegionEmptyFilter) Reason() string {
+func (f *regionEmptyFilter) Reason() string {
 	return "This region is empty"
 }
 
-func (f *RegionEmptyFilter) Select(region *core.RegionInfo) plan.StatusCode {
+func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
 	if !isEmptyRegionAllowBalance(f.cluster, region) {
 		return plan.StatusRegionEmpty
 	}

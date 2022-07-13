@@ -52,16 +52,16 @@ func (f idFilter) Scope() string { return "idFilter" }
 func (f idFilter) Type() string  { return "idFilter" }
 func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if f(store.GetID()) {
-		return statusOK
+		return statusStoreOK
 	}
-	return statusNoNeed
+	return statusStoreNoNeed
 }
 
 func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if f(store.GetID()) {
-		return statusOK
+		return statusStoreOK
 	}
-	return statusNoNeed
+	return statusStoreNoNeed
 }
 
 func TestCandidates(t *testing.T) {
