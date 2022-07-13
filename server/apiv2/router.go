@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
@@ -50,7 +51,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.S
 		c.Next()
 	})
 	router.Use(middlewares.Redirector())
-	_ = router.Group(apiV2Prefix)
-
+	root := router.Group(apiV2Prefix)
+	handlers.RegisterKeyspace(root)
 	return router, group, nil
 }

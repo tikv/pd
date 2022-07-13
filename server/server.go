@@ -787,6 +787,11 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
 }
 
+// GetKeyspaceManager returns the keyspace manager of server.
+func (s *Server) GetKeyspaceManager() *keyspace.Manager {
+	return s.keyspaceManager
+}
+
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
