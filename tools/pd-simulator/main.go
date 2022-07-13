@@ -95,7 +95,7 @@ func main() {
 
 func run(simCase string, simConfig *simulator.SimConfig) {
 	if *pdAddr != "" {
-		go RunMetrics()
+		go runMetrics()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -113,7 +113,7 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 	}
 }
 
-func RunMetrics() {
+func runMetrics() {
 	http.Handle("/metrics", promhttp.Handler())
 	http.ListenAndServe(*statusAddress, nil)
 }
