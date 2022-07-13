@@ -116,23 +116,16 @@ func (manager *Manager) createNameToID(spaceID uint32, name string) error {
 
 // CreateKeyspace create a keyspace meta with initial config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
-	// allocate new id
+	// Validate input.
+	if request.Name == "" {
+		return nil, errIllegalName
+	}
+	// Allocate new keyspaceID.
 	newID, err := manager.allocID()
 	if err != nil {
 		return nil, err
 	}
-	// bind name to that id
-	if err = manager.createNameToID(newID, request.Name); err != nil {
-		return nil, err
-	}
-
-	if request.Name == "" {
-		return nil, errIllegalName
-	}
-
-	manager.metaLock.Lock()
-	defer manager.metaLock.Unlock()
-
+	// Create and save keyspace metadata.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
 		Name:           request.Name,
@@ -141,9 +134,20 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		StateChangedAt: request.Now.Unix(),
 		Config:         request.InitialConfig,
 	}
+	manager.metaLock.Lock()
+	defer manager.metaLock.Unlock()
 	if err := manager.store.SaveKeyspace(keyspace); err != nil {
 		return nil, err
 	}
+	// Create name to ID entry,
+	// if this failed, previously stored keyspace meta should be removed.
+	if err = manager.createNameToID(newID, request.Name); err != nil {
+		if removeErr := manager.store.RemoveKeyspace(newID); removeErr != nil {
+			return nil, errors.Wrap(removeErr, "failed to remove keyspace meta after save spaceID failure")
+		}
+		return nil, err
+	}
+
 	return keyspace, nil
 }
 
