@@ -78,7 +78,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.Equal(filter.Select(region), statusRegionUnReplicated)
+	re.Equal(filter.Select(region), statusRegionNotReplicated)
 }
 
 func TestRegionEmptyFilter(t *testing.T) {

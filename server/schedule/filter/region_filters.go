@@ -101,7 +101,7 @@ func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 		return statusOK
 	}
 	if !isRegionReplicasSatisfied(f.cluster, region) {
-		return statusRegionUnReplicated
+		return statusRegionNotReplicated
 	}
 	return statusOK
 }

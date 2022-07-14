@@ -46,8 +46,8 @@ const (
 	StatusRegionUnhealthy
 	// StatusRegionEmpty represents the region cannot be selected due to the region is empty.
 	StatusRegionEmpty
-	// StatusRegionUnReplicated represents the region does not have enough replicas.
-	StatusRegionUnReplicated
+	// StatusRegionNotReplicated represents the region does not have enough replicas.
+	StatusRegionNotReplicated
 
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
 	StatusLabelNotMatch
@@ -80,10 +80,10 @@ var statusText = map[StatusCode]string{
 	StatusStoreExcluded:    "Region Excluded",
 
 	// region
-	StatusRegionHot:          "Region Hot",
-	StatusRegionUnhealthy:    "Region Unhealthy",
-	StatusRegionEmpty:        "Region Empty",
-	StatusRegionUnReplicated: "Region UnReplicated",
+	StatusRegionHot:           "Region Hot",
+	StatusRegionUnhealthy:     "Region Unhealthy",
+	StatusRegionEmpty:         "Region Empty",
+	StatusRegionNotReplicated: "Region UnReplicated",
 
 	StatusLabelNotMatch:     "Label Not Match",
 	StatusRuleNotMatch:      "Rule Not Match",

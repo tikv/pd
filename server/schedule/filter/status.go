@@ -40,9 +40,9 @@ var (
 	statusStoreSlow               = plan.NewStatus(plan.StatusStoreBlocked, "the store is slow and are evicting leaders, there might be an evict-slow-store-scheduler")
 
 	// region filter status
-	statusRegionPendingPeer  = plan.NewStatus(plan.StatusRegionUnhealthy, "region has pending peers")
-	statusRegionDownPeer     = plan.NewStatus(plan.StatusRegionUnhealthy, "region has down peers")
-	statusRegionEmpty        = plan.NewStatus(plan.StatusRegionEmpty)
-	statusRegionRule         = plan.NewStatus(plan.StatusRuleNotMatch)
-	statusRegionUnReplicated = plan.NewStatus(plan.StatusRegionUnReplicated)
+	statusRegionPendingPeer   = plan.NewStatus(plan.StatusRegionUnhealthy, "region has pending peers")
+	statusRegionDownPeer      = plan.NewStatus(plan.StatusRegionUnhealthy, "region has down peers")
+	statusRegionEmpty         = plan.NewStatus(plan.StatusRegionEmpty)
+	statusRegionRule          = plan.NewStatus(plan.StatusRuleNotMatch)
+	statusRegionNotReplicated = plan.NewStatus(plan.StatusRegionNotReplicated)
 )
