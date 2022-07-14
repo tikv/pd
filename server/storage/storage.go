@@ -83,23 +83,60 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 	}
 }
 
-// GetRegionStorage gets the internal region storage.
-func (ps *coreStorage) GetRegionStorage() endpoint.RegionStorage {
-	return ps.regionStorage
+// TryGetLocalRegionStorage gets the local region storage. Returns nil if not present.
+func TryGetLocalRegionStorage(s Storage) endpoint.RegionStorage {
+	switch ps := s.(type) {
+	case *coreStorage:
+		return ps.regionStorage
+	case *levelDBBackend, *memoryStorage:
+		return ps
+	default:
+		return nil
+	}
 }
 
-// SwitchToRegionStorage switches the region storage to regionStorage,
-// after calling this, all region info will be read/saved by the internal
-// regionStorage, and in most cases it's LevelDB-backend.
-func (ps *coreStorage) SwitchToRegionStorage() {
-	atomic.StoreInt32(&ps.useRegionStorage, 1)
-}
+// TrySwitchRegionStorage try to switch whether the RegionStorage uses local or not,
+// and returns the RegionStorage used after the switch.
+// Returns nil if it cannot be switched.
+func TrySwitchRegionStorage(s Storage, useLocalRegionStorage bool) endpoint.RegionStorage {
+	ps, ok := s.(*coreStorage)
+	if !ok {
+		return nil
+	}
 
-// SwitchToDefaultStorage switches the region storage to defaultStorage,
-// after calling this, all region info will be read/saved by the internal
-// defaultStorage, and in most cases it's etcd-backend.
-func (ps *coreStorage) SwitchToDefaultStorage() {
+	if useLocalRegionStorage {
+		// Switch the region storage to regionStorage, all region info will be read/saved by the internal
+		// regionStorage, and in most cases it's LevelDB-backend.
+		atomic.StoreInt32(&ps.useRegionStorage, 1)
+		return ps.regionStorage
+	}
+	// Switch the region storage to defaultStorage, all region info will be read/saved by the internal
+	// defaultStorage, and in most cases it's etcd-backend.
 	atomic.StoreInt32(&ps.useRegionStorage, 0)
+	return ps.Storage
+}
+
+// TryLoadRegionsOnce loads all regions from storage to RegionsInfo.
+// If the underlying storage is the local region storage, it will only load once.
+func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+	ps, ok := s.(*coreStorage)
+	if !ok {
+		return s.LoadRegions(ctx, f)
+	}
+
+	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
+		return ps.Storage.LoadRegions(ctx, f)
+	}
+
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if !ps.regionLoaded {
+		if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
+			return err
+		}
+		ps.regionLoaded = true
+	}
+	return nil
 }
 
 // LoadRegion loads one region from storage.
@@ -116,23 +153,6 @@ func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.Regi
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
 	return ps.Storage.LoadRegions(ctx, f)
-}
-
-// LoadRegionsOnce loads all regions from storage to RegionsInfo. If the underlying storage is the region storage,
-// it will only load once.
-func (ps *coreStorage) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
-		return ps.Storage.LoadRegions(ctx, f)
-	}
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if !ps.regionLoaded {
-		if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
-			return err
-		}
-		ps.regionLoaded = true
-	}
-	return nil
 }
 
 // SaveRegion saves one region to storage.
