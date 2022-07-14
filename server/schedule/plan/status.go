@@ -83,7 +83,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionHot:           "Region Hot",
 	StatusRegionUnhealthy:     "Region Unhealthy",
 	StatusRegionEmpty:         "Region Empty",
-	StatusRegionNotReplicated: "Region UnReplicated",
+	StatusRegionNotReplicated: "Region Not Replicated",
 
 	StatusLabelNotMatch:     "Label Not Match",
 	StatusRuleNotMatch:      "Rule Not Match",
