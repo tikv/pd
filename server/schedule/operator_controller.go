@@ -661,6 +661,20 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
+func becomeNonWitnessNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_AddLearnerNode, // TODO: add a new type: ConfChangeType_BecomeNonWitness?
+			Peer: &metapb.Peer{
+				Id:        id,
+				StoreId:   storeID,
+				Role:      metapb.PeerRole_Learner,
+				IsWitness: false,
+			},
+		},
+	}
+}
+
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 	oc.fastOperators.Put(op.RegionID(), op)
 }

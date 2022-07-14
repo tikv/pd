@@ -202,6 +202,58 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 	return createResponse(addNode(ap.PeerID, ap.ToStore), useConfChangeV2)
 }
 
+// BecomeNonWitness is an OpStep that makes a peer become a witness.
+type BecomeNonWitness struct {
+	StoreID, PeerID uint64
+}
+
+func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(bn.StoreID)
+	return typeutil.BoolToUint64(peer.GetId() == bn.PeerID)
+}
+
+func (bn BecomeNonWitness) String() string {
+	return fmt.Sprintf("change peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
+}
+
+// IsFinish checks if current step is finished.
+func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
+	if peer := region.GetStorePeer(bn.StoreID); peer != nil {
+		if peer.GetId() != bn.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", bn.String()), zap.Uint64("obtain-non-witness", peer.GetId()))
+			return false
+		}
+		return peer.IsWitness
+	}
+	return false
+}
+
+// CheckInProcess checks if the step is in the progress of advancing.
+func (bn BecomeNonWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, bn.StoreID); err != nil {
+		return err
+	}
+	peer := region.GetStorePeer(bn.StoreID)
+	if peer == nil || peer.GetId() != bn.PeerID {
+		return errors.New("peer does not exist")
+	}
+	return nil
+}
+
+// Influence calculates the store difference that current step makes.
+func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(bn.StoreID)
+
+	regionSize := region.GetApproximateSize()
+	// FIXME: to.WitnessCount -= 1
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+}
+
+// Timeout returns true if the step is timeout
+func (bn BecomeNonWitness) Timeout(start time.Time, regionSize int64) bool {
+	return time.Since(start) > slowStepWaitDuration(regionSize)
+}
+
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
