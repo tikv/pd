@@ -218,5 +218,4 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 			re.Equal(selected[id].Id, c.expectedPeers[id])
 		}
 	}
-
 }
