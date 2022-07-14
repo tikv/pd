@@ -66,8 +66,8 @@ func NewAllocator(client *clientv3.Client, rootPath, allocPath, label, member st
 		rootPath:  rootPath,
 		allocPath: allocPath,
 		label:     label,
-		metrics:   &metrics{idGauge: idGauge.WithLabelValues(label)},
 		member:    member,
+		metrics:   &metrics{idGauge: idGauge.WithLabelValues(label)},
 	}
 }
 
