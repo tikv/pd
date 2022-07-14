@@ -137,25 +137,40 @@ func TestRuleFitFilter(t *testing.T) {
 
 func TestStoreStateFilter(t *testing.T) {
 	re := require.New(t)
-	filters := []Filter{
-		&StoreStateFilter{TransferLeader: true},
-		&StoreStateFilter{MoveRegion: true},
-		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
-		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
-	}
 	opt := config.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
-
 	type testCase struct {
 		filterIdx int
 		sourceRes plan.StatusCode
 		targetRes plan.StatusCode
 	}
 
+	// test TemporaryStateFilter
+	filters := [][]Filter{
+		{NewTemporaryStateFilter("test", TransferLeader)},
+		{NewTemporaryStateFilter("test", MoveRegion)},
+		{NewTemporaryStateFilter("test", TransferLeader|MoveRegion)},
+	}
+
 	check := func(store *core.StoreInfo, testCases []testCase) {
-		for _, testCase := range testCases {
-			re.Equal(testCase.sourceRes, filters[testCase.filterIdx].Source(opt, store).StatusCode)
-			re.Equal(testCase.targetRes, filters[testCase.filterIdx].Target(opt, store).StatusCode)
+		for _, tc := range testCases {
+			var sourceResult, targetResult plan.StatusCode
+			for _, filter := range filters[tc.filterIdx] {
+				sourceResult = filter.Source(opt, store).StatusCode
+				if sourceResult != plan.StatusOK {
+					re.Equal(tc.sourceRes, sourceResult)
+					break
+				}
+			}
+			re.Equal(tc.sourceRes, sourceResult)
+			for _, filter := range filters[tc.filterIdx] {
+				targetResult = filter.Target(opt, store).StatusCode
+				if targetResult != plan.StatusOK {
+					re.Equal(tc.targetRes, targetResult)
+					break
+				}
+			}
+			re.Equal(tc.targetRes, targetResult)
 		}
 	}
 
@@ -164,6 +179,70 @@ func TestStoreStateFilter(t *testing.T) {
 		{2, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	// Disconnected
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
+	testCases = []testCase{
+		{0, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+		{1, plan.StatusOK, plan.StatusStoreUnavailable},
+		{2, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+	}
+	check(store, testCases)
+
+	// Busy
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
+	// todo: status should be StatusStoreThrottled, waiting last PR fixing
+	testCases = []testCase{
+		{0, plan.StatusOK, plan.StatusStoreUnavailable},
+		{1, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+		{2, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+	}
+	check(store, testCases)
+	store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: false}))
+
+	// test LongTermStateFilter
+	filters = [][]Filter{
+		{NewLongTermStateFilter("", TransferLeader)},
+		{NewLongTermStateFilter("", MoveRegion)},
+		{NewLongTermStateFilter("", TransferLeader|MoveRegion)},
+	}
+
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
+	testCases = []testCase{
+		{2, plan.StatusOK, plan.StatusOK},
+	}
+	check(store, testCases)
+
+	// Pause leader
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.PauseLeaderTransfer())
+	testCases = []testCase{
+		{0, plan.StatusStoreBlocked, plan.StatusStoreBlocked},
+		{1, plan.StatusOK, plan.StatusOK},
+		{2, plan.StatusStoreBlocked, plan.StatusStoreBlocked},
+	}
+	check(store, testCases)
+	store = store.Clone(core.ResumeLeaderTransfer())
+
+	// Tombstone
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.TombstoneStore())
+	testCases = []testCase{
+		{0, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+		{1, plan.StatusOK, plan.StatusStoreUnavailable},
+		{2, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+	}
+	check(store, testCases)
+	store = store.Clone(core.UpStore())
+
+	// test TemporaryStateFilter and LongTermStateFilter
+	filters = [][]Filter{
+		{NewTemporaryStateFilter("", TransferLeader), NewLongTermStateFilter("", TransferLeader)},
+		{NewTemporaryStateFilter("", MoveRegion), NewLongTermStateFilter("", MoveRegion)},
+		{NewTemporaryStateFilter("", TransferLeader|MoveRegion), NewLongTermStateFilter("", TransferLeader|MoveRegion)},
+		{NewLongTermStateFilter("", TransferLeader|MoveRegion)},
+	}
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
@@ -185,15 +264,26 @@ func TestStoreStateFilter(t *testing.T) {
 		{3, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+	store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: false}))
+
+	// Pause leader
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
+		Clone(core.PauseLeaderTransfer())
+	testCases = []testCase{
+		{0, plan.StatusStoreBlocked, plan.StatusStoreBlocked},
+		{1, plan.StatusOK, plan.StatusOK},
+		{2, plan.StatusStoreBlocked, plan.StatusStoreBlocked},
+	}
+	check(store, testCases)
 }
 
 func TestStoreStateFilterReason(t *testing.T) {
 	re := require.New(t)
-	filters := []Filter{
-		&StoreStateFilter{TransferLeader: true},
-		&StoreStateFilter{MoveRegion: true},
-		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
-		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+	filters := [][]Filter{
+		{NewLongTermStateFilter("", TransferLeader), NewTemporaryStateFilter("", TransferLeader)},
+		{NewLongTermStateFilter("", MoveRegion), NewTemporaryStateFilter("", MoveRegion)},
+		{NewLongTermStateFilter("", TransferLeader|MoveRegion), NewTemporaryStateFilter("", TransferLeader|MoveRegion)},
+		{NewLongTermStateFilter("", MoveRegion)},
 	}
 	opt := config.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
@@ -206,10 +296,35 @@ func TestStoreStateFilterReason(t *testing.T) {
 
 	check := func(store *core.StoreInfo, testCases []testCase) {
 		for _, testCase := range testCases {
-			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
-			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			var sourceResult, targetResult string
+			for _, filter := range filters[testCase.filterIdx] {
+				filter.Source(opt, store)
+				switch f := filter.(type) {
+				case (*LongTermStateFilter):
+					sourceResult = f.Reason
+				case (*TemporaryStateFilter):
+					sourceResult = f.Reason
+				}
+				if sourceResult != "" {
+					re.Equal(testCase.sourceReason, sourceResult)
+					break
+				}
+			}
+			re.Equal(testCase.sourceReason, sourceResult)
+			for _, filter := range filters[testCase.filterIdx] {
+				filter.Target(opt, store)
+				switch f := filter.(type) {
+				case (*LongTermStateFilter):
+					targetResult = f.Reason
+				case (*TemporaryStateFilter):
+					targetResult = f.Reason
+				}
+				if targetResult != "" {
+					re.Equal(testCase.targetReason, targetResult)
+					break
+				}
+			}
+			re.Equal(testCase.targetReason, targetResult)
 		}
 	}
 
@@ -224,7 +339,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
 		{0, "disconnected", "disconnected"},
-		{1, "", ""},
+		{1, "", "disconnected"},
 		{2, "disconnected", "disconnected"},
 		{3, "", ""},
 	}
@@ -234,7 +349,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, "", ""},
+		{0, "", "busy"},
 		{1, "busy", "busy"},
 		{2, "busy", "busy"},
 		{3, "", ""},

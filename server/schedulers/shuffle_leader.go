@@ -73,7 +73,8 @@ type shuffleLeaderScheduler struct {
 // between stores.
 func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
+		filter.NewLongTermStateFilter(conf.Name, filter.TransferLeader),
+		filter.NewTemporaryStateFilter(conf.Name, filter.TransferLeader),
 		filter.NewSpecialUseFilter(conf.Name),
 	}
 	base := NewBaseScheduler(opController)

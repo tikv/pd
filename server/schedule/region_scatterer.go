@@ -142,7 +142,8 @@ type engineContext struct {
 }
 
 func newEngineContext(ctx context.Context, filters ...filter.Filter) engineContext {
-	filters = append(filters, &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true})
+	filters = append(filters, filter.NewLongTermStateFilter(regionScatterName, filter.MoveRegion|filter.ScatterRegion),
+		filter.NewTemporaryStateFilter(regionScatterName, filter.MoveRegion|filter.ScatterRegion))
 	return engineContext{
 		filters:        filters,
 		selectedPeer:   newSelectedStores(ctx),

@@ -328,7 +328,9 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores))
 		}
 
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
+		filters = append(filters,
+			filter.NewLongTermStateFilter(name, filter.TransferLeader),
+			filter.NewTemporaryStateFilter(name, filter.TransferLeader))
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetOpts(), filters...)
 		// Compatible with old TiKV transfer leader logic.

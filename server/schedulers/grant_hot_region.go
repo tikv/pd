@@ -358,10 +358,12 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 	destStoreIDs := make([]uint64, 0, len(s.conf.StoreIDs))
 	var candidate []uint64
 	if isLeader {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true})
+		filters = append(filters, filter.NewLongTermStateFilter(s.GetName(), filter.TransferLeader),
+			filter.NewTemporaryStateFilter(s.GetName(), filter.TransferLeader))
 		candidate = []uint64{s.conf.GetStoreLeaderID()}
 	} else {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+		filters = append(filters, filter.NewLongTermStateFilter(s.GetName(), filter.MoveRegion),
+			filter.NewTemporaryStateFilter(s.GetName(), filter.MoveRegion),
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = s.conf.StoreIDs
 	}

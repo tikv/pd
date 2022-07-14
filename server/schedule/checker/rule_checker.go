@@ -269,9 +269,13 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster.GetOpts(), s).IsOK() {
-		return false
+	stateFilter := []filter.Filter{filter.NewLongTermStateFilter("rule-checker", filter.TransferLeader),
+		filter.NewTemporaryStateFilter("rule-checker", filter.TransferLeader)}
+	// store state filter
+	for _, filter := range stateFilter {
+		if !filter.Target(c.cluster.GetOpts(), s).IsOK() {
+			return false
+		}
 	}
 	for _, rf := range fit.RuleFits {
 		if (rf.Rule.Role == placement.Leader || rf.Rule.Role == placement.Voter) &&
