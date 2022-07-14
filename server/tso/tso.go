@@ -123,7 +123,7 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 // For example, we have three DCs: dc-1, dc-2 and dc-3. The bits of suffix is defined by
 // the const suffixBits. Then, for dc-2, the suffix may be 1 because it's persisted
 // in etcd with the value of 1.
-// Once we get a noramal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
+// Once we get a normal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
 //   global: xxxxxxxxxx00000000
 //     dc-1: xxxxxxxxxx00000001

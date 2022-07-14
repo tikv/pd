@@ -58,6 +58,17 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
 }
 
+// @Tags     admin
+// @Summary  Drop all regions from cache.
+// @Produce  json
+// @Success  200  {string}  string  "All regions are removed from server cache."
+// @Router   /admin/cache/regions [delete]
+func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	rc.DropCacheAllRegion()
+	h.rd.JSON(w, http.StatusOK, "All regions are removed from server cache.")
+}
+
 // FIXME: details of input json body params
 // @Tags     admin
 // @Summary  Reset the ts.
