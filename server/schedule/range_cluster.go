@@ -15,8 +15,6 @@
 package schedule
 
 import (
-	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -53,7 +51,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	regionCount := r.subCluster.GetStoreRegionCount(id)
 	regionSize := r.subCluster.GetStoreRegionSize(id)
 	pendingPeerCount := r.subCluster.GetStorePendingPeerCount(id)
-	newStats := proto.Clone(s.GetStoreStats()).(*pdpb.StoreStats)
+	newStats := s.CloneStoreStats()
 	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
 	newStats.Available = s.GetCapacity() - newStats.UsedSize
 	newStore := s.Clone(
