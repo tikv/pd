@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -92,15 +91,13 @@ type RegionSyncer struct {
 // Usually open the region syncer in huge cluster and the server
 // no longer etcd but go-leveldb.
 func NewRegionSyncer(s Server) *RegionSyncer {
-	regionStorageGetter, ok := s.GetStorage().(interface {
-		GetRegionStorage() endpoint.RegionStorage
-	})
-	if !ok {
+	localRegionStorage := storage.TryGetLocalRegionStorage(s.GetStorage())
+	if localRegionStorage == nil {
 		return nil
 	}
 	syncer := &RegionSyncer{
 		server:    s,
-		history:   newHistoryBuffer(defaultHistoryBufferSize, regionStorageGetter.GetRegionStorage().(kv.Base)),
+		history:   newHistoryBuffer(defaultHistoryBufferSize, localRegionStorage.(kv.Base)),
 		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
