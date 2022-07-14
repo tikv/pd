@@ -15,6 +15,7 @@
 package schedule
 
 import (
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -41,7 +42,7 @@ func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
 func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	id := s.GetID()
 
-	used := float64(s.GetUsedSize()) / (1 << 20)
+	used := float64(s.GetUsedSize()) / units.MiB
 	if used == 0 {
 		return s
 	}
@@ -52,7 +53,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	regionSize := r.subCluster.GetStoreRegionSize(id)
 	pendingPeerCount := r.subCluster.GetStorePendingPeerCount(id)
 	newStats := s.CloneStoreStats()
-	newStats.UsedSize = uint64(float64(regionSize)/amplification) * (1 << 20)
+	newStats.UsedSize = uint64(float64(regionSize)/amplification) * units.MiB
 	newStats.Available = s.GetCapacity() - newStats.UsedSize
 	newStore := s.Clone(
 		core.SetNewStoreStats(newStats), // it means to use instant value directly

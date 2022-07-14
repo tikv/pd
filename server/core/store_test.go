@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -113,8 +114,8 @@ func BenchmarkStoreClone(b *testing.B) {
 func TestRegionScore(t *testing.T) {
 	re := require.New(t)
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 512 * (1 << 20)  // 512 MB
-	stats.Available = 100 * (1 << 20) // 100 MB
+	stats.Capacity = 512 * units.MiB  // 512 MB
+	stats.Available = 100 * units.MiB // 100 MB
 	stats.UsedSize = 0
 
 	store := NewStoreInfo(
@@ -146,41 +147,41 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		bigger *StoreInfo
 		small  *StoreInfo
 	}{{
-		// store1 and store2 has same store available ratio and store1 less 50gb
-		bigger: NewStoreInfoWithAvailable(1, 20*gb, 100*gb, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 200*gb, 1000*gb, 1.4),
+		// store1 and store2 has same store available ratio and store1 less 50units.GiB
+		bigger: NewStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
 	}, {
-		// store1 and store2 has same available space and less than 50gb
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 1000*gb, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb, 1.4),
+		// store1 and store2 has same available space and less than 50units.GiB
+		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same available ratio less than 0.2
-		bigger: NewStoreInfoWithAvailable(1, 20*gb, 1000*gb, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 10*gb, 500*gb, 1.4),
+		bigger: NewStoreInfoWithAvailable(1, 20*units.GiB, 1000*units.GiB, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 500*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same available ratio
 		// but the store1 ratio less than store2 ((50-10)/50=0.8<(200-100)/200=0.5)
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 100*gb, 1000*gb, 1.4),
+		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.4),
+		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 1000*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same usedSize and capacity
 		// but the bigger's amp is bigger
-		bigger: NewStoreInfoWithAvailable(1, 10*gb, 100*gb, 1.5),
-		small:  NewStoreInfoWithAvailable(2, 10*gb, 100*gb, 1.4),
+		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
+		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same capacity and regionSize（40g)
 		// but store1 has less available space size
-		bigger: NewStoreInfoWithAvailable(1, 60*gb, 100*gb, 1),
-		small:  NewStoreInfoWithAvailable(2, 80*gb, 100*gb, 2),
+		bigger: NewStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
+		small:  NewStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),
 	}, {
 		// store1 and store2 has same capacity and store2 (40g) has twice usedSize than store1 (20g)
 		// but store1 has higher amp, so store1(60g) has more regionSize (40g)
-		bigger: NewStoreInfoWithAvailable(1, 80*gb, 100*gb, 3),
-		small:  NewStoreInfoWithAvailable(2, 60*gb, 100*gb, 1),
+		bigger: NewStoreInfoWithAvailable(1, 80*units.GiB, 100*units.GiB, 3),
+		small:  NewStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
 	}, {
 		// store1's capacity is less than store2's capacity, but store2 has more available space,
-		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
-		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
+		bigger: NewStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
+		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
 	}}
 	for _, v := range testdata {
 		score1 := v.bigger.regionScoreV2(0, 0.8)
