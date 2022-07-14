@@ -456,7 +456,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
-		if status := cf(opt, store); status != statusOK {
+		if status := cf(opt, store); !status.IsOK() {
 			return status
 		}
 	}
@@ -467,12 +467,12 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 // source.
 func (f *StoreStateFilter) Source(opts *config.PersistOptions, store *core.StoreInfo) (status plan.Status) {
 	if f.TransferLeader {
-		if status = f.anyConditionMatch(leaderSource, opts, store); status != statusOK {
+		if status = f.anyConditionMatch(leaderSource, opts, store); !status.IsOK() {
 			return
 		}
 	}
 	if f.MoveRegion {
-		if status = f.anyConditionMatch(regionSource, opts, store); status != statusOK {
+		if status = f.anyConditionMatch(regionSource, opts, store); !status.IsOK() {
 			return
 		}
 	}
@@ -483,17 +483,17 @@ func (f *StoreStateFilter) Source(opts *config.PersistOptions, store *core.Store
 // target.
 func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.StoreInfo) (status plan.Status) {
 	if f.TransferLeader {
-		if status = f.anyConditionMatch(leaderTarget, opts, store); status != statusOK {
+		if status = f.anyConditionMatch(leaderTarget, opts, store); !status.IsOK() {
 			return
 		}
 	}
 	if f.MoveRegion && f.ScatterRegion {
-		if status = f.anyConditionMatch(scatterRegionTarget, opts, store); status != statusOK {
+		if status = f.anyConditionMatch(scatterRegionTarget, opts, store); !status.IsOK() {
 			return
 		}
 	}
 	if f.MoveRegion && !f.ScatterRegion {
-		if status = f.anyConditionMatch(regionTarget, opts, store); status != statusOK {
+		if status = f.anyConditionMatch(regionTarget, opts, store); !status.IsOK() {
 			return
 		}
 	}
