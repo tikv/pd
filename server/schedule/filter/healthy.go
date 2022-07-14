@@ -18,7 +18,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/plan"
 )
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
@@ -44,30 +43,28 @@ func hasDownPeers(region *core.RegionInfo) bool {
 // IsRegionReplicated checks if a region is fully replicated. When placement
 // rules is enabled, its peers should fit corresponding rules. When placement
 // rules is disabled, it should have enough replicas and no any learner peer.
-func IsRegionReplicated(cluster regionFilterCluster, region *core.RegionInfo) bool {
-	return isRegionReplicated(cluster, region).IsOK()
+func IsRegionReplicated(cluster regionHealthCluster, region *core.RegionInfo) bool {
+	if cluster.GetOpts().IsPlacementRulesEnabled() {
+		return isRegionPlacementRuleSatisfied(cluster, region)
+	}
+	return isRegionReplicasSatisfied(cluster, region)
 }
 
-func isRegionReplicated(cluster regionFilterCluster, region *core.RegionInfo) plan.Status {
-	if cluster.GetOpts().IsPlacementRulesEnabled() {
-		if !cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied() {
-			return statusRegionRule
-		}
-		return statusOK
-	}
-	if !(len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()) {
-		return statusRegionIsolation
-	}
-	return statusOK
+func isRegionPlacementRuleSatisfied(cluster regionHealthCluster, region *core.RegionInfo) bool {
+	return cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied()
+}
+
+func isRegionReplicasSatisfied(cluster regionHealthCluster, region *core.RegionInfo) bool {
+	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
 }
 
 // ReplicatedRegion returns a function that checks if a region is fully replicated.
-func ReplicatedRegion(cluster regionFilterCluster) func(*core.RegionInfo) bool {
+func ReplicatedRegion(cluster regionHealthCluster) func(*core.RegionInfo) bool {
 	return func(region *core.RegionInfo) bool { return IsRegionReplicated(cluster, region) }
 }
 
 // cluster provides an overview of a cluster's regions distribution.
-type regionFilterCluster interface {
+type regionHealthCluster interface {
 	core.StoreSetInformer
 	core.RegionSetInformer
 	GetOpts() *config.PersistOptions
