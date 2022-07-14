@@ -634,6 +634,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
 	}
 
+	// TODO: Process operators atomically.
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
