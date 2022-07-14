@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -79,11 +78,17 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	return storeInfo
 }
 
+func (s *StoreInfo) cloneMetaStore() *metapb.Store {
+	b, _ := s.meta.Marshal()
+	store := &metapb.Store{}
+	store.Unmarshal(b)
+	return store
+}
+
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:                meta,
+		meta:                s.cloneMetaStore(),
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		slowStoreEvicted:    s.slowStoreEvicted,

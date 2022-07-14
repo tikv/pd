@@ -44,6 +44,7 @@ const (
 // SimConfig is the simulator configuration.
 type SimConfig struct {
 	// tick
+	CaseName        string            `toml:"case-name"`
 	SimTickInterval typeutil.Duration `toml:"sim-tick-interval"`
 	// store
 	StoreCapacityGB    uint64 `toml:"store-capacity"`
