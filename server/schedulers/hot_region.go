@@ -675,12 +675,12 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		}
 	}
 
-	if !schedule.IsRegionHealthyAllowPending(region) {
+	if !filter.IsRegionHealthyAllowPending(region) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
 		return false
 	}
 
-	if !schedule.IsRegionReplicated(bs.Cluster, region) {
+	if !filter.IsRegionReplicated(bs.Cluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "abnormal-replica").Inc()
 		return false

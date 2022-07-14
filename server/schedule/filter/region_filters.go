@@ -16,14 +16,11 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
 var (
-	statusRegionOK          = plan.NewStatus(plan.StatusOK)
 	statusRegionPendingPeer = plan.NewStatus(plan.StatusRegionUnhealthy)
 	statusRegionDownPeer    = plan.NewStatus(plan.StatusRegionUnhealthy)
 	statusRegionEmpty       = plan.NewStatus(plan.StatusRegionEmpty)
@@ -63,8 +60,6 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 type RegionFilter interface {
 	// RegionFilter is used to indicate where the filter will act on.
 	Scope() string
-	Type() string
-	Reason() string
 	// Return true if the region can be used to schedule.
 	Select(region *core.RegionInfo) plan.Status
 }
@@ -82,19 +77,11 @@ func (f *regionPengdingFilter) Scope() string {
 	return f.scope
 }
 
-func (f *regionPengdingFilter) Type() string {
-	return "Unhealthy"
-}
-
-func (f *regionPengdingFilter) Reason() string {
-	return "This region has too many pending pees."
-}
-
 func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
-	if len(region.GetPendingPeers()) > 0 {
+	if !hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
-	return statusRegionOK
+	return statusOK
 }
 
 type regionDownFilter struct {
@@ -110,19 +97,11 @@ func (f *regionDownFilter) Scope() string {
 	return f.scope
 }
 
-func (f *regionDownFilter) Type() string {
-	return "Unhealthy"
-}
-
-func (f *regionDownFilter) Reason() string {
-	return "This region has too many down pees."
-}
-
 func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
-	if len(region.GetDownPeers()) > 0 {
+	if !hasDownPeers(region) {
 		return statusRegionDownPeer
 	}
-	return statusRegionOK
+	return statusOK
 }
 
 type regionReplicatedFilter struct {
@@ -139,28 +118,8 @@ func (f *regionReplicatedFilter) Scope() string {
 	return f.scope
 }
 
-func (f *regionReplicatedFilter) Type() string {
-	return "NotReplicated"
-}
-
-func (f *regionReplicatedFilter) Reason() string {
-	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
-		return "This region does not fit placement rule."
-	}
-	return "This region is not replicated"
-}
-
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
-	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
-		if !f.cluster.GetRuleManager().FitRegion(f.cluster, region).IsSatisfied() {
-			return statusRegionRule
-		}
-		return statusRegionOK
-	}
-	if !(len(region.GetLearners()) == 0 && len(region.GetPeers()) == f.cluster.GetOpts().GetMaxReplicas()) {
-		return statusRegionIsolation
-	}
-	return statusRegionOK
+	return isRegionReplicated(f.cluster, region)
 }
 
 type regionEmptyFilter struct {
@@ -177,31 +136,14 @@ func (f *regionEmptyFilter) Scope() string {
 	return f.scope
 }
 
-func (f *regionEmptyFilter) Type() string {
-	return "EmptyRegion"
-}
-
-func (f *regionEmptyFilter) Reason() string {
-	return "This region is empty"
-}
-
 func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
 	if !isEmptyRegionAllowBalance(f.cluster, region) {
 		return statusRegionEmpty
 	}
-	return statusRegionOK
+	return statusOK
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
 func isEmptyRegionAllowBalance(cluster regionFilterCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
-}
-
-// cluster provides an overview of a cluster's regions distribution.
-type regionFilterCluster interface {
-	core.StoreSetInformer
-	core.StoreSetController
-	core.RegionSetInformer
-	GetOpts() *config.PersistOptions
-	GetRuleManager() *placement.RuleManager
 }

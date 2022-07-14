@@ -142,10 +142,10 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 }
 
 func (s *randomMergeScheduler) allowMerge(cluster schedule.Cluster, region, target *core.RegionInfo) bool {
-	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionHealthy(target) {
+	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}
-	if !schedule.IsRegionReplicated(cluster, region) || !schedule.IsRegionReplicated(cluster, target) {
+	if !filter.IsRegionReplicated(cluster, region) || !filter.IsRegionReplicated(cluster, target) {
 		return false
 	}
 	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {
