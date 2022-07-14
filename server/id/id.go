@@ -50,8 +50,8 @@ type allocatorImpl struct {
 	rootPath  string
 	allocPath string
 	label     string
-	metrics   *metrics
 	member    string
+	metrics   *metrics
 }
 
 // metrics is a collection of idAllocator's metrics
