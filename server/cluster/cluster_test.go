@@ -1611,8 +1611,8 @@ func Test(t *testing.T) {
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 	}
 
-	pendingFilter := filter.NewRegionPengdingFilter("test")
-	downFilter := filter.NewRegionDownFilter("test")
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for i := uint64(0); i < n; i++ {
 		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())

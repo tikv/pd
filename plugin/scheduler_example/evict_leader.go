@@ -217,8 +217,8 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
-	downFilter := filter.NewRegionDownFilter(s.GetName())
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWitRanges {
 		region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, ranges), pendingFilter, downFilter)
 		if region == nil {

@@ -154,15 +154,15 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 
-	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
-	downFilter := filter.NewRegionDownFilter(s.GetName())
-	replicaFilter := filter.NewRegionReplicatedFilter(s.GetName(), cluster)
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
+	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter}
 	switch cluster.(type) {
 	case *schedule.RangeCluster:
 		// allow empty region to be scheduled in range cluster
 	default:
-		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(s.GetName(), cluster))
+		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
 	for _, plan.source = range stores {

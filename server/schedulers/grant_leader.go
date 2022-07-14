@@ -237,8 +237,8 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
-	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
-	downFilter := filter.NewRegionDownFilter(s.GetName())
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), pendingFilter, downFilter)
 		if region == nil {

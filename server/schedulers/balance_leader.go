@@ -447,7 +447,7 @@ func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uin
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandLeaderRegions(plan.SourceStoreID(), l.conf.Ranges),
-		filter.NewRegionPengdingFilter(l.GetName()), filter.NewRegionDownFilter(l.GetName()))
+		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -481,7 +481,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandFollowerRegions(plan.TargetStoreID(), l.conf.Ranges),
-		filter.NewRegionPengdingFilter(l.GetName()), filter.NewRegionDownFilter(l.GetName()))
+		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()

@@ -23,21 +23,21 @@ import (
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
 // region does not have any down or pending peers.
 func IsRegionHealthy(region *core.RegionInfo) bool {
-	return IsRegionHealthyAllowPending(region) && hasPendingPeers(region)
+	return IsRegionHealthyAllowPending(region) && !hasPendingPeers(region)
 }
 
 // IsRegionHealthyAllowPending checks if a region is healthy for scheduling.
 // Differs from IsRegionHealthy, it allows the region to have pending peers.
 func IsRegionHealthyAllowPending(region *core.RegionInfo) bool {
-	return hasDownPeers(region)
+	return !hasDownPeers(region)
 }
 
 func hasPendingPeers(region *core.RegionInfo) bool {
-	return len(region.GetPendingPeers()) == 0
+	return len(region.GetPendingPeers()) > 0
 }
 
 func hasDownPeers(region *core.RegionInfo) bool {
-	return len(region.GetDownPeers()) == 0
+	return len(region.GetDownPeers()) > 0
 }
 
 // IsRegionReplicated checks if a region is fully replicated. When placement

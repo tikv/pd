@@ -30,7 +30,7 @@ import (
 func TestRegionPengdingFilter(t *testing.T) {
 	re := require.New(t)
 
-	filter := NewRegionPengdingFilter("")
+	filter := NewRegionPengdingFilter()
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
@@ -44,7 +44,7 @@ func TestRegionPengdingFilter(t *testing.T) {
 func TestRegionDownFilter(t *testing.T) {
 	re := require.New(t)
 
-	filter := NewRegionDownFilter("")
+	filter := NewRegionDownFilter()
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
@@ -67,7 +67,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
 	testCluster := mockcluster.NewCluster(ctx, opt)
-	filter := NewRegionReplicatedFilter("", testCluster)
+	filter := NewRegionReplicatedFilter(testCluster)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
@@ -78,7 +78,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
-	re.Equal(filter.Select(region), statusRegionIsolation)
+	re.Equal(filter.Select(region), statusRegionUnReplicated)
 }
 
 func TestRegionEmptyFilter(t *testing.T) {
@@ -89,7 +89,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
 	testCluster := mockcluster.NewCluster(ctx, opt)
-	filter := NewRegionEmptyFilter("", testCluster)
+	filter := NewRegionEmptyFilter(testCluster)
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},

@@ -133,9 +133,9 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		FilterSource(cluster.GetOpts(), s.filters...).
 		Shuffle()
 
-	pendingFilter := filter.NewRegionPengdingFilter(s.GetName())
-	downFilter := filter.NewRegionDownFilter(s.GetName())
-	replicaFilter := filter.NewRegionReplicatedFilter(s.GetName(), cluster)
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
+	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {

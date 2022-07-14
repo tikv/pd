@@ -20,14 +20,6 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
-var (
-	statusRegionPendingPeer = plan.NewStatus(plan.StatusRegionUnhealthy)
-	statusRegionDownPeer    = plan.NewStatus(plan.StatusRegionUnhealthy)
-	statusRegionEmpty       = plan.NewStatus(plan.StatusRegionEmpty)
-	statusRegionIsolation   = plan.NewStatus(plan.StatusIsolationNotMatch)
-	statusRegionRule        = plan.NewStatus(plan.StatusRuleNotMatch)
-)
-
 // SelectRegions selects regions that be selected from the list.
 func SelectRegions(regions []*core.RegionInfo, filters ...RegionFilter) []*core.RegionInfo {
 	return filterRegionsBy(regions, func(r *core.RegionInfo) bool {
@@ -58,64 +50,47 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
-	// RegionFilter is used to indicate where the filter will act on.
-	Scope() string
 	// Return true if the region can be used to schedule.
 	Select(region *core.RegionInfo) plan.Status
 }
 
 type regionPengdingFilter struct {
-	scope string
 }
 
 // NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
-func NewRegionPengdingFilter(scope string) RegionFilter {
-	return &regionPengdingFilter{scope: scope}
-}
-
-func (f *regionPengdingFilter) Scope() string {
-	return f.scope
+func NewRegionPengdingFilter() RegionFilter {
+	return &regionPengdingFilter{}
 }
 
 func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
-	if !hasPendingPeers(region) {
+	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
 	return statusOK
 }
 
 type regionDownFilter struct {
-	scope string
 }
 
 // NewRegionDownFilter creates a RegionFilter that filters all regions with down peers.
-func NewRegionDownFilter(scope string) RegionFilter {
-	return &regionDownFilter{scope: scope}
-}
-
-func (f *regionDownFilter) Scope() string {
-	return f.scope
+func NewRegionDownFilter() RegionFilter {
+	return &regionDownFilter{}
 }
 
 func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
-	if !hasDownPeers(region) {
+	if hasDownPeers(region) {
 		return statusRegionDownPeer
 	}
 	return statusOK
 }
 
 type regionReplicatedFilter struct {
-	scope   string
 	cluster regionHealthCluster
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(scope string, cluster regionHealthCluster) RegionFilter {
-	return &regionReplicatedFilter{scope: scope, cluster: cluster}
-}
-
-func (f *regionReplicatedFilter) Scope() string {
-	return f.scope
+func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
+	return &regionReplicatedFilter{cluster: cluster}
 }
 
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
@@ -126,23 +101,18 @@ func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 		return statusOK
 	}
 	if !isRegionReplicasSatisfied(f.cluster, region) {
-		return statusRegionIsolation
+		return statusRegionUnReplicated
 	}
 	return statusOK
 }
 
 type regionEmptyFilter struct {
-	scope   string
 	cluster regionHealthCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(scope string, cluster regionHealthCluster) RegionFilter {
-	return &regionEmptyFilter{scope: scope, cluster: cluster}
-}
-
-func (f *regionEmptyFilter) Scope() string {
-	return f.scope
+func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
+	return &regionEmptyFilter{cluster: cluster}
 }
 
 func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
