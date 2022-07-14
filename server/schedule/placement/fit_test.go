@@ -113,7 +113,7 @@ func TestFitRegion(t *testing.T) {
 	re := require.New(t)
 	stores := makeStores()
 
-	cases := []struct {
+	testCases := []struct {
 		region   string
 		rules    []string
 		fitPeers string
@@ -138,14 +138,14 @@ func TestFitRegion(t *testing.T) {
 		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
 	}
 
-	for _, cc := range cases {
-		region := makeRegion(cc.region)
+	for _, testCase := range testCases {
+		region := makeRegion(testCase.region)
 		var rules []*Rule
-		for _, r := range cc.rules {
+		for _, r := range testCase.rules {
 			rules = append(rules, makeRule(r))
 		}
 		rf := fitRegion(stores.GetStores(), region, rules)
-		expects := strings.Split(cc.fitPeers, "/")
+		expects := strings.Split(testCase.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			re.True(checkPeerMatch(f.Peers, expects[i]))
 		}

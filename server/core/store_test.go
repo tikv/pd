@@ -90,6 +90,26 @@ func TestCloneStore(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCloneMetaStore(t *testing.T) {
+	re := require.New(t)
+	store := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
+	store2 := NewStoreInfo(store).cloneMetaStore()
+	re.Equal(store2.Labels, store.Labels)
+	store2.Labels[0].Value = "changed value"
+	re.NotEqual(store2.Labels, store.Labels)
+}
+
+func BenchmarkStoreClone(b *testing.B) {
+	meta := &metapb.Store{Id: 1,
+		Address: "mock://tikv-1",
+		Labels:  []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
+	store := NewStoreInfo(meta)
+	b.ResetTimer()
+	for t := 0; t < b.N; t++ {
+		store.Clone(SetLeaderCount(t))
+	}
+}
+
 func TestRegionScore(t *testing.T) {
 	re := require.New(t)
 	stats := &pdpb.StoreStats{}
