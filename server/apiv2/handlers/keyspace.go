@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"github.com/tikv/pd/server/apiv2/middlewares"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,17 +17,28 @@ import (
 
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
+	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
 	router.PATCH("/:name", UpdateKeyspace)
 }
 
+// CreateKeyspaceParams represents parameters needed when creating a new keyspace.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type CreateKeyspaceParams struct {
 	Name   string            `json:"name"`
 	Config map[string]string `json:"config"`
 }
 
+// CreateKeyspace creates keyspace according to given input.
+// @Tags keyspaces
+// @Summary Create new keyspace.
+// @Param body body CreateKeyspaceParams true "Create keyspace parameters"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /keyspaces [post]
 func CreateKeyspace(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -49,6 +61,14 @@ func CreateKeyspace(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
+// LoadKeyspace returns target keyspace.
+// @Tags keyspaces
+// @Summary Get keyspace info.
+// @Param name path string true "Keyspace Name"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /keyspaces/{name} [get]
 func LoadKeyspace(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -105,6 +125,15 @@ type LoadAllKeyspacesResponse struct {
 	NextPageToken string `json:"next_page_token"`
 }
 
+// LoadAllKeyspaces loads range of keyspaces.
+// @Tags keyspaces
+// @Summary list keyspaces.
+// @Param page_token query string false "page token"
+// @Param limit query string false "maximum number of results to return"
+// @Produce json
+// @Success 200 {object} LoadAllKeyspacesResponse
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /keyspaces [get]
 func LoadAllKeyspaces(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -144,6 +173,8 @@ func LoadAllKeyspaces(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, resp)
 }
 
+// UpdateKeyspaceParams represents parameters needed to update a keyspace.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type UpdateKeyspaceParams struct {
 	State string `json:"state"`
 	// Note: Config's values are string pointers.
@@ -153,6 +184,15 @@ type UpdateKeyspaceParams struct {
 	Config map[string]*string `json:"config"`
 }
 
+// UpdateKeyspace update keyspace.
+// @Tags keyspaces
+// @Summary Update keyspace metadata.
+// @Param name path string true "Keyspace Name"
+// @Param body body UpdateKeyspaceParams true "Update keyspace parameters"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// Router /keyspaces/{name} [patch]
 func UpdateKeyspace(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
