@@ -211,7 +211,7 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 
 	for _, c := range testCases {
 		binaryNumber, err := strconv.ParseUint(c.binary, 2, 64)
-		re.Nil(err)
+		re.NoError(err)
 		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
 		re.Len(selected, len(c.expectedPeers))
 		for id := 0; id < len(selected); id++ {
