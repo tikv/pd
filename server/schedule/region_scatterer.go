@@ -130,7 +130,7 @@ func NewRegionScatterer(ctx context.Context, cluster Cluster) *RegionScatterer {
 		ctx:            ctx,
 		name:           regionScatterName,
 		cluster:        cluster,
-		ordinaryEngine: newEngineContext(ctx, filter.NewLabelConstaintFilter(regionScatterName, filter.NotTiFlashEngine, false)),
+		ordinaryEngine: newEngineContext(ctx, filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)),
 		specialEngines: make(map[string]engineContext),
 	}
 }
@@ -273,7 +273,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
-	ordinaryFilter := filter.NewLabelConstaintFilter(r.name, filter.NotTiFlashEngine, false)
+	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
 	// Group peers by the engine of their stores
@@ -282,7 +282,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		if store == nil {
 			return nil
 		}
-		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
+		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
@@ -329,7 +329,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	for engine, peers := range specialPeers {
 		ctx, ok := r.specialEngines[engine]
 		if !ok {
-			ctx = newEngineContext(r.ctx, filter.NewLabelConstaintFilter(r.name, []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.In, Values: []string{engine}}}, false))
+			ctx = newEngineContext(r.ctx, filter.NewEngineFilter(r.name, placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: []string{engine}}))
 			r.specialEngines[engine] = ctx
 		}
 		scatterWithSameEngine(peers, ctx)
@@ -463,7 +463,7 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, peers map[uin
 
 // Put put the final distribution in the context no matter the operator was created
 func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint64, group string) {
-	ordinaryFilter := filter.NewLabelConstaintFilter(r.name, filter.NotTiFlashEngine, false)
+	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	// Group peers by the engine of their stores
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
@@ -471,7 +471,7 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		if store == nil {
 			continue
 		}
-		if ordinaryFilter.Target(r.cluster.GetOpts(), store) {
+		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),
