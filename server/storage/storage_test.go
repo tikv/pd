@@ -282,6 +282,38 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"))
 }
 
+func TestTrySwitchRegionStorage(t *testing.T) {
+	re := require.New(t)
+	defaultStorage := NewStorageWithMemoryBackend()
+	localStorage := NewStorageWithMemoryBackend()
+	storage := NewCoreStorage(defaultStorage, localStorage)
+	defaultCache := core.NewRegionsInfo()
+	localCache := core.NewRegionsInfo()
+
+	TrySwitchRegionStorage(storage, false)
+	regions10 := mustSaveRegions(re, storage, 10)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Empty(localCache.GetMetaRegions())
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+
+	TrySwitchRegionStorage(storage, true)
+	regions20 := mustSaveRegions(re, storage, 20)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	re.Len(localCache.GetMetaRegions(), 20)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+	for _, region := range localCache.GetMetaRegions() {
+		re.Equal(regions20[region.GetId()], region)
+	}
+}
+
 const (
 	keyChars = "abcdefghijklmnopqrstuvwxyz"
 	keyLen   = 20
