@@ -46,6 +46,24 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	})
 }
 
+// SelectSourceStoresWithCollector selects stores that be selected as source store from the list.
+func SelectSourceStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.PlanCollector) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AllOf(filters, func(i int) bool {
+			status := filters[i].Source(opt, s)
+			if !status.IsOK() {
+				sourceID := strconv.FormatUint(s.GetID(), 10)
+				targetID := ""
+				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
+					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				collector.Collect(plan.SetSourceStore(s), plan.SetStatus(status))
+				return false
+			}
+			return true
+		})
+	})
+}
+
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
@@ -60,6 +78,29 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				return false
+			}
+			return true
+		})
+	})
+}
+
+// SelectTargetStoresWithCollector selects stores that be selected as target store from the list.
+func SelectTargetStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.PlanCollector) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AllOf(filters, func(i int) bool {
+			filter := filters[i]
+			status := filter.Target(opt, s)
+			if !status.IsOK() {
+				cfilter, ok := filter.(comparingFilter)
+				targetID := strconv.FormatUint(s.GetID(), 10)
+				sourceID := ""
+				if ok {
+					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+				}
+				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				collector.Collect(plan.SetTargetStore(s), plan.SetStatus(status))
 				return false
 			}
 			return true

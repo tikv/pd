@@ -346,13 +346,14 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
+	basePlan := NewBalanceSchedulerBasePlan()
 	batch := l.conf.Batch
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
-	plan := newBalancePlan(kind, cluster, opInfluence)
+	plan := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -392,10 +393,10 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,
-	plan *balancePlan, usedRegions map[uint64]struct{}) *operator.Operator {
+	plan *solver, usedRegions map[uint64]struct{}) *operator.Operator {
 	store := cs.getStore()
 	retryLimit := l.retryQuota.GetLimit(store)
-	var creator func(*balancePlan) *operator.Operator
+	var creator func(*solver) *operator.Operator
 	switch dir {
 	case transferOut:
 		plan.source, plan.target = store, nil
@@ -427,7 +428,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	return op
 }
 
-func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uint64]struct{}, candidates ...*candidateStores) {
+func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]struct{}, candidates ...*candidateStores) {
 	usedRegions[op.RegionID()] = struct{}{}
 	candidateUpdateStores := make([][]int, len(candidates))
 	for id, candidate := range candidates {
@@ -445,7 +446,7 @@ func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uin
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderOut(plan *solver) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandLeaderRegions(plan.SourceStoreID(), l.conf.Ranges),
 		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
@@ -479,7 +480,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.
 // transferLeaderIn transfers leader to the target store.
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
-func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) *operator.Operator {
+func (l *balanceLeaderScheduler) transferLeaderIn(plan *solver) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandFollowerRegions(plan.TargetStoreID(), l.conf.Ranges),
 		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
@@ -518,7 +519,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) *operator.O
 // If the region is hot or the difference between the two stores is tolerable, then
 // no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
-func (l *balanceLeaderScheduler) createOperator(plan *balancePlan) *operator.Operator {
+func (l *balanceLeaderScheduler) createOperator(plan *solver) *operator.Operator {
 	if plan.IsRegionHot(plan.region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()

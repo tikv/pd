@@ -14,6 +14,72 @@
 
 package plan
 
+import (
+	"github.com/tikv/pd/server/core"
+)
+
 // Plan is the basic unit for both scheduling and diagnosis.
 // TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
-type Plan interface{}
+type Plan interface {
+	GetSourceStore() *core.StoreInfo
+	GetRegion() *core.RegionInfo
+	GetTargetStore() *core.StoreInfo
+	SetSourceStore(store *core.StoreInfo)
+	SetRegion(region *core.RegionInfo)
+	SetTargetStore(store *core.StoreInfo)
+	SetStatus(status Status)
+	GetStatus() Status
+	IsSchedulable() bool
+	Step() int
+	Clone(...PlanOption) Plan
+}
+
+type PlanCollector struct {
+	basePlan Plan
+	plans    []Plan
+	enable   bool
+}
+
+func NewPlanCollector(enable bool, plan Plan) *PlanCollector {
+	return &PlanCollector{
+		basePlan: plan,
+		plans:    make([]Plan, 0),
+		enable:   enable,
+	}
+}
+
+func (c *PlanCollector) Collect(opts ...PlanOption) {
+	if c.enable {
+		c.plans = append(c.plans, c.basePlan.Clone(opts...))
+	}
+}
+
+func (c *PlanCollector) GetPlans() []Plan {
+	return c.plans
+}
+
+type PlanOption func(plan Plan)
+
+func SetStatus(status Status) PlanOption {
+	return func(plan Plan) {
+		plan.SetStatus(status)
+	}
+}
+
+func SetSourceStore(store *core.StoreInfo) PlanOption {
+	return func(plan Plan) {
+		plan.SetSourceStore(store)
+	}
+}
+
+func SetRegion(region *core.RegionInfo) PlanOption {
+	return func(plan Plan) {
+		plan.SetRegion(region)
+	}
+}
+
+func SetTargetStore(store *core.StoreInfo) PlanOption {
+	return func(plan Plan) {
+		plan.SetTargetStore(store)
+	}
+}

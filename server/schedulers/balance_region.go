@@ -138,18 +138,22 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+
+	basePlan := NewBalanceSchedulerBasePlan()
+	collector := plan.NewPlanCollector(dryRun, basePlan)
+
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	stores = filter.SelectSourceStores(stores, s.filters, opts)
+	stores = filter.SelectSourceStoresWithCollector(stores, s.filters, opts, collector)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
-	plan := newBalancePlan(kind, cluster, opInfluence)
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	sort.Slice(stores, func(i, j int) bool {
-		iOp := plan.GetOpInfluence(stores[i].GetID())
-		jOp := plan.GetOpInfluence(stores[j].GetID())
+		iOp := solver.GetOpInfluence(stores[i].GetID())
+		jOp := solver.GetOpInfluence(stores[j].GetID())
 		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
 			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
@@ -165,88 +169,94 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
-	for _, plan.source = range stores {
-		retryLimit := s.retryQuota.GetLimit(plan.source)
+	basePlan.step++
+	for _, solver.source = range stores {
+		retryLimit := s.retryQuota.GetLimit(solver.source)
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = filter.SelectOneRegion(cluster.RandPendingRegions(plan.SourceStoreID(), s.conf.Ranges),
+			solver.region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges),
 				baseRegionFilters...)
-			if plan.region == nil {
+			if solver.region == nil {
 				// Then pick the region that has a follower in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.SourceStoreID(), s.conf.Ranges),
 					append(baseRegionFilters, pendingFilter)...)
 			}
-			if plan.region == nil {
+			if solver.region == nil {
 				// Then pick the region has the leader in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.SourceStoreID(), s.conf.Ranges),
 					append(baseRegionFilters, pendingFilter)...)
 			}
-			if plan.region == nil {
+			if solver.region == nil {
 				// Finally pick learner.
-				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges),
 					append(baseRegionFilters, pendingFilter)...)
 			}
-			if plan.region == nil {
+			if solver.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				continue
 			}
-			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
 
 			// Skip hot regions.
-			if cluster.IsRegionHot(plan.region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			if cluster.IsRegionHot(solver.region) {
+				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
 				continue
 			}
 			// Check region whether have leader
-			if plan.region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			if solver.region.GetLeader() == nil {
+				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
 				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 				continue
 			}
-
-			if op := s.transferPeer(plan); op != nil {
-				s.retryQuota.ResetLimit(plan.source)
+			basePlan.step++
+			if op := s.transferPeer(solver, collector); op != nil {
+				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, nil
 			}
 		}
-		s.retryQuota.Attenuate(plan.source)
+		s.retryQuota.Attenuate(solver.source)
 	}
 	s.retryQuota.GC(stores)
 	return nil, nil
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.PlanCollector) *operator.Operator {
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), nil, plan.region.GetStoreIDs()),
-		filter.NewPlacementSafeguard(s.GetName(), plan.GetOpts(), plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source),
-		filter.NewRegionScoreFilter(s.GetName(), plan.source, plan.GetOpts()),
+		filter.NewExcludedFilter(s.GetName(), nil, solver.region.GetStoreIDs()),
+		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
+		filter.NewRegionScoreFilter(s.GetName(), solver.source, solver.GetOpts()),
 		filter.NewSpecialUseFilter(s.GetName()),
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
 	}
 
-	candidates := filter.NewCandidates(plan.GetStores()).
-		FilterTarget(plan.GetOpts(), filters...).
-		Sort(filter.RegionScoreComparer(plan.GetOpts()))
+	candidates := filter.NewCandidates(solver.GetStores()).
+		FilterTargetWithCollector(solver.GetOpts(), collector, filters...).
+		Sort(filter.RegionScoreComparer(solver.GetOpts()))
 
-	for _, plan.target = range candidates.Stores {
-		regionID := plan.region.GetID()
-		sourceID := plan.source.GetID()
-		targetID := plan.target.GetID()
+	if len(candidates.Stores) != 0 {
+		solver.step++
+	}
+	for _, solver.target = range candidates.Stores {
+		regionID := solver.region.GetID()
+		sourceID := solver.source.GetID()
+		targetID := solver.target.GetID()
 		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-		if !plan.shouldBalance(s.GetName()) {
+		if !solver.shouldBalance(s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed)))
+			solver.step--
 			continue
 		}
 
-		oldPeer := plan.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, plan, plan.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		oldPeer := solver.region.GetStorePeer(sourceID)
+		newPeer := &metapb.Peer{StoreId: solver.target.GetID(), Role: oldPeer.Role}
+		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil
@@ -258,11 +268,14 @@ func (s *balanceRegionScheduler) transferPeer(plan *balancePlan) *operator.Opera
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
-		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(plan.sourceScore, 'f', 2, 64)
-		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(plan.targetScore, 'f', 2, 64)
+		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
+		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
 		return op
 	}
 
 	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
+	if len(candidates.Stores) != 0 {
+		solver.step--
+	}
 	return nil
 }
