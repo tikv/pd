@@ -556,7 +556,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
-				schedulerCounter.WithLabelValues(fmt.Sprintf("hot-region-%s", bs.rwTy), "hot_region_split").Inc()
+				schedulerCounter.WithLabelValues(bs.sche.GetName(), "need_split_before_move_peer").Inc()
 				continue
 			}
 			bs.cur.mainPeerStat = mainPeerStat
