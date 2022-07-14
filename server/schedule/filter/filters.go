@@ -99,7 +99,7 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeAddress := store.GetAddress()
 	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
-		if !filter.Target(opt, store).IsOK() {
+		if !filter.Source(opt, store).IsOK() {
 			sourceID := storeID
 			targetID := ""
 			filterCounter.WithLabelValues("filter-source", storeAddress,
