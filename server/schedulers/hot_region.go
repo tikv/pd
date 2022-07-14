@@ -335,9 +335,9 @@ type solution struct {
 	region       *core.RegionInfo // The region of the main balance effect. Relate mainPeerStat. srcStore -> dstStore
 	mainPeerStat *statistics.HotPeerStat
 
-	dstStore        *statistics.StoreLoadDetail
-	revertRegions   []*core.RegionInfo // The regions to hedge back effects. Relate revertPeersStat. dstStore -> srcStore
-	revertPeersStat []*statistics.HotPeerStat
+	dstStore       *statistics.StoreLoadDetail
+	revertRegion   *core.RegionInfo // The regions to hedge back effects. Relate revertPeerStat. dstStore -> srcStore
+	revertPeerStat *statistics.HotPeerStat
 
 	cachedPeersRate []float64
 
@@ -375,8 +375,8 @@ func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
 	for _, dim := range dims {
 		kind := statistics.GetRegionStatKind(rw, dim)
 		peersRate := s.mainPeerStat.GetLoad(kind)
-		for _, revertPeer := range s.revertPeersStat {
-			peersRate -= revertPeer.GetLoad(kind)
+		if s.revertPeerStat != nil {
+			peersRate -= s.revertPeerStat.GetLoad(kind)
 		}
 		s.cachedPeersRate[dim] = peersRate
 	}
@@ -388,10 +388,10 @@ func (s *solution) getPeersRateFromCache(dim int) float64 {
 }
 
 // isAvailable returns the solution is available.
-// If the solution has no revertRegions, progressiveRank should < 0.
-// If the solution has some revertRegions, progressiveRank should < -1.
+// If the solution has no revertRegion, progressiveRank should < 0.
+// If the solution has some revertRegion, progressiveRank should < -1.
 func (s *solution) isAvailable() bool {
-	return s.progressiveRank < -1 || (s.progressiveRank < 0 && len(s.revertRegions) == 0)
+	return s.progressiveRank < -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
 }
 
 type balanceSolver struct {
@@ -567,7 +567,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				tryUpdateBestSolution(isUniformFirstPriority)
 
 				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
-					(bs.best == nil || bs.best.progressiveRank >= -1 || len(bs.best.revertRegions) > 0) {
+					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
 					// The search-revert-regions is performed only when the following conditions are met to improve performance.
 					// * `searchRevertRegions` is true. It depends on the result of the last `solve`.
 					// * `IsStrictPickingStoreEnabled` is false.
@@ -583,13 +583,13 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 							!allowRevertRegion(revertRegion, srcStoreID) {
 							continue
 						}
-						bs.cur.revertPeersStat = []*statistics.HotPeerStat{revertPeerStat}
-						bs.cur.revertRegions = []*core.RegionInfo{revertRegion}
+						bs.cur.revertPeerStat = revertPeerStat
+						bs.cur.revertRegion = revertRegion
 						bs.calcProgressiveRank()
 						tryUpdateBestSolution(isUniformFirstPriority)
 					}
-					bs.cur.revertPeersStat = nil
-					bs.cur.revertRegions = nil
+					bs.cur.revertPeerStat = nil
+					bs.cur.revertRegion = nil
 				}
 			}
 		}
@@ -607,7 +607,7 @@ func (bs *balanceSolver) allowSearchRevertRegions() bool {
 	// * No best solution was found this time.
 	// * The progressiveRank of the best solution is -1.
 	// * The best solution contain revert regions.
-	return bs.best == nil || bs.best.progressiveRank >= -1 || len(bs.best.revertRegions) > 0
+	return bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil
 }
 
 func (bs *balanceSolver) tryAddPendingInfluence() bool {
@@ -642,9 +642,9 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 	// revert peers
-	for i, revertPeerStat := range bs.best.revertPeersStat {
-		infl = statistics.Influence{Loads: revertPeerStat.Loads, Count: 1}
-		if !bs.sche.tryAddPendingInfluence(bs.ops[i+1], dstStoreID, srcStoreID, infl, maxZombieDur) {
+	if bs.best.revertPeerStat != nil {
+		infl = statistics.Influence{Loads: bs.best.revertPeerStat.Loads, Count: 1}
+		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
 	}
@@ -969,7 +969,7 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 	// than the src store's rate after scheduling one peer.
 	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
-	// Rate may be negative after adding revertRegions, which should be regarded as moving from dst to src.
+	// Rate may be negative after adding revertRegion, which should be regarded as moving from dst to src.
 	if peersRate >= 0 {
 		isHot = peersRate >= bs.getMinRate(dim)
 		decRatio = (dstRate + peersRate) / math.Max(srcRate-peersRate, 1)
@@ -1015,10 +1015,12 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
+		// Higher rank is better.
 		return bs.cur.progressiveRank < old.progressiveRank
 	}
-	if len(bs.cur.revertRegions) != len(old.revertRegions) {
-		return len(bs.cur.revertRegions) < len(old.revertRegions)
+	if (bs.cur.revertRegion == nil) != (old.revertRegion == nil) {
+		// Fewer revertRegions are better.
+		return bs.cur.revertRegion == nil
 	}
 
 	if r := bs.compareSrcStore(bs.cur.srcStore, old.srcStore); r < 0 {
@@ -1166,14 +1168,11 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.region != nil && bs.cur.region.GetID() == bs.cur.mainPeerStat.ID()) {
 		return false
 	}
-	for i, revertRegion := range bs.cur.revertRegions {
-		revertPeerStat := bs.cur.revertPeersStat[i]
-		if !(revertPeerStat != nil && revertPeerStat.StoreID == bs.cur.dstStore.GetID() &&
-			revertRegion != nil && revertRegion.GetID() == revertPeerStat.ID()) {
-			return false
-		}
+	if bs.cur.revertPeerStat == nil {
+		return bs.cur.revertRegion == nil
 	}
-	return true
+	return bs.cur.revertPeerStat.StoreID == bs.cur.dstStore.GetID() &&
+		bs.cur.revertRegion != nil && bs.cur.revertRegion.GetID() == bs.cur.revertPeerStat.ID()
 }
 
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
@@ -1209,13 +1208,12 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	if err == nil {
 		bs.decorateOperator(currentOp, false, sourceLabel, targetLabel, typ, dim)
 		ops = []*operator.Operator{currentOp}
-		for _, revertRegion := range bs.cur.revertRegions {
-			currentOp, typ, err = createOperator(revertRegion, dstStoreID, srcStoreID)
-			if err != nil {
-				break
+		if bs.cur.revertRegion != nil {
+			currentOp, typ, err = createOperator(bs.cur.revertRegion, dstStoreID, srcStoreID)
+			if err == nil {
+				bs.decorateOperator(currentOp, true, targetLabel, sourceLabel, typ, dim)
+				ops = append(ops, currentOp)
 			}
-			bs.decorateOperator(currentOp, true, targetLabel, sourceLabel, typ, dim)
-			ops = append(ops, currentOp)
 		}
 	}
 
@@ -1313,8 +1311,8 @@ func (bs *balanceSolver) logBestSolution() {
 		return
 	}
 
-	if len(best.revertRegions) > 0 {
-		// Log more information on solutions containing revertRegions
+	if best.revertRegion != nil {
+		// Log more information on solutions containing revertRegion
 		srcFirstRate, dstFirstRate := best.getExtremeLoad(bs.firstPriority)
 		srcSecondRate, dstSecondRate := best.getExtremeLoad(bs.secondPriority)
 		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
@@ -1329,7 +1327,7 @@ func (bs *balanceSolver) logBestSolution() {
 			zap.Uint64("main-region", best.region.GetID()),
 			zap.Float64("main-first-rate", mainFirstRate),
 			zap.Float64("main-second-rate", mainSecondRate),
-			zap.Uint64("revert-regions", best.revertRegions[0].GetID()),
+			zap.Uint64("revert-regions", best.revertRegion.GetID()),
 			zap.Float64("peers-first-rate", best.getPeersRateFromCache(bs.firstPriority)),
 			zap.Float64("peers-second-rate", best.getPeersRateFromCache(bs.secondPriority)))
 	}
