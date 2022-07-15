@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -29,10 +30,8 @@ import (
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
 	storePersistInterval   = 5 * time.Minute
-	mb                     = 1 << 20 // megabyte
-	gb                     = 1 << 30 // 1GB size
-	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
-	initialMinSpace        = 1 << 33 // 2^33=8GB
+	initialMaxRegionCounts = 30            // exclude storage Threshold Filter when region less than 30
+	initialMinSpace        = 8 * units.GiB // 2^33=8GB
 	slowStoreThreshold     = 80
 
 	// EngineKey is the label key used to indicate engine.
@@ -335,9 +334,9 @@ func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio fl
 func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
-	available := float64(s.GetAvailable()) / mb
-	used := float64(s.GetUsedSize()) / mb
-	capacity := float64(s.GetCapacity()) / mb
+	available := float64(s.GetAvailable()) / units.MiB
+	used := float64(s.GetUsedSize()) / units.MiB
+	capacity := float64(s.GetCapacity()) / units.MiB
 
 	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
@@ -378,8 +377,8 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 }
 
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
-	A := float64(s.GetAvgAvailable()) / gb
-	C := float64(s.GetCapacity()) / gb
+	A := float64(s.GetAvgAvailable()) / units.GiB
+	C := float64(s.GetCapacity()) / units.GiB
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())

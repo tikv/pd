@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -90,7 +91,7 @@ func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *Sto
 	stats.Capacity = capacity
 	stats.Available = available
 	usedSize := capacity - available
-	regionSize := (float64(usedSize) * amp) / mb
+	regionSize := (float64(usedSize) * amp) / units.MiB
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
