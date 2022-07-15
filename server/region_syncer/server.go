@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -38,9 +39,9 @@ import (
 )
 
 const (
-	msgSize                  = 8 * 1024 * 1024
-	defaultBucketRate        = 20 * 1024 * 1024 // 20MB/s
-	defaultBucketCapacity    = 20 * 1024 * 1024 // 20MB
+	msgSize                  = 8 * units.MiB
+	defaultBucketRate        = 20 * units.MiB // 20MB/s
+	defaultBucketCapacity    = 20 * units.MiB // 20MB
 	maxSyncRegionBatchSize   = 100
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
