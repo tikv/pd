@@ -15,6 +15,7 @@
 package simulator
 
 import (
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
@@ -147,8 +148,8 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	s := &cases.Store{
 		ID:        id,
 		Status:    metapb.StoreState_Up,
-		Capacity:  config.StoreCapacityGB * cases.GB,
-		Available: config.StoreAvailableGB * cases.GB,
+		Capacity:  config.StoreCapacityGB * units.GiB,
+		Available: config.StoreAvailableGB * units.GiB,
 		Version:   config.StoreVersion,
 	}
 	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
