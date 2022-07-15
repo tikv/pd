@@ -19,8 +19,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/docker/go-units"
 	"github.com/BurntSushi/toml"
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"

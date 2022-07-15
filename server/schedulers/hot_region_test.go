@@ -715,8 +715,8 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 9.5*units.MiB*statistics.StoreHeartBeatReportInterval, 10*units.MiB*statistics.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 90, 0.5 * units.MiB, 0},       // no hot
-		{1, []uint64{2, 1, 3}, 90, 0.5 * units.MiB, 0},       // no hot
+		{1, []uint64{1, 2, 3}, 90, 0.5 * units.MiB, 0},              // no hot
+		{1, []uint64{2, 1, 3}, 90, 0.5 * units.MiB, 0},              // no hot
 		{2, []uint64{3, 2, 1}, 0.5 * units.MiB, 0.5 * units.MiB, 0}, // byteDecRatio is greater than greatDecRatio
 	})
 

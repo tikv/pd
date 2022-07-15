@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/server/versioninfo"
 )
 
-
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
