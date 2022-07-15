@@ -20,12 +20,11 @@ import (
 )
 
 type balanceSchedulerBasePlan struct {
-	source        *core.StoreInfo
-	target        *core.StoreInfo
-	region        *core.RegionInfo
-	status        plan.Status
-	step          int
-	isSchedulable bool
+	source *core.StoreInfo
+	target *core.StoreInfo
+	region *core.RegionInfo
+	status plan.Status
+	step   int
 }
 
 func NewBalanceSchedulerBasePlan() *balanceSchedulerBasePlan {
@@ -69,18 +68,13 @@ func (p *balanceSchedulerBasePlan) SetStatus(status plan.Status) {
 	p.status = status
 }
 
-func (p *balanceSchedulerBasePlan) IsSchedulable() bool {
-	return p.isSchedulable
-}
-
 func (p *balanceSchedulerBasePlan) Clone(opts ...plan.PlanOption) plan.Plan {
 	plan := &balanceSchedulerBasePlan{
-		region:        p.region,
-		source:        p.source,
-		target:        p.target,
-		status:        p.status,
-		step:          p.step,
-		isSchedulable: p.isSchedulable,
+		region: p.region,
+		source: p.source,
+		target: p.target,
+		status: p.status,
+		step:   p.step,
 	}
 	for _, opt := range opts {
 		opt(plan)

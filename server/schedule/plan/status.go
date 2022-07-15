@@ -26,6 +26,8 @@ const (
 	StatusNoNeed
 	// StatusPaused represents the scheduler or checker is paused.
 	StatusPaused
+	// StatusNoOperator represents the plan can't create operator successfully
+	StatusNoOperator
 
 	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
 	StatusStoreThrottled

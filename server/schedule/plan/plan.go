@@ -29,33 +29,39 @@ type Plan interface {
 	SetTargetStore(store *core.StoreInfo)
 	SetStatus(status Status)
 	GetStatus() Status
-	IsSchedulable() bool
 	Step() int
 	Clone(...PlanOption) Plan
 }
 
 type PlanCollector struct {
-	basePlan Plan
-	plans    []Plan
-	enable   bool
+	basePlan           Plan
+	unschedulablePlans []Plan
+	schedulablePlans   []Plan
+	enable             bool
 }
 
 func NewPlanCollector(enable bool, plan Plan) *PlanCollector {
 	return &PlanCollector{
-		basePlan: plan,
-		plans:    make([]Plan, 0),
-		enable:   enable,
+		basePlan:           plan,
+		unschedulablePlans: make([]Plan, 0),
+		schedulablePlans:   make([]Plan, 0),
+		enable:             enable,
 	}
 }
 
 func (c *PlanCollector) Collect(opts ...PlanOption) {
 	if c.enable {
-		c.plans = append(c.plans, c.basePlan.Clone(opts...))
+		plan := c.basePlan.Clone(opts...)
+		if plan.GetStatus().IsOK() {
+			c.schedulablePlans = append(c.schedulablePlans, plan)
+		} else {
+			c.unschedulablePlans = append(c.unschedulablePlans, plan)
+		}
 	}
 }
 
 func (c *PlanCollector) GetPlans() []Plan {
-	return c.plans
+	return append(c.schedulablePlans, c.unschedulablePlans...)
 }
 
 type PlanOption func(plan Plan)
