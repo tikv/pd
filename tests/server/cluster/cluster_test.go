@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -585,8 +586,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 			Header: testutil.NewRequestHeader(clusterID),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
-				Capacity:  1000 * (1 << 20),
-				Available: 1000 * (1 << 20),
+				Capacity:  1000 * units.MiB,
+				Available: 1000 * units.MiB,
 			},
 		}
 		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}
@@ -756,13 +757,13 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(err)
 	re.Nil(raftCluster)
 
-	storage := rc.GetStorage()
+	testStorage := rc.GetStorage()
 	basicCluster := rc.GetBasicCluster()
 	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	re.NoError(storage.SaveMeta(meta))
+	re.NoError(testStorage.SaveMeta(meta))
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -770,7 +771,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(testStorage.SaveStore(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -785,12 +786,12 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		re.NoError(storage.SaveRegion(region))
+		re.NoError(testStorage.SaveRegion(region))
 	}
-	re.NoError(storage.Flush())
+	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, testStorage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -819,9 +820,9 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		re.NoError(storage.SaveRegion(region))
+		re.NoError(testStorage.SaveRegion(region))
 	}
-	raftCluster.GetStorage().LoadRegionsOnce(ctx, raftCluster.GetBasicCluster().PutRegion)
+	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
 	re.Equal(n, raftCluster.GetRegionCount())
 }
 
