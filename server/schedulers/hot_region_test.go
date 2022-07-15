@@ -400,9 +400,9 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	}
 	// | region_id | leader_store | follower_store | follower_store | learner_store | written_bytes |
 	// |-----------|--------------|----------------|----------------|---------------|---------------|
-	// |     1     |       1      |        2       |       3        |       8       |      512 units.KiB   |
-	// |     2     |       1      |        3       |       4        |       8       |      512 units.KiB   |
-	// |     3     |       1      |        2       |       4        |       9       |      512 units.KiB   |
+	// |     1     |       1      |        2       |       3        |       8       |      512 KB   |
+	// |     2     |       1      |        3       |       4        |       8       |      512 KB   |
+	// |     3     |       1      |        2       |       4        |       9       |      512 KB   |
 	// |     4     |       2      |                |                |      10       |      100 B    |
 	// Region 1, 2 and 3 are hot regions.
 	testRegions := []testRegionInfo{

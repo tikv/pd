@@ -147,11 +147,11 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		bigger *StoreInfo
 		small  *StoreInfo
 	}{{
-		// store1 and store2 has same store available ratio and store1 less 50units.GiB
+		// store1 and store2 has same store available ratio and store1 less 50 GB
 		bigger: NewStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
 		small:  NewStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
 	}, {
-		// store1 and store2 has same available space and less than 50units.GiB
+		// store1 and store2 has same available space and less than 50 GB
 		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
 		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
