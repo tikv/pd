@@ -59,12 +59,11 @@ func (s *testBalanceWitnessSchedulerSuite) TestScheduleWithOpInfluence(c *C) {
 	s.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
 	// Witnesses:  7    8    9   14
-	// Region1:    F    F    F    L
 	s.tc.AddWitnessStore(1, 7)
 	s.tc.AddWitnessStore(2, 8)
 	s.tc.AddWitnessStore(3, 9)
 	s.tc.AddWitnessStore(4, 14)
-	s.tc.AddLeaderRegion(1, 4, 1, 2, 3)
+	s.tc.AddLeaderRegionWithWitness(1, 3, []uint64{1, 2, 4}, 4)
 	op := s.schedule()[0]
 	c.Check(op, NotNil)
 	s.oc.SetOperator(op)
@@ -93,7 +92,7 @@ func (s *testBalanceWitnessSchedulerSuite) TestTransferWitnessOut(c *C) {
 	s.tc.AddWitnessStore(4, 12)
 	s.tc.SetTolerantSizeRatio(0.1)
 	for i := uint64(1); i <= 7; i++ {
-		s.tc.AddLeaderRegionWithWitness(i, 3, []uint64{1, 2, 3, 4}, 4)
+		s.tc.AddLeaderRegionWithWitness(i, 3, []uint64{1, 2, 4}, 4)
 	}
 
 	// balance leader: 4->1, 4->1, 4->2
@@ -110,8 +109,10 @@ func (s *testBalanceWitnessSchedulerSuite) TestTransferWitnessOut(c *C) {
 			if _, ok := regions[op.RegionID()]; !ok {
 				s.oc.SetOperator(op)
 				regions[op.RegionID()] = struct{}{}
-				from := op.Step(0).(operator.AddPeer).ToStore
-				to := op.Step(1).(operator.AddPeer).ToStore
+				from := op.Step(0).(operator.RemovePeer).FromStore
+				// to := op.Step(1).(operator.AddLearner).ToStore
+				// to := op.Step(2).(operator.PromoteLearner).ToStore
+				to := op.Step(3).(operator.BecomeWitness).StoreID
 				c.Assert(from, Equals, uint64(4))
 				targets[to]--
 			}

@@ -74,11 +74,11 @@ type Builder struct {
 	forceTargetLeader bool
 
 	// intermediate states
-	currentPeers                         peersMap
-	currentLeaderStoreID                 uint64
-	toAdd, toRemove, toPromote, toDemote peersMap       // pending tasks.
-	steps                                []OpStep       // generated steps.
-	peerAddStep                          map[uint64]int // record at which step a peer is created.
+	currentPeers                                    peersMap
+	currentLeaderStoreID                            uint64
+	toAdd, toRemove, toPromote, toDemote, toWitness peersMap       // pending tasks.
+	steps                                           []OpStep       // generated steps.
+	peerAddStep                                     map[uint64]int // record at which step a peer is created.
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus

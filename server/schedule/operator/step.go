@@ -256,6 +256,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 
 	regionSize := region.GetApproximateSize()
 	to.WitnessCount += 1
+	to.RegionSize -= regionSize
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -266,7 +267,11 @@ func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (bw BecomeWitness) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
-	return addNode(bw.StoreID, bw.PeerID, true)
+	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
+		return addLearnerNode(bw.PeerID, bw.StoreID, true)
+	} else {
+		return addNode(bw.PeerID, bw.StoreID, true)
+	}
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -447,9 +452,12 @@ func (rp RemovePeer) CheckInProgress(_ ClusterInformer, region *core.RegionInfo)
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	regionSize := region.GetApproximateSize()
+	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	if region.GetStorePeer(rp.FromStore).IsWitness {
+		from.WitnessCount--
+	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold

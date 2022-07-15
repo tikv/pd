@@ -98,12 +98,23 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 
 // CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
 func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+	// TODO: use build to generate, here is just for quick demo
+	id, err := ci.GetAllocator().Alloc()
+	if err != nil {
+		return nil, err
+	}
+	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), kind, region.GetApproximateSize(),
+		RemovePeer{FromStore: sourceStoreID, PeerID: region.GetStorePeer(sourceStoreID).GetId()},
+		AddLearner{ToStore: sourceStoreID, PeerID: id, IsWitness: false},
+		PromoteLearner{ToStore: sourceStoreID, PeerID: id},
+		BecomeWitness{StoreID: targetStoreID, PeerID: id},
+	), nil
 	// TODO: remove then add is a workaround for simplicity.
-	return NewBuilder(desc, ci, region).
-		RemovePeer(sourceStoreID).
-		AddPeer(&metapb.Peer{StoreId: sourceStoreID}).
-		BecomeWitness(targetStoreID).
-		Build(kind)
+	// return NewBuilder(desc, ci, region).
+	// 	RemovePeer(sourceStoreID).
+	// 	AddPeer(&metapb.Peer{StoreId: sourceStoreID}).
+	// 	BecomeWitness(targetStoreID).
+	// 	Build(kind)
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.

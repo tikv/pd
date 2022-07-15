@@ -147,17 +147,19 @@ func (t *regionTree) remove(region *RegionInfo) {
 	if t.length() == 0 {
 		return
 	}
-	item := &regionItem{region: region}
-	result := t.tree.Find(item).(*regionItem)
-	if result == nil || result.region.GetID() != region.GetID() {
+	item := t.tree.Find(&regionItem{region: region})
+	if item == nil {
 		return
 	}
-
+	result := item.(*regionItem)
+	if result.region.GetID() != region.GetID() {
+		return
+	}
 	t.totalSize -= result.region.GetStorePeerApproximateSize(result.storeID)
 	regionWriteBytesRate, regionWriteKeysRate := result.region.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
-	t.tree.Remove(result)
+	t.tree.Remove(item)
 }
 
 // search returns a region that contains the key.
