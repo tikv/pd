@@ -27,26 +27,26 @@ func TestStoreStats(t *testing.T) {
 	re := require.New(t)
 	meta := &metapb.Store{Id: 1, State: metapb.StoreState_Up}
 	store := NewStoreInfo(meta, SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * units.GiB,
-		UsedSize:  50 * units.GiB,
-		Available: 150 * units.GiB,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(150 * units.GiB),
 	}))
 
-	re.Equal(200*units.GiB, store.GetCapacity())
-	re.Equal(50*units.GiB, store.GetUsedSize())
-	re.Equal(150*units.GiB, store.GetAvailable())
-	re.Equal(150*units.GiB, store.GetAvgAvailable())
+	re.Equal(uint64(200*units.GiB), store.GetCapacity())
+	re.Equal(uint64(50*units.GiB), store.GetUsedSize())
+	re.Equal(uint64(150*units.GiB), store.GetAvailable())
+	re.Equal(uint64(150*units.GiB), store.GetAvgAvailable())
 	re.Equal(uint64(0), store.GetAvailableDeviation())
 
 	store = store.Clone(SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * units.GiB,
-		UsedSize:  50 * units.GiB,
-		Available: 160 * units.GiB,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(160 * units.GiB),
 	}))
 
-	re.Equal(160*units.GiB, store.GetAvailable())
-	re.Greater(store.GetAvgAvailable(), 150*units.GiB)
-	re.Less(store.GetAvgAvailable(), 160*units.GiB)
+	re.Equal(uint64(160*units.GiB), store.GetAvailable())
+	re.Greater(store.GetAvgAvailable(), uint64(150*units.GiB))
+	re.Less(store.GetAvgAvailable(), uint64(160*units.GiB))
 	re.Greater(store.GetAvailableDeviation(), uint64(0))
-	re.Less(store.GetAvailableDeviation(), 10*units.GiB)
+	re.Less(store.GetAvailableDeviation(), uint64(10*units.GiB))
 }
