@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -73,12 +74,14 @@ type coordinator struct {
 	hbStreams       *hbstream.HeartbeatStreams
 	pluginInterface *schedule.PluginInterface
 	regionState     *regionState
+	diagnosis       *diagnosisManager
 }
 
 // newCoordinator creates a new coordinator.
 func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstream.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
+	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -87,11 +90,12 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      make(map[string]*scheduleController),
+		schedulers:      schedulers,
 		opController:    opController,
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
 		regionState:     newRegionState(cluster),
+		diagnosis:       newDiagnosisManager(cluster, schedulers),
 	}
 }
 
@@ -907,6 +911,11 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 	return nil
 }
 
+func (s *scheduleController) DiagnoseDryRun() ([]*operator.Operator, []plan.Plan) {
+	cacheCluster := newCacheCluster(s.cluster)
+	return s.Scheduler.Schedule(cacheCluster, true)
+}
+
 // GetInterval returns the interval of scheduling for a scheduler.
 func (s *scheduleController) GetInterval() time.Duration {
 	return s.nextInterval
@@ -937,6 +946,60 @@ func (s *scheduleController) GetDelayUntil() int64 {
 		return atomic.LoadInt64(&s.delayUntil)
 	}
 	return 0
+}
+
+const maxDiagnosisResultNum = 6
+
+// diagnosisManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
+type diagnosisManager struct {
+	cluster      *RaftCluster
+	schedulers   map[string]*scheduleController
+	dryRunResult map[string]*cache.FIFO
+}
+
+func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosisManager {
+	return &diagnosisManager{
+		cluster:      cluster,
+		schedulers:   schedulerControllers,
+		dryRunResult: make(map[string]*cache.FIFO),
+	}
+}
+
+func (d *diagnosisManager) diagnosisDryRun(name string) error {
+	if _, ok := d.schedulers[name]; !ok {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	ops, plans := d.schedulers[name].DiagnoseDryRun()
+	result := newDiagnosisResult(ops, plans)
+	if _, ok := d.dryRunResult[name]; !ok {
+		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosisResultNum)
+	}
+	queue := d.dryRunResult[name]
+	queue.Put(result.timestamp, result)
+	return nil
+}
+
+type diagnosisResult struct {
+	timestamp          uint64
+	unschedulablePlans []plan.Plan
+	schedulablePlans   []plan.Plan
+}
+
+func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
+	index := len(ops)
+	if len(ops) > 0 {
+		if ops[0].Kind()&operator.OpMerge != 0 {
+			index /= 2
+		}
+	}
+	if index > len(result) {
+		return nil
+	}
+	return &diagnosisResult{
+		timestamp:          uint64(time.Now().Unix()),
+		unschedulablePlans: result[index:],
+		schedulablePlans:   result[:index],
+	}
 }
 
 func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {

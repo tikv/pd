@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
@@ -137,7 +138,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	// After hot heartbeat, we can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
@@ -150,14 +151,14 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 0)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
@@ -614,7 +615,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	stats = cluster.hotStat.RegionStats(statistics.Write, 0)
 	re.Len(stats[1], 1)
-	re.Len(stats[2], 0)
+	re.Empty(stats[2])
 	re.Len(stats[3], 1)
 	re.Len(stats[4], 1)
 }
@@ -675,7 +676,7 @@ func TestBucketHeartbeat(t *testing.T) {
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	re.NoError(cluster.processRegionHeartbeat(newRegion2))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.Len(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), 0)
+	re.Empty(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys())
 }
 
 func TestRegionHeartbeat(t *testing.T) {
@@ -1610,11 +1611,13 @@ func Test(t *testing.T) {
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 	}
 
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.NotEqual(i, region.GetLeader().GetStoreId())
 
 		re.NotNil(region.GetStorePeer(i))
@@ -1630,14 +1633,14 @@ func Test(t *testing.T) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		re.Nil(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
+		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 	for i := uint64(0); i < n; i++ {
-		re.Nil(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
+		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 }
 

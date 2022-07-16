@@ -17,12 +17,12 @@ package cases
 import (
 	"math/rand"
 
-	"go.uber.org/zap"
-
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 func newHotWrite() *Case {
@@ -34,8 +34,8 @@ func newHotWrite() *Case {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
-			Capacity:  1 * TB,
-			Available: 900 * GB,
+			Capacity:  1 * units.TiB,
+			Available: 900 * units.GiB,
 			Version:   "2.1.0",
 		})
 	}
@@ -51,7 +51,7 @@ func newHotWrite() *Case {
 			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * MB,
+			Size:   96 * units.MiB,
 			Keys:   960000,
 		})
 	}
@@ -62,7 +62,7 @@ func newHotWrite() *Case {
 	writeFlow := make(map[uint64]int64, selectStoreNum)
 	for _, r := range simCase.Regions {
 		if r.Leader.GetStoreId() == 1 {
-			writeFlow[r.ID] = 2 * MB
+			writeFlow[r.ID] = 2 * units.MiB
 			if len(writeFlow) == selectStoreNum {
 				break
 			}

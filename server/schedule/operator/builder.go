@@ -768,7 +768,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
-	if !stateFilter.Target(b.GetOpts(), store) {
+	if !stateFilter.Target(b.GetOpts(), store).IsOK() {
 		return false
 	}
 

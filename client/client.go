@@ -328,6 +328,8 @@ const (
 var LeaderHealthCheckInterval = time.Second
 
 var (
+	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
+	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
 	// errClosing is returned when request is canceled when client is closing.

@@ -57,15 +57,6 @@ type Case struct {
 	Checker CheckerFunc // To check the schedule is finished.
 }
 
-// unit of storage
-const (
-	B = 1 << (iota * 10)
-	KB
-	MB
-	GB
-	TB
-)
-
 // IDAllocator is used to alloc unique ID.
 type idAllocator struct {
 	id uint64
