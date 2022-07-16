@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -130,7 +131,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	// The size of empty region will be correct by the previous RegionInfo.
-	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
+	regionSize := heartbeat.GetApproximateSize() / units.MiB
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}

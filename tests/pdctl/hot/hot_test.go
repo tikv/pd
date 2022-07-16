@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -70,8 +71,8 @@ func TestHot(t *testing.T) {
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
-	bytesWritten := uint64(8 * 1024 * 1024)
-	bytesRead := uint64(16 * 1024 * 1024)
+	bytesWritten := uint64(8 * units.MiB)
+	bytesRead := uint64(16 * units.MiB)
 	keysWritten := uint64(2000)
 	keysRead := uint64(4000)
 	newStats.BytesWritten = bytesWritten

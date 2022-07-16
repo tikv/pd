@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -30,11 +31,6 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
-)
-
-const (
-	KB = 1024
-	MB = 1024 * KB
 )
 
 func TestShuffleLeader(t *testing.T) {
@@ -170,10 +166,10 @@ func checkBalance(re *require.Assertions, tc *mockcluster.Cluster, hb schedule.S
 	tc.AddLabelsStore(6, 0, map[string]string{"zone": "z4", "host": "h6"})
 
 	// Report store written bytes.
-	tc.UpdateStorageWrittenBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.UpdateStorageWrittenBytes(6, 0)
 
@@ -183,9 +179,9 @@ func checkBalance(re *require.Assertions, tc *mockcluster.Cluster, hb schedule.S
 	// |     1     |       1      |        2       |       3        |      512KB    |
 	// |     2     |       1      |        3       |       4        |      512KB    |
 	// |     3     |       1      |        2       |       4        |      512KB    |
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4})
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 4})
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{3, 4})
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 4})
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// try to get an operator
@@ -217,13 +213,13 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	tc.AddRegionStore(3, 2)
 
 	// Report store read bytes.
-	tc.UpdateStorageReadBytes(1, 7.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(2, 4.5*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadBytes(3, 4.5*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
 
-	tc.AddRegionWithReadInfo(1, 1, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2})
-	tc.AddRegionWithReadInfo(2, 2, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{1, 3})
-	tc.AddRegionWithReadInfo(3, 1, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2, 3})
+	tc.AddRegionWithReadInfo(1, 1, 512*units.KiB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2})
+	tc.AddRegionWithReadInfo(2, 2, 512*units.KiB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{1, 3})
+	tc.AddRegionWithReadInfo(3, 1, 512*units.KiB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{2, 3})
 	tc.SetHotRegionCacheHitsThreshold(0)
 	re.True(tc.IsRegionHot(tc.GetRegion(1)))
 	re.False(hb.IsScheduleAllowed(tc))
@@ -358,16 +354,16 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	re.Empty(ops)
 
 	// can only move peer to 4
-	tc.UpdateStorageWrittenBytes(1, 60*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 6*MB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 6*MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 60*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(4, 0)
 	tc.UpdateStorageWrittenBytes(5, 0)
-	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
-	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 3})
-	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*KB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 2})
+	tc.AddLeaderRegionWithWriteInfo(1, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(2, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3})
+	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 3})
+	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 2})
 	ops, _ = hs.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
