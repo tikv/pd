@@ -21,8 +21,8 @@ import (
 	"github.com/tikv/pd/server/schedule"
 )
 
-// clearThreadhold indicates when we do cleanup operations.
-// When the number of times the collect() function is executed is over than this threshold,
+// clearThreshold indicates when we do cleanup operations.
+// When the number of times the collect() function is executed is exceeds this threshold,
 // regions that are not in region tree will be deleted.
 const clearThreshold = 10
 
@@ -35,7 +35,8 @@ const (
 	regionStateTypeLen
 )
 
-// regionState is used to record abnormal regions.
+// regionState is used to record abnormal regions which could not be detected by the region heartbeat.
+// For example, the down regions won’t send any heartbeat anymore.
 type regionState struct {
 	cluster schedule.Cluster
 	states  [regionStateTypeLen]map[uint64]*core.RegionInfo
@@ -71,7 +72,7 @@ func (r *regionState) observe(regions []*core.RegionInfo) {
 }
 
 // Collect collects the metrics of the regions' states.
-func (r *regionState) collect() {
+func (r *regionState) collectAndClean() {
 	regionStateGauge.WithLabelValues("down-region-count").Set(float64(len(r.states[regionStateDown])))
 	r.count++
 	if r.count == clearThreshold {

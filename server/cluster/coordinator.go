@@ -171,7 +171,7 @@ func (c *coordinator) patrolRegions() {
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
-			c.regionState.collect()
+			c.regionState.collectAndClean()
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
