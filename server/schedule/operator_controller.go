@@ -479,8 +479,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
 		if store == nil {
-			log.Error("invalid store ID", zap.Uint64("store-id", storeID))
-			return false
+			log.Info("store is nil", zap.Uint64("store-id", storeID))
+			continue
 		}
 		for n, v := range storelimit.TypeNameValue {
 			storeLimit := store.GetStoreLimit(v)
