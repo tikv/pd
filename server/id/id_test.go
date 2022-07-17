@@ -32,6 +32,7 @@ const (
 	allocPath  = "alloc_id"
 	label      = "idalloc"
 	memberVal  = "member"
+	step       = uint64(500)
 )
 
 // TestMultipleAllocator tests situation where multiple allocators that
@@ -61,8 +62,15 @@ func TestMultipleAllocator(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		iStr := strconv.Itoa(i)
 		wg.Add(1)
-		// All allocators share rootPath and memberVal, but they have different allocPaths and labels.
-		allocator := NewAllocator(client, rootPath, allocPath+iStr, label+iStr, memberVal)
+		// All allocators share rootPath and memberVal, but they have different allocPaths, labels and steps.
+		allocator := NewAllocator(&AllocatorParams{
+			Client:    client,
+			RootPath:  rootPath,
+			AllocPath: allocPath + iStr,
+			Label:     label + iStr,
+			Member:    memberVal,
+			Step:      step * uint64(i), // allocator 0, 1, 2 should have step size 1000 (default), 500, 1000 respectively.
+		})
 		go func(re *require.Assertions, allocator Allocator) {
 			defer wg.Done()
 			testAllocator(re, allocator)
@@ -75,7 +83,7 @@ func TestMultipleAllocator(t *testing.T) {
 func testAllocator(re *require.Assertions, allocator Allocator) {
 	startID, err := allocator.Alloc()
 	re.NoError(err)
-	for i := startID + 1; i < startID+allocStep*20; i++ {
+	for i := startID + 1; i < startID+step*20; i++ {
 		id, err := allocator.Alloc()
 		re.NoError(err)
 		re.Equal(i, id)

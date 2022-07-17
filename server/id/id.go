@@ -38,7 +38,7 @@ type Allocator interface {
 	Rebase() error
 }
 
-const allocStep = uint64(1000)
+const defaultAllocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
@@ -51,24 +51,40 @@ type allocatorImpl struct {
 	allocPath string
 	label     string
 	member    string
+	step      uint64
 	metrics   *metrics
 }
 
-// metrics is a collection of idAllocator's metrics
+// metrics is a collection of idAllocator's metrics.
 type metrics struct {
 	idGauge prometheus.Gauge
 }
 
+// AllocatorParams are parameters needed to create a new ID Allocator.
+type AllocatorParams struct {
+	Client    *clientv3.Client
+	RootPath  string
+	AllocPath string // AllocPath specifies path to the persistent window boundary.
+	Label     string // Label used to label metrics and logs.
+	Member    string // Member value, used to check if current pd leader.
+	Step      uint64 // Step size of each persistent window boundary increment, default 1000.
+}
+
 // NewAllocator creates a new ID Allocator.
-func NewAllocator(client *clientv3.Client, rootPath, allocPath, label, member string) Allocator {
-	return &allocatorImpl{
-		client:    client,
-		rootPath:  rootPath,
-		allocPath: allocPath,
-		label:     label,
-		member:    member,
-		metrics:   &metrics{idGauge: idGauge.WithLabelValues(label)},
+func NewAllocator(params *AllocatorParams) Allocator {
+	allocator := &allocatorImpl{
+		client:    params.Client,
+		rootPath:  params.RootPath,
+		allocPath: params.AllocPath,
+		label:     params.Label,
+		member:    params.Member,
+		step:      params.Step,
+		metrics:   &metrics{idGauge: idGauge.WithLabelValues(params.Label)},
 	}
+	if allocator.step == 0 {
+		allocator.step = defaultAllocStep
+	}
+	return allocator
 }
 
 // Alloc returns a new id.
@@ -122,7 +138,7 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 		cmp = clientv3.Compare(clientv3.Value(key), "=", string(value))
 	}
 
-	end += allocStep
+	end += alloc.step
 	value = typeutil.Uint64ToBytes(end)
 	txn := kv.NewSlowLogTxn(alloc.client)
 	leaderPath := path.Join(alloc.rootPath, "leader")
@@ -138,7 +154,7 @@ func (alloc *allocatorImpl) rebaseLocked() error {
 	log.Info("idAllocator allocates a new id", zap.String("label", alloc.label), zap.Uint64("alloc-id", end))
 	alloc.metrics.idGauge.Set(float64(end))
 	alloc.end = end
-	alloc.base = end - allocStep
+	alloc.base = end - alloc.step
 	return nil
 }
 
