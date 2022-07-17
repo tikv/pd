@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"os"
 
+	"github.com/docker/go-units"
 	"github.com/go-echarts/go-echarts/charts"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -37,8 +38,8 @@ func newImportData() *Case {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
-			Capacity:  1 * TB,
-			Available: 900 * GB,
+			Capacity:  1 * units.TiB,
+			Available: 900 * units.GiB,
 			Version:   "2.1.0",
 		})
 	}
@@ -54,12 +55,12 @@ func newImportData() *Case {
 			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   32 * MB,
+			Size:   32 * units.MiB,
 			Keys:   320000,
 		})
 	}
 
-	simCase.RegionSplitSize = 64 * MB
+	simCase.RegionSplitSize = 64 * units.MiB
 	simCase.RegionSplitKeys = 640000
 	simCase.TableNumber = 10
 	// Events description
@@ -71,7 +72,7 @@ func newImportData() *Case {
 			return nil
 		}
 		return map[string]int64{
-			table12: 32 * MB,
+			table12: 32 * units.MiB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}

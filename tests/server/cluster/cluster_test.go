@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -585,8 +586,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 			Header: testutil.NewRequestHeader(clusterID),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
-				Capacity:  1000 * (1 << 20),
-				Available: 1000 * (1 << 20),
+				Capacity:  1000 * units.MiB,
+				Available: 1000 * units.MiB,
 			},
 		}
 		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}

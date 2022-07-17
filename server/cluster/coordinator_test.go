@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -63,8 +64,8 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 	}
 
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 100 * (1 << 30)
-	stats.UsedSize = regionSize * (1 << 20)
+	stats.Capacity = 100 * units.GiB
+	stats.UsedSize = regionSize * units.MiB
 	stats.Available = stats.Capacity - stats.UsedSize
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),

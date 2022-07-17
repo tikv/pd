@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
@@ -278,7 +278,7 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	regions := rc.ScanRegions(startKey, endKey, -1)
 	state := "REPLICATED"
 	for _, region := range regions {
-		if !schedule.IsRegionReplicated(rc, region) {
+		if !filter.IsRegionReplicated(rc, region) {
 			state = "INPROGRESS"
 			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
 				state = "PENDING"

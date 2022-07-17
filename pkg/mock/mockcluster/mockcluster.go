@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -39,9 +40,8 @@ import (
 )
 
 const (
-	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
-	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
-	mb                   = 1 << 20         // 1MiB
+	defaultStoreCapacity = 100 * units.GiB // 100GiB
+	defaultRegionSize    = 96 * units.MiB  // 96MiB
 )
 
 // Cluster is used to mock a cluster for test purpose.
@@ -261,7 +261,7 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 	if len(leaderSizes) != 0 {
 		leaderSize = leaderSizes[0]
 	} else {
-		leaderSize = int64(leaderCount) * defaultRegionSize / mb
+		leaderSize = int64(leaderCount) * defaultRegionSize / units.MiB
 	}
 
 	store := core.NewStoreInfo(
@@ -291,7 +291,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -329,7 +329,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -340,7 +340,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
-	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -348,7 +348,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
-	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -520,7 +520,7 @@ func (mc *Cluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/mb),
+		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/units.MiB),
 	)
 	mc.PutStore(newStore)
 }
@@ -530,7 +530,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 	)
 	mc.PutStore(newStore)
 }
@@ -647,8 +647,8 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	store := mc.Stores.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
-	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*mb)
-	stats.UsedSize = uint64(store.GetRegionSize() * mb)
+	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*units.MiB)
+	stats.UsedSize = uint64(store.GetRegionSize() * units.MiB)
 	newStore := store.Clone(
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),

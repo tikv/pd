@@ -17,6 +17,7 @@ package cases
 import (
 	"math/rand"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -33,8 +34,8 @@ func newDeleteNodes() *Case {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        IDAllocator.nextID(),
 			Status:    metapb.StoreState_Up,
-			Capacity:  1 * TB,
-			Available: 900 * GB,
+			Capacity:  1 * units.TiB,
+			Available: 900 * units.GiB,
 			Version:   "2.1.0",
 		})
 	}
@@ -49,7 +50,7 @@ func newDeleteNodes() *Case {
 			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * MB,
+			Size:   96 * units.MiB,
 			Keys:   960000,
 		})
 	}

@@ -21,6 +21,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -179,7 +180,7 @@ func TestTolerantRatio(t *testing.T) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	// create a region to control average region size.
 	re.NotNil(tc.AddLeaderRegion(1, 1, 2))
-	regionSize := int64(96 * KB)
+	regionSize := int64(96 * units.MiB)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tbl := []struct {
@@ -293,10 +294,10 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() 
 	// Leader Count:    10      10      10      10
 	// Leader Size :    10000   100    	100    	100
 	// Region1:         L       F       F       F
-	suite.tc.AddLeaderStore(1, 10, 10000*MB)
-	suite.tc.AddLeaderStore(2, 10, 100*MB)
-	suite.tc.AddLeaderStore(3, 10, 100*MB)
-	suite.tc.AddLeaderStore(4, 10, 100*MB)
+	suite.tc.AddLeaderStore(1, 10, 10000*units.MiB)
+	suite.tc.AddLeaderStore(2, 10, 100*units.MiB)
+	suite.tc.AddLeaderStore(3, 10, 100*units.MiB)
+	suite.tc.AddLeaderStore(4, 10, 100*units.MiB)
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.Empty(suite.schedule())
@@ -452,10 +453,10 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalancePolicy() {
 	// Stores:       1    2     3    4
 	// LeaderCount: 20   66     6   20
 	// LeaderSize:  66   20    20    6
-	suite.tc.AddLeaderStore(1, 20, 600*MB)
-	suite.tc.AddLeaderStore(2, 66, 200*MB)
-	suite.tc.AddLeaderStore(3, 6, 20*MB)
-	suite.tc.AddLeaderStore(4, 20, 1*MB)
+	suite.tc.AddLeaderStore(1, 20, 600*units.MiB)
+	suite.tc.AddLeaderStore(2, 66, 200*units.MiB)
+	suite.tc.AddLeaderStore(3, 6, 20*units.MiB)
+	suite.tc.AddLeaderStore(4, 20, 1*units.MiB)
 	suite.tc.AddLeaderRegion(1, 2, 1, 3, 4)
 	suite.tc.AddLeaderRegion(2, 1, 2, 3, 4)
 	suite.tc.SetLeaderSchedulePolicy("count")
