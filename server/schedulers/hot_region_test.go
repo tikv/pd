@@ -995,6 +995,18 @@ func (s *testHotReadRegionSchedulerSuite) TestByteRateOnly(c *C) {
 	testutil.CheckTransferPeerWithLeaderTransfer(c, op, operator.OpHotRegion, 1, 5)
 	hb.(*hotScheduler).clearPendingInfluence()
 
+	// test if region lose leader can cause PD panic
+	r1 := tc.GetRegion(3)
+	tc.PutRegion(core.NewRegionInfo(r1.GetMeta(), nil,
+		core.SetReadBytes(r1.GetBytesRead()),
+		core.SetReadKeys(r1.GetKeysRead()),
+		core.SetReadQuery(r1.GetReadQueryNum()),
+		core.SetReportInterval(r1.GetInterval().GetEndTimestamp()),
+	))
+	_ = hb.Schedule(tc)[0]
+	hb.(*hotScheduler).clearPendingInfluence()
+	tc.PutRegion(r1)
+
 	// assume handle the transfer leader operator rather than move leader
 	tc.AddRegionWithReadInfo(3, 3, 512*KB*statistics.ReadReportInterval, 0, 0, statistics.ReadReportInterval, []uint64{1, 2})
 	// After transfer a hot region leader from store 1 to store 3

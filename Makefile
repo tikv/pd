@@ -46,7 +46,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -96,7 +96,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
