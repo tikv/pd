@@ -479,7 +479,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
 		if store == nil {
-			log.Info("store is nil", zap.Uint64("store-id", storeID))
+			log.Info("missing store", zap.Uint64("store-id", storeID))
 			continue
 		}
 		for n, v := range storelimit.TypeNameValue {
