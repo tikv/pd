@@ -22,6 +22,8 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// spaceIDBase is base used to encode/decode spaceID.
+// It's set to 10 for better readability.
 const spaceIDBase = 10
 
 type KeyspaceStorage interface {
@@ -33,10 +35,13 @@ type KeyspaceStorage interface {
 	RemoveKeyspace(spaceID uint32) error
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
-	// SaveKeyspaceID saves keyspace name to ID lookup information.
-	SaveKeyspaceID(spaceID uint32, name string) error
-	// LoadKeyspaceID loads keyspace ID for the given keyspace specified by name.
-	LoadKeyspaceID(name string) (bool, uint32, error)
+	// SaveKeyspaceIDByName saves keyspace name to ID lookup information.
+	// It saves the ID onto the path encoded with name.
+	SaveKeyspaceIDByName(spaceID uint32, name string) error
+	// LoadKeyspaceIDByName loads keyspace ID for the given keyspace specified by name.
+	// It first constructs path to spaceID with the given name, then attempt to retrieve
+	// target spaceID. If the target keyspace does not exist, result boolean is set to false.
+	LoadKeyspaceIDByName(name string) (bool, uint32, error)
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
@@ -82,17 +87,18 @@ func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keys
 	return keyspaces, nil
 }
 
-// SaveKeyspaceID saves keyspace name to ID lookup information to storage.
-func (se *StorageEndpoint) SaveKeyspaceID(spaceID uint32, name string) error {
+// SaveKeyspaceIDByName saves keyspace name to ID lookup information to storage.
+func (se *StorageEndpoint) SaveKeyspaceIDByName(spaceID uint32, name string) error {
 	key := KeyspaceIDPath(name)
 	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
 	return se.Save(key, idStr)
 }
 
-// LoadKeyspaceID loads keyspace ID for the given keyspace name
-func (se *StorageEndpoint) LoadKeyspaceID(name string) (bool, uint32, error) {
+// LoadKeyspaceIDByName loads keyspace ID for the given keyspace name
+func (se *StorageEndpoint) LoadKeyspaceIDByName(name string) (bool, uint32, error) {
 	key := KeyspaceIDPath(name)
 	idStr, err := se.Load(key)
+	// Failed to load the keyspaceID if loading operation errored, or if keyspace does not exist.
 	if err != nil || idStr == "" {
 		return false, 0, err
 	}
