@@ -48,6 +48,23 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 	return nil
 }
 
+// SelectOneRegionWithCollector selects one region that be selected from the list.
+func SelectOneRegionWithCollector(regions []*core.RegionInfo, collector *plan.PlanCollector, filters ...RegionFilter) *core.RegionInfo {
+	for _, r := range regions {
+		if slice.AllOf(filters,
+			func(i int) bool {
+				status := filters[i].Select(r)
+				if !status.IsOK() {
+					collector.Collect(plan.SetRegion(r), plan.SetStatus(status))
+				}
+				return true
+			}) {
+			return r
+		}
+	}
+	return nil
+}
+
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
 	// Return true if the region can be used to schedule.

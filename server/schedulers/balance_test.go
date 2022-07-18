@@ -719,6 +719,8 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
+
+	//
 	opt.SetMaxReplicas(3)
 	ops, _ = sb.Schedule(tc, false)
 	re.Empty(ops)

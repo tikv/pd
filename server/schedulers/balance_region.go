@@ -138,7 +138,6 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-
 	basePlan := NewBalanceSchedulerBasePlan()
 	collector := plan.NewPlanCollector(dryRun, basePlan)
 
@@ -176,21 +175,21 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
-			solver.region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges),
+			solver.region = filter.SelectOneRegionWithCollector(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 				baseRegionFilters...)
 			if solver.region == nil {
 				// Then pick the region that has a follower in the source store.
-				solver.region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegionWithCollector(cluster.RandFollowerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.region == nil {
 				// Then pick the region has the leader in the source store.
-				solver.region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegionWithCollector(cluster.RandLeaderRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.region == nil {
 				// Finally pick learner.
-				solver.region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges),
+				solver.region = filter.SelectOneRegionWithCollector(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.region == nil {
