@@ -22,9 +22,14 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-// spaceIDBase is base used to encode/decode spaceID.
-// It's set to 10 for better readability.
-const spaceIDBase = 10
+const (
+	// spaceIDBase is base used to encode/decode spaceID.
+	// It's set to 10 for better readability.
+	spaceIDBase = 10
+	// spaceIDBitSizeMax is the max bitSize of spaceID.
+	// It's currently set to 24 (3bytes).
+	spaceIDBitSizeMax = 24
+)
 
 type KeyspaceStorage interface {
 	// SaveKeyspace saves the given keyspace to the storage.
@@ -102,7 +107,7 @@ func (se *StorageEndpoint) LoadKeyspaceIDByName(name string) (bool, uint32, erro
 	if err != nil || idStr == "" {
 		return false, 0, err
 	}
-	id64, err := strconv.ParseUint(idStr, spaceIDBase, 32)
+	id64, err := strconv.ParseUint(idStr, spaceIDBase, spaceIDBitSizeMax)
 	if err != nil {
 		return false, 0, err
 	}

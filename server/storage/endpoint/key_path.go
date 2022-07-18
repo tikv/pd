@@ -36,8 +36,8 @@ const (
 	keySpaceSafePointPrefix    = "key_space/gc_safepoint"
 	keySpaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
-	keyspaceMeta               = "meta"
-	keyspaceID                 = "id"
+	keyspaceMetaInfix          = "meta"
+	keyspaceIDInfix            = "id"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -144,7 +144,7 @@ func KeySpaceGCSafePointSuffix() string {
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
 // Prefix: keyspaces/meta/
 func KeyspaceMetaPrefix() string {
-	return path.Join(keyspacePrefix, keyspaceMeta) + "/"
+	return path.Join(keyspacePrefix, keyspaceMetaInfix) + "/"
 }
 
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
@@ -157,5 +157,5 @@ func KeyspaceMetaPath(spaceID uint32) string {
 // KeyspaceIDPath returns the path to keyspace id from the given name.
 // Path: /keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
-	return path.Join(keyspacePrefix, keyspaceID, name)
+	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
 }
