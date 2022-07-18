@@ -153,6 +153,7 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	if ap.IsLightWeight {
 		return
 	}
+	to.AddSnapCost(storelimit.AddPeer, regionSize)
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -229,6 +230,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	if al.IsLightWeight {
 		return
 	}
+	to.AddSnapCost(storelimit.AddPeer, regionSize)
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 

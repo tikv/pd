@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"fmt"
+	"github.com/tikv/pd/server/core/storelimit"
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -119,9 +120,9 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available_avg").Set(float64(store.GetAvgAvailable()))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available_deviation").Set(float64(store.GetAvailableDeviation()))
-
+	//storeStatusGauge.WithLabelValues(storeAddress, id, "store_available_avg").Set(float64(store.GetAvgAvailable()))
+	//storeStatusGauge.WithLabelValues(storeAddress, id, "store_available_deviation").Set(float64(store.GetAvailableDeviation()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available_snapshot_size").Set(float64(store.GetSnapLimit(storelimit.AddPeer).GetUsed()))
 	// Store flows.
 	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
 	if storeFlowStats == nil {

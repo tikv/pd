@@ -370,6 +370,17 @@ func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreI
 	return statusOK
 }
 
+const snapSize = 10
+
+func (f *StoreStateFilter) exceedSnapRecvLimit(_ *config.PersistOptions, store *core.StoreInfo) plan.Status {
+	if !f.AllowTemporaryStates && !store.IsAvailableSnap(storelimit.AddPeer, snapSize) {
+		f.Reason = "exceed-remove-snap-limit"
+		return statusStoreSnapRemoveLimit
+	}
+	f.Reason = ""
+	return statusOK
+}
+
 func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer) {
 		f.Reason = "exceed-remove-limit"
@@ -445,7 +456,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	case leaderSource:
 		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
 	case regionSource:
-		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
+		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots, f.exceedSnapRecvLimit}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
 			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}

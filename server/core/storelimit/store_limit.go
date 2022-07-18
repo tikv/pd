@@ -103,6 +103,6 @@ func (l *StoreLimit) Rate() float64 {
 }
 
 // Take takes count tokens from the bucket without blocking.
-func (l *StoreLimit) Take(count int64) {
-	l.limiter.AllowN(int(count))
+func (l *StoreLimit) Take(count int64) bool {
+	return l.limiter.AllowN(int(count))
 }

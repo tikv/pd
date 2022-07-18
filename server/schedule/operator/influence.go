@@ -41,6 +41,7 @@ type StoreInfluence struct {
 	LeaderSize  int64
 	LeaderCount int64
 	StepCost    map[storelimit.Type]int64
+	SnapCost    map[storelimit.Type]int64
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
@@ -62,12 +63,28 @@ func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 	}
 }
 
+// GetSnapCost returns the given snapshot size.
+func (s StoreInfluence) GetSnapCost(snapType storelimit.Type) int64 {
+	if s.SnapCost == nil {
+		return 0
+	}
+	return s.SnapCost[snapType]
+}
+
 // GetStepCost returns the specific type step cost
 func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	if s.StepCost == nil {
 		return 0
 	}
 	return s.StepCost[limitType]
+}
+
+// AddSnapCost adds the step cost of specific type store limit according to region size.
+func (s *StoreInfluence) AddSnapCost(limitType storelimit.Type, cost int64) {
+	if s.SnapCost == nil {
+		s.SnapCost = make(map[storelimit.Type]int64)
+	}
+	s.SnapCost[limitType] += cost
 }
 
 func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {

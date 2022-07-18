@@ -33,6 +33,7 @@ var (
 	statusStoreTooManyPendingPeer = plan.NewStatus(plan.StatusStoreThrottled, "store has too many pending peers, the related setting is 'max-pending-peer-count'")
 	statusStoreAddLimit           = plan.NewStatus(plan.StatusStoreThrottled, "store's add limit is exhausted, please check the setting of 'store limit'")
 	statusStoreRemoveLimit        = plan.NewStatus(plan.StatusStoreThrottled, "store's remove limit is exhausted, please check the setting of 'store limit'")
+	statusStoreSnapRemoveLimit    = plan.NewStatus(plan.StatusStoreThrottled, "store's snapshot remove limit is exhausted'")
 	statusStoreLabel              = plan.NewStatus(plan.StatusLabelNotMatch)
 	statusStoreRule               = plan.NewStatus(plan.StatusRuleNotMatch)
 	statusStorePauseLeader        = plan.NewStatus(plan.StatusStoreBlocked, "the store is not allowed to transfer leader, there might be an evict-leader-scheduler")

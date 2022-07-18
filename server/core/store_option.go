@@ -235,3 +235,19 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 		store.limiter[limitType] = storelimit.NewStoreLimit(ratePerSec[0], storelimit.RegionInfluence[limitType])
 	}
 }
+
+func ResetSnapLimit(snapType storelimit.Type, capacity int64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		if capacity == 0 {
+			store.snapLimiter[snapType] = nil
+			return
+		}
+		if limiter := store.snapLimiter[snapType]; limiter != nil {
+			limiter.Adjust(capacity)
+		} else {
+			store.snapLimiter[snapType] = storelimit.NewSlidingWindows(capacity)
+		}
+	}
+}

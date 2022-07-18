@@ -483,14 +483,17 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			return false
 		}
 		for n, v := range storelimit.TypeNameValue {
+			snapLimiter := store.GetSnapLimit(v)
 			storeLimit := store.GetStoreLimit(v)
-			if storeLimit == nil {
+			if storeLimit == nil || snapLimiter == nil {
 				continue
 			}
+			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
-			if stepCost == 0 {
+			if stepCost == 0 || snapCost == 0 {
 				continue
 			}
+			snapLimiter.Take(snapCost)
 			storeLimit.Take(stepCost)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
@@ -606,7 +609,7 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
-
+	oc.Ack(op)
 	oc.opRecords.Put(op)
 }
 
@@ -747,6 +750,23 @@ func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
 
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 	oc.fastOperators.Put(op.RegionID(), op)
+}
+
+func (oc *OperatorController) Ack(op *operator.Operator) {
+	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
+	for storeID := range opInfluence.StoresInfluence {
+		for _, v := range storelimit.TypeNameValue {
+			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
+			if snapCost == 0 {
+				continue
+			}
+			snapLimiter := oc.cluster.GetStore(storeID).GetSnapLimit(v)
+			if snapLimiter == nil {
+				continue
+			}
+			snapLimiter.Ack(snapCost)
+		}
+	}
 }
 
 // GetRecords gets operators' records.
@@ -919,14 +939,19 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {
+			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
-			if stepCost == 0 {
+			if snapCost == 0 || stepCost == 0 {
 				continue
 			}
-			limiter := oc.getOrCreateStoreLimit(storeID, v)
-			if limiter == nil {
+			limiter, snapLimiter := oc.getOrCreateStoreLimit(storeID, v)
+			if limiter == nil || snapLimiter == nil {
 				return false
 			}
+			if !snapLimiter.Available(snapCost) {
+				return true
+			}
+
 			if !limiter.Available(stepCost) {
 				return true
 			}
@@ -936,12 +961,12 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) (*storelimit.StoreLimit, *storelimit.SlidingWindows) {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
-		return nil
+		return nil, nil
 	}
 	if s.GetStoreLimit(limitType) == nil {
 		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
@@ -949,5 +974,5 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
 		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
-	return s.GetStoreLimit(limitType)
+	return s.GetStoreLimit(limitType), s.GetSnapLimit(limitType)
 }
