@@ -42,24 +42,24 @@ func newServiceMiddlewareHandler(svr *server.Server, rd *render.Render) *service
 	}
 }
 
-// @Tags service_middleware
-// @Summary Get Service Middleware config.
-// @Produce json
-// @Success 200 {object} config.Config
-// @Router /service-middleware/config [get]
+// @Tags     service_middleware
+// @Summary  Get Service Middleware config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /service-middleware/config [get]
 func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceMiddlewareConfig())
 }
 
-// @Tags service_middleware
-// @Summary Update some service-middleware's config items.
-// @Accept json
-// @Param body body object false "json params"
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /service-middleware/config [post]
+// @Tags     service_middleware
+// @Summary  Update some service-middleware's config items.
+// @Accept   json
+// @Param    body  body  object  false  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The config is updated."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /service-middleware/config [post]
 func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetServiceMiddlewareConfig()
 	data, err := io.ReadAll(r.Body)
