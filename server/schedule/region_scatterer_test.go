@@ -367,10 +367,10 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 		},
 	}
 
-	scatterer := NewRegionScatterer(ctx, tc)
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testCase := range testCases {
 		t.Log(testCase.name)
+		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testCase.groupCount; j++ {
