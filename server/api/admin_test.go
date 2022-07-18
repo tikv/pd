@@ -94,6 +94,74 @@ func (suite *adminTestSuite) TestDropRegion() {
 	suite.Equal(uint64(50), region.GetRegionEpoch().Version)
 }
 
+func (suite *adminTestSuite) TestDropRegions() {
+	cluster := suite.svr.GetRaftCluster()
+
+	n := uint64(10000)
+	np := uint64(3)
+
+	regions := make([]*core.RegionInfo, 0, n)
+	for i := uint64(0); i < n; i++ {
+		peers := make([]*metapb.Peer, 0, np)
+		for j := uint64(0); j < np; j++ {
+			peer := &metapb.Peer{
+				Id: i*np + j,
+			}
+			peer.StoreId = (i + j) % n
+			peers = append(peers, peer)
+		}
+		// initialize region's epoch to (100, 100).
+		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i))).Clone(
+			core.SetPeers(peers),
+			core.SetRegionConfVer(100),
+			core.SetRegionVersion(100),
+		)
+		regions = append(regions, region)
+
+		err := cluster.HandleRegionHeartbeat(region)
+		suite.NoError(err)
+	}
+
+	// Region epoch cannot decrease.
+	for i := uint64(0); i < n; i++ {
+		region := regions[i].Clone(
+			core.SetRegionConfVer(50),
+			core.SetRegionVersion(50),
+		)
+		regions[i] = region
+		err := cluster.HandleRegionHeartbeat(region)
+		suite.Error(err)
+	}
+
+	for i := uint64(0); i < n; i++ {
+		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
+
+		suite.Equal(uint64(100), region.GetRegionEpoch().ConfVer)
+		suite.Equal(uint64(100), region.GetRegionEpoch().Version)
+	}
+
+	// After drop all regions from cache, lower version is accepted.
+	url := fmt.Sprintf("%s/admin/cache/regions", suite.urlPrefix)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	suite.NoError(err)
+	res, err := testDialClient.Do(req)
+	suite.NoError(err)
+	suite.Equal(http.StatusOK, res.StatusCode)
+	res.Body.Close()
+
+	for _, region := range regions {
+		err := cluster.HandleRegionHeartbeat(region)
+		suite.NoError(err)
+	}
+
+	for i := uint64(0); i < n; i++ {
+		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
+
+		suite.Equal(uint64(50), region.GetRegionEpoch().ConfVer)
+		suite.Equal(uint64(50), region.GetRegionEpoch().Version)
+	}
+}
+
 func (suite *adminTestSuite) TestPersistFile() {
 	data := []byte("#!/bin/sh\nrm -rf /")
 	re := suite.Require()
