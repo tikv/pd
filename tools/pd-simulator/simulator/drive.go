@@ -110,10 +110,10 @@ func (d *Driver) Prepare() error {
 func (d *Driver) Tick() {
 	d.tickCount++
 	d.raftEngine.stepRegions()
+	// simulator don't need any schedulers util all stores send their heartbeat.
 	if d.tickCount <= 1 {
 		d.client.RemoveScheduler(balanceRegionScheduler)
 	} else if d.tickCount == storeHeartBeatPeriod {
-		// wait all stores update status.
 		d.client.AddScheduler(balanceRegionScheduler, nil)
 	}
 	d.eventRunner.Tick(d.tickCount)
