@@ -123,6 +123,7 @@ func (s *testRegionSuite) newRegionWithStat(start, end string, size, keys int64)
 
 func (s *testRegionSuite) TestRegionTreeStat(c *C) {
 	tree := newRegionTree()
+<<<<<<< HEAD
 	c.Assert(tree.totalSize, Equals, int64(0))
 	updateNewItem(tree, s.newRegionWithStat("a", "b", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(1))
@@ -134,6 +135,19 @@ func (s *testRegionSuite) TestRegionTreeStat(c *C) {
 	c.Assert(tree.totalSize, Equals, int64(5))
 	tree.remove(s.newRegionWithStat("f", "g", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
+=======
+	re.Equal(int64(0), tree.totalSize)
+	updateNewItem(tree, newRegionWithStat("a", "b", 1, 2))
+	re.Equal(int64(1), tree.totalSize)
+	updateNewItem(tree, newRegionWithStat("b", "c", 3, 4))
+	re.Equal(int64(4), tree.totalSize)
+	updateNewItem(tree, newRegionWithStat("b", "e", 5, 6))
+	re.Equal(int64(6), tree.totalSize)
+	tree.remove(newRegionWithStat("a", "b", 2, 2))
+	re.Equal(int64(5), tree.totalSize)
+	tree.remove(newRegionWithStat("f", "g", 1, 2))
+	re.Equal(int64(5), tree.totalSize)
+>>>>>>> 4cd2fc912 (core: fix the wrong statistics of the region tree (#5301))
 }
 
 func (s *testRegionSuite) TestRegionTreeMerge(c *C) {
