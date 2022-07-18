@@ -44,6 +44,41 @@ type testBalanceSpeedCase struct {
 	kind           core.SchedulePolicy
 }
 
+func TestInfluenceAmp(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re := require.New(t)
+
+	R := int64(96)
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	influence := oc.GetOpInfluence(tc)
+	influence.GetStoreInfluence(1).RegionSize = R
+	influence.GetStoreInfluence(2).RegionSize = -R
+	tc.SetTolerantSizeRatio(1)
+
+	// It will schedule if the diff region count is greater than the sum
+	// of TolerantSizeRatio and influenceAmp*2.
+	tc.AddRegionStore(1, int(100+influenceAmp+3))
+	tc.AddRegionStore(2, int(100-influenceAmp))
+	tc.AddLeaderRegion(1, 1, 2)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
+	tc.PutRegion(region)
+	plan := newBalancePlan(kind, tc, influence)
+	plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+	re.True(plan.shouldBalance(""))
+
+	// It will not schedule if the diff region count is greater than the sum
+	// of TolerantSizeRatio and influenceAmp*2.
+	tc.AddRegionStore(1, int(100+influenceAmp+2))
+	plan.source = tc.GetStore(1)
+	re.False(plan.shouldBalance(""))
+	re.Less(plan.sourceScore-plan.targetScore, float64(1))
+}
+
 func TestShouldBalance(t *testing.T) {
 	// store size = 100GiB
 	// region size = 96MiB
@@ -1063,7 +1098,7 @@ func TestBalanceRegionOpInfluence(t *testing.T) {
 	}
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 3, 1)
+	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 2, 1)
 }
 
 func checkReplacePendingRegion(re *require.Assertions, tc *mockcluster.Cluster, sb schedule.Scheduler) {
