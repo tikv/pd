@@ -17,8 +17,8 @@ package cluster
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,12 +29,14 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -43,7 +45,7 @@ import (
 const (
 	runSchedulerCheckInterval  = 3 * time.Second
 	checkSuspectRangesInterval = 100 * time.Millisecond
-	collectFactor              = 0.8
+	collectFactor              = 0.9
 	collectTimeout             = 5 * time.Minute
 	maxScheduleRetries         = 10
 	maxLoadConfigRetries       = 10
@@ -57,7 +59,7 @@ const (
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
-	sync.RWMutex
+	syncutil.RWMutex
 
 	wg              sync.WaitGroup
 	ctx             context.Context
@@ -71,12 +73,14 @@ type coordinator struct {
 	opController    *schedule.OperatorController
 	hbStreams       *hbstream.HeartbeatStreams
 	pluginInterface *schedule.PluginInterface
+	diagnosis       *diagnosisManager
 }
 
 // newCoordinator creates a new coordinator.
 func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstream.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
+	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -85,15 +89,20 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
 		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      make(map[string]*scheduleController),
+		schedulers:      schedulers,
 		opController:    opController,
 		hbStreams:       hbStreams,
 		pluginInterface: schedule.NewPluginInterface(),
+		diagnosis:       newDiagnosisManager(cluster, schedulers),
 	}
 }
 
 func (c *coordinator) GetWaitingRegions() []*cache.Item {
 	return c.checkers.GetWaitingRegions()
+}
+
+func (c *coordinator) IsPendingRegion(region uint64) bool {
+	return c.checkers.IsPendingRegion(region)
 }
 
 // patrolRegions is used to scan regions.
@@ -115,6 +124,10 @@ func (c *coordinator) patrolRegions() {
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
+		}
+		if c.cluster.GetUnsafeRecoveryController().IsRunning() {
+			// Skip patrolling regions during unsafe recovery.
+			continue
 		}
 
 		// Check priority regions first.
@@ -296,8 +309,19 @@ func (c *coordinator) drivePushOperator() {
 	}
 }
 
+func (c *coordinator) runUntilStop() {
+	c.run()
+	<-c.ctx.Done()
+	log.Info("coordinator is stopping")
+	c.wg.Wait()
+	log.Info("coordinator has been stopped")
+}
+
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {
@@ -512,7 +536,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() {
+		if !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning() {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
@@ -553,7 +577,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
-		storeLabel := fmt.Sprintf("%d", storeID)
+		storeLabel := strconv.FormatUint(storeID, 10)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalLoads[byteTyp])
@@ -561,10 +585,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
 		stat, ok = status.AsPeer[storeID]
@@ -574,10 +598,10 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(0)
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(0)
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
 	}
 }
@@ -587,7 +611,7 @@ func collectPendingInfluence(stores []*core.StoreInfo) {
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
-		storeLabel := fmt.Sprintf("%d", storeID)
+		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := pendings[storeID]; infl != nil {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
@@ -653,7 +677,7 @@ func (c *coordinator) removeScheduler(name string) error {
 	}
 
 	s.Stop()
-	schedulerStatusGauge.WithLabelValues(name, "allow").Set(0)
+	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 
 	return nil
@@ -702,13 +726,29 @@ func (c *coordinator) pauseOrResumeScheduler(name string, t int64) error {
 	}
 	var err error
 	for _, sc := range s {
-		var delayUntil int64
+		var delayAt, delayUntil int64
 		if t > 0 {
-			delayUntil = time.Now().Unix() + t
+			delayAt = time.Now().Unix()
+			delayUntil = delayAt + t
 		}
+		atomic.StoreInt64(&sc.delayAt, delayAt)
 		atomic.StoreInt64(&sc.delayUntil, delayUntil)
 	}
 	return err
+}
+
+// isSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
+func (c *coordinator) isSchedulerAllowed(name string) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return false, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.AllowSchedule(), nil
 }
 
 func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
@@ -821,6 +861,7 @@ type scheduleController struct {
 	nextInterval time.Duration
 	ctx          context.Context
 	cancel       context.CancelFunc
+	delayAt      int64
 	delayUntil   int64
 }
 
@@ -855,13 +896,18 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		}
 		cacheCluster := newCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if op := s.Scheduler.Schedule(cacheCluster); op != nil {
+		if ops, _ := s.Scheduler.Schedule(cacheCluster, false); len(ops) > 0 {
 			s.nextInterval = s.Scheduler.GetMinInterval()
-			return op
+			return ops
 		}
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
 	return nil
+}
+
+func (s *scheduleController) DiagnoseDryRun() ([]*operator.Operator, []plan.Plan) {
+	cacheCluster := newCacheCluster(s.cluster)
+	return s.Scheduler.Schedule(cacheCluster, true)
 }
 
 // GetInterval returns the interval of scheduling for a scheduler.
@@ -871,11 +917,107 @@ func (s *scheduleController) GetInterval() time.Duration {
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
 func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused()
+	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning()
 }
 
 // isPaused returns if a scheduler is paused.
 func (s *scheduleController) IsPaused() bool {
 	delayUntil := atomic.LoadInt64(&s.delayUntil)
 	return time.Now().Unix() < delayUntil
+}
+
+// GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
+func (s *scheduleController) GetDelayAt() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayAt)
+	}
+	return 0
+}
+
+// GetPausedSchedulerDelayUntil returns resume timestamp of a paused scheduler
+func (s *scheduleController) GetDelayUntil() int64 {
+	if s.IsPaused() {
+		return atomic.LoadInt64(&s.delayUntil)
+	}
+	return 0
+}
+
+const maxDiagnosisResultNum = 6
+
+// diagnosisManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
+type diagnosisManager struct {
+	cluster      *RaftCluster
+	schedulers   map[string]*scheduleController
+	dryRunResult map[string]*cache.FIFO
+}
+
+func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosisManager {
+	return &diagnosisManager{
+		cluster:      cluster,
+		schedulers:   schedulerControllers,
+		dryRunResult: make(map[string]*cache.FIFO),
+	}
+}
+
+func (d *diagnosisManager) diagnosisDryRun(name string) error {
+	if _, ok := d.schedulers[name]; !ok {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	ops, plans := d.schedulers[name].DiagnoseDryRun()
+	result := newDiagnosisResult(ops, plans)
+	if _, ok := d.dryRunResult[name]; !ok {
+		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosisResultNum)
+	}
+	queue := d.dryRunResult[name]
+	queue.Put(result.timestamp, result)
+	return nil
+}
+
+type diagnosisResult struct {
+	timestamp          uint64
+	unschedulablePlans []plan.Plan
+	schedulablePlans   []plan.Plan
+}
+
+func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
+	index := len(ops)
+	if len(ops) > 0 {
+		if ops[0].Kind()&operator.OpMerge != 0 {
+			index /= 2
+		}
+	}
+	if index > len(result) {
+		return nil
+	}
+	return &diagnosisResult{
+		timestamp:          uint64(time.Now().Unix()),
+		unschedulablePlans: result[index:],
+		schedulablePlans:   result[:index],
+	}
+}
+
+func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayAt(), nil
+}
+
+func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
+	c.RLock()
+	defer c.RUnlock()
+	if c.cluster == nil {
+		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulers[name]
+	if !ok {
+		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return s.GetDelayUntil(), nil
 }

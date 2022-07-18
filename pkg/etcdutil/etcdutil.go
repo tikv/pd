@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
+	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -104,7 +104,10 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	rmResp, err := client.MemberRemove(ctx, id)
 	cancel()
-	return rmResp, errors.WithStack(err)
+	if err != nil {
+		return rmResp, errs.ErrEtcdMemberRemove.Wrap(err).GenWithStackByCause()
+	}
+	return rmResp, nil
 }
 
 // EtcdKVGet returns the etcd GetResponse by given key or key prefix
@@ -179,10 +182,10 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 }
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig() *embed.Config {
+func NewTestSingleConfig(t *testing.T) *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
+	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}
@@ -198,10 +201,4 @@ func NewTestSingleConfig() *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
-}
-
-// CleanConfig is used to clean the etcd data for the unit test purpose.
-func CleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.Dir)
 }

@@ -24,6 +24,8 @@ var (
 			Name:      "id",
 			Help:      "Record of id allocator.",
 		}, []string{"type"})
+
+	idallocGauge = idGauge.WithLabelValues("idalloc")
 )
 
 func init() {

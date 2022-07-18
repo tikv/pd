@@ -17,46 +17,40 @@ package simutil
 import (
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testTableKeySuite{})
-
-type testTableKeySuite struct{}
-
-func (t *testTableKeySuite) TestGenerateTableKeys(c *C) {
+func TestGenerateTableKeys(t *testing.T) {
+	re := require.New(t)
 	tableCount := 3
 	size := 10
 	keys := GenerateTableKeys(tableCount, size)
-	c.Assert(keys, HasLen, size)
+	re.Len(keys, size)
 
 	for i := 1; i < len(keys); i++ {
-		c.Assert(keys[i-1], Less, keys[i])
+		re.Less(keys[i-1], keys[i])
 		s := []byte(keys[i-1])
 		e := []byte(keys[i])
 		for j := 0; j < 1000; j++ {
 			split, err := GenerateTiDBEncodedSplitKey(s, e)
-			c.Assert(err, IsNil)
-			c.Assert(s, Less, split)
-			c.Assert(split, Less, e)
+			re.NoError(err)
+			re.Less(string(s), string(split))
+			re.Less(string(split), string(e))
 			e = split
 		}
 	}
 }
 
-func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
+func TestGenerateSplitKey(t *testing.T) {
+	re := require.New(t)
 	s := []byte(codec.EncodeBytes([]byte("a")))
 	e := []byte(codec.EncodeBytes([]byte("ab")))
 	for i := 0; i <= 1000; i++ {
 		cc, err := GenerateTiDBEncodedSplitKey(s, e)
-		c.Assert(err, IsNil)
-		c.Assert(s, Less, cc)
-		c.Assert(cc, Less, e)
+		re.NoError(err)
+		re.Less(string(s), string(cc))
+		re.Less(string(cc), string(e))
 		e = cc
 	}
 
@@ -64,19 +58,19 @@ func (t *testTableKeySuite) TestGenerateSplitKey(c *C) {
 	s = []byte("")
 	e = []byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248}
 	splitKey, err := GenerateTiDBEncodedSplitKey(s, e)
-	c.Assert(err, IsNil)
-	c.Assert(s, Less, splitKey)
-	c.Assert(splitKey, Less, e)
+	re.NoError(err)
+	re.Less(string(s), string(splitKey))
+	re.Less(string(splitKey), string(e))
 
 	// split equal key
 	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
 	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
 	for i := 0; i <= 1000; i++ {
-		c.Assert(s, Less, e)
+		re.Less(string(s), string(e))
 		splitKey, err = GenerateTiDBEncodedSplitKey(s, e)
-		c.Assert(err, IsNil)
-		c.Assert(s, Less, splitKey)
-		c.Assert(splitKey, Less, e)
+		re.NoError(err)
+		re.Less(string(s), string(splitKey))
+		re.Less(string(splitKey), string(e))
 		e = splitKey
 	}
 }

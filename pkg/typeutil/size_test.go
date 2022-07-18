@@ -16,26 +16,49 @@ package typeutil
 
 import (
 	"encoding/json"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testSizeSuite{})
-
-type testSizeSuite struct {
-}
-
-func (s *testSizeSuite) TestJSON(c *C) {
+func TestSizeJSON(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
 	b := ByteSize(265421587)
 	o, err := json.Marshal(b)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	var nb ByteSize
 	err = json.Unmarshal(o, &nb)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	b = ByteSize(1756821276000)
 	o, err = json.Marshal(b)
-	c.Assert(err, IsNil)
-	c.Assert(string(o), Equals, `"1.598TiB"`)
+	re.NoError(err)
+	re.Equal(`"1.598TiB"`, string(o))
+}
+
+func TestParseMbFromText(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	testCases := []struct {
+		body []string
+		size uint64
+	}{{
+		body: []string{"10Mib", "10MiB", "10M", "10MB"},
+		size: uint64(10),
+	}, {
+		body: []string{"10GiB", "10Gib", "10G", "10GB"},
+		size: uint64(10 * units.GiB / units.MiB),
+	}, {
+		body: []string{"10yiB", "10aib"},
+		size: uint64(1),
+	}}
+
+	for _, testCase := range testCases {
+		for _, b := range testCase.body {
+			re.Equal(int(testCase.size), int(ParseMBFromText(b, 1)))
+		}
+	}
 }

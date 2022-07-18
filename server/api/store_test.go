@@ -21,22 +21,23 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
+	"testing"
 	"time"
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testStoreSuite{})
-
-type testStoreSuite struct {
+type storeTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	grpcSvr   *server.GrpcServer
 	cleanup   cleanUpFunc
@@ -44,69 +45,78 @@ type testStoreSuite struct {
 	stores    []*metapb.Store
 }
 
-func requestStatusBody(c *C, client *http.Client, method string, url string) int {
+func TestStoreTestSuite(t *testing.T) {
+	suite.Run(t, new(storeTestSuite))
+}
+
+func (suite *storeTestSuite) requestStatusBody(client *http.Client, method string, url string) int {
 	req, err := http.NewRequest(method, url, nil)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	resp, err := client.Do(req)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	err = resp.Body.Close()
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	return resp.StatusCode
 }
 
-func (s *testStoreSuite) SetUpSuite(c *C) {
-	s.stores = []*metapb.Store{
+func (suite *storeTestSuite) SetupSuite() {
+	suite.stores = []*metapb.Store{
 		{
 			// metapb.StoreState_Up == 0
-			Id:      1,
-			Address: "tikv1",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
 		},
 		{
-			Id:      4,
-			Address: "tikv4",
-			State:   metapb.StoreState_Up,
-			Version: "2.0.0",
+			Id:        4,
+			Address:   "tikv4",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
 		},
 		{
 			// metapb.StoreState_Offline == 1
-			Id:      6,
-			Address: "tikv6",
-			State:   metapb.StoreState_Offline,
-			Version: "2.0.0",
+			Id:        6,
+			Address:   "tikv6",
+			State:     metapb.StoreState_Offline,
+			NodeState: metapb.NodeState_Removing,
+			Version:   "2.0.0",
 		},
 		{
 			// metapb.StoreState_Tombstone == 2
-			Id:      7,
-			Address: "tikv7",
-			State:   metapb.StoreState_Tombstone,
-			Version: "2.0.0",
+			Id:        7,
+			Address:   "tikv7",
+			State:     metapb.StoreState_Tombstone,
+			NodeState: metapb.NodeState_Removed,
+			Version:   "2.0.0",
 		},
 	}
 	// TODO: enable placmentrules
-	s.svr, s.cleanup = mustNewServer(c, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
-	mustWaitLeader(c, []*server.Server{s.svr})
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
-	addr := s.svr.GetAddr()
-	s.grpcSvr = &server.GrpcServer{Server: s.svr}
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	addr := suite.svr.GetAddr()
+	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 
-	mustBootstrapCluster(c, s.svr)
+	mustBootstrapCluster(re, suite.svr)
 
-	for _, store := range s.stores {
-		mustPutStore(c, s.svr, store.Id, store.State, nil)
+	for _, store := range suite.stores {
+		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, nil)
 	}
 }
 
-func (s *testStoreSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *storeTestSuite) TearDownSuite() {
+	suite.cleanup()
 }
 
-func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
-	c.Assert(len(ss), Equals, len(want))
+func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Store) {
+	re.Len(ss, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
 		if _, ok := mapWant[s.Id]; !ok {
@@ -118,35 +128,36 @@ func checkStoresInfo(c *C, ss []*StoreInfo, want []*metapb.Store) {
 		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
-		c.Assert(obtained, DeepEquals, expected)
+		re.Equal(expected, obtained)
 	}
 }
 
-func (s *testStoreSuite) TestStoresList(c *C) {
-	url := fmt.Sprintf("%s/stores", s.urlPrefix)
+func (suite *storeTestSuite) TestStoresList() {
+	url := fmt.Sprintf("%s/stores", suite.urlPrefix)
 	info := new(StoresInfo)
-	err := readJSON(testDialClient, url, info)
-	c.Assert(err, IsNil)
-	checkStoresInfo(c, info.Stores, s.stores[:3])
+	re := suite.Require()
+	err := tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[:3])
 
-	url = fmt.Sprintf("%s/stores?state=0", s.urlPrefix)
+	url = fmt.Sprintf("%s/stores?state=0", suite.urlPrefix)
 	info = new(StoresInfo)
-	err = readJSON(testDialClient, url, info)
-	c.Assert(err, IsNil)
-	checkStoresInfo(c, info.Stores, s.stores[:2])
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[:2])
 
-	url = fmt.Sprintf("%s/stores?state=1", s.urlPrefix)
+	url = fmt.Sprintf("%s/stores?state=1", suite.urlPrefix)
 	info = new(StoresInfo)
-	err = readJSON(testDialClient, url, info)
-	c.Assert(err, IsNil)
-	checkStoresInfo(c, info.Stores, s.stores[2:3])
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[2:3])
 }
 
-func (s *testStoreSuite) TestStoreGet(c *C) {
-	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
-	s.grpcSvr.StoreHeartbeat(
+func (suite *storeTestSuite) TestStoreGet() {
+	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
+	suite.grpcSvr.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Stats: &pdpb.StoreStats{
 				StoreId:   1,
 				Capacity:  1798985089024,
@@ -155,90 +166,97 @@ func (s *testStoreSuite) TestStoreGet(c *C) {
 			},
 		},
 	)
-
 	info := new(StoreInfo)
-	err := readJSON(testDialClient, url, info)
-	c.Assert(err, IsNil)
+	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, info)
+	suite.NoError(err)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
-	c.Assert(int64(info.Status.Capacity), Equals, capacity)
-	c.Assert(int64(info.Status.Available), Equals, available)
-	checkStoresInfo(c, []*StoreInfo{info}, s.stores[:1])
+	suite.Equal(capacity, int64(info.Status.Capacity))
+	suite.Equal(available, int64(info.Status.Available))
+	checkStoresInfo(suite.Require(), []*StoreInfo{info}, suite.stores[:1])
 }
 
-func (s *testStoreSuite) TestStoreLabel(c *C) {
-	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+func (suite *storeTestSuite) TestStoreLabel() {
+	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
+	re := suite.Require()
 	var info StoreInfo
-	err := readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.Labels, HasLen, 0)
+	err := tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Empty(info.Store.Labels)
 
 	// Test merge.
 	// enable label match check.
 	labelCheck := map[string]string{"strictly-match-label": "true"}
 	lc, _ := json.Marshal(labelCheck)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", lc)
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", lc, tu.StatusOK(re))
+	suite.NoError(err)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	// TODO: supports strictly match check in placement rules
-	err = postJSON(testDialClient, url+"/label", b)
-	c.Assert(strings.Contains(err.Error(), "key matching the label was not found"), IsTrue)
+	err = tu.CheckPostJSON(testDialClient, url+"/label", b,
+		tu.StatusNotOK(re),
+		tu.StringContain(re, "key matching the label was not found"))
+	suite.NoError(err)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", ll)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", ll, tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	suite.NoError(err)
 
-	err = readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.Labels, HasLen, len(labels))
+	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Len(info.Store.Labels, len(labels))
 	for _, l := range info.Store.Labels {
-		c.Assert(labels[l.Key], Equals, l.Value)
+		suite.Equal(l.Value, labels[l.Key])
 	}
 
 	// Test merge.
 	// disable label match check.
 	labelCheck = map[string]string{"strictly-match-label": "false"}
 	lc, _ = json.Marshal(labelCheck)
-	err = postJSON(testDialClient, s.urlPrefix+"/config", lc)
-	c.Assert(err, IsNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", lc, tu.StatusOK(re))
+	suite.NoError(err)
 
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	suite.NoError(err)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
-	err = readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
+	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		c.Assert(expectLabel[l.Key], Equals, l.Value)
+		suite.Equal(expectLabel[l.Key], l.Value)
 	}
 
 	// delete label
 	b, err = json.Marshal(map[string]string{"host": ""})
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url+"/label", b)
-	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
 	delete(expectLabel, "host")
-	c.Assert(info.Store.Labels, HasLen, len(expectLabel))
+	suite.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		c.Assert(expectLabel[l.Key], Equals, l.Value)
+		suite.Equal(expectLabel[l.Key], l.Value)
 	}
 
-	s.stores[0].Labels = info.Store.Labels
+	suite.stores[0].Labels = info.Store.Labels
 }
 
-func (s *testStoreSuite) TestStoreDelete(c *C) {
-	table := []struct {
+func (suite *storeTestSuite) TestStoreDelete() {
+	re := suite.Require()
+	// prepare enough online stores to store replica.
+	for id := 1111; id <= 1115; id++ {
+		mustPutStore(re, suite.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	}
+	testCases := []struct {
 		id     int
 		status int
 	}{
@@ -251,130 +269,137 @@ func (s *testStoreSuite) TestStoreDelete(c *C) {
 			status: http.StatusGone,
 		},
 	}
-	for _, t := range table {
-		url := fmt.Sprintf("%s/store/%d", s.urlPrefix, t.id)
-		status := requestStatusBody(c, testDialClient, http.MethodDelete, url)
-		c.Assert(status, Equals, t.status)
+	for _, testCase := range testCases {
+		url := fmt.Sprintf("%s/store/%d", suite.urlPrefix, testCase.id)
+		status := suite.requestStatusBody(testDialClient, http.MethodDelete, url)
+		suite.Equal(testCase.status, status)
 	}
 	// store 6 origin status:offline
-	url := fmt.Sprintf("%s/store/6", s.urlPrefix)
+	url := fmt.Sprintf("%s/store/6", suite.urlPrefix)
 	store := new(StoreInfo)
-	err := readJSON(testDialClient, url, store)
-	c.Assert(err, IsNil)
-	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
+	err := tu.ReadGetJSON(re, testDialClient, url, store)
+	suite.NoError(err)
+	suite.False(store.Store.PhysicallyDestroyed)
+	suite.Equal(metapb.StoreState_Offline, store.Store.State)
 
 	// up store success because it is offline but not physically destroyed
-	status := requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
-	c.Assert(status, Equals, http.StatusOK)
+	status := suite.requestStatusBody(testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	suite.Equal(http.StatusOK, status)
 
-	status = requestStatusBody(c, testDialClient, http.MethodGet, url)
-	c.Assert(status, Equals, http.StatusOK)
+	status = suite.requestStatusBody(testDialClient, http.MethodGet, url)
+	suite.Equal(http.StatusOK, status)
 	store = new(StoreInfo)
-	err = readJSON(testDialClient, url, store)
-	c.Assert(err, IsNil)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Up)
-	c.Assert(store.Store.PhysicallyDestroyed, IsFalse)
+	err = tu.ReadGetJSON(re, testDialClient, url, store)
+	suite.NoError(err)
+	suite.Equal(metapb.StoreState_Up, store.Store.State)
+	suite.False(store.Store.PhysicallyDestroyed)
 
 	// offline store with physically destroyed
-	status = requestStatusBody(c, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
-	c.Assert(status, Equals, http.StatusOK)
-	err = readJSON(testDialClient, url, store)
-	c.Assert(err, IsNil)
-	c.Assert(store.Store.State, Equals, metapb.StoreState_Offline)
-	c.Assert(store.Store.PhysicallyDestroyed, IsTrue)
+	status = suite.requestStatusBody(testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
+	suite.Equal(http.StatusOK, status)
+	err = tu.ReadGetJSON(re, testDialClient, url, store)
+	suite.NoError(err)
+	suite.Equal(metapb.StoreState_Offline, store.Store.State)
+	suite.True(store.Store.PhysicallyDestroyed)
 
 	// try to up store again failed because it is physically destroyed
-	status = requestStatusBody(c, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
-	c.Assert(status, Equals, http.StatusBadRequest)
+	status = suite.requestStatusBody(testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	suite.Equal(http.StatusBadRequest, status)
 	// reset store 6
-	s.cleanup()
-	s.SetUpSuite(c)
+	suite.cleanup()
+	suite.SetupSuite()
 }
 
-func (s *testStoreSuite) TestStoreSetState(c *C) {
-	url := fmt.Sprintf("%s/store/1", s.urlPrefix)
+func (suite *storeTestSuite) TestStoreSetState() {
+	re := suite.Require()
+	// prepare enough online stores to store replica.
+	for id := 1111; id <= 1115; id++ {
+		mustPutStore(re, suite.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	}
+	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	info := StoreInfo{}
-	err := readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+	err := tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
 	info = StoreInfo{}
-	err = postJSON(testDialClient, url+"/state?state=Offline", nil)
-	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Equal(metapb.StoreState_Offline, info.Store.State)
 
 	// store not found
 	info = StoreInfo{}
-	err = postJSON(testDialClient, s.urlPrefix+"/store/10086/state?state=Offline", nil)
-	c.Assert(err, NotNil)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
+	suite.NoError(err)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
 		info = StoreInfo{}
-		err = postJSON(testDialClient, url+"/state?state="+state, nil)
-		c.Assert(err, NotNil)
-		err = readJSON(testDialClient, url, &info)
-		c.Assert(err, IsNil)
-		c.Assert(info.Store.State, Equals, metapb.StoreState_Offline)
+		err = tu.CheckPostJSON(testDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
+		suite.NoError(err)
+		err := tu.ReadGetJSON(re, testDialClient, url, &info)
+		suite.NoError(err)
+		suite.Equal(metapb.StoreState_Offline, info.Store.State)
 	}
 
 	// Set back to Up.
 	info = StoreInfo{}
-	err = postJSON(testDialClient, url+"/state?state=Up", nil)
-	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, url, &info)
-	c.Assert(err, IsNil)
-	c.Assert(info.Store.State, Equals, metapb.StoreState_Up)
+	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	suite.NoError(err)
+	suite.Equal(metapb.StoreState_Up, info.Store.State)
+	suite.cleanup()
+	suite.SetupSuite()
 }
 
-func (s *testStoreSuite) TestUrlStoreFilter(c *C) {
-	table := []struct {
+func (suite *storeTestSuite) TestUrlStoreFilter() {
+	testCases := []struct {
 		u    string
 		want []*metapb.Store
 	}{
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores",
-			want: s.stores[:3],
+			want: suite.stores[:3],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=2",
-			want: s.stores[3:],
+			want: suite.stores[3:],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=0",
-			want: s.stores[:2],
+			want: suite.stores[:2],
 		},
 		{
 			u:    "http://localhost:2379/pd/api/v1/stores?state=2&state=1",
-			want: s.stores[2:],
+			want: suite.stores[2:],
 		},
 	}
 
-	for _, t := range table {
-		uu, err := url.Parse(t.u)
-		c.Assert(err, IsNil)
+	for _, testCase := range testCases {
+		uu, err := url.Parse(testCase.u)
+		suite.NoError(err)
 		f, err := newStoreStateFilter(uu)
-		c.Assert(err, IsNil)
-		c.Assert(f.filter(s.stores), DeepEquals, t.want)
+		suite.NoError(err)
+		suite.Equal(testCase.want, f.filter(suite.stores))
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	_, err = newStoreStateFilter(u)
-	c.Assert(err, NotNil)
+	suite.Error(err)
 
 	u, err = url.Parse("http://localhost:2379/pd/api/v1/stores?state=999999")
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	_, err = newStoreStateFilter(u)
-	c.Assert(err, NotNil)
+	suite.Error(err)
 }
 
-func (s *testStoreSuite) TestDownState(c *C) {
+func (suite *storeTestSuite) TestDownState() {
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			State: metapb.StoreState_Up,
@@ -382,27 +407,27 @@ func (s *testStoreSuite) TestDownState(c *C) {
 		core.SetStoreStats(&pdpb.StoreStats{}),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	storeInfo := newStoreInfo(s.svr.GetScheduleConfig(), store)
-	c.Assert(storeInfo.Store.StateName, Equals, metapb.StoreState_Up.String())
+	storeInfo := newStoreInfo(suite.svr.GetScheduleConfig(), store)
+	suite.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
 
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
-	c.Assert(storeInfo.Store.StateName, Equals, disconnectedName)
+	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	suite.Equal(disconnectedName, storeInfo.Store.StateName)
 
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
-	storeInfo = newStoreInfo(s.svr.GetScheduleConfig(), newStore)
-	c.Assert(storeInfo.Store.StateName, Equals, downStateName)
+	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	suite.Equal(downStateName, storeInfo.Store.StateName)
 }
 
-func (s *testStoreSuite) TestGetAllLimit(c *C) {
-	testcases := []struct {
+func (suite *storeTestSuite) TestGetAllLimit() {
+	testCases := []struct {
 		name           string
 		url            string
 		expectedStores map[uint64]struct{}
 	}{
 		{
 			name: "includeTombstone",
-			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=true", s.urlPrefix),
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=true", suite.urlPrefix),
 			expectedStores: map[uint64]struct{}{
 				1: {},
 				4: {},
@@ -412,7 +437,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		},
 		{
 			name: "excludeTombStone",
-			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=false", s.urlPrefix),
+			url:  fmt.Sprintf("%s/stores/limit?include_tombstone=false", suite.urlPrefix),
 			expectedStores: map[uint64]struct{}{
 				1: {},
 				4: {},
@@ -421,7 +446,7 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		},
 		{
 			name: "default",
-			url:  fmt.Sprintf("%s/stores/limit", s.urlPrefix),
+			url:  fmt.Sprintf("%s/stores/limit", suite.urlPrefix),
 			expectedStores: map[uint64]struct{}{
 				1: {},
 				4: {},
@@ -430,66 +455,68 @@ func (s *testStoreSuite) TestGetAllLimit(c *C) {
 		},
 	}
 
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
+	re := suite.Require()
+	for _, testCase := range testCases {
+		suite.T().Logf(testCase.name)
 		info := make(map[uint64]interface{}, 4)
-		err := readJSON(testDialClient, testcase.url, &info)
-		c.Assert(err, IsNil)
-		c.Assert(len(info), Equals, len(testcase.expectedStores))
-		for id := range testcase.expectedStores {
+		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
+		suite.NoError(err)
+		suite.Len(info, len(testCase.expectedStores))
+		for id := range testCase.expectedStores {
 			_, ok := info[id]
-			c.Assert(ok, IsTrue)
+			suite.True(ok)
 		}
 	}
 }
 
-func (s *testStoreSuite) TestStoreLimitTTL(c *C) {
+func (suite *storeTestSuite) TestStoreLimitTTL() {
 	// add peer
-	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", s.urlPrefix, 5)
+	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", suite.urlPrefix, 5)
 	data := map[string]interface{}{
 		"type": "add-peer",
 		"rate": 999,
 	}
 	postData, err := json.Marshal(data)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	re := suite.Require()
+	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	suite.NoError(err)
 	// remove peer
 	data = map[string]interface{}{
 		"type": "remove-peer",
 		"rate": 998,
 	}
 	postData, err = json.Marshal(data)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	suite.NoError(err)
 	// all store limit add peer
-	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", s.urlPrefix, 3)
+	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", suite.urlPrefix, 3)
 	data = map[string]interface{}{
 		"type": "add-peer",
 		"rate": 997,
 	}
 	postData, err = json.Marshal(data)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	suite.NoError(err)
 	// all store limit remove peer
 	data = map[string]interface{}{
 		"type": "remove-peer",
 		"rate": 996,
 	}
 	postData, err = json.Marshal(data)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, url, postData)
-	c.Assert(err, IsNil)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	suite.NoError(err)
 
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Equals, float64(999))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Equals, float64(998))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Equals, float64(997))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Equals, float64(996))
+	suite.Equal(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
+	suite.Equal(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
+	suite.Equal(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
+	suite.Equal(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 	time.Sleep(5 * time.Second)
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer, Not(Equals), float64(999))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer, Not(Equals), float64(998))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer, Not(Equals), float64(997))
-	c.Assert(s.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer, Not(Equals), float64(996))
+	suite.NotEqual(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
+	suite.NotEqual(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
+	suite.NotEqual(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
+	suite.NotEqual(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 }

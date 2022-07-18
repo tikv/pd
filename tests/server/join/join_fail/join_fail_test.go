@@ -16,48 +16,29 @@ package join_fail_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-var _ = Suite(&joinTestSuite{})
-
-type joinTestSuite struct{}
-
-func (s *joinTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
-func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
+func TestFailedPDJoinInStep1(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/join/add-member-failed", `return`), IsNil)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/join/add-member-failed", `return`))
 	_, err = cluster.Join(ctx)
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/join/add-member-failed"), IsNil)
+	re.Error(err)
+	re.Contains(err.Error(), "join failed")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/join/add-member-failed"))
 }

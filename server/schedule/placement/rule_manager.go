@@ -22,12 +22,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage/endpoint"
@@ -38,7 +39,7 @@ import (
 // It is thread safe.
 type RuleManager struct {
 	storage endpoint.RuleStorage
-	sync.RWMutex
+	syncutil.RWMutex
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
@@ -307,7 +308,14 @@ func (m *RuleManager) GetRulesByKey(key []byte) []*Rule {
 func (m *RuleManager) GetRulesForApplyRegion(region *core.RegionInfo) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
-	return m.ruleList.getRulesForApplyRegion(region.GetStartKey(), region.GetEndKey())
+	return m.ruleList.getRulesForApplyRange(region.GetStartKey(), region.GetEndKey())
+}
+
+// GetRulesForApplyRange returns the rules list that should be applied to a range.
+func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
+	m.RLock()
+	defer m.RUnlock()
+	return m.ruleList.getRulesForApplyRange(start, end)
 }
 
 // FitRegion fits a region to the rules it matches.
@@ -686,12 +694,9 @@ func (m *RuleManager) IsInitialized() bool {
 // checkRule check the rule whether will have RuleFit after FitRegion
 // in order to reduce the calculation.
 func checkRule(rule *Rule, stores []*core.StoreInfo) bool {
-	for _, store := range stores {
-		if MatchLabelConstraints(store, rule.LabelConstraints) {
-			return true
-		}
-	}
-	return false
+	return slice.AnyOf(stores, func(idx int) bool {
+		return MatchLabelConstraints(stores[idx], rule.LabelConstraints)
+	})
 }
 
 // SetKeyType will update keyType for adjustRule()

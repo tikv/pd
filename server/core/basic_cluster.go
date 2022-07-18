@@ -16,19 +16,18 @@ package core
 
 import (
 	"bytes"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	Stores  *StoresInfo
 	Regions *RegionsInfo
 }
@@ -95,7 +94,7 @@ func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	bc.RLock()
 	defer bc.RUnlock()
 	var Stores []*StoreInfo
-	for id := range region.GetStoreIds() {
+	for id := range region.GetStoreIDs() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
 		}
@@ -114,6 +113,17 @@ func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
 		}
 	}
 	return Stores
+}
+
+// GetLeaderStoreByRegionID returns the leader store of the given region.
+func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
+	bc.RLock()
+	defer bc.RUnlock()
+	region := bc.Regions.GetRegion(regionID)
+	if region == nil || region.GetLeader() == nil {
+		return nil
+	}
+	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
@@ -184,48 +194,32 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regio
 
 const randomRegionMaxRetry = 10
 
-// RandFollowerRegion returns a random region that has a follower on the store.
-func (bc *BasicCluster) RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+// RandFollowerRegions returns a random region that has a follower on the store.
+func (bc *BasicCluster) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandFollowerRegions(storeID, ranges, randomRegionMaxRetry)
-	bc.RUnlock()
-	return bc.selectRegion(regions, opts...)
+	defer bc.RUnlock()
+	return bc.Regions.RandFollowerRegions(storeID, ranges, randomRegionMaxRetry)
 }
 
-// RandLeaderRegion returns a random region that has leader on the store.
-func (bc *BasicCluster) RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+// RandLeaderRegions returns a random region that has leader on the store.
+func (bc *BasicCluster) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandLeaderRegions(storeID, ranges, randomRegionMaxRetry)
-	bc.RUnlock()
-	return bc.selectRegion(regions, opts...)
+	defer bc.RUnlock()
+	return bc.Regions.RandLeaderRegions(storeID, ranges, randomRegionMaxRetry)
 }
 
-// RandPendingRegion returns a random region that has a pending peer on the store.
-func (bc *BasicCluster) RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+// RandPendingRegions returns a random region that has a pending peer on the store.
+func (bc *BasicCluster) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandPendingRegions(storeID, ranges, randomRegionMaxRetry)
-	bc.RUnlock()
-	return bc.selectRegion(regions, opts...)
+	defer bc.RUnlock()
+	return bc.Regions.RandPendingRegions(storeID, ranges, randomRegionMaxRetry)
 }
 
-// RandLearnerRegion returns a random region that has a learner peer on the store.
-func (bc *BasicCluster) RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo {
+// RandLearnerRegions returns a random region that has a learner peer on the store.
+func (bc *BasicCluster) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	bc.RLock()
-	regions := bc.Regions.RandLearnerRegions(storeID, ranges, randomRegionMaxRetry)
-	bc.RUnlock()
-	return bc.selectRegion(regions, opts...)
-}
-
-func (bc *BasicCluster) selectRegion(regions []*RegionInfo, opts ...RegionOption) *RegionInfo {
-	for _, r := range regions {
-		if r == nil {
-			break
-		}
-		if slice.AllOf(opts, func(i int) bool { return opts[i](r) }) {
-			return r
-		}
-	}
-	return nil
+	defer bc.RUnlock()
+	return bc.Regions.RandLearnerRegions(storeID, ranges, randomRegionMaxRetry)
 }
 
 // GetRegionCount gets the total count of RegionInfo of regionMap.
@@ -327,6 +321,13 @@ func (bc *BasicCluster) PutStore(store *StoreInfo) {
 	bc.Stores.SetStore(store)
 }
 
+// ResetStores resets the store cache.
+func (bc *BasicCluster) ResetStores() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores = NewStoresInfo()
+}
+
 // DeleteStore deletes a store.
 func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 	bc.Lock()
@@ -347,7 +348,7 @@ func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionIn
 func isRegionRecreated(region *RegionInfo) bool {
 	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
 	// prevent stale bootstrap region (first region in a cluster which covers the entire key
-	// range) from reporting stale info, we execlude regions that covers the entire key range
+	// range) from reporting stale info, we exclude regions that covers the entire key range
 	// here. Technically, it is possible for unsafe recover to recreate such region, but that
 	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
 	// better than recreating the cluster.
@@ -386,6 +387,13 @@ func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.Regions.SetRegion(region)
 }
 
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
+}
+
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, err := bc.PreCheckPutRegion(region)
@@ -401,9 +409,16 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
 	bc.Lock()
 	defer bc.Unlock()
-	if region := bc.Regions.GetRegion(id); region != nil {
-		bc.Regions.RemoveRegion(region)
+	if r := bc.Regions.GetRegion(id); r != nil {
+		bc.Regions.RemoveRegion(r)
 	}
+}
+
+// ResetRegionCache drops all region cache.
+func (bc *BasicCluster) ResetRegionCache() {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Regions = NewRegionsInfo()
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap.
@@ -445,10 +460,10 @@ func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
 	GetRegionCount() int
-	RandFollowerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
-	RandLeaderRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
-	RandLearnerRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
-	RandPendingRegion(storeID uint64, ranges []KeyRange, opts ...RegionOption) *RegionInfo
+	RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
+	RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
+	RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
+	RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
 	GetRegion(id uint64) *RegionInfo

@@ -29,8 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -44,6 +44,7 @@ type Region struct {
 	Leader       *metapb.Peer
 	DownPeers    []*metapb.Peer
 	PendingPeers []*metapb.Peer
+	Buckets      *metapb.Buckets
 }
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
@@ -76,13 +77,13 @@ type Client interface {
 	// taking care of region change.
 	// Also it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
-	GetRegion(ctx context.Context, key []byte) (*Region, error)
+	GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionFromMember gets a region from certain members.
 	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
-	GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
+	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
-	GetRegionByID(ctx context.Context, regionID uint64) (*Region, error)
+	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
@@ -114,6 +115,8 @@ type Client interface {
 	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
 	// SplitRegions split regions by given split keys
 	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
+	// SplitAndScatterRegions split regions by given split keys and scatter new regions
+	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 
@@ -159,6 +162,19 @@ func WithGroup(group string) RegionsOption {
 // WithRetry specify the retry limit during Scatter/Split Regions
 func WithRetry(retry uint64) RegionsOption {
 	return func(op *RegionsOp) { op.retryLimit = retry }
+}
+
+// GetRegionOp represents available options when getting regions.
+type GetRegionOp struct {
+	needBuckets bool
+}
+
+// GetRegionOption configures GetRegionOp.
+type GetRegionOption func(op *GetRegionOp)
+
+// WithBuckets means getting region and its buckets.
+func WithBuckets() GetRegionOption {
+	return func(op *GetRegionOp) { op.needBuckets = true }
 }
 
 type tsoRequest struct {
@@ -312,6 +328,8 @@ const (
 var LeaderHealthCheckInterval = time.Second
 
 var (
+	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
+	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
 	// errClosing is returned when request is canceled when client is closing.
@@ -750,7 +768,13 @@ tsoBatchLoop:
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
-			log.Error("[pd] fetch pending tso requests error", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			if err == context.Canceled {
+				log.Info("[pd] stop fetching the pending tso requests due to context canceled",
+					zap.String("dc-location", dc))
+			} else {
+				log.Error("[pd] fetch pending tso requests error",
+					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+			}
 			return
 		}
 		if maxBatchWaitInterval >= 0 {
@@ -768,7 +792,7 @@ tsoBatchLoop:
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				if retryTimeConsuming >= c.option.timeout {
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
@@ -1311,6 +1335,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 		Meta:         res.Region,
 		Leader:       res.Leader,
 		PendingPeers: res.PendingPeers,
+		Buckets:      res.Buckets,
 	}
 	for _, s := range res.DownPeers {
 		r.DownPeers = append(r.DownPeers, s.Peer)
@@ -1318,18 +1343,23 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func (c *client) GetRegion(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegion(ctx, req)
@@ -1385,18 +1415,23 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	return handleRegionResponse(resp), nil
 }
 
-func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error) {
+func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	req := &pdpb.GetRegionRequest{
-		Header:    c.requestHeader(),
-		RegionKey: key,
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetPrevRegion(ctx, req)
@@ -1410,18 +1445,23 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte) (*Region, error)
 	return handleRegionResponse(resp), nil
 }
 
-func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*Region, error) {
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	req := &pdpb.GetRegionByIDRequest{
-		Header:   c.requestHeader(),
-		RegionId: regionID,
+		Header:      c.requestHeader(),
+		RegionId:    regionID,
+		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegionByID(ctx, req)
@@ -1525,7 +1565,7 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 	if store == nil {
 		return nil, errors.New("[pd] store field in rpc response not set")
 	}
-	if store.GetState() == metapb.StoreState_Tombstone {
+	if store.GetNodeState() == metapb.NodeState_Removed {
 		return nil, nil
 	}
 	return store, nil
@@ -1655,6 +1695,30 @@ func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ..
 		defer span.Finish()
 	}
 	return c.scatterRegionsWithOptions(ctx, regionsID, opts...)
+}
+
+func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	options := &RegionsOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	req := &pdpb.SplitAndScatterRegionsRequest{
+		Header:     c.requestHeader(),
+		SplitKeys:  splitKeys,
+		Group:      options.group,
+		RetryLimit: options.retryLimit,
+	}
+
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	return c.getClient().SplitAndScatterRegions(ctx, req)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {

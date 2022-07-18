@@ -38,14 +38,14 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 	}
 }
 
-// @Tags admin
-// @Summary Drop a specific region from cache.
-// @Param id path integer true "Region Id"
-// @Produce json
-// @Success 200 {string} string "The region is removed from server cache."
-// @Failure 400 {string} string "The input is invalid."
-// @Router /admin/cache/region/{id} [delete]
-func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Request) {
+// @Tags     admin
+// @Summary  Drop a specific region from cache.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server cache."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/cache/region/{id} [delete]
+func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
 	regionIDStr := vars["id"]
@@ -58,17 +58,28 @@ func (h *adminHandler) HandleDropCacheRegion(w http.ResponseWriter, r *http.Requ
 	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
 }
 
+// @Tags     admin
+// @Summary  Drop all regions from cache.
+// @Produce  json
+// @Success  200  {string}  string  "All regions are removed from server cache."
+// @Router   /admin/cache/regions [delete]
+func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	rc.DropCacheAllRegion()
+	h.rd.JSON(w, http.StatusOK, "All regions are removed from server cache.")
+}
+
 // FIXME: details of input json body params
-// @Tags admin
-// @Summary Reset the ts.
-// @Accept json
-// @Param body body object true "json params"
-// @Produce json
-// @Success 200 {string} string "Reset ts successfully."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 403 {string} string "Reset ts is forbidden."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /admin/reset-ts [post]
+// @Tags     admin
+// @Summary  Reset the ts.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Reset ts successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  403  {string}  string  "Reset ts is forbidden."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /admin/reset-ts [post]
 func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	var input map[string]interface{}
@@ -98,7 +109,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 
 // Intentionally no swagger mark as it is supposed to be only used in
 // server-to-server. For security reason, it only accepts JSON formatted data.
-func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, "")
@@ -115,44 +126,4 @@ func (h *adminHandler) persistFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.rd.Text(w, http.StatusOK, "")
-}
-
-// Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server.
-func (h *adminHandler) UpdateWaitAsyncTime(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
-		return
-	}
-	memberIDValue, ok := input["member_id"].(string)
-	if !ok || len(memberIDValue) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
-		return
-	}
-	memberID, err := strconv.ParseUint(memberIDValue, 10, 64)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid member id")
-		return
-	}
-	cluster := getCluster(r)
-	cluster.GetReplicationMode().UpdateMemberWaitAsyncTime(memberID)
-	h.rd.JSON(w, http.StatusOK, nil)
-}
-
-// @Tags admin
-// @Summary switch Service Middlewares including ServiceInfo, Audit and rate limit
-// @Param enable query string true "enable" Enums(true, false)
-// @Produce json
-// @Success 200 {string} string "Switching Service middleware is successful."
-// @Failure 400 {string} string "The input is invalid."
-// @Router /admin/service-middleware [POST]
-func (h *adminHandler) HanldeServiceMiddlewareSwitch(w http.ResponseWriter, r *http.Request) {
-	enableStr := r.URL.Query().Get("enable")
-	enable, err := strconv.ParseBool(enableStr)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "The input is invalid.")
-		return
-	}
-	h.svr.SetServiceMiddleware(enable)
-	h.rd.JSON(w, http.StatusOK, "Switching Service middleware is successful.")
 }

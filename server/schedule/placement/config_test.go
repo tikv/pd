@@ -15,15 +15,13 @@
 package placement
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testConfigSuite{})
-
-type testConfigSuite struct {
-}
-
-func (s *testConfigSuite) TestTrim(c *C) {
+func TestTrim(t *testing.T) {
+	re := require.New(t)
 	rc := newRuleConfig()
 	rc.setRule(&Rule{GroupID: "g1", ID: "id1"})
 	rc.setRule(&Rule{GroupID: "g1", ID: "id2"})
@@ -72,11 +70,11 @@ func (s *testConfigSuite) TestTrim(c *C) {
 		},
 	}
 
-	for _, tc := range testCases {
+	for _, testCase := range testCases {
 		p := rc.beginPatch()
-		tc.ops(p)
+		testCase.ops(p)
 		p.trim()
-		c.Assert(p.mut.rules, DeepEquals, tc.mutRules)
-		c.Assert(p.mut.groups, DeepEquals, tc.mutGroups)
+		re.Equal(testCase.mutRules, p.mut.rules)
+		re.Equal(testCase.mutGroups, p.mut.groups)
 	}
 }

@@ -31,11 +31,8 @@ var _ ReplicationStatusStorage = (*StorageEndpoint)(nil)
 // LoadReplicationStatus loads replication status by mode.
 func (se *StorageEndpoint) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
 	v, err := se.Load(replicationModePath(mode))
-	if err != nil {
+	if err != nil || v == "" {
 		return false, err
-	}
-	if v == "" {
-		return false, nil
 	}
 	err = json.Unmarshal([]byte(v), status)
 	if err != nil {

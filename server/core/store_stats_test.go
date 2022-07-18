@@ -15,39 +15,38 @@
 package core
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 )
 
-var _ = Suite(&testStoreStatsSuite{})
-
-type testStoreStatsSuite struct{}
-
-func (s *testStoreStatsSuite) TestStoreStats(c *C) {
-	G := uint64(1024 * 1024 * 1024)
+func TestStoreStats(t *testing.T) {
+	re := require.New(t)
 	meta := &metapb.Store{Id: 1, State: metapb.StoreState_Up}
 	store := NewStoreInfo(meta, SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * G,
-		UsedSize:  50 * G,
-		Available: 150 * G,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(150 * units.GiB),
 	}))
 
-	c.Assert(store.GetCapacity(), Equals, 200*G)
-	c.Assert(store.GetUsedSize(), Equals, 50*G)
-	c.Assert(store.GetAvailable(), Equals, 150*G)
-	c.Assert(store.GetAvgAvailable(), Equals, 150*G)
-	c.Assert(store.GetAvailableDeviation(), Equals, uint64(0))
+	re.Equal(uint64(200*units.GiB), store.GetCapacity())
+	re.Equal(uint64(50*units.GiB), store.GetUsedSize())
+	re.Equal(uint64(150*units.GiB), store.GetAvailable())
+	re.Equal(uint64(150*units.GiB), store.GetAvgAvailable())
+	re.Equal(uint64(0), store.GetAvailableDeviation())
 
 	store = store.Clone(SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * G,
-		UsedSize:  50 * G,
-		Available: 160 * G,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(160 * units.GiB),
 	}))
 
-	c.Assert(store.GetAvailable(), Equals, 160*G)
-	c.Assert(store.GetAvgAvailable(), Greater, 150*G)
-	c.Assert(store.GetAvgAvailable(), Less, 160*G)
-	c.Assert(store.GetAvailableDeviation(), Greater, uint64(0))
-	c.Assert(store.GetAvailableDeviation(), Less, 10*G)
+	re.Equal(uint64(160*units.GiB), store.GetAvailable())
+	re.Greater(store.GetAvgAvailable(), uint64(150*units.GiB))
+	re.Less(store.GetAvgAvailable(), uint64(160*units.GiB))
+	re.Greater(store.GetAvailableDeviation(), uint64(0))
+	re.Less(store.GetAvailableDeviation(), uint64(10*units.GiB))
 }

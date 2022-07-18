@@ -36,11 +36,8 @@ var _ ConfigStorage = (*StorageEndpoint)(nil)
 // LoadConfig loads config from configPath then unmarshal it to cfg.
 func (se *StorageEndpoint) LoadConfig(cfg interface{}) (bool, error) {
 	value, err := se.Load(configPath)
-	if err != nil {
+	if err != nil || value == "" {
 		return false, err
-	}
-	if value == "" {
-		return false, nil
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {

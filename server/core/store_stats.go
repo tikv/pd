@@ -16,14 +16,14 @@ package core
 
 import (
 	"math"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 type storeStats struct {
-	mu       sync.RWMutex
+	mu       syncutil.RWMutex
 	rawStats *pdpb.StoreStats
 
 	// avgAvailable is used to make available smooth, aka no sudden changes.
@@ -65,6 +65,16 @@ func (ss *storeStats) GetStoreStats() *pdpb.StoreStats {
 	ss.mu.RLock()
 	defer ss.mu.RUnlock()
 	return ss.rawStats
+}
+
+// CloneStoreStats returns the statistics information cloned from the store.
+func (ss *storeStats) CloneStoreStats() *pdpb.StoreStats {
+	ss.mu.RLock()
+	b, _ := ss.rawStats.Marshal()
+	ss.mu.RUnlock()
+	stats := &pdpb.StoreStats{}
+	stats.Unmarshal(b)
+	return stats
 }
 
 // GetCapacity returns the capacity size of the store.

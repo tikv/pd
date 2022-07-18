@@ -21,9 +21,8 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -31,79 +30,82 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&labelTestSuite{})
-
-type labelTestSuite struct{}
-
-func (s *labelTestSuite) SetUpSuite(c *C) {
-	server.EnableZap = true
-}
-
-func (s *labelTestSuite) TestLabel(c *C) {
+func TestLabel(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Replication.StrictlyMatchLabel = false })
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 
-	stores := []*metapb.Store{
+	stores := []*api.StoreInfo{
 		{
-			Id:    1,
-			State: metapb.StoreState_Up,
-			Labels: []*metapb.StoreLabel{
-				{
-					Key:   "zone",
-					Value: "us-west",
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:    1,
+					State: metapb.StoreState_Up,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   "zone",
+							Value: "us-west",
+						},
+					},
+					LastHeartbeat: time.Now().UnixNano(),
 				},
+				StateName: metapb.StoreState_Up.String(),
 			},
-			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    2,
-			State: metapb.StoreState_Up,
-			Labels: []*metapb.StoreLabel{
-				{
-					Key:   "zone",
-					Value: "us-east",
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:    2,
+					State: metapb.StoreState_Up,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   "zone",
+							Value: "us-east",
+						},
+					},
+					LastHeartbeat: time.Now().UnixNano(),
 				},
+				StateName: metapb.StoreState_Up.String(),
 			},
-			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:    3,
-			State: metapb.StoreState_Up,
-			Labels: []*metapb.StoreLabel{
-				{
-					Key:   "zone",
-					Value: "us-west",
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:    3,
+					State: metapb.StoreState_Up,
+					Labels: []*metapb.StoreLabel{
+						{
+							Key:   "zone",
+							Value: "us-west",
+						},
+					},
+					LastHeartbeat: time.Now().UnixNano(),
 				},
+				StateName: metapb.StoreState_Up.String(),
 			},
-			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
-
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store.Store.Store)
 	}
 	defer cluster.Destroy()
 
 	// label command
 	args := []string{"-u", pdAddr, "label"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	labels := make([]*metapb.StoreLabel, 0, len(stores))
-	c.Assert(json.Unmarshal(output, &labels), IsNil)
+	re.NoError(json.Unmarshal(output, &labels))
 	got := make(map[string]struct{})
 	for _, l := range labels {
 		if _, ok := got[strings.ToLower(l.Key+l.Value)]; !ok {
@@ -120,14 +122,21 @@ func (s *labelTestSuite) TestLabel(c *C) {
 			}
 		}
 	}
-	c.Assert(got, DeepEquals, expected)
+	re.Equal(expected, got)
 
 	// label store <name> command
 	args = []string{"-u", pdAddr, "label", "store", "zone", "us-west"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	storesInfo := new(api.StoresInfo)
-	c.Assert(json.Unmarshal(output, &storesInfo), IsNil)
-	ss = []*metapb.Store{stores[0], stores[2]}
-	pdctl.CheckStoresInfo(c, storesInfo.Stores, ss)
+	re.NoError(json.Unmarshal(output, &storesInfo))
+	sss := []*api.StoreInfo{stores[0], stores[2]}
+	pdctl.CheckStoresInfo(re, storesInfo.Stores, sss)
+
+	// label isolation [label]
+	args = []string{"-u", pdAddr, "label", "isolation"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "none")
+	re.Contains(string(output), "2")
 }

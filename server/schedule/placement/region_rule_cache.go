@@ -15,10 +15,9 @@
 package placement
 
 import (
-	"sync"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -36,7 +35,7 @@ import (
 // 6. any store label is changed
 // 7. any store state is changed
 type RegionRuleFitCacheManager struct {
-	mu     sync.RWMutex
+	mu     syncutil.RWMutex
 	caches map[uint64]*RegionRuleFitCache
 }
 
@@ -230,7 +229,7 @@ func toRegionCache(r *core.RegionInfo) regionCache {
 // Only Up store should be cached in RegionFitCache
 func ValidateStores(stores []*core.StoreInfo) bool {
 	return slice.NoneOf(stores, func(i int) bool {
-		return stores[i].IsOffline() && stores[i].IsDisconnected()
+		return stores[i].IsRemoving() || stores[i].IsDisconnected()
 	})
 }
 

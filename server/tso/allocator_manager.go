@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/election"
 	"github.com/tikv/pd/server/member"
@@ -99,7 +100,7 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 type AllocatorManager struct {
 	enableLocalTSO bool
 	mu             struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		// There are two kinds of TSO Allocators:
 		//   1. Global TSO Allocator, as a global single point to allocate
 		//      TSO for global transactions, such as cross-region cases.
@@ -122,7 +123,7 @@ type AllocatorManager struct {
 	securityConfig         *grpcutil.TLSConfig
 	// for gRPC use
 	localAllocatorConn struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
 }

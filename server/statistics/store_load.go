@@ -22,14 +22,9 @@ import (
 
 // StoreLoadDetail records store load information.
 type StoreLoadDetail struct {
-	Info     *StoreSummaryInfo
+	*StoreSummaryInfo
 	LoadPred *StoreLoadPred
 	HotPeers []*HotPeerStat
-}
-
-// GetID return the ID of store.
-func (li *StoreLoadDetail) GetID() uint64 {
-	return li.Info.Store.GetID()
 }
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
@@ -78,6 +73,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	}
 }
 
+// IsUniform returns true if the stores are uniform.
+func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
+	return li.LoadPred.Stddev.Loads[dim] < threshold
+}
+
 func toHotPeerStatShow(p *HotPeerStat, kind RWType) HotPeerStatShow {
 	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
 	byteRate := p.Loads[b]
@@ -116,8 +116,8 @@ func GetRegionStatKind(rwTy RWType, dim int) RegionStatKind {
 
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
-	Store      *core.StoreInfo
-	IsTiFlash  bool
+	*core.StoreInfo
+	isTiFlash  bool
 	PendingSum *Influence
 }
 
@@ -132,8 +132,8 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	infos := make(map[uint64]*StoreSummaryInfo, len(stores))
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
-			Store:      store,
-			IsTiFlash:  core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash),
+			StoreInfo:  store,
+			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -156,6 +156,11 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 		s.PendingSum.Loads[i] += load * w
 	}
 	s.PendingSum.Count += infl.Count * w
+}
+
+// IsTiFlash returns true if the store is TiFlash.
+func (s *StoreSummaryInfo) IsTiFlash() bool {
+	return s.isTiFlash
 }
 
 // GetPendingInfluence returns the current pending influence.
@@ -206,6 +211,7 @@ type StoreLoadPred struct {
 	Current StoreLoad
 	Future  StoreLoad
 	Expect  StoreLoad
+	Stddev  StoreLoad
 }
 
 // Min returns the min load between current and future.

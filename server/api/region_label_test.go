@@ -19,39 +19,47 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/apiutil"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/labeler"
 )
 
-var _ = Suite(&testRegionLabelSuite{})
-
-type testRegionLabelSuite struct {
+type regionLabelTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testRegionLabelSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
+func TestRegionLabelTestSuite(t *testing.T) {
+	suite.Run(t, new(regionLabelTestSuite))
 }
 
-func (s *testRegionLabelSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *regionLabelTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
 }
 
-func (s *testRegionLabelSuite) TestGetSet(c *C) {
+func (suite *regionLabelTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *regionLabelTestSuite) TestGetSet() {
+	re := suite.Require()
 	var resp []*labeler.LabelRule
-	err := readJSON(testDialClient, s.urlPrefix+"rules", &resp)
-	c.Assert(err, IsNil)
-	c.Assert(resp, HasLen, 0)
+	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	suite.NoError(err)
+	suite.Empty(resp)
 
 	rules := []*labeler.LabelRule{
 		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
@@ -61,26 +69,27 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
-		err = postJSON(testDialClient, s.urlPrefix+"rule", data)
-		c.Assert(err, IsNil)
+		err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"rule", data, tu.StatusOK(re))
+		suite.NoError(err)
 	}
 	for i, id := range ruleIDs {
 		var rule labeler.LabelRule
-		err = readJSON(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
-		c.Assert(err, IsNil)
-		c.Assert(&rule, DeepEquals, rules[i])
+		err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
+		suite.NoError(err)
+		suite.Equal(rules[i], &rule)
 	}
 
-	err = readJSONWithBody(testDialClient, s.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
-	c.Assert(err, IsNil)
-	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
+	err = tu.ReadGetJSONWithBody(re, testDialClient, suite.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
+	suite.NoError(err)
+	expects := []*labeler.LabelRule{rules[0], rules[2]}
+	suite.Equal(expects, resp)
 
-	_, err = doDelete(testDialClient, s.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
-	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
-	c.Assert(err, IsNil)
+	_, err = apiutil.DoDelete(testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"))
+	suite.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	suite.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[0], rules[2]})
+	suite.Equal([]*labeler.LabelRule{rules[0], rules[2]}, resp)
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
@@ -89,12 +98,12 @@ func (s *testRegionLabelSuite) TestGetSet(c *C) {
 		DeleteRules: []string{"rule1"},
 	}
 	data, _ := json.Marshal(patch)
-	err = patchJSON(testDialClient, s.urlPrefix+"rules", data)
-	c.Assert(err, IsNil)
-	err = readJSON(testDialClient, s.urlPrefix+"rules", &resp)
-	c.Assert(err, IsNil)
+	err = tu.CheckPatchJSON(testDialClient, suite.urlPrefix+"rules", data, tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	suite.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	c.Assert(resp, DeepEquals, []*labeler.LabelRule{rules[1], rules[2]})
+	suite.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
 }
 
 func makeKeyRanges(keys ...string) []interface{} {

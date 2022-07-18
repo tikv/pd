@@ -18,8 +18,9 @@ import (
 	"container/heap"
 	"container/list"
 	"fmt"
-	"sync"
 	"time"
+
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 // TopNItem represents a single object in TopN.
@@ -32,7 +33,7 @@ type TopNItem interface {
 
 // TopN maintains the N largest items of multiple dimensions.
 type TopN struct {
-	rw     sync.RWMutex
+	rw     syncutil.RWMutex
 	topns  []*singleTopN
 	ttlLst *ttlList
 }

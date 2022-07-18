@@ -15,10 +15,9 @@
 package cluster
 
 import (
-	"sync"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
@@ -26,7 +25,7 @@ import (
 
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
-	m       sync.RWMutex
+	m       syncutil.RWMutex
 	opt     *config.PersistOptions
 	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State

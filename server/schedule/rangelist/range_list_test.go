@@ -17,45 +17,42 @@ package rangelist
 import (
 	"testing"
 
-	"github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRangeList(t *testing.T) {
-	check.TestingT(t)
-}
-
-var _ = check.Suite(&testRangeListSuite{})
-
-type testRangeListSuite struct{}
-
-func (s *testRangeListSuite) TestRangeList(c *check.C) {
+	re := require.New(t)
 	rl := NewBuilder().Build()
-	c.Assert(rl.Len(), check.Equals, 0)
+	re.Equal(0, rl.Len())
 	i, data := rl.GetDataByKey([]byte("a"))
-	c.Assert(i, check.Equals, -1)
-	c.Assert(data, check.IsNil)
+	re.Equal(-1, i)
+	re.Nil(data)
+
 	i, data = rl.GetData([]byte("a"), []byte("b"))
-	c.Assert(i, check.Equals, -1)
-	c.Assert(data, check.IsNil)
-	c.Assert(rl.GetSplitKeys(nil, []byte("foo")), check.IsNil)
+	re.Equal(-1, i)
+	re.Nil(data)
+
+	re.Nil(rl.GetSplitKeys(nil, []byte("foo")))
 
 	b := NewBuilder()
 	b.AddItem(nil, nil, 1)
 	rl = b.Build()
-	c.Assert(rl.Len(), check.Equals, 1)
+	re.Equal(1, rl.Len())
 	key, data := rl.Get(0)
-	c.Assert(key, check.IsNil)
-	c.Assert(data, check.DeepEquals, []interface{}{1})
+	re.Nil(key)
+
+	re.Equal([]interface{}{1}, data)
 	i, data = rl.GetDataByKey([]byte("foo"))
-	c.Assert(i, check.Equals, 0)
-	c.Assert(data, check.DeepEquals, []interface{}{1})
+	re.Equal(0, i)
+	re.Equal([]interface{}{1}, data)
 	i, data = rl.GetData([]byte("a"), []byte("b"))
-	c.Assert(i, check.Equals, 0)
-	c.Assert(data, check.DeepEquals, []interface{}{1})
-	c.Assert(rl.GetSplitKeys(nil, []byte("foo")), check.IsNil)
+	re.Equal(0, i)
+	re.Equal([]interface{}{1}, data)
+	re.Nil(rl.GetSplitKeys(nil, []byte("foo")))
 }
 
-func (s *testRangeListSuite) TestRangeList2(c *check.C) {
+func TestRangeList2(t *testing.T) {
+	re := require.New(t)
 	b := NewBuilder()
 	b.SetCompareFunc(func(a, b interface{}) int {
 		if a.(int) > b.(int) {
@@ -88,11 +85,11 @@ func (s *testRangeListSuite) TestRangeList2(c *check.C) {
 	}
 
 	rl := b.Build()
-	c.Assert(rl.Len(), check.Equals, len(expectKeys))
+	re.Equal(len(expectKeys), rl.Len())
 	for i := 0; i < rl.Len(); i++ {
 		key, data := rl.Get(i)
-		c.Assert(key, check.DeepEquals, expectKeys[i])
-		c.Assert(data, check.DeepEquals, expectData[i])
+		re.Equal(expectKeys[i], key)
+		re.Equal(expectData[i], data)
 	}
 
 	getDataByKeyCases := []struct {
@@ -101,10 +98,10 @@ func (s *testRangeListSuite) TestRangeList2(c *check.C) {
 	}{
 		{"", 0}, {"a", 1}, {"abc", 1}, {"efg", 5}, {"z", 9},
 	}
-	for _, tc := range getDataByKeyCases {
-		i, data := rl.GetDataByKey([]byte(tc.key))
-		c.Assert(i, check.Equals, tc.pos)
-		c.Assert(data, check.DeepEquals, expectData[i])
+	for _, testCase := range getDataByKeyCases {
+		i, data := rl.GetDataByKey([]byte(testCase.key))
+		re.Equal(testCase.pos, i)
+		re.Equal(expectData[i], data)
 	}
 
 	getDataCases := []struct {
@@ -114,11 +111,11 @@ func (s *testRangeListSuite) TestRangeList2(c *check.C) {
 		{"", "", -1}, {"", "a", 0}, {"", "aa", -1},
 		{"b", "c", 2}, {"ef", "ex", 5}, {"e", "", -1},
 	}
-	for _, tc := range getDataCases {
-		i, data := rl.GetData([]byte(tc.start), []byte(tc.end))
-		c.Assert(i, check.Equals, tc.pos)
+	for _, testCase := range getDataCases {
+		i, data := rl.GetData([]byte(testCase.start), []byte(testCase.end))
+		re.Equal(testCase.pos, i)
 		if i >= 0 {
-			c.Assert(data, check.DeepEquals, expectData[i])
+			re.Equal(expectData[i], data)
 		}
 	}
 
@@ -130,7 +127,7 @@ func (s *testRangeListSuite) TestRangeList2(c *check.C) {
 		{"a", "c", 2, 3},
 		{"cc", "fx", 4, 7},
 	}
-	for _, tc := range getSplitKeysCases {
-		c.Assert(rl.GetSplitKeys([]byte(tc.start), []byte(tc.end)), check.DeepEquals, expectKeys[tc.indexStart:tc.indexEnd])
+	for _, testCase := range getSplitKeysCases {
+		re.Equal(expectKeys[testCase.indexStart:testCase.indexEnd], rl.GetSplitKeys([]byte(testCase.start), []byte(testCase.end)))
 	}
 }

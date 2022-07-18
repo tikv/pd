@@ -24,6 +24,16 @@ import (
 // ByteSize is a retype uint64 for TOML and JSON.
 type ByteSize uint64
 
+// ParseMBFromText parses MB from text.
+func ParseMBFromText(text string, value uint64) uint64 {
+	b := ByteSize(0)
+	err := b.UnmarshalText([]byte(text))
+	if err != nil {
+		return value
+	}
+	return uint64(b / units.MiB)
+}
+
 // MarshalJSON returns the size as a JSON string.
 func (b ByteSize) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + units.BytesSize(float64(b)) + `"`), nil

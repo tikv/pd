@@ -18,22 +18,22 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
 )
-
-var _ = Suite(&clientTLSTestSuite{})
 
 var (
 	testTLSInfo = transport.TLSInfo{
@@ -55,75 +55,59 @@ var (
 	}
 )
 
-type clientTLSTestSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *clientTLSTestSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	server.EnableZap = true
-}
-
-func (s *clientTLSTestSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
 // TestTLSReloadAtomicReplace ensures server reloads expired/valid certs
 // when all certs are atomically replaced by directory renaming.
 // And expects server to reject client requests, and vice versa.
-func (s *clientTLSTestSuite) TestTLSReloadAtomicReplace(c *C) {
-	tmpDir, err := os.MkdirTemp(os.TempDir(), "cert-tmp")
-	c.Assert(err, IsNil)
+func TestTLSReloadAtomicReplace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tmpDir := t.TempDir()
 	os.RemoveAll(tmpDir)
-	defer os.RemoveAll(tmpDir)
 
-	certsDir, err := os.MkdirTemp(os.TempDir(), "cert-to-load")
-	c.Assert(err, IsNil)
-	defer os.RemoveAll(certsDir)
+	certsDir := t.TempDir()
 
-	certsDirExp, err := os.MkdirTemp(os.TempDir(), "cert-expired")
-	c.Assert(err, IsNil)
-	defer os.RemoveAll(certsDirExp)
+	certsDirExp := t.TempDir()
 
 	cloneFunc := func() transport.TLSInfo {
 		tlsInfo, terr := copyTLSFiles(testTLSInfo, certsDir)
-		c.Assert(terr, IsNil)
-		_, err = copyTLSFiles(testTLSInfoExpired, certsDirExp)
-		c.Assert(err, IsNil)
+		re.NoError(terr)
+		_, err := copyTLSFiles(testTLSInfoExpired, certsDirExp)
+		re.NoError(err)
 		return tlsInfo
 	}
 	replaceFunc := func() {
-		err = os.Rename(certsDir, tmpDir)
-		c.Assert(err, IsNil)
+		err := os.Rename(certsDir, tmpDir)
+		re.NoError(err)
 		err = os.Rename(certsDirExp, certsDir)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		// after rename,
 		// 'certsDir' contains expired certs
 		// 'tmpDir' contains valid certs
 		// 'certsDirExp' does not exist
 	}
 	revertFunc := func() {
-		err = os.Rename(tmpDir, certsDirExp)
-		c.Assert(err, IsNil)
+		err := os.Rename(tmpDir, certsDirExp)
+		re.NoError(err)
 
 		err = os.Rename(certsDir, tmpDir)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 
 		err = os.Rename(certsDirExp, certsDir)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 	}
-	s.testTLSReload(c, cloneFunc, replaceFunc, revertFunc)
+	testTLSReload(re, ctx, cloneFunc, replaceFunc, revertFunc)
 }
 
-func (s *clientTLSTestSuite) testTLSReload(
-	c *C,
+func testTLSReload(
+	re *require.Assertions,
+	ctx context.Context,
 	cloneFunc func() transport.TLSInfo,
 	replaceFunc func(),
 	revertFunc func()) {
 	tlsInfo := cloneFunc()
 	// 1. start cluster with valid certs
-	clus, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) {
+	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{
 			KeyPath:  tlsInfo.KeyFile,
 			CertPath: tlsInfo.CertFile,
@@ -135,22 +119,31 @@ func (s *clientTLSTestSuite) testTLSReload(
 		conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
 		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
 	})
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer clus.Destroy()
 	err = clus.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	clus.WaitLeader()
 
 	testServers := clus.GetServers()
 	endpoints := make([]string, 0, len(testServers))
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+		tlsConfig, err := s.GetConfig().Security.ToTLSConfig()
+		re.NoError(err)
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				DisableKeepAlives: true,
+				TLSClientConfig:   tlsConfig,
+			},
+		}
+		re.True(netutil.IsEnableHTTPS(httpClient))
 	}
 	// 2. concurrent client dialing while certs become expired
 	errc := make(chan error, 1)
 	go func() {
 		for {
-			dctx, dcancel := context.WithTimeout(s.ctx, time.Second)
+			dctx, dcancel := context.WithTimeout(ctx, time.Second)
 			cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
 				CAPath:   testClientTLSInfo.TrustedCAFile,
 				CertPath: testClientTLSInfo.CertFile,
@@ -172,46 +165,46 @@ func (s *clientTLSTestSuite) testTLSReload(
 	// 4. expect dial time-out when loading expired certs
 	select {
 	case cerr := <-errc:
-		c.Assert(strings.Contains(cerr.Error(), "failed to get cluster id"), IsTrue)
+		re.Contains(cerr.Error(), "failed to get cluster id")
 	case <-time.After(5 * time.Second):
-		c.Fatal("failed to receive dial timeout error")
+		re.FailNow("failed to receive dial timeout error")
 	}
 
 	// 5. replace expired certs back with valid ones
 	revertFunc()
 
 	// 6. new requests should trigger listener to reload valid certs
-	dctx, dcancel := context.WithTimeout(s.ctx, 5*time.Second)
+	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
 	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
 		CAPath:   testClientTLSInfo.TrustedCAFile,
 		CertPath: testClientTLSInfo.CertFile,
 		KeyPath:  testClientTLSInfo.KeyFile,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	dcancel()
 	cli.Close()
 
 	// 7. test use raw bytes to init tls config
-	caData, certData, keyData := loadTLSContent(c,
+	caData, certData, keyData := loadTLSContent(re,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
-	ctx1, cancel1 := context.WithTimeout(s.ctx, 2*time.Second)
+	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
 	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cancel1()
 }
 
-func loadTLSContent(c *C, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
+func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
 	var err error
 	caData, err = os.ReadFile(caPath)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	certData, err = os.ReadFile(certPath)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	keyData, err = os.ReadFile(keyPath)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	return
 }
 
@@ -234,6 +227,7 @@ func copyTLSFiles(ti transport.TLSInfo, dst string) (transport.TLSInfo, error) {
 	}
 	return ci, nil
 }
+
 func copyFile(src, dst string) error {
 	f, err := os.Open(src)
 	if err != nil {

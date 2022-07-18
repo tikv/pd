@@ -11,15 +11,6 @@ jobs:
     runs-on: ubuntu-latest
     name: Assign to One Project
     steps:
-      - name: Run issues assignment to project Scheduling SIG
-        uses: srggrs/assign-one-project-github-action@1.2.0
-        if: |
-          contains(github.event.issue.labels.*.name, 'component/checker') ||
-          contains(github.event.issue.labels.*.name, 'component/schedule') ||
-          contains(github.event.issue.labels.*.name, 'component/scheduler')
-        with:
-          project: "https://github.com/tikv/pd/projects/5"
-          column_name: "Issue: Need Triage"
       - name: Run issues assignment to Questions and Bug Reports
         uses: srggrs/assign-one-project-github-action@1.2.0
         if: |

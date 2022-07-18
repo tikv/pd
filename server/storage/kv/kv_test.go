@@ -17,81 +17,72 @@ package kv
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"path"
 	"sort"
 	"strconv"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/tempurl"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
 
-func TestKV(t *testing.T) {
-	TestingT(t)
-}
-
-type testKVSuite struct{}
-
-var _ = Suite(&testKVSuite{})
-
-func (s *testKVSuite) TestEtcd(c *C) {
-	cfg := newTestSingleConfig()
-	defer cleanConfig(cfg)
+func TestEtcd(t *testing.T) {
+	re := require.New(t)
+	cfg := newTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer etcd.Close()
 
 	ep := cfg.LCUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 
 	kv := NewEtcdKVBase(client, rootPath)
-	s.testReadWrite(c, kv)
-	s.testRange(c, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
-func (s *testKVSuite) TestLevelDB(c *C) {
-	dir, err := os.MkdirTemp("/tmp", "leveldb_kv")
-	c.Assert(err, IsNil)
-	defer os.RemoveAll(dir)
+func TestLevelDB(t *testing.T) {
+	re := require.New(t)
+	dir := t.TempDir()
 	kv, err := NewLevelDBKV(dir)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	s.testReadWrite(c, kv)
-	s.testRange(c, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
-func (s *testKVSuite) TestMemKV(c *C) {
+func TestMemKV(t *testing.T) {
+	re := require.New(t)
 	kv := NewMemoryKV()
-	s.testReadWrite(c, kv)
-	s.testRange(c, kv)
+	testReadWrite(re, kv)
+	testRange(re, kv)
 }
 
-func (s *testKVSuite) testReadWrite(c *C, kv Base) {
+func testReadWrite(re *require.Assertions, kv Base) {
 	v, err := kv.Load("key")
-	c.Assert(err, IsNil)
-	c.Assert(v, Equals, "")
+	re.NoError(err)
+	re.Equal("", v)
 	err = kv.Save("key", "value")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	v, err = kv.Load("key")
-	c.Assert(err, IsNil)
-	c.Assert(v, Equals, "value")
+	re.NoError(err)
+	re.Equal("value", v)
 	err = kv.Remove("key")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	v, err = kv.Load("key")
-	c.Assert(err, IsNil)
-	c.Assert(v, Equals, "")
+	re.NoError(err)
+	re.Equal("", v)
 	err = kv.Remove("key")
-	c.Assert(err, IsNil)
+	re.NoError(err)
 }
 
-func (s *testKVSuite) testRange(c *C, kv Base) {
+func testRange(re *require.Assertions, kv Base) {
 	keys := []string{
 		"test-a", "test-a/a", "test-a/ab",
 		"test", "test/a", "test/ab",
@@ -99,7 +90,7 @@ func (s *testKVSuite) testRange(c *C, kv Base) {
 	}
 	for _, k := range keys {
 		err := kv.Save(k, k)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 	}
 	sortedKeys := append(keys[:0:0], keys...)
 	sort.Strings(sortedKeys)
@@ -118,18 +109,18 @@ func (s *testKVSuite) testRange(c *C, kv Base) {
 		{start: "test", end: clientv3.GetPrefixRangeEnd("test/"), limit: 100, expect: []string{"test", "test-a", "test-a/a", "test-a/ab", "test/a", "test/ab"}},
 	}
 
-	for _, tc := range testCases {
-		ks, vs, err := kv.LoadRange(tc.start, tc.end, tc.limit)
-		c.Assert(err, IsNil)
-		c.Assert(ks, DeepEquals, tc.expect)
-		c.Assert(vs, DeepEquals, tc.expect)
+	for _, testCase := range testCases {
+		ks, vs, err := kv.LoadRange(testCase.start, testCase.end, testCase.limit)
+		re.NoError(err)
+		re.Equal(testCase.expect, ks)
+		re.Equal(testCase.expect, vs)
 	}
 }
 
-func newTestSingleConfig() *embed.Config {
+func newTestSingleConfig(t *testing.T) *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = "test_etcd"
-	cfg.Dir, _ = os.MkdirTemp("/tmp", "test_etcd")
+	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}
@@ -145,9 +136,4 @@ func newTestSingleConfig() *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
-}
-
-func cleanConfig(cfg *embed.Config) {
-	// Clean data directory
-	os.RemoveAll(cfg.Dir)
 }

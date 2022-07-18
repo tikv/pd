@@ -16,17 +16,20 @@ package statistics
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/tikv/pd/server/core"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersInfos struct {
 	AsPeer   StoreHotPeersStat `json:"as_peer"`
 	AsLeader StoreHotPeersStat `json:"as_leader"`
 }
 
 // StoreHotPeersStat is used to record the hot region statistics group by store.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // GetHotStatus returns the hot status for a given type.
@@ -126,7 +129,7 @@ func summaryStoresLoadByEngine(
 	allHotPeersCount := 0
 
 	for _, info := range storeInfos {
-		store := info.Store
+		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
 		if !ok || !collector.Filter(info, kind) {
@@ -169,9 +172,9 @@ func summaryStoresLoadByEngine(
 
 		// Construct store load info.
 		loadDetail = append(loadDetail, &StoreLoadDetail{
-			Info:     info,
-			LoadPred: stLoadPred,
-			HotPeers: hotPeers,
+			StoreSummaryInfo: info,
+			LoadPred:         stLoadPred,
+			HotPeers:         hotPeers,
 		})
 	}
 
@@ -184,6 +187,19 @@ func summaryStoresLoadByEngine(
 	for i := range expectLoads {
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
+
+	stddevLoads := make([]float64, len(allStoreLoadSum))
+	if allHotPeersCount != 0 {
+		for _, detail := range loadDetail {
+			for i := range expectLoads {
+				stddevLoads[i] += math.Pow(detail.LoadPred.Current.Loads[i]-expectLoads[i], 2)
+			}
+		}
+		for i := range stddevLoads {
+			stddevLoads[i] = math.Sqrt(stddevLoads[i]/float64(allStoreCount)) / expectLoads[i]
+		}
+	}
+
 	{
 		// Metric for debug.
 		engine := collector.Engine()
@@ -195,13 +211,24 @@ func summaryStoresLoadByEngine(
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[QueryDim])
 		ty = "exp-count-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
+		ty = "stddev-byte-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[ByteDim])
+		ty = "stddev-key-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[KeyDim])
+		ty = "stddev-query-rate-" + rwTy.String() + "-" + kind.String()
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[QueryDim])
 	}
 	expect := StoreLoad{
 		Loads: expectLoads,
-		Count: float64(allHotPeersCount) / float64(allStoreCount),
+		Count: expectCount,
+	}
+	stddev := StoreLoad{
+		Loads: stddevLoads,
+		Count: expectCount,
 	}
 	for _, detail := range loadDetail {
 		detail.LoadPred.Expect = expect
+		detail.LoadPred.Stddev = stddev
 	}
 	return loadDetail
 }

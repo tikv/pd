@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -84,13 +85,13 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
-// NewStoreInfoWithAvailable is create with available and capacity
+// NewStoreInfoWithAvailable is created with available and capacity
 func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity
 	stats.Available = available
 	usedSize := capacity - available
-	regionSize := (float64(usedSize) * amp) / mb
+	regionSize := (float64(usedSize) * amp) / units.MiB
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
@@ -112,8 +113,8 @@ func NewStoreInfoWithLabel(id uint64, regionCount int, labels map[string]string)
 		})
 	}
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = uint64(1024)
-	stats.Available = uint64(1024)
+	stats.Capacity = units.GiB / units.MiB
+	stats.Available = units.GiB / units.MiB
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id:     id,
@@ -129,8 +130,8 @@ func NewStoreInfoWithLabel(id uint64, regionCount int, labels map[string]string)
 // NewStoreInfoWithSizeCount is create a store with size and count.
 func NewStoreInfoWithSizeCount(id uint64, regionCount, leaderCount int, regionSize, leaderSize int64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = uint64(1024)
-	stats.Available = uint64(1024)
+	stats.Capacity = units.GiB / units.MiB
+	stats.Available = units.GiB / units.MiB
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,

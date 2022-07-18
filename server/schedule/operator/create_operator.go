@@ -15,8 +15,8 @@
 package operator
 
 import (
-	"encoding/hex"
 	"fmt"
+	"github.com/tikv/pd/pkg/logutil"
 	"math/rand"
 
 	"github.com/pingcap/errors"
@@ -129,11 +129,14 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 	if len(keys) > 0 {
 		hexKeys := make([]string, len(keys))
 		for i := range keys {
-			hexKeys[i] = hex.EncodeToString(keys[i])
+			hexKeys[i] = core.HexRegionKeyStr(logutil.RedactBytes(keys[i]))
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step), nil
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
+	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey()))
+	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey()))
+	return op, nil
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
@@ -216,6 +219,9 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 		EnableForceTargetLeader().
 		Build(0)
 }
+
+// OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.
+const OpDescLeaveJointState = "leave-joint-state"
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
 func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core.RegionInfo) (*Operator, error) {

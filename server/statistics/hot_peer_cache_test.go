@@ -20,26 +20,25 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 )
 
-var _ = Suite(&testHotPeerCache{})
-
-type testHotPeerCache struct{}
-
-func (t *testHotPeerCache) TestStoreTimeUnsync(c *C) {
+func TestStoreTimeUnsync(t *testing.T) {
+	re := require.New(t)
 	cache := NewHotPeerCache(Write)
 	intervals := []uint64{120, 60}
 	for _, interval := range intervals {
 		region := buildRegion(Write, 3, interval)
-		checkAndUpdate(c, cache, region, 3)
+		checkAndUpdate(re, cache, region, 3)
 		{
 			stats := cache.RegionStats(0)
-			c.Assert(stats, HasLen, 3)
+			re.Len(stats, 3)
 			for _, s := range stats {
-				c.Assert(s, HasLen, 1)
+				re.Len(s, 1)
 			}
 		}
 	}
@@ -61,7 +60,8 @@ type testCacheCase struct {
 	actionType ActionType
 }
 
-func (t *testHotPeerCache) TestCache(c *C) {
+func TestCache(t *testing.T) {
+	re := require.New(t)
 	tests := []*testCacheCase{
 		{Read, transferLeader, 3, Update},
 		{Read, movePeer, 4, Remove},
@@ -70,26 +70,22 @@ func (t *testHotPeerCache) TestCache(c *C) {
 		{Write, movePeer, 4, Remove},
 		{Write, addReplica, 4, Remove},
 	}
-	for _, t := range tests {
-		testCache(c, t)
-	}
-}
+	for _, test := range tests {
+		defaultSize := map[RWType]int{
+			Read:  3, // all peers
+			Write: 3, // all peers
+		}
+		cache := NewHotPeerCache(test.kind)
+		region := buildRegion(test.kind, 3, 60)
+		checkAndUpdate(re, cache, region, defaultSize[test.kind])
+		checkHit(re, cache, region, test.kind, Add) // all peers are new
 
-func testCache(c *C, t *testCacheCase) {
-	defaultSize := map[RWType]int{
-		Read:  3, // all peers
-		Write: 3, // all peers
-	}
-	cache := NewHotPeerCache(t.kind)
-	region := buildRegion(t.kind, 3, 60)
-	checkAndUpdate(c, cache, region, defaultSize[t.kind])
-	checkHit(c, cache, region, t.kind, Add) // all peers are new
-
-	srcStore, region := schedule(c, t.operator, region, 10)
-	res := checkAndUpdate(c, cache, region, t.expect)
-	checkHit(c, cache, region, t.kind, Update) // hit cache
-	if t.expect != defaultSize[t.kind] {
-		checkOp(c, res, srcStore, t.actionType)
+		srcStore, region := schedule(re, test.operator, region, 10)
+		res := checkAndUpdate(re, cache, region, test.expect)
+		checkHit(re, cache, region, test.kind, Update) // hit cache
+		if test.expect != defaultSize[test.kind] {
+			checkOp(re, res, srcStore, test.actionType)
+		}
 	}
 }
 
@@ -126,35 +122,35 @@ func updateFlow(cache *hotPeerCache, res []*HotPeerStat) []*HotPeerStat {
 	return res
 }
 
-type check func(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat)
+type check func(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat)
 
-func checkAndUpdate(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+func checkAndUpdate(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
 	res = checkFlow(cache, region, region.GetPeers())
 	if len(expect) != 0 {
-		c.Assert(res, HasLen, expect[0])
+		re.Len(res, expect[0])
 	}
 	return updateFlow(cache, res)
 }
 
 // Check and update peers in the specified order that old item that he items that have not expired come first, and the items that have expired come second.
 // This order is also similar to the previous version. By the way the order in now version is random.
-func checkAndUpdateWithOrdering(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+func checkAndUpdateWithOrdering(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
 	res = checkFlow(cache, region, orderingPeers(cache, region))
 	if len(expect) != 0 {
-		c.Assert(res, HasLen, expect[0])
+		re.Len(res, expect[0])
 	}
 	return updateFlow(cache, res)
 }
 
-func checkAndUpdateSkipOne(c *C, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
+func checkAndUpdateSkipOne(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect ...int) (res []*HotPeerStat) {
 	res = checkFlow(cache, region, region.GetPeers()[1:])
 	if len(expect) != 0 {
-		c.Assert(res, HasLen, expect[0])
+		re.Len(res, expect[0])
 	}
 	return updateFlow(cache, res)
 }
 
-func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, actionType ActionType) {
+func checkHit(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, kind RWType, actionType ActionType) {
 	var peers []*metapb.Peer
 	if kind == Read {
 		peers = []*metapb.Peer{region.GetLeader()}
@@ -163,15 +159,15 @@ func checkHit(c *C, cache *hotPeerCache, region *core.RegionInfo, kind RWType, a
 	}
 	for _, peer := range peers {
 		item := cache.getOldHotPeerStat(region.GetID(), peer.StoreId)
-		c.Assert(item, NotNil)
-		c.Assert(item.actionType, Equals, actionType)
+		re.NotNil(item)
+		re.Equal(actionType, item.actionType)
 	}
 }
 
-func checkOp(c *C, ret []*HotPeerStat, storeID uint64, actionType ActionType) {
+func checkOp(re *require.Assertions, ret []*HotPeerStat, storeID uint64, actionType ActionType) {
 	for _, item := range ret {
 		if item.StoreID == storeID {
-			c.Assert(item.actionType, Equals, actionType)
+			re.Equal(actionType, item.actionType)
 			return
 		}
 	}
@@ -191,7 +187,7 @@ func checkIntervalSum(cache *hotPeerCache, region *core.RegionInfo) bool {
 }
 
 // checkIntervalSumContinuous checks whether the interval sum of the peer is continuous.
-func checkIntervalSumContinuous(c *C, intervalSums map[uint64]int, rets []*HotPeerStat, interval uint64) {
+func checkIntervalSumContinuous(re *require.Assertions, intervalSums map[uint64]int, rets []*HotPeerStat, interval uint64) {
 	for _, ret := range rets {
 		if ret.actionType == Remove {
 			delete(intervalSums, ret.StoreID)
@@ -200,27 +196,27 @@ func checkIntervalSumContinuous(c *C, intervalSums map[uint64]int, rets []*HotPe
 		new := int(ret.getIntervalSum() / 1000000000)
 		if ret.source == direct {
 			if old, ok := intervalSums[ret.StoreID]; ok {
-				c.Assert(new, Equals, (old+int(interval))%RegionHeartBeatReportInterval)
+				re.Equal((old+int(interval))%RegionHeartBeatReportInterval, new)
 			}
 		}
 		intervalSums[ret.StoreID] = new
 	}
 }
 
-func schedule(c *C, operator operator, region *core.RegionInfo, targets ...uint64) (srcStore uint64, _ *core.RegionInfo) {
+func schedule(re *require.Assertions, operator operator, region *core.RegionInfo, targets ...uint64) (srcStore uint64, _ *core.RegionInfo) {
 	switch operator {
 	case transferLeader:
 		_, newLeader := pickFollower(region)
 		return region.GetLeader().StoreId, region.Clone(core.WithLeader(newLeader))
 	case movePeer:
-		c.Assert(targets, HasLen, 1)
+		re.Len(targets, 1)
 		index, _ := pickFollower(region)
 		srcStore := region.GetPeers()[index].StoreId
 		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: targets[0]*10 + 1, StoreId: targets[0]}))
 		region = region.Clone(core.WithRemoveStorePeer(srcStore))
 		return srcStore, region
 	case addReplica:
-		c.Assert(targets, HasLen, 1)
+		re.Len(targets, 1)
 		region := region.Clone(core.WithAddPeer(&metapb.Peer{Id: targets[0]*10 + 1, StoreId: targets[0]}))
 		return 0, region
 	case removeReplica:
@@ -274,8 +270,8 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 			meta,
 			leader,
 			core.SetReportInterval(interval),
-			core.SetReadBytes(10*1024*1024*interval),
-			core.SetReadKeys(10*1024*1024*interval),
+			core.SetReadBytes(10*units.MiB*interval),
+			core.SetReadKeys(10*units.MiB*interval),
 			core.SetReadQuery(1024*interval),
 		)
 	case Write:
@@ -283,8 +279,8 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 			meta,
 			leader,
 			core.SetReportInterval(interval),
-			core.SetWrittenBytes(10*1024*1024*interval),
-			core.SetWrittenKeys(10*1024*1024*interval),
+			core.SetWrittenBytes(10*units.MiB*interval),
+			core.SetWrittenKeys(10*units.MiB*interval),
 			core.SetWrittenQuery(1024*interval),
 		)
 	default:
@@ -306,7 +302,8 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 	return peers
 }
 
-func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
+func TestUpdateHotPeerStat(t *testing.T) {
+	re := require.New(t)
 	cache := NewHotPeerCache(Read)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
@@ -314,69 +311,70 @@ func (t *testHotPeerCache) TestUpdateHotPeerStat(c *C) {
 	// skip interval=0
 	newItem := &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
-	c.Check(newItem, IsNil)
+	re.Nil(newItem)
 
 	// new peer, interval is larger than report interval, but no hot
 	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
-	c.Check(newItem, IsNil)
+	re.Nil(newItem)
 
 	// new peer, interval is less than report interval
 	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
 	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
-	c.Check(newItem, NotNil)
-	c.Check(newItem.HotDegree, Equals, 0)
-	c.Check(newItem.AntiCount, Equals, 0)
+	re.NotNil(newItem)
+	re.Equal(0, newItem.HotDegree)
+	re.Equal(0, newItem.AntiCount)
 	// sum of interval is less than report interval
 	oldItem := newItem
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
-	c.Check(newItem.HotDegree, Equals, 0)
-	c.Check(newItem.AntiCount, Equals, 0)
+	re.Equal(0, newItem.HotDegree)
+	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
-	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2*m)
+	re.Equal(1, newItem.HotDegree)
+	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is less than report interval
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
-	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2*m)
+	re.Equal(1, newItem.HotDegree)
+	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
-	c.Check(newItem.HotDegree, Equals, 2)
-	c.Check(newItem.AntiCount, Equals, 2*m)
+	re.Equal(2, newItem.HotDegree)
+	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is larger than report interval, and cold
 	oldItem = newItem
 	newItem.thresholds = []float64{10.0, 10.0, 10.0}
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
-	c.Check(newItem.HotDegree, Equals, 1)
-	c.Check(newItem.AntiCount, Equals, 2*m-1)
+	re.Equal(1, newItem.HotDegree)
+	re.Equal(2*m-1, newItem.AntiCount)
 	// sum of interval is larger than report interval, and cold
 	for i := 0; i < 2*m-1; i++ {
 		oldItem = newItem
 		newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
 	}
-	c.Check(newItem.HotDegree, Less, 0)
-	c.Check(newItem.AntiCount, Equals, 0)
-	c.Check(newItem.actionType, Equals, Remove)
+	re.Less(newItem.HotDegree, 0)
+	re.Equal(0, newItem.AntiCount)
+	re.Equal(Remove, newItem.actionType)
 }
 
-func (t *testHotPeerCache) TestThresholdWithUpdateHotPeerStat(c *C) {
+func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
+	re := require.New(t)
 	byteRate := minHotThresholds[RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
-	t.testMetrics(c, 120., byteRate, expectThreshold)
-	t.testMetrics(c, 60., byteRate, expectThreshold)
-	t.testMetrics(c, 30., byteRate, expectThreshold)
-	t.testMetrics(c, 17., byteRate, expectThreshold)
-	t.testMetrics(c, 1., byteRate, expectThreshold)
+	testMetrics(re, 120., byteRate, expectThreshold)
+	testMetrics(re, 60., byteRate, expectThreshold)
+	testMetrics(re, 30., byteRate, expectThreshold)
+	testMetrics(re, 17., byteRate, expectThreshold)
+	testMetrics(re, 1., byteRate, expectThreshold)
 }
 
-func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold float64) {
+func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
-	c.Assert(byteRate, GreaterEqual, minHotThresholds[RegionReadBytes])
+	re.GreaterOrEqual(byteRate, minHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		for {
@@ -400,14 +398,15 @@ func (t *testHotPeerCache) testMetrics(c *C, interval, byteRate, expectThreshold
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			c.Assert(thresholds[RegionReadBytes], Equals, minHotThresholds[RegionReadBytes])
+			re.Equal(minHotThresholds[RegionReadBytes], thresholds[RegionReadBytes])
 		} else {
-			c.Assert(thresholds[RegionReadBytes], Equals, expectThreshold)
+			re.Equal(expectThreshold, thresholds[RegionReadBytes])
 		}
 	}
 }
 
-func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
+func TestRemoveFromCache(t *testing.T) {
+	re := require.New(t)
 	peerCount := 3
 	interval := uint64(5)
 	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
@@ -417,29 +416,30 @@ func (t *testHotPeerCache) TestRemoveFromCache(c *C) {
 		// prepare
 		intervalSums := make(map[uint64]int)
 		for i := 1; i <= 200; i++ {
-			rets := checker(c, cache, region)
-			checkIntervalSumContinuous(c, intervalSums, rets, interval)
+			rets := checker(re, cache, region)
+			checkIntervalSumContinuous(re, intervalSums, rets, interval)
 		}
 		// make the interval sum of peers are different
-		checkAndUpdateSkipOne(c, cache, region)
+		checkAndUpdateSkipOne(re, cache, region)
 		checkIntervalSum(cache, region)
 		// check whether cold cache is cleared
 		var isClear bool
 		intervalSums = make(map[uint64]int)
 		region = region.Clone(core.SetWrittenBytes(0), core.SetWrittenKeys(0), core.SetWrittenQuery(0))
 		for i := 1; i <= 200; i++ {
-			rets := checker(c, cache, region)
-			checkIntervalSumContinuous(c, intervalSums, rets, interval)
+			rets := checker(re, cache, region)
+			checkIntervalSumContinuous(re, intervalSums, rets, interval)
 			if len(cache.storesOfRegion[region.GetID()]) == 0 {
 				isClear = true
 				break
 			}
 		}
-		c.Assert(isClear, IsTrue)
+		re.True(isClear)
 	}
 }
 
-func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
+func TestRemoveFromCacheRandom(t *testing.T) {
+	re := require.New(t)
 	peerCounts := []int{3, 5}
 	intervals := []uint64{120, 60, 10, 5}
 	checkers := []check{checkAndUpdate, checkAndUpdateWithOrdering}
@@ -454,12 +454,12 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 				step := func(i int) {
 					tmp := uint64(0)
 					if i%5 == 0 {
-						tmp, region = schedule(c, removeReplica, region)
+						tmp, region = schedule(re, removeReplica, region)
 					}
-					rets := checker(c, cache, region)
-					checkIntervalSumContinuous(c, intervalSums, rets, interval)
+					rets := checker(re, cache, region)
+					checkIntervalSumContinuous(re, intervalSums, rets, interval)
 					if i%5 == 0 {
-						_, region = schedule(c, addReplica, region, target)
+						_, region = schedule(re, addReplica, region, target)
 						target = tmp
 					}
 				}
@@ -472,9 +472,9 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 					}
 				}
 				if interval < RegionHeartBeatReportInterval {
-					c.Assert(checkIntervalSum(cache, region), IsTrue)
+					re.True(checkIntervalSum(cache, region))
 				}
-				c.Assert(cache.storesOfRegion[region.GetID()], HasLen, peerCount)
+				re.Len(cache.storesOfRegion[region.GetID()], peerCount)
 
 				// check whether cold cache is cleared
 				var isClear bool
@@ -487,97 +487,148 @@ func (t *testHotPeerCache) TestRemoveFromCacheRandom(c *C) {
 						break
 					}
 				}
-				c.Assert(isClear, IsTrue)
+				re.True(isClear)
 			}
 		}
 	}
 }
 
-func checkCoolDown(c *C, cache *hotPeerCache, region *core.RegionInfo, expect bool) {
+func checkCoolDown(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect bool) {
 	item := cache.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
-	c.Assert(item.IsNeedCoolDownTransferLeader(3), Equals, expect)
+	re.Equal(expect, item.IsNeedCoolDownTransferLeader(3))
 }
 
-func (t *testHotPeerCache) TestCoolDownTransferLeader(c *C) {
+func TestCoolDownTransferLeader(t *testing.T) {
+	re := require.New(t)
 	cache := NewHotPeerCache(Read)
 	region := buildRegion(Read, 3, 60)
 
 	moveLeader := func() {
-		_, region = schedule(c, movePeer, region, 10)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, false)
-		_, region = schedule(c, transferLeader, region, 10)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, true)
+		_, region = schedule(re, movePeer, region, 10)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, false)
+		_, region = schedule(re, transferLeader, region, 10)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, true)
 	}
 	transferLeader := func() {
-		_, region = schedule(c, transferLeader, region)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, true)
+		_, region = schedule(re, transferLeader, region)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, true)
 	}
 	movePeer := func() {
-		_, region = schedule(c, movePeer, region, 10)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, false)
+		_, region = schedule(re, movePeer, region, 10)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, false)
 	}
 	addReplica := func() {
-		_, region = schedule(c, addReplica, region, 10)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, false)
+		_, region = schedule(re, addReplica, region, 10)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, false)
 	}
 	removeReplica := func() {
-		_, region = schedule(c, removeReplica, region, 10)
-		checkAndUpdate(c, cache, region)
-		checkCoolDown(c, cache, region, false)
+		_, region = schedule(re, removeReplica, region, 10)
+		checkAndUpdate(re, cache, region)
+		checkCoolDown(re, cache, region, false)
 	}
-	cases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
-	for _, runCase := range cases {
+	testCases := []func(){moveLeader, transferLeader, movePeer, addReplica, removeReplica}
+	for _, testCase := range testCases {
 		cache = NewHotPeerCache(Read)
 		region = buildRegion(Read, 3, 60)
 		for i := 1; i <= 200; i++ {
-			checkAndUpdate(c, cache, region)
+			checkAndUpdate(re, cache, region)
 		}
-		checkCoolDown(c, cache, region, false)
-		runCase()
+		checkCoolDown(re, cache, region, false)
+		testCase()
 	}
 }
 
 // See issue #4510
-func (t *testHotPeerCache) TestCacheInherit(c *C) {
+func TestCacheInherit(t *testing.T) {
+	re := require.New(t)
 	cache := NewHotPeerCache(Read)
 	region := buildRegion(Read, 3, 10)
 	// prepare
 	for i := 1; i <= 200; i++ {
-		checkAndUpdate(c, cache, region)
+		checkAndUpdate(re, cache, region)
 	}
 	// move peer
 	newStoreID := uint64(10)
-	_, region = schedule(c, addReplica, region, newStoreID)
-	checkAndUpdate(c, cache, region)
-	newStoreID, region = schedule(c, removeReplica, region)
-	rets := checkAndUpdate(c, cache, region)
+	_, region = schedule(re, addReplica, region, newStoreID)
+	checkAndUpdate(re, cache, region)
+	newStoreID, region = schedule(re, removeReplica, region)
+	rets := checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
 			flow := ret.GetLoads()[RegionReadBytes]
-			c.Assert(flow, Equals, float64(region.GetBytesRead()/ReadReportInterval))
+			re.Equal(float64(region.GetBytesRead()/ReadReportInterval), flow)
 		}
 	}
 	// new flow
 	newFlow := region.GetBytesRead() * 10
 	region = region.Clone(core.SetReadBytes(newFlow))
 	for i := 1; i <= 200; i++ {
-		checkAndUpdate(c, cache, region)
+		checkAndUpdate(re, cache, region)
 	}
 	// move peer
-	_, region = schedule(c, addReplica, region, newStoreID)
-	checkAndUpdate(c, cache, region)
-	_, region = schedule(c, removeReplica, region)
-	rets = checkAndUpdate(c, cache, region)
+	_, region = schedule(re, addReplica, region, newStoreID)
+	checkAndUpdate(re, cache, region)
+	_, region = schedule(re, removeReplica, region)
+	rets = checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
 			flow := ret.GetLoads()[RegionReadBytes]
-			c.Assert(flow, Equals, float64(newFlow/ReadReportInterval))
+			re.Equal(float64(newFlow/ReadReportInterval), flow)
 		}
+	}
+}
+
+type testMovingAverageCase struct {
+	report []float64
+	expect []float64
+}
+
+func checkMovingAverage(re *require.Assertions, testCase *testMovingAverageCase) {
+	interval := 1 * time.Second
+	tm := movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
+	var results []float64
+	for _, data := range testCase.report {
+		tm.Add(data, interval)
+		results = append(results, tm.Get())
+	}
+	re.Equal(testCase.expect, results)
+}
+
+func TestUnstableData(t *testing.T) {
+	re := require.New(t)
+	testCases := []*testMovingAverageCase{
+		{
+			report: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+			expect: []float64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 1, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 1, 1, 1, 0, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 1, 1, 1, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 1, 0, 0},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		},
+		{
+			report: []float64{0, 0, 0, 0, 0, 1, 0, 1, 0, 1},
+			expect: []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+		},
+	}
+	for _, testCase := range testCases {
+		checkMovingAverage(re, testCase)
 	}
 }
 

@@ -6,6 +6,11 @@ error = '''
 KMS error
 '''
 
+["PD:apiutil:ErrOptionNotExist"]
+error = '''
+the option %s does not exist
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -41,6 +46,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:checker:ErrCheckerMergeAgain"]
+error = '''
+region will be merged again, %s
+'''
+
 ["PD:checker:ErrCheckerNotFound"]
 error = '''
 checker not found
@@ -48,7 +58,7 @@ checker not found
 
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
-create TSO stream failed
+create TSO stream failed, %s
 '''
 
 ["PD:client:ErrClientGetLeader"]
@@ -91,6 +101,11 @@ error = '''
 incorrect system time
 '''
 
+["PD:core:ErrNoStoreForRegionLeader"]
+error = '''
+can not remove store %d since there are no extra up store to store the leader
+'''
+
 ["PD:core:ErrPauseLeaderTransfer"]
 error = '''
 store %v is paused for leader transfer
@@ -98,7 +113,7 @@ store %v is paused for leader transfer
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
-store %v is evited as a slow store
+store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -111,14 +126,24 @@ error = '''
 store %v not found
 '''
 
-["PD:core:ErrStoreTombstone"]
+["PD:core:ErrStoreRemoved"]
 error = '''
 store %v has been removed
+'''
+
+["PD:core:ErrStoreServing"]
+error = '''
+store %v has been serving
 '''
 
 ["PD:core:ErrStoreUnhealthy"]
 error = '''
 store %v is unhealthy
+'''
+
+["PD:core:ErrStoresNotEnough"]
+error = '''
+can not remove store %v since the number of up stores would be %v while need %v
 '''
 
 ["PD:core:ErrWrongRangeKeys"]
@@ -276,6 +301,11 @@ error = '''
 etcd member list failed
 '''
 
+["PD:etcd:ErrEtcdMemberRemove"]
+error = '''
+etcd remove member failed
+'''
+
 ["PD:etcd:ErrEtcdMoveLeader"]
 error = '''
 etcd move leader error
@@ -319,6 +349,11 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:gin:ErrBindJSON"]
+error = '''
+bind JSON error
 '''
 
 ["PD:grpc:ErrCloseGRPCConn"]
@@ -466,6 +501,16 @@ error = '''
 failed to lookup plugin function
 '''
 
+["PD:progress:ErrProgressNotFound"]
+error = '''
+no progress found for %s
+'''
+
+["PD:progress:ErrProgressWrongStatus"]
+error = '''
+progress status is wrong
+'''
+
 ["PD:prometheus:ErrPrometheusCreateClient"]
 error = '''
 create client error
@@ -591,9 +636,19 @@ error = '''
 leader is nil
 '''
 
+["PD:server:ErrServerNotStarted"]
+error = '''
+server not started
+'''
+
 ["PD:server:ErrServiceRegistered"]
 error = '''
 service with path [%s] already registered
+'''
+
+["PD:strconv:ErrStrconvParseBool"]
+error = '''
+parse bool error
 '''
 
 ["PD:strconv:ErrStrconvParseFloat"]
@@ -654,6 +709,16 @@ sync max ts failed, %s
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"]
+error = '''
+invalid input %s
+'''
+
+["PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"]
+error = '''
+unsafe recovery is running
 '''
 
 ["PD:url:ErrQueryUnescape"]

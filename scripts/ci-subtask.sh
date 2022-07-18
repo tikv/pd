@@ -9,7 +9,6 @@ tasks=($(comm -12 <(printf "%s\n" "${packages[@]}") <(printf "%s\n" "${dirs[@]}"
 weight () {
     [[ $1 == "github.com/tikv/pd/server/api" ]] && return 30
     [[ $1 == "github.com/tikv/pd/server/schedule" ]] && return 30
-    [[ $1 == "github.com/tikv/pd/tests/client" ]] && return 30
     [[ $1 =~ "pd/tests" ]] && return 5
     return 1
 }

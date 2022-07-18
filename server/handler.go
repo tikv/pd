@@ -17,25 +17,28 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
@@ -73,6 +76,8 @@ var (
 	ErrPluginNotFound = func(pluginPath string) error {
 		return errors.Errorf("plugin is not found: %s", pluginPath)
 	}
+
+	schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -80,11 +85,11 @@ type Handler struct {
 	s               *Server
 	opt             *config.PersistOptions
 	pluginChMap     map[string]chan string
-	pluginChMapLock sync.RWMutex
+	pluginChMapLock syncutil.RWMutex
 }
 
 func newHandler(s *Server) *Handler {
-	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: sync.RWMutex{}}
+	return &Handler{s: s, opt: s.persistOptions, pluginChMap: make(map[string]chan string), pluginChMapLock: syncutil.RWMutex{}}
 }
 
 // GetRaftCluster returns RaftCluster.
@@ -344,6 +349,11 @@ func (h *Handler) AddEvictSlowStoreScheduler() error {
 	return h.AddScheduler(schedulers.EvictSlowStoreType)
 }
 
+// AddSplitBucketScheduler adds a split-bucket-scheduler.
+func (h *Handler) AddSplitBucketScheduler() error {
+	return h.AddScheduler(schedulers.SplitBucketType)
+}
+
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
 	return h.AddScheduler(schedulers.RandomMergeType)
@@ -455,6 +465,19 @@ func (h *Handler) GetHistory(start time.Time) ([]operator.OpHistory, error) {
 		return nil, err
 	}
 	return c.GetHistory(start), nil
+}
+
+// GetRecords returns finished operators since start.
+func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	records := c.GetRecords(from)
+	if len(records) == 0 {
+		return nil, ErrOperatorNotFound
+	}
+	return records, nil
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
@@ -727,11 +750,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionReplicated(c, region) {
+	if !filter.IsRegionHealthy(region) || !filter.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !schedule.IsRegionHealthy(target) || !schedule.IsRegionReplicated(c, target) {
+	if !filter.IsRegionHealthy(target) || !filter.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -851,6 +874,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	for _, op := range ops {
+		op.AttachKind(operator.OpAdmin)
 		if ok := c.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
@@ -872,10 +896,10 @@ func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.
 }
 
 // GetSchedulerConfigHandler gets the handler of schedulers.
-func (h *Handler) GetSchedulerConfigHandler() http.Handler {
+func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
@@ -883,7 +907,7 @@ func (h *Handler) GetSchedulerConfigHandler() http.Handler {
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
-	return mux
+	return mux, nil
 }
 
 // GetOfflinePeer gets the region with offline peer.
@@ -917,6 +941,16 @@ func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelim
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
 	cluster := h.s.GetRaftCluster()
 	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
+}
+
+// GetProgressByID returns the progress details for a given store ID.
+func (h *Handler) GetProgressByID(storeID string) (action string, p, ls, cs float64, err error) {
+	return h.s.GetRaftCluster().GetProgressByID(storeID)
+}
+
+// GetProgressByAction returns the progress details for a given action.
+func (h *Handler) GetProgressByAction(action string) (p, ls, cs float64, err error) {
+	return h.s.GetRaftCluster().GetProgressByAction(action)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
@@ -1045,11 +1079,66 @@ func checkStoreState(rc *cluster.RaftCluster, storeID uint64) error {
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if store.IsTombstone() {
-		return errs.ErrStoreTombstone.FastGenByArgs(storeID)
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
 	}
 	if store.IsUnhealthy() {
 		return errs.ErrStoreUnhealthy.FastGenByArgs(storeID)
 	}
 	return nil
+}
+
+// RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
+func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
+	input := make(map[string]interface{})
+	input["name"] = name
+	input["store_id"] = storeID
+	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	return apiutil.PostJSONIgnoreResp(h.s.GetHTTPClient(), updateURL, body)
+}
+
+// AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
+func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
+	if exist, err := h.IsSchedulerExisted(name); !exist {
+		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			return err
+		}
+		switch name {
+		case schedulers.EvictLeaderName:
+			err = h.AddEvictLeaderScheduler(uint64(storeID))
+		case schedulers.GrantLeaderName:
+			err = h.AddGrantLeaderScheduler(uint64(storeID))
+		}
+		if err != nil {
+			return err
+		}
+	} else {
+		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+			return err
+		}
+		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+	}
+	return nil
+}
+
+// GetPausedSchedulerDelayAt returns paused unix timestamp when a scheduler is paused
+func (h *Handler) GetPausedSchedulerDelayAt(name string) (int64, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return -1, err
+	}
+	return rc.GetPausedSchedulerDelayAt(name)
+}
+
+// GetPausedSchedulerDelayUntil returns resume unix timestamp when a scheduler is paused
+func (h *Handler) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return -1, err
+	}
+	return rc.GetPausedSchedulerDelayUntil(name)
 }

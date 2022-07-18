@@ -17,8 +17,10 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/requestutil"
 	"github.com/tikv/pd/server"
@@ -26,6 +28,23 @@ import (
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
 )
+
+// serviceMiddlewareBuilder is used to build service middleware for HTTP api
+type serviceMiddlewareBuilder struct {
+	svr      *server.Server
+	handlers []negroni.Handler
+}
+
+func newServiceMiddlewareBuilder(s *server.Server) *serviceMiddlewareBuilder {
+	return &serviceMiddlewareBuilder{
+		svr:      s,
+		handlers: []negroni.Handler{newRequestInfoMiddleware(s), newAuditMiddleware(s), newRateLimitMiddleware(s)},
+	}
+}
+
+func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, *http.Request)) http.Handler {
+	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
+}
 
 // requestInfoMiddleware is used to gather info from requsetInfo
 type requestInfoMiddleware struct {
@@ -37,7 +56,7 @@ func newRequestInfoMiddleware(s *server.Server) negroni.Handler {
 }
 
 func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	if !rm.svr.IsServiceMiddlewareEnabled() {
+	if !rm.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() && !rm.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
 		next(w, r)
 		return
 	}
@@ -85,4 +104,83 @@ type clusterCtxKey struct{}
 
 func getCluster(r *http.Request) *cluster.RaftCluster {
 	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
+}
+
+type auditMiddleware struct {
+	svr *server.Server
+}
+
+func newAuditMiddleware(s *server.Server) negroni.Handler {
+	return &auditMiddleware{svr: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for auditMiddleware
+func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !s.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() {
+		next(w, r)
+		return
+	}
+
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		requestInfo = requestutil.GetRequestInfo(r)
+	}
+
+	labels := s.svr.GetServiceAuditBackendLabels(requestInfo.ServiceLabel)
+	if labels == nil {
+		next(w, r)
+		return
+	}
+
+	beforeNextBackends := make([]audit.Backend, 0)
+	afterNextBackends := make([]audit.Backend, 0)
+	for _, backend := range s.svr.GetAuditBackend() {
+		if backend.Match(labels) {
+			if backend.ProcessBeforeHandler() {
+				beforeNextBackends = append(beforeNextBackends, backend)
+			} else {
+				afterNextBackends = append(afterNextBackends, backend)
+			}
+		}
+	}
+	for _, backend := range beforeNextBackends {
+		backend.ProcessHTTPRequest(r)
+	}
+
+	next(w, r)
+
+	endTime := time.Now().Unix()
+	r = r.WithContext(requestutil.WithEndTime(r.Context(), endTime))
+	for _, backend := range afterNextBackends {
+		backend.ProcessHTTPRequest(r)
+	}
+}
+
+type rateLimitMiddleware struct {
+	svr *server.Server
+}
+
+func newRateLimitMiddleware(s *server.Server) negroni.Handler {
+	return &rateLimitMiddleware{svr: s}
+}
+
+// ServeHTTP is used to implememt negroni.Handler for rateLimitMiddleware
+func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	if !s.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
+		next(w, r)
+		return
+	}
+	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
+	if !ok {
+		requestInfo = requestutil.GetRequestInfo(r)
+	}
+
+	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
+	rateLimiter := s.svr.GetServiceRateLimiter()
+	if rateLimiter.Allow(requestInfo.ServiceLabel) {
+		defer rateLimiter.Release(requestInfo.ServiceLabel)
+		next(w, r)
+	} else {
+		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+	}
 }

@@ -16,10 +16,10 @@ package cache
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +30,7 @@ type ttlCacheItem struct {
 
 // ttlCache is a cache that assigns TTL (Time-To-Live) for each items.
 type ttlCache struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	ctx context.Context
 
 	items      map[interface{}]ttlCacheItem
@@ -165,6 +165,23 @@ func (c *ttlCache) doGC() {
 			return
 		}
 	}
+}
+
+// UpdateTTL updates the TTL for the cache.
+func (c *ttlCache) UpdateTTL(duration time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	if c.ttl == duration {
+		return
+	}
+
+	for key := range c.items {
+		c.items[key] = ttlCacheItem{
+			value:  c.items[key].value,
+			expire: time.Now().Add(duration),
+		}
+	}
+	c.ttl = duration
 }
 
 // TTLUint64 is simple TTL saves only uint64s.

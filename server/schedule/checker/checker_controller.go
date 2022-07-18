@@ -80,6 +80,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
+	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		l := cl.GetRegionLabeler()
+		if l.ScheduleDisabled(region) {
+			return nil
+		}
+	}
+
 	if op := c.splitChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
@@ -195,6 +202,12 @@ func (c *Controller) PopOneSuspectKeyRange() ([2][]byte, bool) {
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
 func (c *Controller) ClearSuspectKeyRanges() {
 	c.suspectKeyRanges.Clear()
+}
+
+// IsPendingRegion returns true if the given region is in the pending list.
+func (c *Controller) IsPendingRegion(regionID uint64) bool {
+	_, exist := c.ruleChecker.pendingList.Get(regionID)
+	return exist
 }
 
 // GetPauseController returns pause controller of the checker

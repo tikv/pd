@@ -49,18 +49,21 @@ var (
 
 // core errors
 var (
-	ErrWrongRangeKeys      = errors.Normalize("wrong range keys", errors.RFCCodeText("PD:core:ErrWrongRangeKeys"))
-	ErrStoreNotFound       = errors.Normalize("store %v not found", errors.RFCCodeText("PD:core:ErrStoreNotFound"))
-	ErrPauseLeaderTransfer = errors.Normalize("store %v is paused for leader transfer", errors.RFCCodeText("PD:core:ErrPauseLeaderTransfer"))
-	ErrStoreTombstone      = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreTombstone"))
-	ErrStoreDestroyed      = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
-	ErrStoreUnhealthy      = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
-	ErrSlowStoreEvicted    = errors.Normalize("store %v is evited as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
+	ErrWrongRangeKeys         = errors.Normalize("wrong range keys", errors.RFCCodeText("PD:core:ErrWrongRangeKeys"))
+	ErrStoreNotFound          = errors.Normalize("store %v not found", errors.RFCCodeText("PD:core:ErrStoreNotFound"))
+	ErrPauseLeaderTransfer    = errors.Normalize("store %v is paused for leader transfer", errors.RFCCodeText("PD:core:ErrPauseLeaderTransfer"))
+	ErrStoreRemoved           = errors.Normalize("store %v has been removed", errors.RFCCodeText("PD:core:ErrStoreRemoved"))
+	ErrStoreDestroyed         = errors.Normalize("store %v has been physically destroyed", errors.RFCCodeText("PD:core:ErrStoreDestroyed"))
+	ErrStoreUnhealthy         = errors.Normalize("store %v is unhealthy", errors.RFCCodeText("PD:core:ErrStoreUnhealthy"))
+	ErrStoreServing           = errors.Normalize("store %v has been serving", errors.RFCCodeText("PD:core:ErrStoreServing"))
+	ErrSlowStoreEvicted       = errors.Normalize("store %v is evicted as a slow store", errors.RFCCodeText("PD:core:ErrSlowStoreEvicted"))
+	ErrStoresNotEnough        = errors.Normalize("can not remove store %v since the number of up stores would be %v while need %v", errors.RFCCodeText("PD:core:ErrStoresNotEnough"))
+	ErrNoStoreForRegionLeader = errors.Normalize("can not remove store %d since there are no extra up store to store the leader", errors.RFCCodeText("PD:core:ErrNoStoreForRegionLeader"))
 )
 
 // client errors
 var (
-	ErrClientCreateTSOStream = errors.Normalize("create TSO stream failed", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
+	ErrClientCreateTSOStream = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientGetTSOTimeout   = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
 	ErrClientGetTSO          = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
 	ErrClientGetLeader       = errors.Normalize("get leader from %v error", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
@@ -89,7 +92,8 @@ var (
 
 // checker errors
 var (
-	ErrCheckerNotFound = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+	ErrCheckerNotFound   = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+	ErrCheckerMergeAgain = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
 )
 
 // placement errors
@@ -129,7 +133,8 @@ var (
 
 // apiutil errors
 var (
-	ErrRedirect = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
+	ErrRedirect       = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
+	ErrOptionNotExist = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
 )
 
 // grpcutil errors
@@ -145,6 +150,7 @@ var (
 	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
 	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 	ErrConfigItem            = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
+	ErrServerNotStarted      = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
 )
 
 // logutil errors
@@ -198,6 +204,7 @@ var (
 	ErrEtcdWatcherCancel = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:etcd:ErrEtcdWatcherCancel"))
 	ErrCloseEtcdClient   = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
 	ErrEtcdMemberList    = errors.Normalize("etcd member list failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberList"))
+	ErrEtcdMemberRemove  = errors.Normalize("etcd remove member failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberRemove"))
 )
 
 // dashboard errors
@@ -208,6 +215,7 @@ var (
 
 // strconv errors
 var (
+	ErrStrconvParseBool  = errors.Normalize("parse bool error", errors.RFCCodeText("PD:strconv:ErrStrconvParseBool"))
 	ErrStrconvParseInt   = errors.Normalize("parse int error", errors.RFCCodeText("PD:strconv:ErrStrconvParseInt"))
 	ErrStrconvParseUint  = errors.Normalize("parse uint error", errors.RFCCodeText("PD:strconv:ErrStrconvParseUint"))
 	ErrStrconvParseFloat = errors.Normalize("parse float error", errors.RFCCodeText("PD:strconv:ErrStrconvParseFloat"))
@@ -312,4 +320,21 @@ var (
 var (
 	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
 	ErrCryptoAppendCertsFromPEM = errors.Normalize("cert pool append certs error", errors.RFCCodeText("PD:crypto:ErrCryptoAppendCertsFromPEM"))
+)
+
+// gin errors
+var (
+	ErrBindJSON = errors.Normalize("bind JSON error", errors.RFCCodeText("PD:gin:ErrBindJSON"))
+)
+
+// unsafe recovery errors
+var (
+	ErrUnsafeRecoveryIsRunning    = errors.Normalize("unsafe recovery is running", errors.RFCCodeText("PD:unsaferecovery:ErrUnsafeRecoveryIsRunning"))
+	ErrUnsafeRecoveryInvalidInput = errors.Normalize("invalid input %s", errors.RFCCodeText("PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput"))
+)
+
+// progress errors
+var (
+	ErrProgressWrongStatus = errors.Normalize("progress status is wrong", errors.RFCCodeText("PD:progress:ErrProgressWrongStatus"))
+	ErrProgressNotFound    = errors.Normalize("no progress found for %s", errors.RFCCodeText("PD:progress:ErrProgressNotFound"))
 )

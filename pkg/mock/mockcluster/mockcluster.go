@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -33,14 +34,14 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
 
 const (
-	defaultStoreCapacity = 100 * (1 << 30) // 100GiB
-	defaultRegionSize    = 96 * (1 << 20)  // 96MiB
-	mb                   = (1 << 20)       // 1MiB
+	defaultStoreCapacity = 100 * units.GiB // 100GiB
+	defaultRegionSize    = 96 * units.MiB  // 96MiB
 )
 
 // Cluster is used to mock a cluster for test purpose.
@@ -53,24 +54,35 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
+	*config.StoreConfigManager
+	*buckets.HotBucketCache
+	ctx context.Context
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
+		BasicCluster:       core.NewBasicCluster(),
+		IDAllocator:        mockid.NewIDAllocator(),
+		HotStat:            statistics.NewHotStat(ctx),
+		HotBucketCache:     buckets.NewBucketsCache(ctx),
+		PersistOptions:     opts,
+		suspectRegions:     map[uint64]struct{}{},
+		StoreConfigManager: config.NewTestStoreConfigManager(nil),
+		ctx:                ctx,
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
 	}
 	// It should be updated to the latest feature version.
 	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(storage.NewStorageWithMemoryBackend())
+	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend(), time.Second*5)
 	return clus
+}
+
+// GetStoreConfig returns the store config.
+func (mc *Cluster) GetStoreConfig() *config.StoreConfig {
+	return mc.StoreConfigManager.GetStoreConfig()
 }
 
 // GetOpts returns the cluster configuration.
@@ -121,6 +133,15 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// We directly use threshold for read stats for mockCluster
 	return mc.HotCache.RegionStats(statistics.Read, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (mc *Cluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree)
+	if !mc.HotBucketCache.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(mc.ctx)
 }
 
 // RegionWriteStats returns hot region's write stats.
@@ -240,7 +261,7 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 	if len(leaderSizes) != 0 {
 		leaderSize = leaderSizes[0]
 	} else {
-		leaderSize = int64(leaderCount) * defaultRegionSize / mb
+		leaderSize = int64(leaderCount) * defaultRegionSize / units.MiB
 	}
 
 	store := core.NewStoreInfo(
@@ -270,7 +291,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -308,7 +329,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
@@ -319,7 +340,7 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
-	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -327,7 +348,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
-	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }
@@ -499,7 +520,7 @@ func (mc *Cluster) UpdateLeaderCount(storeID uint64, leaderCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/mb),
+		core.SetLeaderSize(int64(leaderCount)*defaultRegionSize/units.MiB),
 	)
 	mc.PutStore(newStore)
 }
@@ -509,7 +530,7 @@ func (mc *Cluster) UpdateRegionCount(storeID uint64, regionCount int) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/mb),
+		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 	)
 	mc.PutStore(newStore)
 }
@@ -626,8 +647,8 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	store := mc.Stores.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
-	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*mb)
-	stats.UsedSize = uint64(store.GetRegionSize() * mb)
+	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*units.MiB)
+	stats.UsedSize = uint64(store.GetRegionSize() * units.MiB)
 	newStore := store.Clone(
 		core.SetStoreStats(stats),
 		core.SetLeaderCount(leaderCount),
@@ -644,7 +665,7 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if store := mc.GetStore(storeID); store != nil && store.IsTiFlash() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
 		} else {
 			followerStoreIDs = append(followerStoreIDs, storeID)

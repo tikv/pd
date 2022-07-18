@@ -15,18 +15,22 @@
 package placement
 
 import (
-	. "github.com/pingcap/check"
+	"testing"
+	"time"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 )
 
-func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
+func TestRegionRuleFitCache(t *testing.T) {
+	re := require.New(t)
 	originRegion := mockRegion(3, 0)
 	originRules := addExtraRules(0)
 	originStores := mockStores(3)
 	cache := mockRegionRuleFitCache(originRegion, originRules, originStores)
-	testcases := []struct {
+	testCases := []struct {
 		name      string
 		region    *core.RegionInfo
 		rules     []*Rule
@@ -171,17 +175,21 @@ func (s *testRuleSuite) TestRegionRuleFitCache(c *C) {
 			unchanged: false,
 		},
 	}
-	for _, testcase := range testcases {
-		c.Log(testcase.name)
-		c.Assert(cache.IsUnchanged(testcase.region, testcase.rules, mockStores(3)), Equals, testcase.unchanged)
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		re.Equal(testCase.unchanged, cache.IsUnchanged(testCase.region, testCase.rules, mockStores(3)))
+	}
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		re.False(cache.IsUnchanged(testCase.region, testCase.rules, mockStoresNoHeartbeat(3)))
 	}
 	// Invalid Input4
-	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil), IsFalse)
+	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), nil))
 	// Invalid Input5
-	c.Assert(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}), IsFalse)
+	re.False(cache.IsUnchanged(mockRegion(3, 0), addExtraRules(0), []*core.StoreInfo{}))
 	// origin rules changed, assert whether cache is changed
 	originRules[0].Version++
-	c.Assert(cache.IsUnchanged(originRegion, originRules, originStores), IsFalse)
+	re.False(cache.IsUnchanged(originRegion, originRules, originStores))
 }
 
 func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *RegionRuleFitCache {
@@ -197,6 +205,16 @@ func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores
 }
 
 func mockStores(num int) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, num)
+	now := time.Now()
+	for i := 1; i <= num; i++ {
+		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i)},
+			core.SetLastHeartbeatTS(now)))
+	}
+	return stores
+}
+
+func mockStoresNoHeartbeat(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
 	for i := 1; i <= num; i++ {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: uint64(i)}))

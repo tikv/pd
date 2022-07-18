@@ -39,16 +39,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/encryptionkm"
+	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
@@ -78,12 +83,8 @@ const (
 	pdClusterIDPath = "/pd/cluster_id"
 )
 
-var (
-	// EnableZap enable the zap logger in embed etcd.
-	EnableZap = false
-	// EtcdStartTimeout the timeout of the startup etcd.
-	EtcdStartTimeout = time.Minute * 5
-)
+// EtcdStartTimeout the timeout of the startup etcd.
+var EtcdStartTimeout = time.Minute * 5
 
 // Server is the pd server.
 // nolint
@@ -97,10 +98,12 @@ type Server struct {
 	startTimestamp int64
 
 	// Configs and initial fields.
-	cfg            *config.Config
-	etcdCfg        *embed.Config
-	persistOptions *config.PersistOptions
-	handler        *Handler
+	cfg                             *config.Config
+	serviceMiddlewareCfg            *config.ServiceMiddlewareConfig
+	etcdCfg                         *embed.Config
+	serviceMiddlewarePersistOptions *config.ServiceMiddlewarePersistOptions
+	persistOptions                  *config.PersistOptions
+	handler                         *Handler
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -125,6 +128,8 @@ type Server struct {
 	encryptionKeyManager *encryptionkm.KeyManager
 	// for storage operation.
 	storage storage.Storage
+	// safepoint manager
+	gcSafePointManager *gc.SafePointManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -141,9 +146,6 @@ type Server struct {
 	startCallbacks []func()
 	closeCallbacks []func()
 
-	// serviceSafePointLock is a lock for UpdateServiceGCSafePoint
-	serviceSafePointLock sync.Mutex
-
 	// hot region history info storeage
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
@@ -151,6 +153,14 @@ type Server struct {
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+
+	serviceRateLimiter *ratelimit.Limiter
+	serviceLabels      map[string][]apiutil.AccessPath
+	apiServiceLabelMap map[apiutil.AccessPath]string
+
+	serviceAuditBackendLabels map[string]*audit.BackendLabels
+
+	auditBackends []audit.Backend
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -213,8 +223,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated
-				router.Path("/pd/diagnose").Handler(handler)
-				// Deprecated
 				router.Path("/pd/ping").Handler(handler)
 			}
 		}
@@ -229,17 +237,30 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
+	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
-		cfg:               cfg,
-		persistOptions:    config.NewPersistOptions(cfg),
-		member:            &member.Member{},
-		ctx:               ctx,
-		startTimestamp:    time.Now().Unix(),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                             cfg,
+		persistOptions:                  config.NewPersistOptions(cfg),
+		serviceMiddlewareCfg:            serviceMiddlewareCfg,
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
+		member:                          &member.Member{},
+		ctx:                             ctx,
+		startTimestamp:                  time.Now().Unix(),
+		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 	}
-
 	s.handler = newHandler(s)
+
+	// create audit backend
+	s.auditBackends = []audit.Backend{
+		audit.NewLocalLogBackend(true),
+		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
+	}
+	s.serviceRateLimiter = ratelimit.NewLimiter()
+	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
+	s.serviceRateLimiter = ratelimit.NewLimiter()
+	s.serviceLabels = make(map[string][]apiutil.AccessPath)
+	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
 	// Adjust etcd config.
 	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
@@ -258,14 +279,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
-	if EnableZap {
-		// The etcd master version has removed embed.Config.SetupLogging.
-		// Now logger is set up automatically based on embed.Config.Logger,
-		// Use zap logger in the test, otherwise will panic.
-		// Reference: https://go.etcd.io/etcd/blob/master/embed/config_logging.go#L45
-		s.etcdCfg.Logger = "zap"
-		s.etcdCfg.LogOutputs = []string{"stdout"}
-	}
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()
 	return s, nil
@@ -389,6 +402,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -494,6 +508,16 @@ func (s *Server) Run() error {
 	s.startServerLoop(s.ctx)
 
 	return nil
+}
+
+// SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.
+func (s *Server) SetServiceAuditBackendForHTTP(route *mux.Route, labels ...string) {
+	if len(route.GetName()) == 0 {
+		return
+	}
+	if len(labels) > 0 {
+		s.SetServiceAuditBackendLabels(route.GetName(), labels)
+	}
 }
 
 // Context returns the context of server.
@@ -726,16 +750,6 @@ func (s *Server) SetStorage(storage storage.Storage) {
 	s.storage = storage
 }
 
-// SetServiceMiddleware change EnableServiceMiddleware
-func (s *Server) SetServiceMiddleware(status bool) {
-	s.cfg.EnableServiceMiddleware = status
-}
-
-// IsServiceMiddlewareEnabled returns EnableServiceMiddleware status
-func (s *Server) IsServiceMiddlewareEnabled() bool {
-	return s.cfg.EnableServiceMiddleware
-}
-
 // GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
@@ -744,6 +758,11 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 // GetPersistOptions returns the schedule option.
 func (s *Server) GetPersistOptions() *config.PersistOptions {
 	return s.persistOptions
+}
+
+// GetServiceMiddlewarePersistOptions returns the service middleware persist option.
+func (s *Server) GetServiceMiddlewarePersistOptions() *config.ServiceMiddlewarePersistOptions {
+	return s.serviceMiddlewarePersistOptions
 }
 
 // GetHBStreams returns the heartbeat streams.
@@ -779,10 +798,18 @@ func (s *Server) StartTimestamp() int64 {
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	if s.IsClosed() {
-		return nil, errors.New("server not started")
+		return nil, errs.ErrServerNotStarted.FastGenByArgs()
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	return members, err
+}
+
+// GetServiceMiddlewareConfig gets the service middleware config information.
+func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
+	cfg := s.serviceMiddlewareCfg.Clone()
+	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
+	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
+	return cfg
 }
 
 // GetConfig gets the config information.
@@ -870,7 +897,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
 			for _, s := range raftCluster.GetStores() {
-				if !s.IsTombstone() && core.IsStoreContainLabel(s.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+				if !s.IsRemoved() && s.IsTiFlash() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
 			}
@@ -929,6 +956,76 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		return err
 	}
 	log.Info("replication config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetAuditConfig gets the audit config information.
+func (s *Server) GetAuditConfig() *config.AuditConfig {
+	return s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
+}
+
+// SetAuditConfig sets the audit config.
+func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetAuditConfig()
+	s.serviceMiddlewarePersistOptions.SetAuditConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetAuditConfig(old)
+		log.Error("failed to update Audit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// UpdateRateLimitConfig is used to update rate-limit config which will reserve old limiter-config
+func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+	cfg := s.GetServiceMiddlewareConfig()
+	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
+	for label, item := range cfg.LimiterConfig {
+		rateLimitCfg[label] = item
+	}
+	rateLimitCfg[label] = value
+	return s.UpdateRateLimit(&cfg.RateLimitConfig, key, &rateLimitCfg)
+}
+
+// UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
+func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = s.SetRateLimitConfig(*cfg)
+	}
+	return err
+}
+
+// GetRateLimitConfig gets the rate limit config information.
+func (s *Server) GetRateLimitConfig() *config.RateLimitConfig {
+	return s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
+}
+
+// SetRateLimitConfig sets the rate limit config.
+func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetRateLimitConfig()
+	s.serviceMiddlewarePersistOptions.SetRateLimitConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetRateLimitConfig(old)
+		log.Error("failed to update Rate Limit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("Rate Limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1098,6 +1195,72 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
+// GetServiceLabels returns ApiAccessPaths by given service label
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
+	if apis, ok := s.serviceLabels[serviceLabel]; ok {
+		return apis
+	}
+	return nil
+}
+
+// GetAPIAccessServiceLabel returns service label by given access path
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.AccessPath) string {
+	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
+		return servicelabel
+	}
+	accessPathNoMethod := apiutil.NewAccessPath(accessPath.Path, "")
+	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
+		return servicelabel
+	}
+	return ""
+}
+
+// AddServiceLabel is used to add the relationship between service label and api access path
+// TODO: this function will be used for updating api rate limit config
+func (s *Server) AddServiceLabel(serviceLabel string, accessPath apiutil.AccessPath) {
+	if slice, ok := s.serviceLabels[serviceLabel]; ok {
+		slice = append(slice, accessPath)
+		s.serviceLabels[serviceLabel] = slice
+	} else {
+		slice = []apiutil.AccessPath{accessPath}
+		s.serviceLabels[serviceLabel] = slice
+	}
+
+	s.apiServiceLabelMap[accessPath] = serviceLabel
+}
+
+// GetAuditBackend returns audit backends
+func (s *Server) GetAuditBackend() []audit.Backend {
+	return s.auditBackends
+}
+
+// GetServiceAuditBackendLabels returns audit backend labels by serviceLabel
+func (s *Server) GetServiceAuditBackendLabels(serviceLabel string) *audit.BackendLabels {
+	return s.serviceAuditBackendLabels[serviceLabel]
+}
+
+// SetServiceAuditBackendLabels is used to add audit backend labels for service by service label
+func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []string) {
+	s.serviceAuditBackendLabels[serviceLabel] = &audit.BackendLabels{Labels: labels}
+}
+
+// GetServiceRateLimiter is used to get rate limiter
+func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+	return s.serviceRateLimiter
+}
+
+// IsInRateLimitAllowList returns whethis given service label is in allow lost
+func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
+	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
+}
+
+// UpdateServiceRateLimiter is used to update RateLimiter
+func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
+	return s.serviceRateLimiter.Update(serviceLabel, opts...)
+}
+
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 	s.cluster.Lock()
@@ -1246,17 +1409,24 @@ func (s *Server) campaignLeader() {
 	go s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
-	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
 		return
 	}
 	log.Info("initializing the global TSO allocator")
-	if err := alllocator.Initialize(0); err != nil {
+	if err := allocator.Initialize(0); err != nil {
 		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 		return
 	}
-	defer s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			if err = allocator.UpdateTSO(); err != nil {
+				panic(err)
+			}
+		})
+	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1342,21 +1512,29 @@ func (s *Server) reloadConfigFromKV() error {
 	if err != nil {
 		return err
 	}
-	switchableStorage, ok := s.storage.(interface {
-		SwitchToRegionStorage()
-		SwitchToDefaultStorage()
-	})
-	if !ok {
-		return nil
+	err = s.serviceMiddlewarePersistOptions.Reload(s.storage)
+	if err != nil {
+		return err
 	}
-	if s.persistOptions.IsUseRegionStorage() {
-		switchableStorage.SwitchToRegionStorage()
-		log.Info("server enable region storage")
-	} else {
-		switchableStorage.SwitchToDefaultStorage()
-		log.Info("server disable region storage")
+	s.loadRateLimitConfig()
+	useRegionStorage := s.persistOptions.IsUseRegionStorage()
+	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
+	if regionStorage != nil {
+		if useRegionStorage {
+			log.Info("server enable region storage")
+		} else {
+			log.Info("server disable region storage")
+		}
 	}
 	return nil
+}
+
+func (s *Server) loadRateLimitConfig() {
+	cfg := s.serviceMiddlewarePersistOptions.GetRateLimitConfig().LimiterConfig
+	for key := range cfg {
+		value := cfg[key]
+		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
+	}
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.
@@ -1387,6 +1565,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
+	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
 }
 
@@ -1405,7 +1584,12 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 	return nil
 }
 
-// SplitAndScatterRegions TODO
-func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	return nil, errors.New("no implemented")
+// IsTTLConfigExist returns true if the ttl config is existed for a given config.
+func (s *Server) IsTTLConfigExist(key string) bool {
+	if config.IsSupportedTTLConfig(key) {
+		if _, ok := s.persistOptions.GetTTLData(key); ok {
+			return true
+		}
+	}
+	return false
 }

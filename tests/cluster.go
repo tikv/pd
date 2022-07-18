@@ -22,11 +22,11 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -81,7 +82,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
@@ -361,7 +362,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	_, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
@@ -603,7 +604,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 }
 
 // WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]string) {
+func (c *TestCluster) WaitAllLeaders(re *require.Assertions, dcLocations map[string]string) {
 	c.WaitLeader()
 	c.CheckClusterDCLocation()
 	// Wait for each DC's Local TSO Allocator leader
@@ -611,9 +612,8 @@ func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]stri
 	for _, dcLocation := range dcLocations {
 		wg.Add(1)
 		go func(dc string) {
-			testutil.WaitUntil(testC, func() bool {
-				leaderName := c.WaitAllocatorLeader(dc)
-				return leaderName != ""
+			testutil.Eventually(re, func() bool {
+				return c.WaitAllocatorLeader(dc) != ""
 			})
 			wg.Done()
 		}(dcLocation)

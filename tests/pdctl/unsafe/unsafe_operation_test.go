@@ -18,41 +18,40 @@ import (
 	"context"
 	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func Test(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&unsafeOperationTestSuite{})
-
-type unsafeOperationTestSuite struct{}
-
-func (s *unsafeOperationTestSuite) TestRemoveFailedStores(c *C) {
+func TestRemoveFailedStores(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	cluster.WaitLeader()
 	err = cluster.GetServer(cluster.GetLeader()).BootstrapCluster()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 	defer cluster.Destroy()
 
 	args := []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "3600"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "abc"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.Error(err)
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "show"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "history"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 }

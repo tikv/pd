@@ -17,15 +17,16 @@ package schedulers
 import (
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
@@ -74,7 +75,7 @@ const (
 )
 
 type scatterRangeSchedulerConfig struct {
-	mu        sync.RWMutex
+	mu        syncutil.RWMutex
 	storage   endpoint.ConfigStorage
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
@@ -213,25 +214,25 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
 	c.SetTolerantSizeRatio(2)
 	if l.allowBalanceLeader(cluster) {
-		ops := l.balanceLeader.Schedule(c)
+		ops, _ := l.balanceLeader.Schedule(c, false)
 		if len(ops) > 0 {
 			ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.config.RangeName))
 			ops[0].AttachKind(operator.OpRange)
 			ops[0].Counters = append(ops[0].Counters,
 				schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
 				schedulerCounter.WithLabelValues(l.GetName(), "new-leader-operator"))
-			return ops
+			return ops, nil
 		}
 		schedulerCounter.WithLabelValues(l.GetName(), "no-need-balance-leader").Inc()
 	}
 	if l.allowBalanceRegion(cluster) {
-		ops := l.balanceRegion.Schedule(c)
+		ops, _ := l.balanceRegion.Schedule(c, false)
 		if len(ops) > 0 {
 			ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.config.RangeName))
 			ops[0].AttachKind(operator.OpRange)
@@ -239,12 +240,12 @@ func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster) []*operator.O
 				schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
 				schedulerCounter.WithLabelValues(l.GetName(), "new-region-operator"),
 			)
-			return ops
+			return ops, nil
 		}
 		schedulerCounter.WithLabelValues(l.GetName(), "no-need-balance-region").Inc()
 	}
 
-	return nil
+	return nil, nil
 }
 
 type scatterRangeHandler struct {
@@ -301,7 +302,7 @@ func newScatterRangeHandler(config *scatterRangeSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
-	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
 	return router
 }

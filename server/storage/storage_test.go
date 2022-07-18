@@ -19,73 +19,67 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
-func TestStorage(t *testing.T) {
-	TestingT(t)
-}
-
-var _ = Suite(&testStorageSuite{})
-
-type testStorageSuite struct {
-}
-
-func (s *testStorageSuite) TestBasic(c *C) {
+func TestBasic(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	c.Assert(endpoint.StorePath(123), Equals, "raft/s/00000000000000000123")
-	c.Assert(endpoint.RegionPath(123), Equals, "raft/r/00000000000000000123")
+	re.Equal("raft/s/00000000000000000123", endpoint.StorePath(123))
+	re.Equal("raft/r/00000000000000000123", endpoint.RegionPath(123))
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := storage.LoadMeta(meta)
-	c.Assert(ok, IsFalse)
-	c.Assert(err, IsNil)
-	c.Assert(storage.SaveMeta(meta), IsNil)
+	re.False(ok)
+	re.NoError(err)
+	re.NoError(storage.SaveMeta(meta))
 	newMeta := &metapb.Cluster{}
 	ok, err = storage.LoadMeta(newMeta)
-	c.Assert(ok, IsTrue)
-	c.Assert(err, IsNil)
-	c.Assert(newMeta, DeepEquals, meta)
+	re.True(ok)
+	re.NoError(err)
+	re.Equal(meta, newMeta)
 
 	store := &metapb.Store{Id: 123}
 	ok, err = storage.LoadStore(123, store)
-	c.Assert(ok, IsFalse)
-	c.Assert(err, IsNil)
-	c.Assert(storage.SaveStore(store), IsNil)
+	re.False(ok)
+	re.NoError(err)
+	re.NoError(storage.SaveStore(store))
 	newStore := &metapb.Store{}
 	ok, err = storage.LoadStore(123, newStore)
-	c.Assert(ok, IsTrue)
-	c.Assert(err, IsNil)
-	c.Assert(newStore, DeepEquals, store)
+	re.True(ok)
+	re.NoError(err)
+	re.Equal(store, newStore)
 
 	region := &metapb.Region{Id: 123}
 	ok, err = storage.LoadRegion(123, region)
-	c.Assert(ok, IsFalse)
-	c.Assert(err, IsNil)
-	c.Assert(storage.SaveRegion(region), IsNil)
+	re.False(ok)
+	re.NoError(err)
+	re.NoError(storage.SaveRegion(region))
 	newRegion := &metapb.Region{}
 	ok, err = storage.LoadRegion(123, newRegion)
-	c.Assert(ok, IsTrue)
-	c.Assert(err, IsNil)
-	c.Assert(newRegion, DeepEquals, region)
+	re.True(ok)
+	re.NoError(err)
+	re.Equal(region, newRegion)
 	err = storage.DeleteRegion(region)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	ok, err = storage.LoadRegion(123, newRegion)
-	c.Assert(ok, IsFalse)
-	c.Assert(err, IsNil)
+	re.False(ok)
+	re.NoError(err)
 }
 
-func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
+func mustSaveStores(re *require.Assertions, s Storage, n int) []*metapb.Store {
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -93,60 +87,64 @@ func mustSaveStores(c *C, s Storage, n int) []*metapb.Store {
 	}
 
 	for _, store := range stores {
-		c.Assert(s.SaveStore(store), IsNil)
+		re.NoError(s.SaveStore(store))
 	}
 
 	return stores
 }
 
-func (s *testStorageSuite) TestLoadStores(c *C) {
+func TestLoadStores(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewStoresInfo()
 
 	n := 10
-	stores := mustSaveStores(c, storage, n)
-	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
+	stores := mustSaveStores(re, storage, n)
+	re.NoError(storage.LoadStores(cache.SetStore))
 
-	c.Assert(cache.GetStoreCount(), Equals, n)
+	re.Equal(n, cache.GetStoreCount())
 	for _, store := range cache.GetMetaStores() {
-		c.Assert(store, DeepEquals, stores[store.GetId()])
+		re.Equal(stores[store.GetId()], store)
 	}
 }
 
-func (s *testStorageSuite) TestStoreWeight(c *C) {
+func TestStoreWeight(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewStoresInfo()
 	const n = 3
 
-	mustSaveStores(c, storage, n)
-	c.Assert(storage.SaveStoreWeight(1, 2.0, 3.0), IsNil)
-	c.Assert(storage.SaveStoreWeight(2, 0.2, 0.3), IsNil)
-	c.Assert(storage.LoadStores(cache.SetStore), IsNil)
+	mustSaveStores(re, storage, n)
+	re.NoError(storage.SaveStoreWeight(1, 2.0, 3.0))
+	re.NoError(storage.SaveStoreWeight(2, 0.2, 0.3))
+	re.NoError(storage.LoadStores(cache.SetStore))
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
 	for i := 0; i < n; i++ {
-		c.Assert(cache.GetStore(uint64(i)).GetLeaderWeight(), Equals, leaderWeights[i])
-		c.Assert(cache.GetStore(uint64(i)).GetRegionWeight(), Equals, regionWeights[i])
+		re.Equal(leaderWeights[i], cache.GetStore(uint64(i)).GetLeaderWeight())
+		re.Equal(regionWeights[i], cache.GetStore(uint64(i)).GetRegionWeight())
 	}
 }
 
-func (s *testStorageSuite) TestLoadGCSafePoint(c *C) {
+func TestLoadGCSafePoint(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
 
 	r, e := storage.LoadGCSafePoint()
-	c.Assert(r, Equals, uint64(0))
-	c.Assert(e, IsNil)
+	re.Equal(uint64(0), r)
+	re.NoError(e)
 	for _, safePoint := range testData {
 		err := storage.SaveGCSafePoint(safePoint)
-		c.Assert(err, IsNil)
+		re.NoError(err)
 		safePoint1, err := storage.LoadGCSafePoint()
-		c.Assert(err, IsNil)
-		c.Assert(safePoint, Equals, safePoint1)
+		re.NoError(err)
+		re.Equal(safePoint1, safePoint)
 	}
 }
 
-func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
+func TestSaveServiceGCSafePoint(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(100 * time.Second).Unix()
 	serviceSafePoints := []*endpoint.ServiceSafePoint{
@@ -156,28 +154,29 @@ func (s *testStorageSuite) TestSaveServiceGCSafePoint(c *C) {
 	}
 
 	for _, ssp := range serviceSafePoints {
-		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
+		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
 	prefix := endpoint.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
-	c.Assert(err, IsNil)
-	c.Assert(keys, HasLen, 3)
-	c.Assert(values, HasLen, 3)
+	re.NoError(err)
+	re.Len(keys, 3)
+	re.Len(values, 3)
 
 	ssp := &endpoint.ServiceSafePoint{}
 	for i, key := range keys {
-		c.Assert(strings.HasSuffix(key, serviceSafePoints[i].ServiceID), IsTrue)
+		re.True(strings.HasSuffix(key, serviceSafePoints[i].ServiceID))
 
-		c.Assert(json.Unmarshal([]byte(values[i]), ssp), IsNil)
-		c.Assert(ssp.ServiceID, Equals, serviceSafePoints[i].ServiceID)
-		c.Assert(ssp.ExpiredAt, Equals, serviceSafePoints[i].ExpiredAt)
-		c.Assert(ssp.SafePoint, Equals, serviceSafePoints[i].SafePoint)
+		re.NoError(json.Unmarshal([]byte(values[i]), ssp))
+		re.Equal(serviceSafePoints[i].ServiceID, ssp.ServiceID)
+		re.Equal(serviceSafePoints[i].ExpiredAt, ssp.ExpiredAt)
+		re.Equal(serviceSafePoints[i].SafePoint, ssp.SafePoint)
 	}
 }
 
-func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
+func TestLoadMinServiceGCSafePoint(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	expireAt := time.Now().Add(1000 * time.Second).Unix()
 	serviceSafePoints := []*endpoint.ServiceSafePoint{
@@ -187,44 +186,45 @@ func (s *testStorageSuite) TestLoadMinServiceGCSafePoint(c *C) {
 	}
 
 	for _, ssp := range serviceSafePoints {
-		c.Assert(storage.SaveServiceGCSafePoint(ssp), IsNil)
+		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
 	// gc_worker's safepoint will be automatically inserted when loading service safepoints. Here the returned
 	// safepoint can be either of "gc_worker" or "2".
 	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
-	c.Assert(err, IsNil)
-	c.Assert(ssp.SafePoint, Equals, uint64(2))
+	re.NoError(err)
+	re.Equal(uint64(2), ssp.SafePoint)
 
 	// Advance gc_worker's safepoint
-	c.Assert(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
+	re.NoError(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
 		ServiceID: "gc_worker",
 		ExpiredAt: math.MaxInt64,
 		SafePoint: 10,
-	}), IsNil)
+	}))
 
 	ssp, err = storage.LoadMinServiceGCSafePoint(time.Now())
-	c.Assert(err, IsNil)
-	c.Assert(ssp.ServiceID, Equals, "2")
-	c.Assert(ssp.ExpiredAt, Equals, expireAt)
-	c.Assert(ssp.SafePoint, Equals, uint64(2))
+	re.NoError(err)
+	re.Equal("2", ssp.ServiceID)
+	re.Equal(expireAt, ssp.ExpiredAt)
+	re.Equal(uint64(2), ssp.SafePoint)
 }
 
-func (s *testStorageSuite) TestLoadRegions(c *C) {
+func TestLoadRegions(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewRegionsInfo()
 
 	n := 10
-	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
+	regions := mustSaveRegions(re, storage, n)
+	re.NoError(storage.LoadRegions(context.Background(), cache.SetRegion))
 
-	c.Assert(cache.GetRegionCount(), Equals, n)
+	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
-		c.Assert(region, DeepEquals, regions[region.GetId()])
+		re.Equal(regions[region.GetId()], region)
 	}
 }
 
-func mustSaveRegions(c *C, s endpoint.RegionStorage, n int) []*metapb.Region {
+func mustSaveRegions(re *require.Assertions, s endpoint.RegionStorage, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
 	for i := 0; i < n; i++ {
 		region := newTestRegionMeta(uint64(i))
@@ -232,7 +232,7 @@ func mustSaveRegions(c *C, s endpoint.RegionStorage, n int) []*metapb.Region {
 	}
 
 	for _, region := range regions {
-		c.Assert(s.SaveRegion(region), IsNil)
+		re.NoError(s.SaveRegion(region))
 	}
 
 	return regions
@@ -246,36 +246,222 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 	}
 }
 
-func (s *testStorageSuite) TestLoadRegionsToCache(c *C) {
+func TestLoadRegionsToCache(t *testing.T) {
+	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewRegionsInfo()
 
 	n := 10
-	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
+	regions := mustSaveRegions(re, storage, n)
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
 
-	c.Assert(cache.GetRegionCount(), Equals, n)
+	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
-		c.Assert(region, DeepEquals, regions[region.GetId()])
+		re.Equal(regions[region.GetId()], region)
 	}
 
 	n = 20
-	mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegionsOnce(context.Background(), cache.SetRegion), IsNil)
-	c.Assert(cache.GetRegionCount(), Equals, n)
+	mustSaveRegions(re, storage, n)
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
+	re.Equal(n, cache.GetRegionCount())
 }
 
-func (s *testStorageSuite) TestLoadRegionsExceedRangeLimit(c *C) {
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/storage/kv/withRangeLimit", "return(500)"), IsNil)
+func TestLoadRegionsExceedRangeLimit(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/withRangeLimit", "return(500)"))
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewRegionsInfo()
 
 	n := 1000
-	regions := mustSaveRegions(c, storage, n)
-	c.Assert(storage.LoadRegions(context.Background(), cache.SetRegion), IsNil)
-	c.Assert(cache.GetRegionCount(), Equals, n)
+	regions := mustSaveRegions(re, storage, n)
+	re.NoError(storage.LoadRegions(context.Background(), cache.SetRegion))
+	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
-		c.Assert(region, DeepEquals, regions[region.GetId()])
+		re.Equal(regions[region.GetId()], region)
 	}
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"), IsNil)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"))
+}
+
+func TestTrySwitchRegionStorage(t *testing.T) {
+	re := require.New(t)
+	defaultStorage := NewStorageWithMemoryBackend()
+	localStorage := NewStorageWithMemoryBackend()
+	storage := NewCoreStorage(defaultStorage, localStorage)
+	defaultCache := core.NewRegionsInfo()
+	localCache := core.NewRegionsInfo()
+
+	TrySwitchRegionStorage(storage, false)
+	regions10 := mustSaveRegions(re, storage, 10)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Empty(localCache.GetMetaRegions())
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+
+	TrySwitchRegionStorage(storage, true)
+	regions20 := mustSaveRegions(re, storage, 20)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	re.Len(localCache.GetMetaRegions(), 20)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+	for _, region := range localCache.GetMetaRegions() {
+		re.Equal(regions20[region.GetId()], region)
+	}
+}
+
+const (
+	keyChars = "abcdefghijklmnopqrstuvwxyz"
+	keyLen   = 20
+)
+
+func generateKeys(size int) []string {
+	m := make(map[string]struct{}, size)
+	for len(m) < size {
+		k := make([]byte, keyLen)
+		for i := range k {
+			k[i] = keyChars[rand.Intn(len(keyChars))]
+		}
+		m[string(k)] = struct{}{}
+	}
+
+	v := make([]string, 0, size)
+	for k := range m {
+		v = append(v, k)
+	}
+	sort.Strings(v)
+	return v
+}
+
+func randomMerge(regions []*metapb.Region, n int, ratio int) {
+	rand.Seed(6)
+	note := make(map[int]bool)
+	for i := 0; i < n*ratio/100; i++ {
+		pos := rand.Intn(n - 1)
+		for {
+			if _, ok := note[pos]; !ok {
+				break
+			}
+			pos = rand.Intn(n - 1)
+		}
+		note[pos] = true
+
+		mergeIndex := pos + 1
+		for mergeIndex < n {
+			_, ok := note[mergeIndex]
+			if ok {
+				mergeIndex++
+			} else {
+				break
+			}
+		}
+		regions[mergeIndex].StartKey = regions[pos].StartKey
+		if regions[pos].GetRegionEpoch().GetVersion() > regions[mergeIndex].GetRegionEpoch().GetVersion() {
+			regions[mergeIndex].GetRegionEpoch().Version = regions[pos].GetRegionEpoch().GetVersion()
+		}
+		regions[mergeIndex].GetRegionEpoch().Version++
+	}
+}
+
+func saveRegions(lb *levelDBBackend, n int, ratio int) error {
+	keys := generateKeys(n)
+	regions := make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(n); i++ {
+		var region *metapb.Region
+		if i == 0 {
+			region = &metapb.Region{
+				Id:       i,
+				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
+				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+			}
+		} else {
+			region = &metapb.Region{
+				Id:       i,
+				StartKey: []byte(keys[i-1]),
+				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+			}
+		}
+		regions = append(regions, region)
+	}
+	if ratio != 0 {
+		randomMerge(regions, n, ratio)
+	}
+
+	for _, region := range regions {
+		err := lb.SaveRegion(region)
+		if err != nil {
+			return err
+		}
+	}
+	return lb.Flush()
+}
+
+func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
+	ctx := context.Background()
+	dir := b.TempDir()
+	lb, err := newLevelDBBackend(ctx, dir, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	cluster := core.NewBasicCluster()
+	err = saveRegions(lb, n, ratio)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		err = lb.Close()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	b.ResetTimer()
+	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
+	if err != nil {
+		b.Fatal(err)
+	}
+}
+
+var volumes = []struct {
+	input int
+}{
+	{input: 10000},
+	{input: 100000},
+	{input: 1000000},
+}
+
+func BenchmarkLoadRegionsByVolume(b *testing.B) {
+	for _, v := range volumes {
+		b.Run(fmt.Sprintf("input size %d", v.input), func(b *testing.B) {
+			benchmarkLoadRegions(b, v.input, 0)
+		})
+	}
+}
+
+var ratios = []struct {
+	ratio int
+}{
+	{ratio: 0},
+	{ratio: 20},
+	{ratio: 40},
+	{ratio: 60},
+	{ratio: 80},
+}
+
+func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
+	for _, r := range ratios {
+		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
+			benchmarkLoadRegions(b, 1000000, r.ratio)
+		})
+	}
 }

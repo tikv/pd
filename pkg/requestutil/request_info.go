@@ -27,25 +27,31 @@ import (
 
 // RequestInfo holds service information from http.Request
 type RequestInfo struct {
-	ServiceLabel string
-	Method       string
-	Component    string
-	IP           string
-	TimeStamp    string
-	URLParam     string
-	BodyParam    string
+	ServiceLabel   string
+	Method         string
+	Component      string
+	IP             string
+	URLParam       string
+	BodyParam      string
+	StartTimeStamp int64
+}
+
+func (info *RequestInfo) String() string {
+	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, Component:%s, IP:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
+		info.ServiceLabel, info.Method, info.Component, info.IP, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+	return s
 }
 
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
-		ServiceLabel: apiutil.GetRouteName(r),
-		Method:       fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
-		Component:    apiutil.GetComponentNameOnHTTP(r),
-		IP:           apiutil.GetIPAddrFromHTTPRequest(r),
-		TimeStamp:    time.Now().Local().String(),
-		URLParam:     getURLParam(r),
-		BodyParam:    getBodyParam(r),
+		ServiceLabel:   apiutil.GetRouteName(r),
+		Method:         fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
+		Component:      apiutil.GetComponentNameOnHTTP(r),
+		IP:             apiutil.GetIPAddrFromHTTPRequest(r),
+		URLParam:       getURLParam(r),
+		BodyParam:      getBodyParam(r),
+		StartTimeStamp: time.Now().Unix(),
 	}
 }
 

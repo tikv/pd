@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -34,46 +35,49 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 	}
 }
 
-// @Tags unsafe
-// @Summary Remove failed stores unsafely.
-// @Produce json
+// @Tags     unsafe
+// @Summary  Remove failed stores unsafely.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
 // Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /admin/unsafe/remove-failed-stores [POST]
+// @Router   /admin/unsafe/remove-failed-stores [POST]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	var stores map[uint64]string
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &stores); err != nil {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	if len(stores) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "No store specified")
+	storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
 		return
 	}
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores); err != nil {
+	stores := make(map[uint64]struct{})
+	for _, store := range storeSlice {
+		stores[store] = struct{}{}
+	}
+	timeout := uint64(600)
+	rawTimeout, exists := input["timeout"].(float64)
+	if exists {
+		timeout = uint64(rawTimeout)
+	}
+
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
 }
 
-// @Tags unsafe
-// @Summary Show the current status of failed stores removal.
-// @Produce json
-// Success 200 {object} []string
-// @Router /admin/unsafe/remove-failed-stores/show [GET]
+// @Tags     unsafe
+// @Summary  Show the current status of failed stores removal.
+// @Produce  json
+// Success 200 {object} []StageOutput
+// @Router   /admin/unsafe/remove-failed-stores/show [GET]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().Show())
-}
-
-// @Tags unsafe
-// @Summary Show the history of failed stores removal.
-// @Produce json
-// Success 200 {object} []string
-// @Router /admin/unsafe/remove-failed-stores/history [GET]
-func (h *unsafeOperationHandler) GetFailedStoresRemovalHistory(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
-	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().History())
 }

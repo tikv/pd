@@ -44,7 +44,6 @@ type MetaStorage interface {
 type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
 	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
-	LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
 	Flush() error
@@ -107,6 +106,12 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if err := store.Unmarshal([]byte(str)); err != nil {
 				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
+			if store.State == metapb.StoreState_Offline {
+				store.NodeState = metapb.NodeState_Removing
+			}
+			if store.State == metapb.StoreState_Tombstone {
+				store.NodeState = metapb.NodeState_Removed
+			}
 			leaderWeight, err := se.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
@@ -149,11 +154,8 @@ func (se *StorageEndpoint) DeleteStore(store *metapb.Store) error {
 // LoadRegion loads one region from the backend storage.
 func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
 	value, err := se.Load(RegionPath(regionID))
-	if err != nil {
+	if err != nil || value == "" {
 		return false, err
-	}
-	if value == "" {
-		return false, nil
 	}
 	err = proto.Unmarshal([]byte(value), region)
 	if err != nil {
@@ -213,11 +215,6 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			return nil
 		}
 	}
-}
-
-// LoadRegionsOnce loads all regions from storage to RegionsInfo.
-func (se *StorageEndpoint) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	return se.LoadRegions(ctx, f)
 }
 
 // SaveRegion saves one region to storage.

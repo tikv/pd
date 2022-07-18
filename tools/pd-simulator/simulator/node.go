@@ -21,13 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -85,7 +85,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		cancel:                   cancel,
 		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
-		ioRate:                   ioRate * cases.MB,
+		ioRate:                   ioRate * units.MiB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
@@ -122,7 +122,7 @@ func (n *Node) receiveRegionHeartbeat() {
 // Tick steps node status change.
 func (n *Node) Tick(wg *sync.WaitGroup) {
 	defer wg.Done()
-	if n.GetState() != metapb.StoreState_Up {
+	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
 	n.stepHeartBeat()
@@ -167,7 +167,7 @@ func (n *Node) stepCompaction() {
 }
 
 func (n *Node) storeHeartBeat() {
-	if n.GetState() != metapb.StoreState_Up {
+	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
@@ -189,7 +189,7 @@ func (n *Node) compaction() {
 }
 
 func (n *Node) regionHeartBeat() {
-	if n.GetState() != metapb.StoreState_Up {
+	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
 	regions := n.raftEngine.GetRegions()

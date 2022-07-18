@@ -37,12 +37,12 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 	}
 }
 
-// @Tags label
-// @Summary List all label values.
-// @Produce json
-// @Success 200 {array} metapb.StoreLabel
-// @Router /labels [get]
-func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
+// @Tags     label
+// @Summary  List all label values.
+// @Produce  json
+// @Success  200  {array}  metapb.StoreLabel
+// @Router   /labels [get]
+func (h *labelsHandler) GetLabels(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	var labels []*metapb.StoreLabel
 	m := make(map[string]struct{})
@@ -59,15 +59,15 @@ func (h *labelsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, labels)
 }
 
-// @Tags label
-// @Summary List stores that have specific label values.
-// @Param name query string true "name of store label filter"
-// @Param value query string true "value of store label filter"
-// @Produce json
-// @Success 200 {object} StoresInfo
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /labels/stores [get]
-func (h *labelsHandler) GetStores(w http.ResponseWriter, r *http.Request) {
+// @Tags     label
+// @Summary  List stores that have specific label values.
+// @Param    name   query  string  true  "name of store label filter"
+// @Param    value  query  string  true  "value of store label filter"
+// @Produce  json
+// @Success  200  {object}  StoresInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /labels/stores [get]
+func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")

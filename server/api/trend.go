@@ -26,11 +26,13 @@ import (
 )
 
 // Trend describes the cluster's schedule trend.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Trend struct {
 	Stores  []trendStore  `json:"stores"`
 	History *trendHistory `json:"history"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendStore struct {
 	ID              uint64             `json:"id"`
 	Address         string             `json:"address"`
@@ -49,12 +51,14 @@ type trendStore struct {
 	HotReadRegionFlows  []float64 `json:"hot_read_region_flows"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistory struct {
 	StartTime int64               `json:"start"`
 	EndTime   int64               `json:"end"`
 	Entries   []trendHistoryEntry `json:"entries"`
 }
 
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistoryEntry struct {
 	From  uint64 `json:"from"`
 	To    uint64 `json:"to"`
@@ -76,15 +80,15 @@ func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 	}
 }
 
-// @Tags trend
-// @Summary Get the growth and changes of data in the most recent period of time.
-// @Param from query integer false "From Unix timestamp"
-// @Produce json
-// @Success 200 {object} Trend
-// @Failure 400 {string} string "The request is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /trend [get]
-func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
+// @Tags     trend
+// @Summary  Get the growth and changes of data in the most recent period of time.
+// @Param    from  query  integer  false  "From Unix timestamp"
+// @Produce  json
+// @Success  200  {object}  Trend
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /trend [get]
+func (h *trendHandler) GetTrend(w http.ResponseWriter, r *http.Request) {
 	var from time.Time
 	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
 		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)

@@ -22,6 +22,8 @@ package storelimit
 // The values here defines the store-limit for each load. For example:
 // Idle = 60, means that change the store-limit to 60 when the cluster is
 // idle.
+//
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Scene struct {
 	Idle   int
 	Low    int

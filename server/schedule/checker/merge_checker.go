@@ -27,12 +27,16 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
-const maxTargetRegionSize = 500
+const (
+	maxTargetRegionSize   = 500
+	maxTargetRegionFactor = 4
+)
 
 // When a region has label `merge_option=deny`, skip merging the region.
 // If label value is `allow` or other value, it will be treated as `allow`.
@@ -90,6 +94,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	m.splitCache.UpdateTTL(m.opts.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		checkerCounter.WithLabelValues("merge_checker", "recently-split").Inc()
 		return nil
@@ -105,19 +110,18 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// region is not small enough
-	if region.GetApproximateSize() > int64(m.opts.GetMaxMergeRegionSize()) ||
-		region.GetApproximateKeys() > int64(m.opts.GetMaxMergeRegionKeys()) {
+	if !region.NeedMerge(int64(m.opts.GetMaxMergeRegionSize()), int64(m.opts.GetMaxMergeRegionKeys())) {
 		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
 		return nil
 	}
 
 	// skip region has down peers or pending peers
-	if !schedule.IsRegionHealthy(region) {
+	if !filter.IsRegionHealthy(region) {
 		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
 		return nil
 	}
 
-	if !schedule.IsRegionReplicated(m.cluster, region) {
+	if !filter.IsRegionReplicated(m.cluster, region) {
 		checkerCounter.WithLabelValues("merge_checker", "abnormal-replica").Inc()
 		return nil
 	}
@@ -145,8 +149,24 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	if target.GetApproximateSize() > maxTargetRegionSize {
+	regionMaxSize := m.cluster.GetStoreConfig().GetRegionMaxSize()
+	maxTargetRegionSizeThreshold := int64(float64(regionMaxSize) * float64(maxTargetRegionFactor))
+	if maxTargetRegionSizeThreshold < maxTargetRegionSize {
+		maxTargetRegionSizeThreshold = maxTargetRegionSize
+	}
+	if target.GetApproximateSize() > maxTargetRegionSizeThreshold {
 		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
+		return nil
+	}
+	if err := m.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
+		m.opts.GetMaxMergeRegionSize()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-size-after-merge").Inc()
+		return nil
+	}
+
+	if err := m.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
+		m.opts.GetMaxMergeRegionKeys()); err != nil {
+		checkerCounter.WithLabelValues("merge_checker", "split-keys-after-merge").Inc()
 		return nil
 	}
 
@@ -192,12 +212,12 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 		return false
 	}
 
-	if !schedule.IsRegionHealthy(adjacent) {
+	if !filter.IsRegionHealthy(adjacent) {
 		checkerCounter.WithLabelValues("merge_checker", "adj-special-peer").Inc()
 		return false
 	}
 
-	if !schedule.IsRegionReplicated(m.cluster, adjacent) {
+	if !filter.IsRegionReplicated(m.cluster, adjacent) {
 		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-replica").Inc()
 		return false
 	}
@@ -263,11 +283,11 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
 func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
-	regionStoreIDs := region.GetStoreIds()
+	regionStoreIDs := region.GetStoreIDs()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()
 		store := cluster.GetStore(storeID)
-		if store == nil || store.IsOffline() {
+		if store == nil || store.IsRemoving() {
 			if _, ok := regionStoreIDs[storeID]; !ok {
 				return false
 			}

@@ -17,39 +17,45 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/log"
+	"github.com/stretchr/testify/suite"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )
 
-var _ = Suite(&testLogSuite{})
-
-type testLogSuite struct {
+type logTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *testLogSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
+func TestLogTestSuite(t *testing.T) {
+	suite.Run(t, new(logTestSuite))
 }
 
-func (s *testLogSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *logTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
 }
 
-func (s *testLogSuite) TestSetLogLevel(c *C) {
+func (suite *logTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *logTestSuite) TestSetLogLevel() {
 	level := "error"
 	data, err := json.Marshal(level)
-	c.Assert(err, IsNil)
-	err = postJSON(testDialClient, s.urlPrefix+"/log", data)
-	c.Assert(err, IsNil)
-	c.Assert(log.GetLevel().String(), Equals, level)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/log", data, tu.StatusOK(suite.Require()))
+	suite.NoError(err)
+	suite.Equal(level, log.GetLevel().String())
 }
