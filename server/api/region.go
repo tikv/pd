@@ -280,13 +280,10 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	for _, region := range regions {
 		if !schedule.IsRegionReplicated(rc, region) {
 			state = "INPROGRESS"
-			for _, item := range rc.GetCoordinator().GetWaitingRegions() {
-				if item.Key == region.GetID() {
-					state = "PENDING"
-					break
-				}
+			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
+				state = "PENDING"
+				break
 			}
-			break
 		}
 	}
 	failpoint.Inject("mockPending", func(val failpoint.Value) {

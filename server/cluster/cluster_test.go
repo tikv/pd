@@ -860,6 +860,45 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
 }
 
+func (s *testClusterInfoSuite) TestRegionSizeChanged(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	region := newTestRegions(1, 3, 3)[0]
+	cluster.opt.GetMaxMergeRegionKeys()
+	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
+	curMaxMergeKeys := int64(cluster.opt.GetMaxMergeRegionKeys())
+	region = region.Clone(
+		core.WithLeader(region.GetPeers()[2]),
+		core.SetApproximateSize(curMaxMergeSize-1),
+		core.SetApproximateKeys(curMaxMergeKeys-1),
+		core.SetFromHeartbeat(true),
+	)
+	cluster.processRegionHeartbeat(region)
+	regionID := region.GetID()
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsTrue)
+	// Test ApproximateSize and ApproximateKeys change.
+	region = region.Clone(
+		core.WithLeader(region.GetPeers()[2]),
+		core.SetApproximateSize(curMaxMergeSize+1),
+		core.SetApproximateKeys(curMaxMergeKeys+1),
+		core.SetFromHeartbeat(true),
+	)
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsFalse)
+	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
+	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize + 2)))
+	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys + 2)))
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsTrue)
+	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize)))
+	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys)))
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsFalse)
+}
+
 func (s *testClusterInfoSuite) TestConcurrentReportBucket(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
