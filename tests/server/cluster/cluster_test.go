@@ -1118,3 +1118,60 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	err = rc.HandleRegionHeartbeat(region)
 	c.Assert(err, NotNil)
 }
+
+// See https://github.com/tikv/pd/issues/4941
+func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
+	tc, err := tests.NewTestCluster(s.ctx, 2)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	svr := leaderServer.GetServer()
+	rc := cluster.NewRaftCluster(s.ctx, svr.GetClusterRootPath(), svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	storage := rc.GetStorage()
+	meta := &metapb.Cluster{Id: 123}
+	c.Assert(storage.SaveMeta(meta), IsNil)
+	n := 4
+	stores := make([]*metapb.Store, 0, n)
+	for i := 1; i <= n; i++ {
+		store := &metapb.Store{Id: uint64(i), State: metapb.StoreState_Up}
+		stores = append(stores, store)
+	}
+
+	for _, store := range stores {
+		c.Assert(storage.SaveStore(store), IsNil)
+	}
+	rc, err = rc.LoadClusterInfo()
+	c.Assert(err, IsNil)
+	c.Assert(rc, NotNil)
+	// offline a store
+	c.Assert(rc.RemoveStore(1, false), IsNil)
+	c.Assert(rc.GetStore(1).GetState(), Equals, metapb.StoreState_Offline)
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr1 := leaderServer.GetServer()
+	rc1 := svr1.GetRaftCluster()
+	c.Assert(err, IsNil)
+	c.Assert(rc1, NotNil)
+	// tombstone a store, and remove its record
+	c.Assert(rc1.BuryStore(1), IsNil)
+	c.Assert(rc1.RemoveTombStoneRecords(), IsNil)
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	svr = leaderServer.GetServer()
+	rc = svr.GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	// check store count
+	c.Assert(rc.GetConfig(), DeepEquals, meta)
+	c.Assert(rc.GetStoreCount(), Equals, 3)
+}
