@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -291,6 +292,50 @@ func TestScatterCheck(t *testing.T) {
 	}
 }
 
+// TestSomeStoresFilteredScatterGroupInConcurrency is used to test #5317 panic and won't test scatter result
+func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	// Add 5 connected stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	// Add 10 disconnected stores.
+	for i := uint64(6); i <= 15; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, 10*time.Minute)
+	}
+	// Add 85 down stores.
+	for i := uint64(16); i <= 100; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, 40*time.Minute)
+	}
+	re.Equal(tc.GetStore(uint64(6)).IsDisconnected(), true)
+	scatterer := NewRegionScatterer(ctx, tc)
+	var wg sync.WaitGroup
+	for j := 0; j < 10; j++ {
+		wg.Add(1)
+		go scatterOnce(tc, scatterer, fmt.Sprintf("group-%v", j), &wg)
+	}
+	wg.Wait()
+}
+
+func scatterOnce(tc *mockcluster.Cluster, scatter *RegionScatterer, group string, wg *sync.WaitGroup) {
+	regionID := 1
+	for i := 0; i < 100; i++ {
+		scatter.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), group)
+		regionID++
+	}
+	wg.Done()
+}
+
 func TestScatterGroupInConcurrency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -322,10 +367,10 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 		},
 	}
 
+	scatterer := NewRegionScatterer(ctx, tc)
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
 	for _, testCase := range testCases {
 		t.Log(testCase.name)
-		scatterer := NewRegionScatterer(ctx, tc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
 			for j := 0; j < testCase.groupCount; j++ {
