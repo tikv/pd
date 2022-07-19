@@ -367,6 +367,30 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	suite.False(next)
 }
 
+func (suite *operatorControllerTestSuite) TestSnapLimiter() {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(suite.ctx, tc, stream)
+	tc.AddLeaderStore(1, 0)
+	tc.UpdateLeaderCount(1, 1000)
+	tc.AddLeaderStore(2, 0)
+	for i := uint64(1); i <= 1000; i++ {
+		tc.AddLeaderRegion(i, 1)
+		// make it small region
+		tc.PutRegion(tc.GetRegion(i).Clone(core.SetApproximateSize(10)))
+	}
+	tc.SetStoreLimit(2, storelimit.AddPeer, 60)
+
+	for i := uint64(1); i <= 5; i++ {
+		op := operator.NewTestOperator(i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		suite.True(oc.AddOperator(op))
+		limiter := oc.cluster.GetStore(2).GetSnapLimit(storelimit.AddPeer)
+		suite.Equal(int64(10*i), limiter.GetUsed())
+	}
+
+}
+
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
