@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -1522,7 +1523,7 @@ func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreIn
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
 		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
-		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels())
+		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
 
@@ -1562,7 +1563,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 			}
 		}
 		regionSize := c.core.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
-		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels)
+		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
 		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
@@ -1577,14 +1578,20 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 	return storeSize
 }
 
-func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) float64 {
-	topology, sameLocationStoreNum := buildTopology(store, stores, locationLabels)
+func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) float64 {
+	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
 	weight := 1.0
 	topo := topology
+	if isMatch {
+		return weight / float64(count) / sameLocationStoreNum
+	}
+
 	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
 	for _, label := range storeLabels {
 		if _, ok := topo[label.Value]; ok {
-			weight /= float64(len(topo))
+			if slice.Contains(validLabels, label.Key) {
+				weight /= float64(len(topo))
+			}
 			topo = topo[label.Value].(map[string]interface{})
 		} else {
 			break
@@ -1594,24 +1601,42 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 	return weight / sameLocationStoreNum
 }
 
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) (map[string]interface{}, float64) {
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]interface{}, []string, float64, bool) {
 	topology := make(map[string]interface{})
 	sameLocationStoreNum := 1.0
+	totalLabelCount := make([]int, len(locationLabels))
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
-			updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+			labelCount := updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+			for i, c := range labelCount {
+				totalLabelCount[i] += c
+			}
 		}
+	}
 
+	validLabels := locationLabels
+	var isMatch bool
+	for i, c := range totalLabelCount {
+		if count/c == 0 {
+			validLabels = validLabels[:i]
+			break
+		}
+		if count/c == 1 {
+			validLabels = []string{validLabels[i]}
+			isMatch = true
+			break
+		}
+	}
+	for _, store := range stores {
 		if store.GetID() == s.GetID() {
 			continue
 		}
-
-		if s.CompareLocation(store, locationLabels) == -1 {
+		if s.CompareLocation(store, validLabels) == -1 {
 			sameLocationStoreNum++
 		}
 	}
 
-	return topology, sameLocationStoreNum
+	return topology, validLabels, sameLocationStoreNum, isMatch
 }
 
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
@@ -1634,17 +1659,20 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 }
 
 // updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) {
+func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) []int {
+	labelCount := make([]int, len(sortedLabels))
 	if len(sortedLabels) == 0 {
-		return
+		return labelCount
 	}
 	topo := topology
-	for _, l := range sortedLabels {
+	for i, l := range sortedLabels {
 		if _, exist := topo[l.Value]; !exist {
 			topo[l.Value] = make(map[string]interface{})
+			labelCount[i] += 1
 		}
 		topo = topo[l.Value].(map[string]interface{})
 	}
+	return labelCount
 }
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
