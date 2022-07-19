@@ -18,6 +18,8 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
+const snapSize = 10
+
 // SlidingWindows limits the operators of a store
 type SlidingWindows struct {
 	mu       syncutil.Mutex
@@ -54,13 +56,13 @@ func (s *SlidingWindows) Ack(token int64) {
 }
 
 // Available returns false if there is no free size for the token.
-func (s *SlidingWindows) Available(token int64) bool {
+func (s *SlidingWindows) Available(_ int64) bool {
 	if s == nil {
 		return true
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.used+token <= s.capacity
+	return s.used+snapSize <= s.capacity
 }
 
 // GetUsed returns the used size in the sliding windows.
@@ -73,6 +75,7 @@ func (s *SlidingWindows) GetUsed() int64 {
 	return s.used
 }
 
+// GetCapacity returns the capacity of the sliding windows.
 func (s *SlidingWindows) GetCapacity() int64 {
 	if s == nil {
 		return 0
@@ -89,7 +92,7 @@ func (s *SlidingWindows) Take(token int64) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.used+token <= s.capacity {
+	if s.used+snapSize <= s.capacity {
 		s.used += token
 		return true
 	}

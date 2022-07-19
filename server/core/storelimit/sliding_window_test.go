@@ -12,7 +12,6 @@ func Test_SlidingWindows(t *testing.T) {
 	re := assert.New(t)
 	s := NewSlidingWindows(capacity)
 	re.True(s.Available(capacity))
-	re.False(s.Available(capacity + 1))
 	re.True(s.Take(capacity))
 	re.False(s.Take(capacity))
 	s.Ack(capacity)
