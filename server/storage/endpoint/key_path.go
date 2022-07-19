@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -148,14 +149,22 @@ func KeyspaceMetaPrefix() string {
 }
 
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
-// Path: /keyspaces/meta/{space_id}
+// Path: keyspaces/meta/{space_id}
 func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	idStr := encodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.
-// Path: /keyspaces/id/{name}
+// Path: keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
 	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
+}
+
+// encodeKeyspaceID from uint32 to string.
+// It adds extra padding to make encoded ID ordered.
+// Encoded ID can be decoded directly with strconv.ParseUint.
+func encodeKeyspaceID(spaceID uint32) string {
+	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	return strings.Repeat("0", spaceIDStrLen-len(idStr)) + idStr
 }

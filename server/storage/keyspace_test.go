@@ -15,6 +15,7 @@
 package storage
 
 import (
+	"github.com/tikv/pd/server/storage/endpoint"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestSaveLoadKeyspace(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	keyspaces := getTestKeyspaces()
+	keyspaces := makeTestKeyspaces()
 	for _, keyspace := range keyspaces {
 		re.NoError(storage.SaveKeyspace(keyspace))
 	}
@@ -53,7 +54,7 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	keyspaces := getTestKeyspaces()
+	keyspaces := makeTestKeyspaces()
 	for _, keyspace := range keyspaces {
 		re.NoError(storage.SaveKeyspace(keyspace))
 	}
@@ -97,11 +98,11 @@ func TestSaveLoadKeyspaceID(t *testing.T) {
 	re.Equal(uint32(0), id)
 }
 
-func getTestKeyspaces() []*keyspacepb.KeyspaceMeta {
+func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	return []*keyspacepb.KeyspaceMeta{
 		{
-			Id:             500,
+			Id:             10,
 			Name:           "keyspace1",
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -112,7 +113,7 @@ func getTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             700,
+			Id:             11,
 			Name:           "keyspace2",
 			State:          keyspacepb.KeyspaceState_ARCHIVED,
 			CreatedAt:      now + 300,
@@ -123,7 +124,7 @@ func getTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             800,
+			Id:             100,
 			Name:           "keyspace3",
 			State:          keyspacepb.KeyspaceState_DISABLED,
 			CreatedAt:      now + 500,
@@ -134,4 +135,14 @@ func getTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 	}
+}
+
+// TestEncodeSpaceID test spaceID encoding.
+func TestEncodeSpaceID(t *testing.T) {
+	re := require.New(t)
+	re.Equal("keyspaces/meta/00000000", endpoint.KeyspaceMetaPath(0))
+	re.Equal("keyspaces/meta/16777215", endpoint.KeyspaceMetaPath(1<<24-1))
+	re.Equal("keyspaces/meta/00000100", endpoint.KeyspaceMetaPath(100))
+	re.Equal("keyspaces/meta/00000011", endpoint.KeyspaceMetaPath(11))
+	re.Equal("keyspaces/meta/00000010", endpoint.KeyspaceMetaPath(10))
 }
