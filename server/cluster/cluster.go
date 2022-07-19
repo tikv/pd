@@ -1621,8 +1621,8 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 			validLabels = validLabels[:i]
 			break
 		}
-		if count/c == 1 {
-			validLabels = []string{validLabels[i]}
+		if count/c == 1 && count%c == 0 {
+			validLabels = validLabels[:i+1]
 			isMatch = true
 			break
 		}

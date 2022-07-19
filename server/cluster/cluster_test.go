@@ -1424,6 +1424,22 @@ func TestTopologyWeight3(t *testing.T) {
 	re.Equal(1.0/5/2, getStoreTopoWeight(store10, stores, labels, 5))
 }
 
+func TestTopologyWeight4(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+
+	stores := []*core.StoreInfo{store1, store2, store3, store4}
+
+	re.Equal(1.0/3/2, getStoreTopoWeight(store1, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store3, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store4, stores, labels, 3))
+}
+
 func TestCalculateStoreSize1(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
