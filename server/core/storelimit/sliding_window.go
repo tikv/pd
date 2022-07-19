@@ -73,6 +73,15 @@ func (s *SlidingWindows) GetUsed() int64 {
 	return s.used
 }
 
+func (s *SlidingWindows) GetCapacity() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.capacity
+}
+
 // Take some size if there are some free size more than token.
 func (s *SlidingWindows) Take(token int64) bool {
 	if s == nil {

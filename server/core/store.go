@@ -164,7 +164,12 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 func (s *StoreInfo) IsAvailableSnap(snapType storelimit.Type, token int64) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.snapLimiter != nil && s.snapLimiter[snapType] != nil {
+	notNil := s.snapLimiter != nil && s.snapLimiter[snapType] != nil
+	log.Info("is available for snapshot", zap.Bool("notNil", notNil),
+		zap.Int64("used", s.snapLimiter[snapType].GetUsed()),
+		zap.Int64("capacity", s.snapLimiter[snapType].GetUsed()),
+		zap.Uint64("store-id", s.GetID()))
+	if notNil {
 		return s.snapLimiter[snapType].Available(token)
 	}
 	return true
