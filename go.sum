@@ -1,8 +1,8 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/AlekSi/gocov-xml v1.0.0 h1:4QctJBgXEkbzeKz6PJy6bt3JSPNSN4I2mITYW+eKUoQ=
 github.com/AlekSi/gocov-xml v1.0.0/go.mod h1:J0qYeZ6tDg4oZubW9mAAgxlqw39PDfoEkzB3HXSbEuA=
-github.com/AmoebaProtozoa/kvproto v0.0.0-20220704092113-f8d176ab7cb4 h1:SNXqBJDGf3s7OrgyhUtry9vZoD4IpTI9fNKvGWqcN/s=
-github.com/AmoebaProtozoa/kvproto v0.0.0-20220704092113-f8d176ab7cb4/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
+github.com/AmoebaProtozoa/kvproto v0.0.0-20220715053401-9a717ffca7c6 h1:i9SJvU3P8t7MTEQ8zSUxDUDA3tyEf2+3I+JmWG5uw1Q=
+github.com/AmoebaProtozoa/kvproto v0.0.0-20220715053401-9a717ffca7c6/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/DATA-DOG/go-sqlmock v1.3.3/go.mod h1:f/Ixk793poVmq4qj/V1dPUg2JEAKC73Q5eFN3EC/SaM=

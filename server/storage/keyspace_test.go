@@ -15,12 +15,12 @@
 package storage
 
 import (
-	"github.com/tikv/pd/server/storage/endpoint"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 func TestSaveLoadKeyspace(t *testing.T) {
@@ -59,17 +59,17 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 		re.NoError(storage.SaveKeyspace(keyspace))
 	}
 
-	// load all keyspaces.
+	// Load all keyspaces.
 	loadedKeyspaces, err := storage.LoadRangeKeyspace(keyspaces[0].GetId(), 0)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces, loadedKeyspaces)
 
-	// load keyspaces that with id no less than second test keyspace.
+	// Load keyspaces with id >= second test keyspace's id.
 	loadedKeyspaces2, err := storage.LoadRangeKeyspace(keyspaces[1].GetId(), 0)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces[1:], loadedKeyspaces2)
 
-	// load keyspace with the smallest id.
+	// Load keyspace with the smallest id.
 	loadedKeyspace3, err := storage.LoadRangeKeyspace(1, 1)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
@@ -91,7 +91,7 @@ func TestSaveLoadKeyspaceID(t *testing.T) {
 		re.True(success)
 		re.Equal(ids[i], id)
 	}
-	// loading non-existing id should return false, 0, nil
+	// Loading non-existing id should return false, 0, nil.
 	success, id, err := storage.LoadKeyspaceIDByName("non-existing")
 	re.NoError(err)
 	re.False(success)
