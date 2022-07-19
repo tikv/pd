@@ -372,9 +372,9 @@ func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreI
 
 const snapSize = 10
 
-func (f *StoreStateFilter) exceedSnapRecvLimit(_ *config.PersistOptions, store *core.StoreInfo) plan.Status {
+func (f *StoreStateFilter) exceedRecvSnapLimit(_ *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailableSnap(storelimit.AddPeer, snapSize) {
-		f.Reason = "exceed-remove-snap-limit"
+		f.Reason = "exceed-recv-snap-limit"
 		return statusStoreSnapRemoveLimit
 	}
 	f.Reason = ""
@@ -456,13 +456,13 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	case leaderSource:
 		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
 	case regionSource:
-		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots, f.exceedSnapRecvLimit}
+		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
 			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
-			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}
+			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers, f.exceedRecvSnapLimit}
 	case scatterRegionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}

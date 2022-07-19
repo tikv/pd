@@ -32,6 +32,9 @@ func NewSlidingWindows(capacity int64) *SlidingWindows {
 
 // Adjust the sliding window capacity.
 func (s *SlidingWindows) Adjust(capacity int64) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.capacity = capacity
@@ -39,6 +42,9 @@ func (s *SlidingWindows) Adjust(capacity int64) {
 
 // Ack indicates that some executing operator has been finished.
 func (s *SlidingWindows) Ack(token int64) {
+	if s == nil {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.used > token {
@@ -49,6 +55,9 @@ func (s *SlidingWindows) Ack(token int64) {
 
 // Available returns false if there is no free size for the token.
 func (s *SlidingWindows) Available(token int64) bool {
+	if s == nil {
+		return true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.used+token <= s.capacity
@@ -66,6 +75,9 @@ func (s *SlidingWindows) GetUsed() int64 {
 
 // Take some size if there are some free size more than token.
 func (s *SlidingWindows) Take(token int64) bool {
+	if s == nil {
+		return true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.used+token <= s.capacity {
