@@ -245,22 +245,46 @@ func (c *baseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Memb
 func (c *baseClient) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	var clusterID uint64
 	for _, u := range c.GetURLs() {
 		members, err := c.getMembers(ctx, u, c.option.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
 			continue
 		}
-		c.clusterID = members.GetHeader().GetClusterId()
-		return nil
+		if clusterID == 0 {
+			clusterID = members.GetHeader().GetClusterId()
+			continue
+		}
+		failpoint.Inject("skipClusterIDCheck", func() {
+			failpoint.Continue()
+		})
+		// All URLs passed in should have the same cluster ID.
+		if members.GetHeader().GetClusterId() != clusterID {
+			return errors.WithStack(errUnmatchedClusterID)
+		}
 	}
-	return errors.WithStack(errFailInitClusterID)
+	// Failed to init the cluster ID.
+	if clusterID == 0 {
+		return errors.WithStack(errFailInitClusterID)
+	}
+	c.clusterID = clusterID
+	return nil
 }
 
 func (c *baseClient) updateMember() error {
-	for _, u := range c.GetURLs() {
+	for i, u := range c.GetURLs() {
+		failpoint.Inject("skipFirstUpdateMember", func() {
+			if i == 0 {
+				failpoint.Continue()
+			}
+		})
 		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
-
+		// Check the cluster ID.
+		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
+			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
+		}
+		// Check the TSO Allocator Leader.
 		var errTSO error
 		if err == nil {
 			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {

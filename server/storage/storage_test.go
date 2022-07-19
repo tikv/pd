@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -251,7 +253,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 	n := 10
 	regions := mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegionsOnce(context.Background(), cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
 
 	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
@@ -260,7 +262,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 	n = 20
 	mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegionsOnce(context.Background(), cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
 	re.Equal(n, cache.GetRegionCount())
 }
 
@@ -278,4 +280,188 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 		re.Equal(regions[region.GetId()], region)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"))
+}
+
+func TestTrySwitchRegionStorage(t *testing.T) {
+	re := require.New(t)
+	defaultStorage := NewStorageWithMemoryBackend()
+	localStorage := NewStorageWithMemoryBackend()
+	storage := NewCoreStorage(defaultStorage, localStorage)
+	defaultCache := core.NewRegionsInfo()
+	localCache := core.NewRegionsInfo()
+
+	TrySwitchRegionStorage(storage, false)
+	regions10 := mustSaveRegions(re, storage, 10)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Empty(localCache.GetMetaRegions())
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+
+	TrySwitchRegionStorage(storage, true)
+	regions20 := mustSaveRegions(re, storage, 20)
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.Len(defaultCache.GetMetaRegions(), 10)
+	re.Len(localCache.GetMetaRegions(), 20)
+	for _, region := range defaultCache.GetMetaRegions() {
+		re.Equal(regions10[region.GetId()], region)
+	}
+	for _, region := range localCache.GetMetaRegions() {
+		re.Equal(regions20[region.GetId()], region)
+	}
+}
+
+const (
+	keyChars = "abcdefghijklmnopqrstuvwxyz"
+	keyLen   = 20
+)
+
+func generateKeys(size int) []string {
+	m := make(map[string]struct{}, size)
+	for len(m) < size {
+		k := make([]byte, keyLen)
+		for i := range k {
+			k[i] = keyChars[rand.Intn(len(keyChars))]
+		}
+		m[string(k)] = struct{}{}
+	}
+
+	v := make([]string, 0, size)
+	for k := range m {
+		v = append(v, k)
+	}
+	sort.Strings(v)
+	return v
+}
+
+func randomMerge(regions []*metapb.Region, n int, ratio int) {
+	rand.Seed(6)
+	note := make(map[int]bool)
+	for i := 0; i < n*ratio/100; i++ {
+		pos := rand.Intn(n - 1)
+		for {
+			if _, ok := note[pos]; !ok {
+				break
+			}
+			pos = rand.Intn(n - 1)
+		}
+		note[pos] = true
+
+		mergeIndex := pos + 1
+		for mergeIndex < n {
+			_, ok := note[mergeIndex]
+			if ok {
+				mergeIndex++
+			} else {
+				break
+			}
+		}
+		regions[mergeIndex].StartKey = regions[pos].StartKey
+		if regions[pos].GetRegionEpoch().GetVersion() > regions[mergeIndex].GetRegionEpoch().GetVersion() {
+			regions[mergeIndex].GetRegionEpoch().Version = regions[pos].GetRegionEpoch().GetVersion()
+		}
+		regions[mergeIndex].GetRegionEpoch().Version++
+	}
+}
+
+func saveRegions(lb *levelDBBackend, n int, ratio int) error {
+	keys := generateKeys(n)
+	regions := make([]*metapb.Region, 0, n)
+	for i := uint64(0); i < uint64(n); i++ {
+		var region *metapb.Region
+		if i == 0 {
+			region = &metapb.Region{
+				Id:       i,
+				StartKey: []byte("aaaaaaaaaaaaaaaaaaaa"),
+				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+			}
+		} else {
+			region = &metapb.Region{
+				Id:       i,
+				StartKey: []byte(keys[i-1]),
+				EndKey:   []byte(keys[i]),
+				RegionEpoch: &metapb.RegionEpoch{
+					Version: 1,
+				},
+			}
+		}
+		regions = append(regions, region)
+	}
+	if ratio != 0 {
+		randomMerge(regions, n, ratio)
+	}
+
+	for _, region := range regions {
+		err := lb.SaveRegion(region)
+		if err != nil {
+			return err
+		}
+	}
+	return lb.Flush()
+}
+
+func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
+	ctx := context.Background()
+	dir := b.TempDir()
+	lb, err := newLevelDBBackend(ctx, dir, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	cluster := core.NewBasicCluster()
+	err = saveRegions(lb, n, ratio)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() {
+		err = lb.Close()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}()
+
+	b.ResetTimer()
+	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
+	if err != nil {
+		b.Fatal(err)
+	}
+}
+
+var volumes = []struct {
+	input int
+}{
+	{input: 10000},
+	{input: 100000},
+	{input: 1000000},
+}
+
+func BenchmarkLoadRegionsByVolume(b *testing.B) {
+	for _, v := range volumes {
+		b.Run(fmt.Sprintf("input size %d", v.input), func(b *testing.B) {
+			benchmarkLoadRegions(b, v.input, 0)
+		})
+	}
+}
+
+var ratios = []struct {
+	ratio int
+}{
+	{ratio: 0},
+	{ratio: 20},
+	{ratio: 40},
+	{ratio: 60},
+	{ratio: 80},
+}
+
+func BenchmarkLoadRegionsByRandomMerge(b *testing.B) {
+	for _, r := range ratios {
+		b.Run(fmt.Sprintf("merge ratio %d", r.ratio), func(b *testing.B) {
+			benchmarkLoadRegions(b, 1000000, r.ratio)
+		})
+	}
 }

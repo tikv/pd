@@ -67,6 +67,16 @@ func (ss *storeStats) GetStoreStats() *pdpb.StoreStats {
 	return ss.rawStats
 }
 
+// CloneStoreStats returns the statistics information cloned from the store.
+func (ss *storeStats) CloneStoreStats() *pdpb.StoreStats {
+	ss.mu.RLock()
+	b, _ := ss.rawStats.Marshal()
+	ss.mu.RUnlock()
+	stats := &pdpb.StoreStats{}
+	stats.Unmarshal(b)
+	return stats
+}
+
 // GetCapacity returns the capacity size of the store.
 func (ss *storeStats) GetCapacity() uint64 {
 	ss.mu.RLock()

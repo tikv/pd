@@ -195,7 +195,7 @@ func TestFinished(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
 		re.NotNil(resp.RecoveryPlan.ForceLeader)
-		re.Equal(1, len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders))
+		re.Len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders, 1)
 		re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
@@ -207,7 +207,7 @@ func TestFinished(t *testing.T) {
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
-		re.Equal(1, len(resp.RecoveryPlan.Demotes))
+		re.Len(resp.RecoveryPlan.Demotes, 1)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 	re.Equal(demoteFailedVoter, recoveryController.GetStage())
@@ -274,7 +274,7 @@ func TestFailed(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
 		re.NotNil(resp.RecoveryPlan.ForceLeader)
-		re.Equal(1, len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders))
+		re.Len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders, 1)
 		re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
@@ -286,7 +286,7 @@ func TestFailed(t *testing.T) {
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		re.NotNil(resp.RecoveryPlan)
-		re.Equal(1, len(resp.RecoveryPlan.Demotes))
+		re.Len(resp.RecoveryPlan.Demotes, 1)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 	re.Equal(demoteFailedVoter, recoveryController.GetStage())
@@ -433,7 +433,7 @@ func TestAffectedTableID(t *testing.T) {
 
 	advanceUntilFinished(re, recoveryController, reports)
 
-	re.Equal(1, len(recoveryController.affectedTableIDs))
+	re.Len(recoveryController.affectedTableIDs, 1)
 	_, exists := recoveryController.affectedTableIDs[6]
 	re.True(exists)
 }
@@ -494,7 +494,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	// force leader on regions of commit merge first
 	re.NotNil(resp.RecoveryPlan)
 	re.NotNil(resp.RecoveryPlan.ForceLeader)
-	re.Equal(1, len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders))
+	re.Len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders, 1)
 	re.Equal(uint64(1002), resp.RecoveryPlan.ForceLeader.EnterForceLeaders[0])
 	re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 	applyRecoveryPlan(re, 1, reports, resp)
@@ -505,7 +505,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	// force leader on the rest regions
 	re.NotNil(resp.RecoveryPlan)
 	re.NotNil(resp.RecoveryPlan.ForceLeader)
-	re.Equal(1, len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders))
+	re.Len(resp.RecoveryPlan.ForceLeader.EnterForceLeaders, 1)
 	re.Equal(uint64(1001), resp.RecoveryPlan.ForceLeader.EnterForceLeaders[0])
 	re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 	applyRecoveryPlan(re, 1, reports, resp)
