@@ -219,3 +219,12 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 	}
 	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
 }
+
+// GetStores returns stores of the item.
+func (stat *HotPeerStat) GetStores() []uint64{
+	stores:=[]uint64{}
+	for _, peer := range stat.peers {
+		stores = append(stores, peer.StoreId)
+	}
+	return stores
+}

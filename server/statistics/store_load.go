@@ -85,6 +85,7 @@ func toHotPeerStatShow(p *HotPeerStat, kind RWType) HotPeerStatShow {
 	queryRate := p.Loads[q]
 	return HotPeerStatShow{
 		StoreID:        p.StoreID,
+		Stores:         p.GetStores(),
 		RegionID:       p.RegionID,
 		HotDegree:      p.HotDegree,
 		ByteRate:       byteRate,
