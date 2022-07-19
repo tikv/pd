@@ -64,6 +64,8 @@ const (
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
 	StatusRegionLabelReject
+	// StatusCreateOperatorFailed represents the plan stops at creating operator.
+	StatusCreateOperatorFailed
 )
 
 var statusText = map[StatusCode]string{

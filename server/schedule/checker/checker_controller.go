@@ -75,16 +75,20 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
+	plan := newPlan(region, false)
 
-	if op := c.jointStateChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+	if check := c.jointStateChecker.Check(plan); check {
+		return plan.Operators()
 	}
 
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
+		checkPlan := plan.newCheckNode("region-label-schedule-disabled")
 		if l.ScheduleDisabled(region) {
+			checkPlan.StopWith(statusPaused)
 			return nil
 		}
+		checkPlan.StopWith(statusOK)
 	}
 
 	if op := c.splitChecker.Check(region); op != nil {
