@@ -56,6 +56,9 @@ func (s *SlidingWindows) Available(token int64) bool {
 
 // GetUsed returns the used size in the sliding windows.
 func (s *SlidingWindows) GetUsed() int64 {
+	if s == nil {
+		return 0
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.used
