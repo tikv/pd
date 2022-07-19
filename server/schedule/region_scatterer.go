@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -120,7 +121,7 @@ type RegionScatterer struct {
 	name           string
 	cluster        Cluster
 	ordinaryEngine engineContext
-	specialEngines map[string]engineContext
+	specialEngines sync.Map
 }
 
 // NewRegionScatterer creates a region scatterer.
@@ -133,7 +134,6 @@ func NewRegionScatterer(ctx context.Context, cluster Cluster) *RegionScatterer {
 		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
 			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
 		}),
-		specialEngines: make(map[string]engineContext),
 	}
 }
 
@@ -333,14 +333,14 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	}
 
 	for engine, peers := range specialPeers {
-		ctx, ok := r.specialEngines[engine]
+		ctx, ok := r.specialEngines.Load(engine)
 		if !ok {
 			ctx = newEngineContext(r.ctx, func() filter.Filter {
 				return filter.NewEngineFilter(r.name, placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: []string{engine}})
 			})
-			r.specialEngines[engine] = ctx
+			r.specialEngines.Store(engine, ctx)
 		}
-		scatterWithSameEngine(peers, ctx)
+		scatterWithSameEngine(peers, ctx.(engineContext))
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -489,7 +489,8 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 				core.EngineTiKV).Inc()
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
-			r.specialEngines[engine].selectedPeer.Put(storeID, group)
+			ctx, _ := r.specialEngines.Load(engine)
+			ctx.(engineContext).selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),
 				fmt.Sprintf("%v", false),
