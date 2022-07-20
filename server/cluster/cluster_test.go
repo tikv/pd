@@ -383,7 +383,7 @@ func TestReuseAddress(t *testing.T) {
 		}
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsRemoved() {
-			// try to start a new store with the same address with store which is physically destryed or tombstone should be success
+			// try to start a new store with the same address with store which is physically destroyed or tombstone should be success
 			re.NoError(cluster.PutStore(newStore))
 		} else {
 			re.Error(cluster.PutStore(newStore))
