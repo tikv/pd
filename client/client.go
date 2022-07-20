@@ -586,7 +586,6 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetMembers(ctx, req)
 	cancel()
-
 	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
