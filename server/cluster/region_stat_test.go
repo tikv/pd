@@ -62,9 +62,19 @@ func TestRegionState(t *testing.T) {
 			}),
 		),
 	}
+	cluster.GetBasicCluster().PutRegion(regions[0])
 
 	rsc.observe(regions)
 	re.Len(rsc.getRegionStateByType(regionStateDown), 1)
+	for i := 0; i < clearThreshold; i++ {
+		rsc.collectAndClean()
+	}
+	re.Len(rsc.getRegionStateByType(regionStateDown), 1)
+	cluster.GetBasicCluster().RemoveRegion(regions[0])
+	for i := 0; i < clearThreshold; i++ {
+		rsc.collectAndClean()
+	}
+	re.Len(rsc.getRegionStateByType(regionStateDown), 0)
 }
 
 // GetRegionStateByType gets the states of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
