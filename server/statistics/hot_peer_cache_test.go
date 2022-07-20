@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/movingaverage"
@@ -269,8 +270,8 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 			meta,
 			leader,
 			core.SetReportInterval(interval),
-			core.SetReadBytes(10*1024*1024*interval),
-			core.SetReadKeys(10*1024*1024*interval),
+			core.SetReadBytes(10*units.MiB*interval),
+			core.SetReadKeys(10*units.MiB*interval),
 			core.SetReadQuery(1024*interval),
 		)
 	case Write:
@@ -278,8 +279,8 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 			meta,
 			leader,
 			core.SetReportInterval(interval),
-			core.SetWrittenBytes(10*1024*1024*interval),
-			core.SetWrittenKeys(10*1024*1024*interval),
+			core.SetWrittenBytes(10*units.MiB*interval),
+			core.SetWrittenKeys(10*units.MiB*interval),
 			core.SetWrittenQuery(1024*interval),
 		)
 	default:

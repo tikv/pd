@@ -220,7 +220,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 	}
 	check(store, testCases)
 
-	// Disconn
+	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
 		{0, "disconnected", "disconnected"},
