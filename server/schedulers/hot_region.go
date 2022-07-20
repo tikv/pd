@@ -402,7 +402,8 @@ type balanceSolver struct {
 	opTy         opType
 	resourceTy   resourceType
 
-	cur *solution
+	minPerceivedLoads [statistics.DimLen]float64
+	cur               *solution
 
 	best *solution
 	ops  []*operator.Operator
@@ -416,10 +417,15 @@ type balanceSolver struct {
 	firstPriority  int
 	secondPriority int
 
-	greatDecRatio float64
-	minorDecRatio float64
-	maxPeerNum    int
-	minHotDegree  int
+	preBalancedRatio      float64
+	balancedRatio         float64
+	preBalancedCheckRatio float64
+	balancedCheckRatio    float64
+	perceivedRatio        float64
+
+	maxPeerNum            int
+	minPerceivedLoadIndex int
+	minHotDegree          int
 
 	pick func(s interface{}, p func(int) bool) bool
 }
@@ -459,8 +465,16 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
+	bs.balancedRatio = bs.sche.conf.GetGreatDecRatio()
+	bs.preBalancedRatio = 2.0*bs.balancedRatio - 1.0 // 1.0 - (1.0-bs.balancedRatio)*2
+	bs.balancedCheckRatio = bs.balancedRatio - 0.02
+	bs.preBalancedCheckRatio = bs.preBalancedRatio - 0.03
+	bs.perceivedRatio = (1.0 - bs.preBalancedRatio) * 2
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
+	bs.minPerceivedLoadIndex = bs.maxPeerNum/100 - 1
+	if bs.minPerceivedLoadIndex < 0 {
+		bs.minPerceivedLoadIndex = 0
+	}
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
 
 	bs.pick = slice.AnyOf
@@ -552,7 +566,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(srcStore.GetID(), 10)).Inc()
 			continue
 		}
-		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
+		var hotPeers []*statistics.HotPeerStat
+		hotPeers, bs.minPerceivedLoads[bs.firstPriority], bs.minPerceivedLoads[bs.secondPriority] = bs.filterHotPeers(srcStore)
+		for _, mainPeerStat := range hotPeers {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
@@ -577,7 +593,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 					//     * The current best solution contain revert regions.
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
-					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
+					hotRevertPeers, _, _ := bs.filterHotPeers(bs.cur.dstStore)
+					for _, revertPeerStat := range hotRevertPeers {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) {
@@ -695,7 +712,7 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
 // The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
+func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat, minFirstPerceivedLoad, minSecondPerceivedLoad float64) {
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
 			// no in pending operator and no need cool down after transfer leader
@@ -703,50 +720,58 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (
 		}
 	}
 
-	src := storeLoad.HotPeers
-	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
-	if len(src) <= bs.maxPeerNum {
-		ret = make([]*statistics.HotPeerStat, 0, len(src))
-		for _, peer := range src {
+	var firstSortedPeers, secondSortedPeers []*statistics.HotPeerStat
+	minFirstPerceivedLoad, firstSortedPeers = bs.sortHotPeers(storeLoad.HotPeers, bs.firstPriority)
+	minSecondPerceivedLoad, secondSortedPeers = bs.sortHotPeers(storeLoad.HotPeers, bs.secondPriority)
+	if len(firstSortedPeers) <= bs.maxPeerNum {
+		ret = make([]*statistics.HotPeerStat, 0, len(firstSortedPeers))
+		for _, peer := range firstSortedPeers {
 			appendItem(peer)
 		}
 	} else {
-		union := bs.sortHotPeers(src)
+		union := bs.selectHotPeers(firstSortedPeers, secondSortedPeers)
 		ret = make([]*statistics.HotPeerStat, 0, len(union))
 		for peer := range union {
 			appendItem(peer)
 		}
 	}
-
 	return
 }
 
-func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
-	firstSort := make([]*statistics.HotPeerStat, len(ret))
-	copy(firstSort, ret)
-	sort.Slice(firstSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
-		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, dim int) (minPerceivedLoad float64, sortedPeers []*statistics.HotPeerStat) {
+	if len(ret) == 0 {
+		return 0, nil
+	}
+
+	sortedPeers = make([]*statistics.HotPeerStat, len(ret))
+	copy(sortedPeers, ret)
+	k := statistics.GetRegionStatKind(bs.rwTy, dim)
+	sort.Slice(sortedPeers, func(i, j int) bool {
+		return sortedPeers[i].GetLoad(k) > sortedPeers[j].GetLoad(k)
 	})
-	secondSort := make([]*statistics.HotPeerStat, len(ret))
-	copy(secondSort, ret)
-	sort.Slice(secondSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
-		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
-	})
+
+	minPerceivedLoadIndex := len(ret) - 1
+	if minPerceivedLoadIndex > bs.minPerceivedLoadIndex {
+		minPerceivedLoadIndex = bs.minPerceivedLoadIndex
+	}
+	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].GetLoad(k)
+	return
+}
+
+func (bs *balanceSolver) selectHotPeers(firstSortedPeers, secondSortedPeers []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {
-		for len(firstSort) > 0 {
-			peer := firstSort[0]
-			firstSort = firstSort[1:]
+		for len(firstSortedPeers) > 0 {
+			peer := firstSortedPeers[0]
+			firstSortedPeers = firstSortedPeers[1:]
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
 			}
 		}
-		for len(union) < bs.maxPeerNum && len(secondSort) > 0 {
-			peer := secondSort[0]
-			secondSort = secondSort[1:]
+		for len(union) < bs.maxPeerNum && len(secondSortedPeers) > 0 {
+			peer := secondSortedPeers[0]
+			secondSortedPeers = secondSortedPeers[1:]
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
@@ -923,29 +948,27 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		// For write leader, only compare the first priority.
 		// If the first priority is better, the progressiveRank is -3.
 		// Because it is not a solution that needs to be optimized.
-		if bs.isBetterForWriteLeader() {
+		if bs.getBalanceBoostByPriorities(bs.firstPriority) == 1 {
 			bs.cur.progressiveRank = -3
 		}
 		return
 	}
-
-	isFirstBetter, isSecondBetter := bs.isBetter(bs.firstPriority), bs.isBetter(bs.secondPriority)
-	isFirstNotWorsened := isFirstBetter || bs.isNotWorsened(bs.firstPriority)
-	isSecondNotWorsened := isSecondBetter || bs.isNotWorsened(bs.secondPriority)
+	firstCmp := bs.getBalanceBoostByPriorities(bs.firstPriority)
+	secondCmp := bs.getBalanceBoostByPriorities(bs.secondPriority)
 	switch {
-	case isFirstBetter && isSecondBetter:
+	case firstCmp == 1 && secondCmp == 1:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
 		bs.cur.progressiveRank = -4
-	case isFirstBetter && isSecondNotWorsened:
+	case firstCmp == 1 && secondCmp == 0:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
 		bs.cur.progressiveRank = -3
-	case isFirstNotWorsened && isSecondBetter:
+	case firstCmp == 0 && secondCmp == 1:
 		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
 		bs.cur.progressiveRank = -2
-	case isFirstBetter:
+	case firstCmp == 1:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
 		bs.cur.progressiveRank = -1
-	case isSecondBetter:
+	case secondCmp == 1:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
 		// It's a solution that cannot be used directly, but can be optimized.
 		bs.cur.progressiveRank = 0
@@ -954,17 +977,26 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
-func (bs *balanceSolver) isTolerance(dim int) bool {
+func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
+	srcStoreID := bs.cur.srcStore.GetID()
+	dstStoreID := bs.cur.dstStore.GetID()
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
+	srcPending, dstPending := bs.cur.getPendingLoad(dim)
+	if reverse {
+		srcStoreID, dstStoreID = dstStoreID, srcStoreID
+		srcRate, dstRate = dstRate, srcRate
+		srcPending, dstPending = dstPending, srcPending
+	}
+
 	if srcRate <= dstRate {
 		return false
 	}
-	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStore.GetID(), 10), strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Set(pendingAmp)
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(srcStoreID, 10), strconv.FormatUint(dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
+/*
 func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRatio float64) {
 	// we use DecRatio(Decline Ratio) to expect that the dst store's rate should still be less
 	// than the src store's rate after scheduling one peer.
@@ -979,8 +1011,93 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 		decRatio = (srcRate - peersRate) / math.Max(dstRate+peersRate, 1)
 	}
 	return
+}*/
+
+func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
+	// Four values minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate can be determined from src and dst.
+	// peersRate < minNotWorsenedRate                  ====> cmp == -1
+	// minNotWorsenedRate <= peersRate < minBetterRate ====> cmp == 0
+	// minBetterRate <= peersRate <= maxBetterRate     ====> cmp == 1
+	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == 0
+	// peersRate > maxNotWorsenedRate                  ====> cmp == -1
+
+	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
+	peersRate := bs.cur.getPeersRateFromCache(dim)
+	highRate, lowRate := srcRate, dstRate
+	reverse := false
+	if srcRate < dstRate {
+		highRate, lowRate = dstRate, srcRate
+		peersRate = -peersRate
+		reverse = true
+	}
+
+	if highRate*bs.balancedCheckRatio <= lowRate {
+		// At this time, it is considered to be in the balanced state, and cmp = 1 will not be judged.
+		// If the balanced state is not broken, cmp = 0.
+		// If the balanced state is broken, cmp = -1.
+
+		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)
+		minNotWorsenedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
+		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)*bs.balancedRatio
+		maxNotWorsenedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		if minNotWorsenedRate > 0 {
+			minNotWorsenedRate = 0
+		}
+
+		if peersRate >= minNotWorsenedRate && peersRate <= maxNotWorsenedRate {
+			return 0
+		}
+		return -1
+	}
+
+	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
+	if highRate*bs.preBalancedCheckRatio <= lowRate {
+		// At this time, it is considered to be in pre-balanced state.
+		// Only the schedules that reach the balanced state will be judged as 1,
+		// and the schedules that do not destroy the pre-balanced state will be judged as 0.
+		minNotWorsenedRate = (highRate*bs.preBalancedRatio - lowRate) / (1.0 + bs.preBalancedRatio)
+		minBetterRate = (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
+		maxBetterRate = (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		maxNotWorsenedRate = (highRate - lowRate*bs.preBalancedRatio) / (1.0 + bs.preBalancedRatio)
+		if minNotWorsenedRate > 0 {
+			minNotWorsenedRate = 0
+		}
+	} else {
+		// At this time, it is considered to be in the unbalanced state.
+		// As long as the balance is significantly improved, it is judged as 1.
+		// If the balance is not reduced, it is judged as 0.
+		// If the rate relationship between src and dst is reversed, there will be a certain penalty.
+		minBalancedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
+		maxBalancedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+
+		minNotWorsenedRate = -bs.getMinRate(dim)
+		minBetterRate = math.Min(minBalancedRate*bs.perceivedRatio, bs.minPerceivedLoads[dim])
+		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*bs.perceivedRatio
+		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*bs.perceivedRatio
+		if maxBetterRate < minBetterRate {
+			maxBetterRate = minBetterRate
+		}
+		if maxNotWorsenedRate < maxBetterRate {
+			maxNotWorsenedRate = maxBalancedRate
+		}
+	}
+
+	switch {
+	case minBetterRate <= peersRate && peersRate <= maxBetterRate:
+		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) {
+			return 1
+		}
+		return 0
+	case minNotWorsenedRate <= peersRate && peersRate < minBetterRate:
+		return 0
+	case maxBetterRate < peersRate && peersRate <= maxNotWorsenedRate:
+		return 0
+	default:
+		return -1
+	}
 }
 
+/*
 func (bs *balanceSolver) isBetterForWriteLeader() bool {
 	srcRate, dstRate := bs.cur.getExtremeLoad(bs.firstPriority)
 	peersRate := bs.cur.getPeersRateFromCache(bs.firstPriority)
@@ -996,7 +1113,7 @@ func (bs *balanceSolver) isBetter(dim int) bool {
 func (bs *balanceSolver) isNotWorsened(dim int) bool {
 	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
 	return !isHot || decRatio <= bs.minorDecRatio
-}
+}*/
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
 	switch dim {
