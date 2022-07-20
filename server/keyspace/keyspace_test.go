@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"sync"
 	"testing"
@@ -160,6 +161,7 @@ func TestLoadRangeKeyspace(t *testing.T) {
 	re := require.New(t)
 	manager := newKeyspaceManager()
 	// Test with 100 keyspaces.
+	// Keyspace ids are 1 - 101.
 	total := 100
 	requests := makeCreateKeyspaceRequests(total)
 
@@ -195,6 +197,28 @@ func TestLoadRangeKeyspace(t *testing.T) {
 		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
 	}
+
+	// Attempts to load 30 keyspaces starting from keyspace with id 90.
+	// Scan result should be keyspaces with id 90-101.
+	loadStart = 90
+	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
+	re.NoError(err)
+	re.Equal(11, len(keyspaces))
+	for i := range keyspaces {
+		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
+	}
+
+	// Loading starting from non-existing keyspace ID should result in empty result.
+	loadStart = 900
+	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 0)
+	re.NoError(err)
+	re.Empty(keyspaces)
+
+	// Scanning starting from a non-zero illegal index should result in error.
+	loadStart = math.MaxUint32
+	_, err = manager.LoadRangeKeyspace(uint32(loadStart), 0)
+	re.Error(err)
 }
 
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously

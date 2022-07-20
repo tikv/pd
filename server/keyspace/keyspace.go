@@ -15,7 +15,6 @@
 package keyspace
 
 import (
-	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -26,28 +25,11 @@ import (
 )
 
 const (
-	spaceIDMin = uint32(1)       // 1 is the minimum value of spaceID, 0 is reserved.
-	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// AllocStep set idAllocator's step when write persistent window boundary.
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
 	// AllocLabel is used to label keyspace idAllocator's metrics.
 	AllocLabel = "keyspace-idAlloc"
-	// illegalChars contains forbidden characters for keyspace name.
-	illegalChars = "/"
-)
-
-var (
-	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
-	ErrKeyspaceNotFound = errors.New("Keyspace does not exist")
-	// ErrKeyspaceExists indicates target keyspace already exists.
-	// Used when creating a new keyspace.
-	ErrKeyspaceExists   = errors.New("Keyspace already exists")
-	errKeyspaceArchived = errors.New("Keyspace already archived")
-	errArchiveEnabled   = errors.New("Cannot archive ENABLED keyspace")
-	errIllegalID        = errors.New("Cannot create keyspace with that ID")
-	errIllegalName      = errors.New("Cannot create keyspace with that name")
-	errIllegalOperation = errors.New("Illegal operation")
 )
 
 // Manager manages keyspace related data.
@@ -216,6 +198,11 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+	// Load Start should fall within acceptable ID range, otherwise there may be problem with ID encoding.
+	// The only exception is 0, which is used to indicate beginning.
+	if err := validateID(startID); startID != 0 && err != nil {
+		return nil, err
+	}
 	return manager.store.LoadRangeKeyspace(startID, limit)
 }
 
@@ -234,29 +221,6 @@ func (manager *Manager) allocID() (uint32, error) {
 		return 0, err
 	}
 	return id32, nil
-}
-
-// validateID check if keyspace falls within the acceptable range.
-// It throws errIllegalID when input id is our of range.
-func validateID(spaceID uint32) error {
-	if spaceID < spaceIDMin || spaceID > spaceIDMax {
-		return errIllegalID
-	}
-	return nil
-}
-
-// validateName check if name contains illegal character.
-// It throws errIllegalName when name contains illegal character.
-func validateName(name string) error {
-	// Name should not be empty.
-	if name == "" {
-		return errIllegalName
-	}
-	// Name should not contain any illegal character.
-	if strings.ContainsAny(name, illegalChars) {
-		return errIllegalName
-	}
-	return nil
 }
 
 // createNameToID create a keyspace name to ID lookup entry.
