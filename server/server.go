@@ -81,6 +81,9 @@ const (
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
 	pdClusterIDPath = "/pd/cluster_id"
+	// idAllocPath for idAllocator to save persistent window's end.
+	idAllocPath  = "alloc_id"
+	idAllocLabel = "idalloc"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -381,7 +384,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
-	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
+	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: idAllocPath,
+		Label:     idAllocLabel,
+		Member:    s.member.MemberValue(),
+	})
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
