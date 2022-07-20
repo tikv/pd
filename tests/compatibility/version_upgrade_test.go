@@ -16,6 +16,7 @@ package compatibility_test
 
 import (
 	"context"
+	"github.com/pingcap/errors"
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
@@ -76,8 +77,9 @@ func TestStoreRegister(t *testing.T) {
 			Version: "1.0.1",
 		},
 	}
-	_, err = svr.PutStore(context.Background(), putStoreRequest)
-	re.Error(err)
+	putStoreResponse, err := svr.PutStore(context.Background(), putStoreRequest)
+	re.NoError(err)
+	re.Error(errors.New(putStoreResponse.GetHeader().GetError().String()))
 }
 
 func TestRollingUpgrade(t *testing.T) {
