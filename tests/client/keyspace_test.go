@@ -28,14 +28,14 @@ const (
 	testConfig2 = "config_entry_2"
 )
 
-func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, count int) []*keyspacepb.KeyspaceMeta {
+func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start, count int) []*keyspacepb.KeyspaceMeta {
 	now := time.Now()
 	var err error
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
 	manager := server.GetKeyspaceManager()
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", i),
+			Name: fmt.Sprintf("test_keyspace%d", start+i),
 			InitialConfig: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
@@ -48,7 +48,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, count 
 }
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.Name)
 		re.NoError(err)
@@ -61,7 +61,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 
 func (suite *clientTestSuite) TestUpdateKeyspaceConfig() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	// Update keyspace configs.
 	for _, meta := range metas {
 		_, err := suite.client.UpdateKeyspaceConfig(suite.ctx, meta.Name, []*keyspacepb.Mutation{
@@ -99,9 +99,37 @@ func (suite *clientTestSuite) TestUpdateKeyspaceConfig() {
 
 func (suite *clientTestSuite) TestWatchKeyspace() {
 	re := suite.Require()
-	expected := mustMakeTestKeyspaces(re, suite.srv, 10)
+	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
 	re.NoError(err)
+	// First batch of watchChan message should contain all existing keyspaces.
+	initialLoaded := <-watchChan
+	re.Equal(initialKeyspaces, initialLoaded)
+	// Each additional message contains extra put events.
+	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
+	re.NoError(err)
+	// Checks that all additional keyspaces are captured by watch channel.
+	for i := 0; i < 10; {
+		loadedKeyspaces := <-watchChan
+		re.NotEmpty(loadedKeyspaces)
+		for j := range loadedKeyspaces {
+			re.Equal(additionalKeyspaces[i+j], loadedKeyspaces[j])
+		}
+		i += len(loadedKeyspaces)
+	}
+	// Updates to state should also be captured.
+	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now())
+	re.NoError(err)
 	loaded := <-watchChan
-	re.Equal(expected, loaded)
+	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
+	// Updates to config should also be captured.
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(initialKeyspaces[0].Name, []*keyspacepb.Mutation{
+		{
+			Op:  keyspacepb.Op_DEL,
+			Key: []byte(testConfig1),
+		},
+	})
+	re.NoError(err)
+	loaded = <-watchChan
+	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 }

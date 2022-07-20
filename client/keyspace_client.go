@@ -30,7 +30,7 @@ import (
 // KeyspaceClient manages keyspace metadata.
 type KeyspaceClient interface {
 	// UpdateKeyspaceConfig updates target keyspace's config.
-	UpdateKeyspaceConfig(ctx context.Context, name string, put map[string]string, delete []string) (*keyspacepb.KeyspaceMeta, error)
+	UpdateKeyspaceConfig(ctx context.Context, name string, mutations []*keyspacepb.Mutation) (*keyspacepb.KeyspaceMeta, error)
 	// LoadKeyspace load and return target keyspace's metadata.
 	LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error)
 	// WatchKeyspaces watches keyspace meta changes.
@@ -46,8 +46,7 @@ func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
 }
 
 // UpdateKeyspaceConfig updates target keyspace config and returns the updated keyspace meta.
-// Note: delete will happen after put.
-func (c *client) UpdateKeyspaceConfig(ctx context.Context, name string, put map[string]string, delete []string) (*keyspacepb.KeyspaceMeta, error) {
+func (c *client) UpdateKeyspaceConfig(ctx context.Context, name string, mutations []*keyspacepb.Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("keyspaceClient.UpdateKeyspaceConfig", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -56,10 +55,9 @@ func (c *client) UpdateKeyspaceConfig(ctx context.Context, name string, put map[
 	defer func() { cmdDurationUpdateKeyspaceConfig.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &keyspacepb.UpdateKeyspaceConfigRequest{
-		Header: c.requestHeader(),
-		Name:   name,
-		Put:    put,
-		Delete: delete,
+		Header:    c.requestHeader(),
+		Name:      name,
+		Mutations: mutations,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.keyspaceClient().UpdateKeyspaceConfig(ctx, req)
