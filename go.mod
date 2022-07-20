@@ -5,6 +5,7 @@ go 1.18
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/axw/gocov v1.0.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
@@ -52,6 +53,12 @@ require (
 )
 
 require (
+	github.com/bitly/go-simplejson v0.5.0 // indirect
+	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
+	google.golang.org/protobuf v1.28.0 // indirect
+)
+
+require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
@@ -67,7 +74,6 @@ require (
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
 	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
 	github.com/fatih/color v1.10.0 // indirect
@@ -90,11 +96,11 @@ require (
 	github.com/goccy/go-graphviz v0.0.9 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
-	github.com/golang/snappy v0.0.1 // indirect
+	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/google/uuid v1.0.0 // indirect
-	github.com/gorilla/websocket v1.4.1 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.12.1 // indirect
 	github.com/gtank/cryptopasta v0.0.0-20170601214702-1f550f6f2f69 // indirect
@@ -141,19 +147,19 @@ require (
 	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.4 // indirect
 	github.com/tklauser/numcpus v0.2.1 // indirect
-	github.com/tmc/grpc-websocket-proxy v0.0.0-20190109142713-0ad062ec5ee5 // indirect
+	github.com/tmc/grpc-websocket-proxy v0.0.0-20200427203606-3cfed13b9966 // indirect
 	github.com/ugorji/go/codec v1.1.7 // indirect
 	github.com/urfave/cli/v2 v2.3.0 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
-	go.etcd.io/bbolt v1.3.5 // indirect
+	go.etcd.io/bbolt v1.3.6 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519 // indirect
+	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4 // indirect
 	golang.org/x/image v0.0.0-20200119044424-58c23975cae1 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
 	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
