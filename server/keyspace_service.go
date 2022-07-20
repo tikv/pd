@@ -16,11 +16,12 @@ package server
 
 import (
 	"context"
-	"github.com/gogo/protobuf/proto"
-	"github.com/tikv/pd/server/keyspace"
+	"path"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -117,7 +118,7 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 	if err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, endpoint.KeyspaceMetaPrefix(), clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -144,15 +145,17 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 }
 
 func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
-	getResp, err := s.client.Get(ctx, endpoint.KeyspaceMetaPrefix(), clientv3.WithPrefix())
+	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}
 	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
 	for i, kv := range getResp.Kvs {
-		if err = proto.Unmarshal(kv.Value, metas[i]); err != nil {
+		meta := &keyspacepb.KeyspaceMeta{}
+		if err = proto.Unmarshal(kv.Value, meta); err != nil {
 			return err
 		}
+		metas[i] = meta
 	}
 	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
 }
