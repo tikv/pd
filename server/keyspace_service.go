@@ -75,7 +75,7 @@ func (s *KeyspaceServer) UpdateKeyspaceConfig(ctx context.Context, request *keys
 		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	manager := s.keyspaceManager
+	manager := s.GetKeyspaceManager()
 	updatedMeta, err := manager.UpdateKeyspaceConfig(request.Name, request.Mutations)
 	if err != nil {
 		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.getErrorHeader(err)}, err
@@ -93,7 +93,7 @@ func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.L
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	manager := s.keyspaceManager
+	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.Name)
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, err
