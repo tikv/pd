@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -36,8 +37,8 @@ const (
 	keySpaceSafePointPrefix    = "key_space/gc_safepoint"
 	keySpaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
-	keyspaceMeta               = "meta"
-	keyspaceID                 = "id"
+	keyspaceMetaInfix          = "meta"
+	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
 )
 
@@ -145,23 +146,32 @@ func KeySpaceGCSafePointSuffix() string {
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
 // Prefix: keyspaces/meta/
 func KeyspaceMetaPrefix() string {
-	return path.Join(keyspacePrefix, keyspaceMeta) + "/"
+	return path.Join(keyspacePrefix, keyspaceMetaInfix) + "/"
 }
 
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
-// Path: /keyspaces/meta/{space_id}
+// Path: keyspaces/meta/{space_id}
 func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	idStr := encodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.
+// Path: keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
-	return path.Join(keyspacePrefix, keyspaceID, name)
+	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
 }
 
 // KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
-// Path: /keyspace/alloc_id
+// Path: keyspace/alloc_id
 func KeyspaceIDAlloc() string {
 	return path.Join(keyspacePrefix, keyspaceAllocID)
+}
+
+// encodeKeyspaceID from uint32 to string.
+// It adds extra padding to make encoded ID ordered.
+// Encoded ID can be decoded directly with strconv.ParseUint.
+func encodeKeyspaceID(spaceID uint32) string {
+	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
+	return strings.Repeat("0", spaceIDStrLen-len(idStr)) + idStr
 }

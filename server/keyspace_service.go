@@ -16,11 +16,12 @@ package server
 
 import (
 	"context"
-	"github.com/gogo/protobuf/proto"
-	"github.com/tikv/pd/server/keyspace"
+	"path"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -51,7 +52,7 @@ func (s *KeyspaceServer) notBootstrappedHeader() *pdpb.ResponseHeader {
 // getErrorHeader returns corresponding ResponseHeader based on err.
 func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
-	case keyspace.ErrKeyspaceNameExists:
+	case keyspace.ErrKeyspaceExists:
 		return s.errorHeader(&pdpb.Error{
 			Type:    pdpb.ErrorType_DUPLICATED_ENTRY,
 			Message: err.Error(),
@@ -75,21 +76,15 @@ func (s *KeyspaceServer) UpdateKeyspaceConfig(ctx context.Context, request *keys
 		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	manager := s.keyspaceManager
-	updateRequest := &keyspace.UpdateKeyspaceRequest{
-		Name:        request.Name,
-		UpdateState: false,
-		ToPut:       request.Put,
-		ToDelete:    request.Delete,
-	}
-	keyspaceMeta, err := manager.UpdateKeyspace(updateRequest)
+	manager := s.GetKeyspaceManager()
+	updatedMeta, err := manager.UpdateKeyspaceConfig(request.Name, request.Mutations)
 	if err != nil {
 		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.getErrorHeader(err)}, err
 	}
 
 	return &keyspacepb.UpdateKeyspaceConfigResponse{
 		Header:   s.header(),
-		Keyspace: keyspaceMeta,
+		Keyspace: updatedMeta,
 	}, nil
 }
 
@@ -99,7 +94,7 @@ func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.L
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	manager := s.keyspaceManager
+	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.Name)
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, err
@@ -123,7 +118,7 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 	if err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, endpoint.KeyspaceMetaPrefix(), clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -134,11 +129,11 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 				if event.Type != clientv3.EventTypePut {
 					continue
 				}
-				keyspace := &keyspacepb.KeyspaceMeta{}
-				if err = proto.Unmarshal(event.Kv.Value, keyspace); err != nil {
+				meta := &keyspacepb.KeyspaceMeta{}
+				if err = proto.Unmarshal(event.Kv.Value, meta); err != nil {
 					return err
 				}
-				keyspaces = append(keyspaces, keyspace)
+				keyspaces = append(keyspaces, meta)
 			}
 			if len(keyspaces) > 0 {
 				if err = stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces}); err != nil {
@@ -150,15 +145,17 @@ func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, str
 }
 
 func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
-	getResp, err := s.client.Get(ctx, endpoint.KeyspaceMetaPrefix(), clientv3.WithPrefix())
+	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
+	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
 	for i, kv := range getResp.Kvs {
-		if err = proto.Unmarshal(kv.Value, keyspaces[i]); err != nil {
+		meta := &keyspacepb.KeyspaceMeta{}
+		if err = proto.Unmarshal(kv.Value, meta); err != nil {
 			return err
 		}
+		metas[i] = meta
 	}
-	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces})
+	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
 }

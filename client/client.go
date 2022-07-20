@@ -128,6 +128,9 @@ type Client interface {
 	WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
+
+	// KeyspaceClient manages keyspace metadata.
+	KeyspaceClient
 	// Close closes the client.
 	Close()
 }
