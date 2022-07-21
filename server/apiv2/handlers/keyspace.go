@@ -16,13 +16,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"github.com/tikv/pd/server/apiv2/middlewares"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -31,11 +29,14 @@ import (
 
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
-	router.Use(middlewares.BootstrapChecker())
+	//router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
-	router.PATCH("/:name", UpdateKeyspace)
+	router.PATCH("/:name/updateConfig", UpdateKeyspaceConfig)
+	router.POST("/:name/enable", EnableKeyspace)
+	router.POST("/:name/disable", DisableKeyspace)
+	router.POST("/:name/archive", ArchiveKeyspace)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
@@ -187,42 +188,27 @@ func LoadAllKeyspaces(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, resp)
 }
 
-// UpdateKeyspaceParams represents parameters needed to update a keyspace.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type UpdateKeyspaceParams struct {
-	State string `json:"state"`
-	// Note: Config's values are string pointers.
-	// This is to differentiate between empty string "" and null value during binding.
-	// This is especially important when applying JSON merge patch, where null value means to remove,
-	// whereas empty string should simply set.
-	Config map[string]*string `json:"config"`
-}
-
-// UpdateKeyspace update keyspace.
+// UpdateKeyspaceConfig updates target keyspace's config.
 // @Tags keyspaces
-// @Summary Update keyspace metadata.
+// @Summary Update keyspace config.
 // @Param name path string true "Keyspace Name"
-// @Param body body UpdateKeyspaceParams true "Update keyspace parameters"
+// @Param body body map[string]*string true "Update keyspace parameters"
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name} [patch]
-func UpdateKeyspace(c *gin.Context) {
+// Router /keyspaces/{name}/updateConfig [patch]
+func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
-	updateParams := &UpdateKeyspaceParams{}
-	err := c.BindJSON(updateParams)
+	mergePatch := map[string]*string{}
+	err := c.BindJSON(mergePatch)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	req, err := getUpdateRequest(name, updateParams)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	meta, err := manager.UpdateKeyspace(req)
+	mutations := getMutations(mergePatch)
+	meta, err := manager.UpdateKeyspaceConfig(name, mutations)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -230,38 +216,71 @@ func UpdateKeyspace(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
-// getUpdateRequest converts updateKeyspaceParams to keyspace.UpdateKeyspaceRequest.
-func getUpdateRequest(name string, params *UpdateKeyspaceParams) (*keyspace.UpdateKeyspaceRequest, error) {
-	req := &keyspace.UpdateKeyspaceRequest{
-		Name: name,
-	}
-	if params.State == "" {
-		req.UpdateState = false
-	} else {
-		req.UpdateState = true
-		req.Now = time.Now()
-		stateVal, ok := keyspacepb.KeyspaceState_value[params.State]
-		if !ok {
-			return nil, errors.New("Illegal keyspace state")
-		}
-		req.NewState = keyspacepb.KeyspaceState(stateVal)
-	}
-	toPut := map[string]string{}
-	var toDelete []string
-	for k, v := range params.Config {
+// getMutations converts a given JSON merge patch to a series of keyspace config mutations.
+func getMutations(patch map[string]*string) []*keyspacepb.Mutation {
+	mutations := make([]*keyspacepb.Mutation, 0, len(patch))
+	for k, v := range patch {
 		if v == nil {
-			toDelete = append(toDelete, k)
+			mutations = append(mutations, &keyspacepb.Mutation{
+				Op:  keyspacepb.Op_DEL,
+				Key: []byte(k),
+			})
 		} else {
-			toPut[k] = *v
+			mutations = append(mutations, &keyspacepb.Mutation{
+				Op:    keyspacepb.Op_PUT,
+				Key:   []byte(k),
+				Value: []byte(*v),
+			})
 		}
 	}
-	if len(toPut) > 0 {
-		req.ToPut = toPut
+	return mutations
+}
+
+// EnableKeyspace enables target keyspace.
+// @Tags keyspaces
+// @Summary Enable keyspace.
+// @Param name path string true "Keyspace Name"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// Router /keyspaces/{name}/enable [post]
+func EnableKeyspace(c *gin.Context) {
+	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_ENABLED)
+}
+
+// DisableKeyspace disables target keyspace.
+// @Tags keyspaces
+// @Summary Disable keyspace.
+// @Param name path string true "Keyspace Name"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// Router /keyspaces/{name}/disable [post]
+func DisableKeyspace(c *gin.Context) {
+	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_DISABLED)
+}
+
+// ArchiveKeyspace archives target keyspace.
+// @Tags keyspaces
+// @Summary Archive keyspace.
+// @Param name path string true "Keyspace Name"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// Router /keyspaces/{name}/archive [post]
+func ArchiveKeyspace(c *gin.Context) {
+	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_ARCHIVED)
+}
+func UpdateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
+	svr := c.MustGet("server").(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	name := c.Param("name")
+	meta, err := manager.UpdateKeyspaceState(name, state, time.Now())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
 	}
-	if len(toDelete) > 0 {
-		req.ToDelete = toDelete
-	}
-	return req, nil
+	c.IndentedJSON(http.StatusOK, meta)
 }
 
 // KeyspaceMeta wraps keyspacepb.KeyspaceMeta to provide custom JSON marshal.
