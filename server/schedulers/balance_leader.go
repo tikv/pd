@@ -364,6 +364,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 
 	result := make([]*operator.Operator, 0, batch)
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
+		// if coordinator is stopping, speed up exit
+		if l.BaseScheduler.OpController.Ctx().Err() != nil {
+			break
+		}
+
 		// first choose source
 		if sourceCandidate.hasStore() {
 			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, plan, usedRegions)
