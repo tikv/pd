@@ -28,7 +28,6 @@ require (
 	github.com/montanaflynn/stats v0.5.0
 	github.com/petermattis/goid v0.0.0-20211229010228-4d14c490ee36 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
-	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce

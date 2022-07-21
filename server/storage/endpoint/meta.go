@@ -44,7 +44,6 @@ type MetaStorage interface {
 type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
 	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
-	LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
 	Flush() error
@@ -216,11 +215,6 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			return nil
 		}
 	}
-}
-
-// LoadRegionsOnce loads all regions from storage to RegionsInfo.
-func (se *StorageEndpoint) LoadRegionsOnce(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	return se.LoadRegions(ctx, f)
 }
 
 // SaveRegion saves one region to storage.

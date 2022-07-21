@@ -17,6 +17,7 @@ package core
 import (
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -24,29 +25,28 @@ import (
 
 func TestStoreStats(t *testing.T) {
 	re := require.New(t)
-	G := uint64(1024 * 1024 * 1024)
 	meta := &metapb.Store{Id: 1, State: metapb.StoreState_Up}
 	store := NewStoreInfo(meta, SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * G,
-		UsedSize:  50 * G,
-		Available: 150 * G,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(150 * units.GiB),
 	}))
 
-	re.Equal(200*G, store.GetCapacity())
-	re.Equal(50*G, store.GetUsedSize())
-	re.Equal(150*G, store.GetAvailable())
-	re.Equal(150*G, store.GetAvgAvailable())
+	re.Equal(uint64(200*units.GiB), store.GetCapacity())
+	re.Equal(uint64(50*units.GiB), store.GetUsedSize())
+	re.Equal(uint64(150*units.GiB), store.GetAvailable())
+	re.Equal(uint64(150*units.GiB), store.GetAvgAvailable())
 	re.Equal(uint64(0), store.GetAvailableDeviation())
 
 	store = store.Clone(SetStoreStats(&pdpb.StoreStats{
-		Capacity:  200 * G,
-		UsedSize:  50 * G,
-		Available: 160 * G,
+		Capacity:  uint64(200 * units.GiB),
+		UsedSize:  uint64(50 * units.GiB),
+		Available: uint64(160 * units.GiB),
 	}))
 
-	re.Equal(160*G, store.GetAvailable())
-	re.Greater(store.GetAvgAvailable(), 150*G)
-	re.Less(store.GetAvgAvailable(), 160*G)
+	re.Equal(uint64(160*units.GiB), store.GetAvailable())
+	re.Greater(store.GetAvgAvailable(), uint64(150*units.GiB))
+	re.Less(store.GetAvgAvailable(), uint64(160*units.GiB))
 	re.Greater(store.GetAvailableDeviation(), uint64(0))
-	re.Less(store.GetAvailableDeviation(), 10*G)
+	re.Less(store.GetAvailableDeviation(), uint64(10*units.GiB))
 }
