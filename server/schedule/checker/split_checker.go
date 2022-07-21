@@ -47,13 +47,13 @@ func (c *SplitChecker) GetType() string {
 }
 
 // Check checks whether the region need to split and returns true if need to fix.
-func (c *SplitChecker) Check(p *checkNode) []*operator.Operator {
+func (c *SplitChecker) Check(p *checkPlan) []*operator.Operator {
 	curPlan := p.newSubCheck(c.GetType())
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
 
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("split_checker", "paused").Inc()
-		return curPlan.StopByPaused()
+		return curPlan.stopByPaused()
 	}
 	region := curPlan.region
 	start, end := region.GetStartKey(), region.GetEndKey()
@@ -76,5 +76,5 @@ func (c *SplitChecker) Check(p *checkNode) []*operator.Operator {
 	if err != nil {
 		log.Debug("create split region operator failed", errs.ZapError(err))
 	}
-	return curPlan.StopAtCreateOps(err, op)
+	return curPlan.stopAtCreateOps(err, op)
 }

@@ -47,7 +47,7 @@ func TestSplit(t *testing.T) {
 		Count:       1,
 	})
 	cluster.AddLeaderRegionWithRange(1, "", "", 1)
-	checkNode := newNode("split-test", cluster.GetRegion(1), false)
+	checkNode := newCheckPlan("split-test", cluster.GetRegion(1), false)
 	ops := sc.Check(checkNode)
 	re.NotEmpty(ops)
 	op := ops[0]
@@ -64,7 +64,7 @@ func TestSplit(t *testing.T) {
 		RuleType: labeler.KeyRange,
 		Data:     makeKeyRanges("bb", "dd"),
 	})
-	checkNode2 := newNode("split-test", cluster.GetRegion(1), false)
+	checkNode2 := newCheckPlan("split-test", cluster.GetRegion(1), false)
 	ops = sc.Check(checkNode2)
 	re.NotEmpty(ops)
 	op = ops[0]

@@ -42,8 +42,8 @@ const (
 	StatusStoreBlocked
 	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
 	StatusStoreExcluded
-	// StatusNoStoreAvailable represents that no store is avaiable.
-	StatusNoStoreAvailable
+	// StatusStoreNotEnough represents that there is no store to choose.
+	StatusStoreNotEnough
 )
 
 // region status
@@ -89,7 +89,7 @@ var statusText = map[StatusCode]string{
 	StatusStoreDraining:    "Store Draining",
 	StatusStoreBlocked:     "Store Blocked",
 	StatusStoreExcluded:    "Region Excluded",
-	StatusNoStoreAvailable: "no store",
+	StatusStoreNotEnough:   "no store",
 
 	// region
 	StatusRegionHot:           "Region Hot",
