@@ -146,6 +146,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*keyspacep
 	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
 		return nil, errKeyspaceArchived
 	}
+	if keyspace.Config == nil {
+		keyspace.Config = map[string]string{}
+	}
 	// Update keyspace config according to mutations.
 	for _, mutation := range mutations {
 		switch mutation.Op {
