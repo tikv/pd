@@ -16,10 +16,10 @@ package compatibility_test
 
 import (
 	"context"
-	"github.com/pingcap/errors"
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
