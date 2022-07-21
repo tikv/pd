@@ -118,9 +118,10 @@ func BenchmarkFitRegion(b *testing.B) {
 		},
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -136,9 +137,10 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 		},
 	}
 	storesSet := newMockStoresSet(200)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -154,9 +156,10 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 		},
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -179,9 +182,10 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 		},
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -206,9 +210,10 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 		})
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -233,9 +238,10 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 		})
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -243,9 +249,10 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	region := mockRegion(3, 0)
 	rules := addExtraRules(1)
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -269,9 +276,10 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		})
 	}
 	storesSet := newMockStoresSet(100)
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
 	}
 }
 
@@ -308,17 +316,19 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		rule.LabelConstraints = append(rule.LabelConstraints, labelContaint)
 		rules = append(rules, rule)
 	}
-	// create stores, with each stores has 101 labels(1 exclusive label).
+	// create stores, with each stores has 101 normal labels(1 exclusive label).
 	lists := make([]*core.StoreInfo, 0)
+	labels := []*metapb.StoreLabel{}
+	for labID := 0; labID < 100; labID++ {
+		label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
+		labels = append(labels, label)
+	}
+	label := &metapb.StoreLabel{Key: "exclusive", Value: "exclusive"}
+	labels = append(labels, label)
+	// 5 peers in 5 different stores,
+	// split the stores(peers) to three zones,make the number of peers in each zone: 2:2:1
 	for _, peer := range region.GetPeers() {
 		storeID := peer.StoreId
-		labels := []*metapb.StoreLabel{}
-		for labID := 0; labID < 100; labID++ {
-			label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
-			labels = append(labels, label)
-		}
-		label := &metapb.StoreLabel{Key: "exclusive", Value: "exclusive"}
-		labels = append(labels, label)
 		store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(labels))
 		lists = append(lists, store)
 	}
@@ -330,9 +340,67 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		stores:     mm,
 		storelists: lists,
 	}
-
+	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(storesSet.GetStores(), region, rules)
+		fitRegion(stores, region, rules)
+	}
+}
+
+func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
+	region := mockRegion(5, 5)
+	rules := []*Rule{}
+	rule := &Rule{
+		GroupID:          "pd",
+		ID:               "followers",
+		Role:             Follower,
+		Count:            3,
+		LocationLabels:   []string{"zone", "rack", "host"},
+		LabelConstraints: []LabelConstraint{},
+	}
+	rules = append(rules, rule)
+	rule = &Rule{
+		GroupID:          "pd",
+		ID:               "learner",
+		Role:             Learner,
+		Count:            3,
+		LocationLabels:   []string{"zone", "rack", "host"},
+		LabelConstraints: []LabelConstraint{},
+	}
+	rules = append(rules, rule)
+	rule = &Rule{
+		GroupID:          "pd",
+		ID:               "voters",
+		Role:             Voter,
+		Count:            4,
+		LocationLabels:   []string{"zone", "rack", "host"},
+		LabelConstraints: []LabelConstraint{},
+	}
+	rules = append(rules, rule)
+	// create stores
+	lists := make([]*core.StoreInfo, 0)
+	// 10 peers in 10 different stores,
+	// split the stores(peers) to three zones,make the number of peers in each zone: 4:3:3
+	for idx, peer := range region.GetPeers() {
+		storeID := peer.StoreId
+		zoneInfo := &metapb.StoreLabel{Key: "zone", Value: fmt.Sprintf("z_%02d", idx%3)}
+		rackInfo := &metapb.StoreLabel{Key: "rack", Value: fmt.Sprintf("r_%02d", idx%2)}
+		host := &metapb.StoreLabel{Key: "host", Value: fmt.Sprintf("r_%02d", idx)}
+		curLabels := []*metapb.StoreLabel{zoneInfo, rackInfo, host}
+		store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(curLabels))
+		lists = append(lists, store)
+	}
+	mm := make(map[uint64]*core.StoreInfo)
+	for _, store := range lists {
+		mm[store.GetID()] = store
+	}
+	storesSet := mockStoresSet{
+		stores:     mm,
+		storelists: lists,
+	}
+	stores := getStoresByRegion(storesSet, region)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		fitRegion(stores, region, rules)
 	}
 }

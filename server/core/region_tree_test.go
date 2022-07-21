@@ -129,7 +129,7 @@ func TestRegionTreeStat(t *testing.T) {
 	re.Equal(int64(4), tree.totalSize)
 	updateNewItem(tree, newRegionWithStat("b", "e", 5, 6))
 	re.Equal(int64(6), tree.totalSize)
-	tree.remove(newRegionWithStat("a", "b", 1, 2))
+	tree.remove(newRegionWithStat("a", "b", 2, 2))
 	re.Equal(int64(5), tree.totalSize)
 	tree.remove(newRegionWithStat("f", "g", 1, 2))
 	re.Equal(int64(5), tree.totalSize)

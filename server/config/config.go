@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -203,12 +204,12 @@ const (
 	defaultLeaderLease             = int64(3)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
-	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
 
 	// The default max bytes for grpc message
 	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
-	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
-	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
+	defaultMaxRequestBytes = uint(150 * units.MiB) // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"

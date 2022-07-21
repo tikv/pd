@@ -146,43 +146,43 @@ func TestSortedEqual(t *testing.T) {
 		return peers
 	}
 	// test NewRegionInfo
-	for _, test := range testCases {
-		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(test.idsA)}, nil)
-		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(test.idsB)}, nil)
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
+	for _, testCase := range testCases {
+		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)}, nil)
+		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)}, nil)
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
 	// test RegionFromHeartbeat
-	for _, test := range testCases {
+	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region:       &metapb.Region{Id: 100, Peers: pickPeers(test.idsA)},
-			DownPeers:    pickPeerStats(test.idsA),
-			PendingPeers: pickPeers(test.idsA),
+			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)},
+			DownPeers:    pickPeerStats(testCase.idsA),
+			PendingPeers: pickPeers(testCase.idsA),
 		})
 		regionB := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
-			Region:       &metapb.Region{Id: 100, Peers: pickPeers(test.idsB)},
-			DownPeers:    pickPeerStats(test.idsB),
-			PendingPeers: pickPeers(test.idsB),
+			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)},
+			DownPeers:    pickPeerStats(testCase.idsB),
+			PendingPeers: pickPeers(testCase.idsB),
 		})
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
-		re.Equal(test.isEqual, SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()))
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
+		re.Equal(testCase.isEqual, SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()))
 	}
 
 	// test Clone
 	region := NewRegionInfo(meta, meta.Peers[0])
-	for _, test := range testCases {
-		downPeersA := pickPeerStats(test.idsA)
-		downPeersB := pickPeerStats(test.idsB)
-		pendingPeersA := pickPeers(test.idsA)
-		pendingPeersB := pickPeers(test.idsB)
+	for _, testCase := range testCases {
+		downPeersA := pickPeerStats(testCase.idsA)
+		downPeersB := pickPeerStats(testCase.idsB)
+		pendingPeersA := pickPeers(testCase.idsA)
+		pendingPeersB := pickPeers(testCase.idsB)
 
 		regionA := region.Clone(WithDownPeers(downPeersA), WithPendingPeers(pendingPeersA))
 		regionB := region.Clone(WithDownPeers(downPeersB), WithPendingPeers(pendingPeersB))
-		re.Equal(test.isEqual, SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()))
-		re.Equal(test.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
+		re.Equal(testCase.isEqual, SortedPeersStatsEqual(regionA.GetDownPeers(), regionB.GetDownPeers()))
+		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
 	}
 }
 
@@ -202,16 +202,16 @@ func TestInherit(t *testing.T) {
 		{true, 1, 2, 2},
 		{true, 2, 0, 2},
 	}
-	for _, test := range testCases {
+	for _, testCase := range testCases {
 		var origin *RegionInfo
-		if test.originExists {
+		if testCase.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.approximateSize = int64(test.originSize)
+			origin.approximateSize = int64(testCase.originSize)
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.approximateSize = int64(test.size)
+		r.approximateSize = int64(testCase.size)
 		r.Inherit(origin, false)
-		re.Equal(int64(test.expect), r.approximateSize)
+		re.Equal(int64(testCase.expect), r.approximateSize)
 	}
 
 	// bucket
@@ -254,11 +254,11 @@ func TestRegionRoundingFlow(t *testing.T) {
 		{252623, math.MaxInt64, 0},
 		{252623, math.MinInt64, 252623},
 	}
-	for _, test := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, WithFlowRoundByDigit(test.digit))
-		r.readBytes = test.flow
-		r.writtenBytes = test.flow
-		re.Equal(test.expect, r.GetRoundBytesRead())
+	for _, testCase := range testCases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, WithFlowRoundByDigit(testCase.digit))
+		r.readBytes = testCase.flow
+		r.writtenBytes = testCase.flow
+		re.Equal(testCase.expect, r.GetRoundBytesRead())
 	}
 }
 
@@ -280,11 +280,11 @@ func TestRegionWriteRate(t *testing.T) {
 		{0, 0, 500, 0, 0},
 		{10, 3, 500, 0, 0},
 	}
-	for _, test := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(test.bytes), SetWrittenKeys(test.keys), SetReportInterval(test.interval))
+	for _, testCase := range testCases {
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(testCase.interval))
 		bytesRate, keysRate := r.GetWriteRate()
-		re.Equal(test.expectBytesRate, bytesRate)
-		re.Equal(test.expectKeysRate, keysRate)
+		re.Equal(testCase.expectBytesRate, bytesRate)
+		re.Equal(testCase.expectKeysRate, keysRate)
 	}
 }
 
@@ -357,11 +357,11 @@ func TestNeedSync(t *testing.T) {
 		},
 	}
 
-	for _, test := range testCases {
-		regionA := region.Clone(test.optionsA...)
-		regionB := region.Clone(test.optionsB...)
+	for _, testCase := range testCases {
+		regionA := region.Clone(testCase.optionsA...)
+		regionB := region.Clone(testCase.optionsB...)
 		_, _, _, needSync := RegionGuide(regionA, regionB)
-		re.Equal(test.needSync, needSync)
+		re.Equal(testCase.needSync, needSync)
 	}
 }
 
