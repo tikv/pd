@@ -97,6 +97,47 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	}
 }
 
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
+	re := suite.Require()
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	for _, created := range keyspaces {
+		// Should not allow archiving enabled keyspace.
+		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
+		re.False(success)
+		// Disable an ENABLED keyspace is allowed. Should result in time stamp change.
+		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		re.True(success)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, disabled.State)
+		re.NotEqual(created.StateChangedAt, disabled.StateChangedAt)
+		// Disable a already DISABLED keyspace should not result in any change.
+		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		re.True(success)
+		re.Equal(disabled, disabledAgain)
+		// Archiving a DISABLED keyspace should be allowed. Should result in time stamp change.
+		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
+		re.True(success)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, archived.State)
+		re.NotEqual(disabled.StateChangedAt, archived.StateChangedAt)
+		// Modifying ARCHIVED keyspace is not allowed.
+		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		re.False(success)
+	}
+}
+
+func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, action string) (bool, *keyspacepb.KeyspaceMeta) {
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/"+name+"/"+action, nil)
+	re.NoError(err)
+	resp, err := dialClient.Do(httpReq)
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.NoError(resp.Body.Close())
+	meta := &handlers.KeyspaceMeta{}
+	re.NoError(json.Unmarshal(data, meta))
+	return true, meta.KeyspaceMeta
+}
 func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, start, count int) []*keyspacepb.KeyspaceMeta {
 	testConfig := map[string]string{
 		"config1": "100",
