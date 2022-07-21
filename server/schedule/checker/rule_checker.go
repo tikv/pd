@@ -113,7 +113,7 @@ func (c *RuleChecker) CheckWithFit(p *checkPlan, fit *placement.RegionFit) []*op
 		checkerCounter.WithLabelValues("rule_checker", "need-split").Inc()
 		// If the region matches no rules, the most possible reason is it spans across
 		// multiple rules.
-		return curPlan.noNeed("CheckRuleFitsLen", "no fit rule, need-split")
+		return curPlan.noNeed("CheckRuleFitsLen", "no fit rule, need-split region")
 	}
 	region := curPlan.region
 	if ops := c.fixOrphanPeers(curPlan, fit); len(ops) != 0 {
@@ -121,7 +121,7 @@ func (c *RuleChecker) CheckWithFit(p *checkPlan, fit *placement.RegionFit) []*op
 		return ops
 	}
 	for _, rf := range fit.RuleFits {
-		ops := c.fixRulePeer(p, fit, rf)
+		ops := c.fixRulePeer(curPlan, fit, rf)
 		if len(ops) > 0 {
 			c.pendingList.Remove(region.GetID())
 			return ops
@@ -148,21 +148,21 @@ func (c *RuleChecker) fixRulePeer(p *checkPlan, fit *placement.RegionFit, rf *pl
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceUnexpectRulePeer(p, rf, fit, peer, downStatus)
+			return c.replaceUnexpectRulePeer(curPlan, rf, fit, peer, downStatus)
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceUnexpectRulePeer(p, rf, fit, peer, offlineStatus)
+			return c.replaceUnexpectRulePeer(curPlan, rf, fit, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
 	for _, peer := range rf.PeersWithDifferentRole {
-		ops := c.fixLooseMatchPeer(p, fit, rf, peer)
+		ops := c.fixLooseMatchPeer(curPlan, fit, rf, peer)
 		if len(ops) > 0 {
 			return ops
 		}
 	}
-	return c.fixBetterLocation(p, rf)
+	return c.fixBetterLocation(curPlan, rf)
 }
 
 func (c *RuleChecker) addRulePeer(p *checkPlan, rf *placement.RuleFit) []*operator.Operator {
@@ -323,7 +323,7 @@ func (c *RuleChecker) fixBetterLocation(p *checkPlan, rf *placement.RuleFit) []*
 func (c *RuleChecker) fixOrphanPeers(p *checkPlan, fit *placement.RegionFit) []*operator.Operator {
 	checkNode := p.newSubCheck("fixOrphanPeers")
 	if len(fit.OrphanPeers) == 0 {
-		return checkNode.stopAt("len(fit.OrphanPeers)", plan.NewStatus(plan.StatusNoNeed, "no orphan peers"))
+		return checkNode.stopAt("checkOrphanPeersLen", plan.NewStatus(plan.StatusNoNeed, "no orphan peers"))
 	}
 	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
 	// by RuleFits is not pending or down.

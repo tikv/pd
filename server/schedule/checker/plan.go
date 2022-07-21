@@ -15,6 +15,8 @@
 package checker
 
 import (
+	"fmt"
+
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -87,15 +89,31 @@ func (node *checkPlan) newSubCheck(checker string) *checkPlan {
 	return child
 }
 
-func (p *checkPlan) lastChild() *checkPlan {
-	len := len(p.children)
+func (node *checkPlan) lastChild() *checkPlan {
+	len := len(node.children)
 	if len > 0 {
-		return p.children[len-1]
+		return node.children[len-1]
 	}
 	return nil
 }
 
 // GetPlans returns the plans list for current check.
-func (p *checkPlan) GetPlans() plan.Plan {
-	return p
+func (node *checkPlan) GetPlans() plan.Plan {
+	return node
+}
+
+func (node *checkPlan) ToString() []string {
+	prefix := node.checker
+	plans := make([]string, 0)
+	if len(node.children) == 0 {
+		value := fmt.Sprintf("%s\nStep:%s\nStatus:%s", prefix, node.step, node.status.String())
+		plans = append(plans, value)
+		return plans
+	}
+	for _, child := range node.children {
+		for _, subPlan := range child.ToString() {
+			plans = append(plans, fmt.Sprintf("%s->%s", prefix, subPlan))
+		}
+	}
+	return plans
 }
