@@ -17,7 +17,6 @@ require (
 	github.com/golang/protobuf v1.5.0
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
-	github.com/gorilla/websocket v1.4.1 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
 	github.com/mattn/go-shellwords v1.0.12
@@ -44,9 +43,7 @@ require (
 	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
-	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
-	go.etcd.io/bbolt v1.3.5 // indirect
-	go.etcd.io/etcd v0.5.0-alpha.5.0.20191023171146-3cf2f69b5738
+	go.etcd.io/etcd v0.5.0-alpha.5.0.20220712081845-4636a5fab43f
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.19.1
 	golang.org/x/text v0.3.7
