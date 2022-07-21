@@ -14,7 +14,7 @@ require (
 	github.com/gin-gonic/gin v1.7.4
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
-	github.com/golang/protobuf v1.3.4
+	github.com/golang/protobuf v1.5.0
 	github.com/google/btree v1.0.0
 	github.com/gorilla/mux v1.7.4
 	github.com/gorilla/websocket v1.4.1 // indirect
@@ -31,7 +31,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20220510035547-0e2f26c0a46a
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
-	github.com/pingcap/tidb-dashboard v0.0.0-20220613053259-1b8920062bd3
+	github.com/pingcap/tidb-dashboard v0.0.0-20220721032514-a48079b99aa5
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
