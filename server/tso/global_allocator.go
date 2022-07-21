@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/errors"
 	"sync"
 	"sync/atomic"
 	"time"

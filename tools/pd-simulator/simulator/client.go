@@ -279,9 +279,12 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	newStore := typeutil.DeepClone(store, core.StoreFactory)
 	newRegion := typeutil.DeepClone(region, core.RegionFactory)
 
+=======
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  newStore,
