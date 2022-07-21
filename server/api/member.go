@@ -70,12 +70,18 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if members.GetHeader().GetError() != nil {
 		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
+<<<<<<< HEAD
 	dclocationDistribution := make(map[string][]uint64)
 	if !svr.IsAPIServiceMode() {
 		dclocationDistribution, err = svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
+=======
+	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+	if err != nil {
+		return nil, errors.WithStack(err)
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 	}
 	for _, m := range members.GetMembers() {
 		var e error

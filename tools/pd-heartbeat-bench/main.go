@@ -76,6 +76,9 @@ func initClusterID(ctx context.Context, cli pdpb.PDClient) {
 	if res.GetHeader().GetError() != nil {
 		log.Fatal("failed to get members", zap.String("err", res.GetHeader().GetError().String()))
 	}
+	if res.GetHeader().GetError() != nil {
+		log.Fatal(res.GetHeader().GetError())
+	}
 	clusterID = res.GetHeader().GetClusterId()
 	log.Info("init cluster ID successfully", zap.Uint64("cluster-id", clusterID))
 }
@@ -113,16 +116,26 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 		Store:  store,
 		Region: region,
 	}
+<<<<<<< HEAD
 	cctx, cancel = context.WithCancel(ctx)
 	resp, err := cli.Bootstrap(cctx, req)
 	cancel()
+=======
+	resp, err := cli.Bootstrap(context.TODO(), req)
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 	if err != nil {
 		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
 	}
 	if resp.GetHeader().GetError() != nil {
+<<<<<<< HEAD
 		log.Fatal("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
 	}
 	log.Info("bootstrapped")
+=======
+		log.Fatalf("bootstrap failed: %s", resp.GetHeader().GetError().String())
+	}
+	log.Println("bootstrapped")
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 }
 
 func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
@@ -132,13 +145,18 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			Address: fmt.Sprintf("localhost:%d", i),
 			Version: "6.4.0-alpha",
 		}
+<<<<<<< HEAD
 		cctx, cancel := context.WithCancel(ctx)
 		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
 		cancel()
+=======
+		resp, err := cli.PutStore(context.TODO(), &pdpb.PutStoreRequest{Header: header(), Store: store})
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 		if err != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
 		}
 		if resp.GetHeader().GetError() != nil {
+<<<<<<< HEAD
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
@@ -153,6 +171,10 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 				}
 			}
 		}(ctx, i)
+=======
+			log.Fatalf("put store failed: %s", resp.GetHeader().GetError().String())
+		}
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 	}
 }
 

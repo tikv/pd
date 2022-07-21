@@ -91,6 +91,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwar
 	return nil, nil
 }
 
+<<<<<<< HEAD
 // GetClusterInfo implements gRPC PDServer.
 func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -117,6 +118,13 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 		Header:       s.header(),
 		ServiceModes: svcModes,
 	}, nil
+=======
+func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
+	return s.errorHeader(&pdpb.Error{
+		Type:    errorType,
+		Message: message,
+	})
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 }
 
 // GetMembers implements gRPC PDServer.

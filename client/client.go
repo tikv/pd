@@ -1268,6 +1268,7 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	return globalConfigWatcherCh, err
 }
 
+<<<<<<< HEAD
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 	protoClient := c.getClient()
 	if protoClient == nil {
@@ -1305,17 +1306,24 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 	return nil
 }
 
+=======
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 func (c *client) respForErr(observer prometheus.Observer, start time.Time, err error, header *pdpb.ResponseHeader) error {
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
+<<<<<<< HEAD
 			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+=======
+			c.ScheduleCheckLeader()
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))
 	}
 	return nil
 }
+<<<<<<< HEAD
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
@@ -1326,3 +1334,5 @@ func (c *client) GetTSOAllocators() *sync.Map {
 	}
 	return tsoClient.GetTSOAllocators()
 }
+=======
+>>>>>>> bde0a1b42 (*: put gRPC unknown error into the header. (#5310))
