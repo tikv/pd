@@ -75,32 +75,35 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// If PD has restarted, it need to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
-	plan := newPlan(region, false)
+	checkPlan := newNode("Controller", region, false)
 
-	if check := c.jointStateChecker.Check(plan); check {
-		return plan.Operators()
+	if ops := c.jointStateChecker.Check(checkPlan); len(ops) > 0 {
+		return checkPlan.StopAtCreateOps(nil, ops...)
 	}
 
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
-		checkPlan := plan.newCheckNode("region-label-schedule-disabled")
+		checkPlan := checkPlan.newSubCheck("region-label-schedule-disabled")
 		if l.ScheduleDisabled(region) {
 			checkPlan.StopWith(statusPaused)
 			return nil
 		}
-		checkPlan.StopWith(statusOK)
 	}
 
-	if op := c.splitChecker.Check(region); op != nil {
-		return []*operator.Operator{op}
+	if ops := c.splitChecker.Check(checkPlan); len(ops) > 0 {
+		return checkPlan.StopAtCreateOps(nil, ops...)
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {
 		fit := c.priorityInspector.Inspect(region)
-		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+		if ops := c.ruleChecker.CheckWithFit(checkPlan, fit); len(ops) > 0 {
+			rulePlan := checkPlan.lastChild()
+			coutCheck := rulePlan.newSubCheck("check-OperatorCount")
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+				return ops
 			}
+			// update last plans status
+			coutCheck.noNeed("ScheduleLimit", "overflow")
 			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
 		}

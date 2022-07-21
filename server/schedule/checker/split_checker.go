@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -47,15 +46,16 @@ func (c *SplitChecker) GetType() string {
 	return "split-checker"
 }
 
-// Check checks whether the region need to split and returns Operator to fix.
-func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
+// Check checks whether the region need to split and returns true if need to fix.
+func (c *SplitChecker) Check(p *checkNode) []*operator.Operator {
+	curPlan := p.newSubCheck(c.GetType())
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
 
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("split_checker", "paused").Inc()
-		return nil
+		return curPlan.StopByPaused()
 	}
-
+	region := curPlan.region
 	start, end := region.GetStartKey(), region.GetEndKey()
 	// We may consider to merge labeler split keys and rule split keys together
 	// before creating operator. It can help to reduce operator count. However,
@@ -69,13 +69,12 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 
 	if len(keys) == 0 {
-		return nil
+		return curPlan.noNeed("GetSplitKeys", "no-split-key")
 	}
 
 	op, err := operator.CreateSplitRegionOperator(desc, region, 0, pdpb.CheckPolicy_USEKEY, keys)
 	if err != nil {
 		log.Debug("create split region operator failed", errs.ZapError(err))
-		return nil
 	}
-	return op
+	return curPlan.StopAtCreateOps(err, op)
 }

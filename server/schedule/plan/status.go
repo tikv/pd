@@ -26,9 +26,12 @@ const (
 	StatusNoNeed
 	// StatusPaused represents the scheduler or checker is paused.
 	StatusPaused
+)
 
+// store status
+const (
 	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
-	StatusStoreThrottled
+	StatusStoreThrottled StatusCode = iota + 100
 	// StatusStoreUnavailable represents the store cannot be selected due to it's state.
 	StatusStoreUnavailable
 	// StatusStoreLowSpace represents the store cannot be selected because it runs out of space.
@@ -39,9 +42,14 @@ const (
 	StatusStoreBlocked
 	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
 	StatusStoreExcluded
+	// StatusNoStoreAvailable represents that no store is avaiable.
+	StatusNoStoreAvailable
+)
 
+// region status
+const (
 	// StatusRegionHot represents the region cannot be selected due to the heavy load.
-	StatusRegionHot
+	StatusRegionHot StatusCode = iota + 200
 	// StatusRegionUnhealthy represents the region cannot be selected due to the region health.
 	StatusRegionUnhealthy
 	// StatusRegionEmpty represents the region cannot be selected due to the region is empty.
@@ -50,16 +58,17 @@ const (
 	StatusRegionNotReplicated
 
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
-	StatusLabelNotMatch
+	StatusLabelNotMatch = iota + 300
 	// StatusRuleNotMatch represents the placement rule cannot satisfy the requirement.
 	StatusRuleNotMatch
 	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
 	StatusIsolationNotMatch
-
+)
+const (
 	// TODO: The below status is not used for now. Once it is used, Please remove this comment.
 
 	// StatusStoreNotExisted represents the store cannot be found in PD.
-	StatusStoreNotExisted
+	StatusStoreNotExisted StatusCode = iota + 500
 	// StatusNoTargetRegion represents the target region of merge operation cannot be found.
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
@@ -80,6 +89,7 @@ var statusText = map[StatusCode]string{
 	StatusStoreDraining:    "Store Draining",
 	StatusStoreBlocked:     "Store Blocked",
 	StatusStoreExcluded:    "Region Excluded",
+	StatusNoStoreAvailable: "no store",
 
 	// region
 	StatusRegionHot:           "Region Hot",

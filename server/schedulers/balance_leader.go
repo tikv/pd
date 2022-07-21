@@ -391,6 +391,12 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	return result, nil
 }
 
+/*
+source store
+1          2 3 4 
+region region 
+target 1, targ 2
+*/
 func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,
 	plan *balancePlan, usedRegions map[uint64]struct{}) *operator.Operator {
 	store := cs.getStore()

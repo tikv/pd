@@ -25,77 +25,93 @@ var (
 	statusPaused               = plan.NewStatus(plan.StatusPaused, "checker paused")
 	statusNotInJointState      = plan.NewStatus(plan.StatusNoNeed, "no peer in JointState")
 	statusCreateOperatorFailed = plan.NewStatus(plan.StatusCreateOperatorFailed)
+	statusNoStoreToAdd         = plan.NewStatus(plan.StatusStoreDraining)
 )
 
 type checkNode struct {
-	checker  string
-	regionID uint64
+	checker string
+	region  *core.RegionInfo
 	// srcStoreID  uint64
 	// destStoreID uint64
-	status plan.Status
-	ops    []*operator.Operator
-}
-
-type checkPlan struct {
+	step      string
+	status    plan.Status
+	children  []*checkNode
 	cacheNode bool
-	region    *core.RegionInfo
-	nodes     []*checkNode
 }
 
-func newNode(checker string, regionID uint64) *checkNode {
+func newNode(checker string, region *core.RegionInfo, cache bool) *checkNode {
 	return &checkNode{
-		checker:  checker,
-		regionID: regionID,
-		status:   statusOK,
+		checker:   checker,
+		region:    region,
+		status:    statusOK,
+		children:  []*checkNode{},
+		cacheNode: cache,
 	}
 }
 
-// StopWith finshed the check plan with status, it returns true if the status is ok.
-func (node *checkNode) StopWith(status plan.Status) bool {
+// StopWith finshed the check plan with status, allways return nil.
+func (node *checkNode) StopWith(status plan.Status) []*operator.Operator {
 	node.status = status
-	return node.status.IsOK()
+	return nil
+}
+
+func (node *checkNode) StopByPaused() []*operator.Operator {
+	return node.StopWith(statusPaused)
 }
 
 // FinishWithOps finished the plan with ops.
-func (node *checkNode) FinishWithOps(ops ...*operator.Operator) {
-	//node.ops := make([]*operator.Operator,len(ops))
-	node.ops = ops
+func (node *checkNode) FinishWithOps(ops ...*operator.Operator) []*operator.Operator {
+	return ops
 }
 
-func newPlan(region *core.RegionInfo, cacheNode bool) *checkPlan {
-	return &checkPlan{
-		region:    region,
-		nodes:     []*checkNode{},
-		cacheNode: cacheNode,
+func (node *checkNode) faildWithCreateOperator(err error) []*operator.Operator {
+	node.step = "CreateOperator"
+	node.status = plan.NewStatus(plan.StatusCreateOperatorFailed, err.Error())
+	return nil
+}
+
+func (node *checkNode) StopAtStep(step string, status plan.Status) []*operator.Operator {
+	node.step = step
+	node.status = status
+	return nil
+}
+
+func (node *checkNode) StopAtCreateOps(err error, ops ...*operator.Operator) []*operator.Operator {
+	if err != nil {
+		return node.faildWithCreateOperator(err)
 	}
+	return node.FinishWithOps(ops...)
 }
 
-func (p *checkPlan) newCheckNode(checker string) *checkNode {
-	node := newNode(checker, p.region.GetID())
-	if !p.cacheNode {
-		p.nodes = []*checkNode{node}
+// always return false
+func (node *checkNode) noNeed(step, reason string) []*operator.Operator {
+	status := plan.NewStatus(plan.StatusNoNeed, reason)
+	return node.StopAtStep(step, status)
+}
+
+func (node *checkNode) newSubCheck(checker string) *checkNode {
+	child := newNode(checker, node.region, node.cacheNode)
+	if !node.cacheNode {
+		node.children = []*checkNode{child}
 	} else {
-		p.nodes = append(p.nodes, node)
+		node.children = append(node.children, child)
 	}
-	return node
-}
-
-func (p *checkPlan) Region() *core.RegionInfo {
-	return p.region
-}
-
-func (p *checkPlan) Operators() []*operator.Operator {
-	if len(p.nodes) == 0 {
-		return nil
-	}
-	return p.nodes[len(p.nodes)-1].ops
+	return child
 }
 
 // GetPlans returns the plans list for current check.
-func (p *checkPlan) GetPlans() []plan.Plan {
-	plans := make([]plan.Plan, len(p.nodes))
-	for id, plan := range p.nodes {
+func (p *checkNode) GetPlans() []plan.Plan {
+	plans := make([]plan.Plan, len(p.children))
+	for id, plan := range p.children {
 		plans[id] = plan
 	}
 	return plans
+}
+
+func (p *checkNode) lastChild() *checkNode {
+	len := len(p.children)
+	if len > 0 {
+		return p.children[len-1]
+	}
+	return nil
 }
