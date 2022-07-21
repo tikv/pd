@@ -24,13 +24,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/apiv2/middlewares"
 	"github.com/tikv/pd/server/keyspace"
 )
 
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
-	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
@@ -312,4 +310,28 @@ func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 		meta.StateChangedAt,
 		meta.Config,
 	})
+}
+
+// UnmarshalJSON reverse KeyspaceMeta's the Custom JSON marshal.
+func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
+	aux := &struct {
+		Name           string            `json:"name,omitempty"`
+		State          string            `json:"state,omitempty"`
+		CreatedAt      int64             `json:"created_at,omitempty"`
+		StateChangedAt int64             `json:"state_changed_at,omitempty"`
+		Config         map[string]string `json:"config,omitempty"`
+	}{}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	pbMeta := &keyspacepb.KeyspaceMeta{
+		Name:           aux.Name,
+		State:          keyspacepb.KeyspaceState(keyspacepb.KeyspaceState_value[aux.State]),
+		CreatedAt:      aux.CreatedAt,
+		StateChangedAt: aux.StateChangedAt,
+		Config:         aux.Config,
+	}
+	meta.KeyspaceMeta = pbMeta
+	return nil
 }
