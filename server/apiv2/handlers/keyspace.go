@@ -188,11 +188,17 @@ func LoadAllKeyspaces(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, resp)
 }
 
+// UpdateConfigParams represents parameters needed to modify target keyspace's configs.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type UpdateConfigParams struct {
+	Config map[string]*string `json:"config"`
+}
+
 // UpdateKeyspaceConfig updates target keyspace's config.
 // @Tags keyspaces
 // @Summary Update keyspace config.
 // @Param name path string true "Keyspace Name"
-// @Param body body map[string]*string true "Update keyspace parameters"
+// @Param body body UpdateConfigParams true "Update keyspace parameters"
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
 // @Failure 500 {string} string "PD server failed to proceed the request."
@@ -201,13 +207,13 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
-	mergePatch := map[string]*string{}
-	err := c.BindJSON(mergePatch)
+	configParams := &UpdateConfigParams{}
+	err := c.BindJSON(configParams)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	mutations := getMutations(mergePatch)
+	mutations := getMutations(configParams.Config)
 	meta, err := manager.UpdateKeyspaceConfig(name, mutations)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -280,7 +286,7 @@ func UpdateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.IndentedJSON(http.StatusOK, meta)
+	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
 // KeyspaceMeta wraps keyspacepb.KeyspaceMeta to provide custom JSON marshal.
