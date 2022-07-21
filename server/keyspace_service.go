@@ -70,25 +70,7 @@ func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	}
 }
 
-func (s *KeyspaceServer) UpdateKeyspaceConfig(ctx context.Context, request *keyspacepb.UpdateKeyspaceConfigRequest) (*keyspacepb.UpdateKeyspaceConfigResponse, error) {
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-
-	manager := s.GetKeyspaceManager()
-	updatedMeta, err := manager.UpdateKeyspaceConfig(request.Name, request.Mutations)
-	if err != nil {
-		return &keyspacepb.UpdateKeyspaceConfigResponse{Header: s.getErrorHeader(err)}, err
-	}
-
-	return &keyspacepb.UpdateKeyspaceConfigResponse{
-		Header:   s.header(),
-		Keyspace: updatedMeta,
-	}, nil
-}
-
-func (s *KeyspaceServer) LoadKeyspace(ctx context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil

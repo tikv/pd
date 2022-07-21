@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto" //nolint:staticcheck
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -425,7 +425,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
+	if err != nil {
+		return err
+	}
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -1545,19 +1548,14 @@ func (s *Server) reloadConfigFromKV() error {
 		return err
 	}
 	s.loadRateLimitConfig()
-	switchableStorage, ok := s.storage.(interface {
-		SwitchToRegionStorage()
-		SwitchToDefaultStorage()
-	})
-	if !ok {
-		return nil
-	}
-	if s.persistOptions.IsUseRegionStorage() {
-		switchableStorage.SwitchToRegionStorage()
-		log.Info("server enable region storage")
-	} else {
-		switchableStorage.SwitchToDefaultStorage()
-		log.Info("server disable region storage")
+	useRegionStorage := s.persistOptions.IsUseRegionStorage()
+	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
+	if regionStorage != nil {
+		if useRegionStorage {
+			log.Info("server enable region storage")
+		} else {
+			log.Info("server disable region storage")
+		}
 	}
 	return nil
 }

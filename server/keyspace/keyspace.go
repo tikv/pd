@@ -29,7 +29,9 @@ const (
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
 	// AllocLabel is used to label keyspace idAllocator's metrics.
-	AllocLabel = "keyspace-idAlloc"
+	AllocLabel          = "keyspace-idAlloc"
+	defaultKeyspaceName = "DEFAULT"
+	defaultKeyspaceID   = uint32(0)
 )
 
 // Manager manages keyspace related data.
@@ -49,20 +51,48 @@ type Manager struct {
 type CreateKeyspaceRequest struct {
 	// Name of the keyspace to be created.
 	// Using an existing name will result in error.
-	Name          string
-	InitialConfig map[string]string
-	Now           time.Time
+	Name   string
+	Config map[string]string
+	Now    time.Time
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
-func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator) *Manager {
-	return &Manager{
+func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator) (*Manager, error) {
+	manager := &Manager{
 		store:       store,
 		idAllocator: idAllocator,
 	}
+
+	manager.metaLock.Lock()
+	defer manager.metaLock.Unlock()
+	// Check if default keyspace already exists.
+	defaultExists, err := manager.store.LoadKeyspace(defaultKeyspaceID, &keyspacepb.KeyspaceMeta{})
+	if err != nil {
+		return nil, err
+	}
+	if defaultExists {
+		return manager, nil
+	}
+	// Initialize default keyspace.
+	defaultKeyspace := &keyspacepb.KeyspaceMeta{
+		Id:    defaultKeyspaceID,
+		Name:  defaultKeyspaceName,
+		State: keyspacepb.KeyspaceState_ENABLED,
+	}
+	if err = manager.store.SaveKeyspace(defaultKeyspace); err != nil {
+		return nil, err
+	}
+	if err = manager.createNameToID(defaultKeyspaceID, defaultKeyspaceName); err != nil {
+		if removeErr := manager.store.RemoveKeyspace(defaultKeyspaceID); removeErr != nil {
+			return nil, errors.Wrap(removeErr, "failed to remove keyspace meta after save spaceID failure")
+		}
+		return nil, err
+	}
+
+	return manager, nil
 }
 
-// CreateKeyspace create a keyspace meta with initial config and save it to storage.
+// CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	// Validate purposed name's legality.
 	if err := validateName(request.Name); err != nil {
@@ -81,20 +111,20 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      request.Now.Unix(),
 		StateChangedAt: request.Now.Unix(),
-		Config:         request.InitialConfig,
+		Config:         request.Config,
 	}
 	manager.metaLock.Lock()
 	defer manager.metaLock.Unlock()
 	// Check if keyspace with that id already exists.
-	idExists, err := manager.store.LoadKeyspace(newID, &keyspacepb.KeyspaceMeta{})
+	keyspaceExists, err := manager.store.LoadKeyspace(newID, &keyspacepb.KeyspaceMeta{})
 	if err != nil {
 		return nil, err
 	}
-	if idExists {
+	if keyspaceExists {
 		return nil, ErrKeyspaceExists
 	}
 	// Save keyspace meta before saving id.
-	if err := manager.store.SaveKeyspace(keyspace); err != nil {
+	if err = manager.store.SaveKeyspace(keyspace); err != nil {
 		return nil, err
 	}
 	// Create name to ID entry,
@@ -132,9 +162,22 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return keyspace, nil
 }
 
-// UpdateKeyspaceConfig apply mutations to target keyspace in order.
+type Mutation struct {
+	Op    OpType
+	Key   string
+	Value string
+}
+
+type OpType int
+
+const (
+	OpPut OpType = iota + 1 // Operation type starts at 1.
+	OpDel
+)
+
+// UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
-func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*keyspacepb.Mutation) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	manager.metaLock.Lock()
 	defer manager.metaLock.Unlock()
 	// Load keyspace by name.
@@ -146,13 +189,16 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*keyspacep
 	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
 		return nil, errKeyspaceArchived
 	}
+	if keyspace.Config == nil {
+		keyspace.Config = map[string]string{}
+	}
 	// Update keyspace config according to mutations.
 	for _, mutation := range mutations {
 		switch mutation.Op {
-		case keyspacepb.Op_PUT:
-			keyspace.Config[string(mutation.Key)] = string(mutation.Value)
-		case keyspacepb.Op_DEL:
-			delete(keyspace.Config, string(mutation.Key))
+		case OpPut:
+			keyspace.Config[mutation.Key] = mutation.Value
+		case OpDel:
+			delete(keyspace.Config, mutation.Key)
 		default:
 			return nil, errIllegalOperation
 		}
@@ -167,6 +213,10 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*keyspacep
 // UpdateKeyspaceState updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now time.Time) (*keyspacepb.KeyspaceMeta, error) {
+	// Changing the state of default keyspace is not allowed.
+	if name == defaultKeyspaceName {
+		return nil, errModifyDefault
+	}
 	manager.metaLock.Lock()
 	defer manager.metaLock.Unlock()
 	// Load keyspace by name.
@@ -198,10 +248,9 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
-	// Load Start should fall within acceptable ID range, otherwise there may be problem with ID encoding.
-	// The only exception is 0, which is used to indicate beginning.
-	if err := validateID(startID); startID != 0 && err != nil {
-		return nil, err
+	// Load Start should fall within acceptable ID range.
+	if startID > spaceIDMax {
+		return nil, errIllegalID
 	}
 	return manager.store.LoadRangeKeyspace(startID, limit)
 }
@@ -213,8 +262,8 @@ func (manager *Manager) allocID() (uint32, error) {
 		return 0, err
 	}
 	id32 := uint32(id64)
-	// If obtained id is too small, re-allocate a higher ID.
-	if id32 < spaceIDMin {
+	// Skip reserved space ID.
+	if id32 == defaultKeyspaceID {
 		return manager.allocID()
 	}
 	if err = validateID(id32); err != nil {

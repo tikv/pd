@@ -35,10 +35,12 @@ const (
 	testConfig2 = "config_entry_2"
 )
 
-func newKeyspaceManager() *Manager {
+func mustNewKeyspaceManager(re *require.Assertions) *Manager {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	return NewKeyspaceManager(store, allocator)
+	manager, err := NewKeyspaceManager(store, allocator)
+	re.NoError(err)
+	return manager
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
@@ -47,7 +49,7 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	for i := 0; i < count; i++ {
 		requests[i] = &CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace%d", i),
-			InitialConfig: map[string]string{
+			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
 			},
@@ -59,7 +61,7 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 
 func TestCreateKeyspace(t *testing.T) {
 	re := require.New(t)
-	manager := newKeyspaceManager()
+	manager := mustNewKeyspaceManager(re)
 	requests := makeCreateKeyspaceRequests(10)
 
 	for i, request := range requests {
@@ -83,36 +85,36 @@ func TestCreateKeyspace(t *testing.T) {
 	re.Error(err)
 }
 
-func makeMutations() []*keyspacepb.Mutation {
-	return []*keyspacepb.Mutation{
+func makeMutations() []*Mutation {
+	return []*Mutation{
 		{
-			Op:    keyspacepb.Op_PUT,
-			Key:   []byte(testConfig1),
-			Value: []byte("new val"),
+			Op:    OpPut,
+			Key:   testConfig1,
+			Value: "new val",
 		},
 		{
-			Op:    keyspacepb.Op_PUT,
-			Key:   []byte("new config"),
-			Value: []byte("new val"),
+			Op:    OpPut,
+			Key:   "new config",
+			Value: "new val",
 		},
 		{
-			Op:  keyspacepb.Op_DEL,
-			Key: []byte(testConfig2),
+			Op:  OpDel,
+			Key: testConfig2,
 		},
 	}
 }
 
 func TestUpdateKeyspaceConfig(t *testing.T) {
 	re := require.New(t)
-	manager := newKeyspaceManager()
+	manager := mustNewKeyspaceManager(re)
 	requests := makeCreateKeyspaceRequests(5)
+	mutations := makeMutations()
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
-		mutations := makeMutations()
 		updated, err := manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.NoError(err)
-		checkMutations(re, createRequest.InitialConfig, updated.Config, mutations)
+		checkMutations(re, createRequest.Config, updated.Config, mutations)
 		// Changing config of a ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, time.Now())
 		re.NoError(err)
@@ -121,11 +123,15 @@ func TestUpdateKeyspaceConfig(t *testing.T) {
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
 	}
+	// Changing config of DEFAULT keyspace is allowed.
+	updated, err := manager.UpdateKeyspaceConfig(defaultKeyspaceName, mutations)
+	re.NoError(err)
+	checkMutations(re, nil, updated.Config, mutations)
 }
 
 func TestUpdateKeyspaceState(t *testing.T) {
 	re := require.New(t)
-	manager := newKeyspaceManager()
+	manager := mustNewKeyspaceManager(re)
 	requests := makeCreateKeyspaceRequests(5)
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
@@ -154,14 +160,17 @@ func TestUpdateKeyspaceState(t *testing.T) {
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
+		// Changing state of DEFAULT keyspace is not allowed.
+		_, err = manager.UpdateKeyspaceState(defaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, time.Now())
+		re.Error(err)
 	}
 }
 
 func TestLoadRangeKeyspace(t *testing.T) {
 	re := require.New(t)
-	manager := newKeyspaceManager()
+	manager := mustNewKeyspaceManager(re)
 	// Test with 100 keyspaces.
-	// Keyspace ids are 1 - 101.
+	// Created keyspace ids are 1 - 100.
 	total := 100
 	requests := makeCreateKeyspaceRequests(total)
 
@@ -170,25 +179,31 @@ func TestLoadRangeKeyspace(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// Load all keyspaces.
+	// Load all keyspaces including the default keyspace.
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
-	re.Equal(total, len(keyspaces))
+	re.Equal(total+1, len(keyspaces))
 	for i := range keyspaces {
-		re.Equal(uint32(i+1), keyspaces[i].Id)
-		checkCreateRequest(re, requests[i], keyspaces[i])
+		re.Equal(uint32(i), keyspaces[i].Id)
+		if i != 0 {
+			checkCreateRequest(re, requests[i-1], keyspaces[i])
+		}
 	}
 
 	// Load first 50 keyspaces.
+	// Result should be keyspaces with id 0 - 49.
 	keyspaces, err = manager.LoadRangeKeyspace(0, 50)
 	re.NoError(err)
 	re.Equal(50, len(keyspaces))
 	for i := range keyspaces {
-		re.Equal(uint32(i+1), keyspaces[i].Id)
-		checkCreateRequest(re, requests[i], keyspaces[i])
+		re.Equal(uint32(i), keyspaces[i].Id)
+		if i != 0 {
+			checkCreateRequest(re, requests[i-1], keyspaces[i])
+		}
 	}
 
 	// Load 20 keyspaces starting from keyspace with id 33.
+	// Result should be keyspaces with id 33 - 52.
 	loadStart := 33
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 20)
 	re.NoError(err)
@@ -199,7 +214,7 @@ func TestLoadRangeKeyspace(t *testing.T) {
 	}
 
 	// Attempts to load 30 keyspaces starting from keyspace with id 90.
-	// Scan result should be keyspaces with id 90-101.
+	// Scan result should be keyspaces with id 90-100.
 	loadStart = 90
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
 	re.NoError(err)
@@ -225,7 +240,7 @@ func TestLoadRangeKeyspace(t *testing.T) {
 // will be successful.
 func TestUpdateMultipleKeyspace(t *testing.T) {
 	re := require.New(t)
-	manager := newKeyspaceManager()
+	manager := mustNewKeyspaceManager(re)
 	requests := makeCreateKeyspaceRequests(50)
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
@@ -258,11 +273,11 @@ func checkCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, 
 	re.Equal(request.Now.Unix(), meta.CreatedAt)
 	re.Equal(request.Now.Unix(), meta.StateChangedAt)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.InitialConfig, meta.Config)
+	re.Equal(request.Config, meta.Config)
 }
 
 // checkMutations verifies that performing mutations on old config would result in new config.
-func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]string, mutations []*keyspacepb.Mutation) {
+func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]string, mutations []*Mutation) {
 	// Copy oldConfig to expected to avoid modifying its content.
 	expected := map[string]string{}
 	for k, v := range oldConfig {
@@ -270,10 +285,10 @@ func checkMutations(re *require.Assertions, oldConfig, newConfig map[string]stri
 	}
 	for _, mutation := range mutations {
 		switch mutation.Op {
-		case keyspacepb.Op_PUT:
-			expected[string(mutation.Key)] = string(mutation.Value)
-		case keyspacepb.Op_DEL:
-			delete(expected, string(mutation.Key))
+		case OpPut:
+			expected[mutation.Key] = mutation.Value
+		case OpDel:
+			delete(expected, mutation.Key)
 		}
 	}
 	re.Equal(expected, newConfig)
@@ -284,11 +299,11 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 	oldMeta, err := manager.LoadKeyspace(name)
 	re.NoError(err)
 	for i := 0; i <= end; i++ {
-		mutations := []*keyspacepb.Mutation{
+		mutations := []*Mutation{
 			{
-				Op:    keyspacepb.Op_PUT,
-				Key:   []byte(testConfig),
-				Value: []byte(strconv.Itoa(i)),
+				Op:    OpPut,
+				Key:   testConfig,
+				Value: strconv.Itoa(i),
 			},
 		}
 		updatedMeta, err := manager.UpdateKeyspaceConfig(name, mutations)
