@@ -24,11 +24,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/apiv2/middlewares"
 	"github.com/tikv/pd/server/keyspace"
 )
 
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
+	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
