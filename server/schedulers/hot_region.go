@@ -562,6 +562,10 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			bs.cur.mainPeerStat = mainPeerStat
 
 			for _, dstStore := range bs.filterDstStores() {
+				if bs.sche.OpController.Ctx().Err() != nil {
+					goto fastExit
+				}
+
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution(isUniformFirstPriority)
@@ -594,6 +598,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 		}
 	}
+
+fastExit:
 	searchRevertRegions = bs.allowSearchRevertRegions()
 	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
 	if searchRevertRegions {
@@ -660,6 +666,10 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	confSrcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
+		if bs.sche.OpController.Ctx().Err() != nil {
+			break
+		}
+
 		srcToleranceRatio := confSrcToleranceRatio
 		if detail.IsTiFlash() {
 			if !confEnableForTiFlash {
@@ -863,6 +873,10 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	confDstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
 	for _, detail := range candidates {
+		if bs.sche.OpController.Ctx().Err() != nil {
+			break
+		}
+
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
 		if detail.IsTiFlash() {
