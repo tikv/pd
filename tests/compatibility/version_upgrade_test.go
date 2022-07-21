@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -76,8 +77,9 @@ func TestStoreRegister(t *testing.T) {
 			Version: "1.0.1",
 		},
 	}
-	_, err = svr.PutStore(context.Background(), putStoreRequest)
-	re.Error(err)
+	putStoreResponse, err := svr.PutStore(context.Background(), putStoreRequest)
+	re.NoError(err)
+	re.Error(errors.New(putStoreResponse.GetHeader().GetError().String()))
 }
 
 func TestRollingUpgrade(t *testing.T) {
