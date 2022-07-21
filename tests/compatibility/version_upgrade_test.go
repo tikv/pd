@@ -93,8 +93,9 @@ func (s *compatibilityTestSuite) TestStoreRegister(c *C) {
 			Version: "1.0.1",
 		},
 	}
-	_, err = svr.PutStore(context.Background(), putStoreRequest)
-	c.Assert(err, NotNil)
+	resp, err := svr.PutStore(context.Background(), putStoreRequest)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp.GetHeader().GetError().String()) > 0, IsTrue)
 }
 
 func (s *compatibilityTestSuite) TestRollingUpgrade(c *C) {

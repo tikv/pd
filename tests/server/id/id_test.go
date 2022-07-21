@@ -114,6 +114,7 @@ func (s *testAllocIDSuite) TestCommand(c *C) {
 		resp, err := grpcPDClient.AllocID(context.Background(), req)
 		c.Assert(err, IsNil)
 		c.Assert(resp.GetId(), Greater, last)
+		c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 		last = resp.GetId()
 	}
 }

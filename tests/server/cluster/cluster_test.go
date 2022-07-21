@@ -175,8 +175,9 @@ func (s *clusterTestSuite) TestDamagedRegion(c *C) {
 	// To put stores.
 	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
-		_, err = svr.PutStore(context.Background(), store)
+		resp, err := svr.PutStore(context.Background(), store)
 		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError(), IsNil)
 	}
 
 	// To validate remove peer op be added.
@@ -252,50 +253,57 @@ func testPutStore(c *C, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient 
 	c.Assert(updatedStore, DeepEquals, store)
 
 	// Update store again.
-	_, err = putStore(grpcPDClient, clusterID, store)
+	resp, err := putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 
 	rc.GetAllocator().Alloc()
 	id, err := rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
-	c.Assert(err, NotNil)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 
 	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
-	c.Assert(err, NotNil)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 
 	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Tombstone)
 	rc.GetStore(store.GetId())
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 
 	id, err = rc.GetAllocator().Alloc()
 	c.Assert(err, IsNil)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	s := rc.GetStore(id).GetMeta()
 	c.Assert(s.DeployPath, Equals, deployPath)
 
 	deployPath = fmt.Sprintf("move/test/store%d", id)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	s = rc.GetStore(id).GetMeta()
 	c.Assert(s.DeployPath, Equals, deployPath)
 
 	// Put an existed store with duplicated address with other old stores.
 	resetStoreState(c, rc, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(store.GetId(), testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(store.GetId())))
-	c.Assert(err, NotNil)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(store.GetId(), testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(store.GetId())))
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 }
 
 func getTestDeployPath(storeID uint64) string {
@@ -489,6 +497,7 @@ func (s *clusterTestSuite) TestGetPDMembers(c *C) {
 	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID)}
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
 	c.Assert(err, IsNil)
+	c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 	// A more strict test can be found at api/member_test.go
 	c.Assert(resp.GetMembers(), Not(HasLen), 0)
 }
@@ -535,8 +544,9 @@ func (s *clusterTestSuite) TestStoreVersionChange(c *C) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError(), IsNil)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	svr.SetClusterVersion("1.0.0")
@@ -571,8 +581,9 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 		c.Assert(err, IsNil)
 		store := newMetaStore(storeID, addr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 		stores = append(stores, store)
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError(), IsNil)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -589,8 +600,9 @@ func (s *clusterTestSuite) TestConcurrentHandleRegion(c *C) {
 			},
 		}
 		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}
-		_, err := grpcServer.StoreHeartbeat(context.TODO(), req)
+		resp, err := grpcServer.StoreHeartbeat(context.TODO(), req)
 		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError(), IsNil)
 		stream, err := grpcPDClient.RegionHeartbeat(ctx)
 		c.Assert(err, IsNil)
 		peerID, err := id.Alloc()
@@ -846,15 +858,17 @@ func (s *clusterTestSuite) TestTiFlashWithPlacementRules(c *C) {
 	}
 
 	// cannot put TiFlash node without placement rules
-	_, err = putStore(grpcPDClient, clusterID, tiflashStore)
-	c.Assert(err, NotNil)
+	resp, err := putStore(grpcPDClient, clusterID, tiflashStore)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), NotNil)
 	rep := leaderServer.GetConfig().Replication
 	rep.EnablePlacementRules = true
 	svr := leaderServer.GetServer()
 	err = svr.SetReplicationConfig(rep)
 	c.Assert(err, IsNil)
-	_, err = putStore(grpcPDClient, clusterID, tiflashStore)
+	resp, err = putStore(grpcPDClient, clusterID, tiflashStore)
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	// test TiFlash store limit
 	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
 	c.Assert(svr.GetScheduleConfig().StoreLimit, DeepEquals, expect)
@@ -921,8 +935,9 @@ func newBootstrapRequest(clusterID uint64) *pdpb.BootstrapRequest {
 // helper function to check and bootstrap.
 func bootstrapCluster(c *C, clusterID uint64, grpcPDClient pdpb.PDClient) {
 	req := newBootstrapRequest(clusterID)
-	_, err := grpcPDClient.Bootstrap(context.Background(), req)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 }
 
 func putStore(grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
@@ -941,6 +956,7 @@ func getStore(c *C, clusterID uint64, grpcPDClient pdpb.PDClient, storeID uint64
 	}
 	resp, err := grpcPDClient.GetStore(context.Background(), req)
 	c.Assert(err, IsNil)
+	c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 	c.Assert(resp.GetStore().GetId(), Equals, storeID)
 
 	return resp.GetStore()
@@ -1002,8 +1018,9 @@ func (s *clusterTestSuite) TestOfflineStoreLimit(c *C) {
 		storeID, err := id.Alloc()
 		c.Assert(err, IsNil)
 		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
+		c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 	}
 	for i := uint64(1); i <= 2; i++ {
 		r := &metapb.Region{
@@ -1085,8 +1102,9 @@ func (s *clusterTestSuite) TestUpgradeStoreLimit(c *C) {
 	c.Assert(rc, NotNil)
 	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
-	_, err = putStore(grpcPDClient, clusterID, store)
+	resp, err := putStore(grpcPDClient, clusterID, store)
 	c.Assert(err, IsNil)
+	c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 	r := &metapb.Region{
 		Id: 1,
 		RegionEpoch: &metapb.RegionEpoch{
@@ -1150,8 +1168,9 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 		peerID, err := id.Alloc()
 		c.Assert(err, IsNil)
 		store := newMetaStore(storeID, addr, "3.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
+		c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 		peers = append(peers, &metapb.Peer{
 			Id:      peerID,
 			StoreId: storeID,
@@ -1269,8 +1288,9 @@ func (s *clusterTestSuite) TestMinResolvedTS(c *C) {
 		if isTiflash {
 			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
 		}
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		c.Assert(err, IsNil)
+		c.Assert(pdpb.ErrorType_OK, Equals, resp.GetHeader().GetError().GetType())
 		req := &pdpb.ReportMinResolvedTsRequest{
 			Header:        testutil.NewRequestHeader(clusterID),
 			StoreId:       storeID,

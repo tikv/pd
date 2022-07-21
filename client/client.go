@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
@@ -583,10 +584,8 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetMembers(ctx, req)
 	cancel()
-	if err != nil {
-		cmdFailDurationGetAllMembers.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return resp.GetMembers(), nil
 }
@@ -1368,10 +1367,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	resp, err := c.getClient().GetRegion(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return handleRegionResponse(resp), nil
 }
@@ -1400,7 +1397,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 			Header:    c.requestHeader(),
 			RegionKey: key,
 		})
-		if err != nil {
+		if err != nil || resp.GetHeader().GetError() != nil {
 			log.Error("[pd] can't get region info", zap.String("member-URL", url), errs.ZapError(err))
 			continue
 		}
@@ -1440,10 +1437,8 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	resp, err := c.getClient().GetPrevRegion(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailDurationGetPrevRegion.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return handleRegionResponse(resp), nil
 }
@@ -1470,10 +1465,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	resp, err := c.getClient().GetRegionByID(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailedDurationGetRegionByID.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return handleRegionResponse(resp), nil
 }
@@ -1501,10 +1494,8 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScanRegions(scanCtx, req)
 
-	if err != nil {
-		cmdFailedDurationScanRegions.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 
 	return handleRegionsResponse(resp), nil
@@ -1555,10 +1546,8 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	resp, err := c.getClient().GetStore(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailedDurationGetStore.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return handleStoreResponse(resp)
 }
@@ -1597,10 +1586,8 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 	resp, err := c.getClient().GetAllStores(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailedDurationGetAllStores.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return resp.GetStores(), nil
 }
@@ -1622,10 +1609,8 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	resp, err := c.getClient().UpdateGCSafePoint(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailedDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return 0, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
+		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
 }
@@ -1654,10 +1639,8 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	resp, err := c.getClient().UpdateServiceGCSafePoint(ctx, req)
 	cancel()
 
-	if err != nil {
-		cmdFailedDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return 0, errors.WithStack(err)
+	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
+		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
 }
@@ -1895,4 +1878,16 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 		}
 	}()
 	return globalConfigWatcherCh, err
+}
+
+func (c *client) respForErr(observer prometheus.Observer, start time.Time, err error, header *pdpb.ResponseHeader) error {
+	if err != nil || header.GetError() != nil {
+		observer.Observe(time.Since(start).Seconds())
+		if err != nil {
+			c.ScheduleCheckLeader()
+			return errors.WithStack(err)
+		}
+		return errors.WithStack(errors.New(header.GetError().String()))
+	}
+	return nil
 }

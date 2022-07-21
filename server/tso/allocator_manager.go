@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/errors"
 	"math"
 	"path"
 	"strconv"
@@ -1077,6 +1078,9 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 	})
 	if err != nil {
 		return false, &pdpb.GetDCLocationInfoResponse{}, err
+	}
+	if resp.GetHeader().GetError() != nil {
+		return false, &pdpb.GetDCLocationInfoResponse{}, errors.Errorf("get the dc-location info from leader failed: %s", resp.GetHeader().GetError().String())
 	}
 	return resp.GetSuffix() != 0, resp, nil
 }

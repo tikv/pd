@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"github.com/pingcap/errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -347,6 +348,11 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				respCh <- syncMaxTSResp
 				if syncMaxTSResp.err != nil {
 					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), errs.ZapError(err))
+					return
+				}
+				if syncMaxTSResp.rpcRes.GetHeader().GetError() != nil {
+					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()),
+						errs.ZapError(errors.Errorf("%s", syncMaxTSResp.rpcRes.GetHeader().GetError().String())))
 					return
 				}
 			}(ctx, leaderConn, respCh)

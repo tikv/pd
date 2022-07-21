@@ -17,7 +17,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -268,7 +267,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 	}
 
 	for _, t := range cases {
-		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
@@ -281,14 +280,14 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 		if t.valid {
 			c.Assert(err, IsNil)
 		} else {
-			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+			c.Assert(resp.GetHeader().GetError(), NotNil)
 		}
 	}
 
 	// enable placement rules. Report no error any more.
 	c.Assert(tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/config", s.urlPrefix), []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(c)), IsNil)
 	for _, t := range cases {
-		_, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := s.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
@@ -301,7 +300,7 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 		if t.valid {
 			c.Assert(err, IsNil)
 		} else {
-			c.Assert(strings.Contains(err.Error(), t.expectError), IsTrue)
+			c.Assert(resp.GetHeader().GetError(), NotNil)
 		}
 	}
 }

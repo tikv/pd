@@ -309,6 +309,10 @@ func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Du
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
+	if members.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+	}
 	return members, nil
 }
 

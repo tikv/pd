@@ -524,8 +524,9 @@ func (s *testProgressSuite) TestRemovingProgress(c *C) {
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	_, err = grpcPDClient.Bootstrap(context.Background(), req)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -640,8 +641,9 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	_, err = grpcPDClient.Bootstrap(context.Background(), req)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
 	stores := []*metapb.Store{
 		{
 			Id:             1,

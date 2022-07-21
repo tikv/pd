@@ -61,6 +61,9 @@ func initClusterID(cli pdpb.PDClient) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if res.GetHeader().GetError() != nil {
+		log.Fatal(res.GetHeader().GetError())
+	}
 	clusterID = res.GetHeader().GetClusterId()
 	log.Println("ClusterID:", clusterID)
 }
@@ -95,9 +98,12 @@ func bootstrap(cli pdpb.PDClient) {
 		Store:  store,
 		Region: region,
 	}
-	_, err = cli.Bootstrap(context.TODO(), req)
+	resp, err := cli.Bootstrap(context.TODO(), req)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if resp.GetHeader().GetError() != nil {
+		log.Fatalf("bootstrap failed: %s", resp.GetHeader().GetError().String())
 	}
 	log.Println("bootstrapped")
 }
@@ -108,9 +114,12 @@ func putStores(cli pdpb.PDClient) {
 			Id:      i,
 			Address: fmt.Sprintf("localhost:%d", i),
 		}
-		_, err := cli.PutStore(context.TODO(), &pdpb.PutStoreRequest{Header: header(), Store: store})
+		resp, err := cli.PutStore(context.TODO(), &pdpb.PutStoreRequest{Header: header(), Store: store})
 		if err != nil {
 			log.Fatal(err)
+		}
+		if resp.GetHeader().GetError() != nil {
+			log.Fatalf("put store failed: %s", resp.GetHeader().GetError().String())
 		}
 	}
 }
