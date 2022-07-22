@@ -65,9 +65,9 @@ func CreateKeyspace(c *gin.Context) {
 		return
 	}
 	req := &keyspace.CreateKeyspaceRequest{
-		Name:          createParams.Name,
-		InitialConfig: createParams.Config,
-		Now:           time.Now(),
+		Name:   createParams.Name,
+		Config: createParams.Config,
+		Now:    time.Now(),
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {
@@ -191,6 +191,8 @@ func LoadAllKeyspaces(c *gin.Context) {
 
 // UpdateConfigParams represents parameters needed to modify target keyspace's configs.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// A Map of string to string pointer is used to differentiate between json null and "",
+// which will both be set to "" if value type is string during binding.
 type UpdateConfigParams struct {
 	Config map[string]*string `json:"config"`
 }
@@ -224,19 +226,19 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 }
 
 // getMutations converts a given JSON merge patch to a series of keyspace config mutations.
-func getMutations(patch map[string]*string) []*keyspacepb.Mutation {
-	mutations := make([]*keyspacepb.Mutation, 0, len(patch))
+func getMutations(patch map[string]*string) []*keyspace.Mutation {
+	mutations := make([]*keyspace.Mutation, 0, len(patch))
 	for k, v := range patch {
 		if v == nil {
-			mutations = append(mutations, &keyspacepb.Mutation{
-				Op:  keyspacepb.Op_DEL,
-				Key: []byte(k),
+			mutations = append(mutations, &keyspace.Mutation{
+				Op:  keyspace.OpDel,
+				Key: k,
 			})
 		} else {
-			mutations = append(mutations, &keyspacepb.Mutation{
-				Op:    keyspacepb.Op_PUT,
-				Key:   []byte(k),
-				Value: []byte(*v),
+			mutations = append(mutations, &keyspace.Mutation{
+				Op:    keyspace.OpPut,
+				Key:   k,
+				Value: *v,
 			})
 		}
 	}

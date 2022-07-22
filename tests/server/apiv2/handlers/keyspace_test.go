@@ -83,7 +83,7 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10, 10)
 	for _, created := range keyspaces {
 		config1val := "300"
 		updateRequest := &handlers.UpdateConfigParams{
@@ -99,29 +99,30 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20, 10)
 	for _, created := range keyspaces {
-		// Should not allow archiving enabled keyspace.
+		// Should NOT allow archiving ENABLED keyspace.
 		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
 		re.False(success)
-		// Disable an ENABLED keyspace is allowed. Should result in time stamp change.
+		// Disabling an ENABLED keyspace is allowed.
 		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, disabled.State)
-		re.NotEqual(created.StateChangedAt, disabled.StateChangedAt)
-		// Disable a already DISABLED keyspace should not result in any change.
+		// Disabling an already DISABLED keyspace should not result in any change.
 		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
-		// Archiving a DISABLED keyspace should be allowed. Should result in time stamp change.
+		// Archiving a DISABLED keyspace should be allowed.
 		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, archived.State)
-		re.NotEqual(disabled.StateChangedAt, archived.StateChangedAt)
 		// Modifying ARCHIVED keyspace is not allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "disable")
 		re.False(success)
 	}
+	// Changing default keyspace's state is NOT allowed.
+	success, _ := sendUpdateStateRequest(re, suite.server, "DEFAULT", "disable")
+	re.False(success)
 }
 
 func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, action string) (bool, *keyspacepb.KeyspaceMeta) {
@@ -149,6 +150,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, sta
 			Name:   fmt.Sprintf("test_keyspace%d", start+i),
 			Config: testConfig,
 		}
+		fmt.Println(createRequest)
 		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)
 	}
 	return resultMeta
