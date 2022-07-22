@@ -124,7 +124,7 @@ func TestUpdateKeyspaceConfig(t *testing.T) {
 		re.Error(err)
 	}
 	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(defaultKeyspaceName, mutations)
+	updated, err := manager.UpdateKeyspaceConfig(DefaultKeyspaceName, mutations)
 	re.NoError(err)
 	checkMutations(re, nil, updated.Config, mutations)
 }
@@ -161,7 +161,7 @@ func TestUpdateKeyspaceState(t *testing.T) {
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(defaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, time.Now())
+		_, err = manager.UpdateKeyspaceState(DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, time.Now())
 		re.Error(err)
 	}
 }
