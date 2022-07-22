@@ -28,39 +28,39 @@ var (
 	statusNotInJointState = plan.NewStatus(plan.StatusNoNeed, "no peer in JointState")
 )
 
-type checkPlan struct {
+type checkPlanNode struct {
 	checker     string
 	region      *core.RegionInfo
 	srcStoreID  uint64
 	destStoreID uint64
 	step        string
 	status      plan.Status
-	children    []*checkPlan
-	cacheNode   bool
+	children    []*checkPlanNode
+	cache       bool
 }
 
-func newCheckPlan(checker string, region *core.RegionInfo, cache bool) *checkPlan {
-	return &checkPlan{
-		checker:   checker,
-		region:    region,
-		status:    statusOK,
-		children:  []*checkPlan{},
-		cacheNode: cache,
+func newCheckPlan(checker string, region *core.RegionInfo, cache bool) *checkPlanNode {
+	return &checkPlanNode{
+		checker:  checker,
+		region:   region,
+		status:   statusOK,
+		children: []*checkPlanNode{},
+		cache:    cache,
 	}
 }
 
-func (node *checkPlan) stopByPaused() []*operator.Operator {
+func (node *checkPlanNode) stopByPaused() []*operator.Operator {
 	node.status = statusPaused
 	return nil
 }
 
-func (node *checkPlan) stopAt(step string, status plan.Status) []*operator.Operator {
+func (node *checkPlanNode) stopAt(step string, status plan.Status) []*operator.Operator {
 	node.step = step
 	node.status = status
 	return nil
 }
 
-func (node *checkPlan) stopAtCreateOps(err error, ops ...*operator.Operator) []*operator.Operator {
+func (node *checkPlanNode) stopAtCreateOps(err error, ops ...*operator.Operator) []*operator.Operator {
 	if last := node.lastChild(); last != nil {
 		node.step = last.checker
 	} else {
@@ -75,23 +75,23 @@ func (node *checkPlan) stopAtCreateOps(err error, ops ...*operator.Operator) []*
 }
 
 // always return false
-func (node *checkPlan) noNeed(step string, reason ...string) []*operator.Operator {
+func (node *checkPlanNode) noNeed(step string, reason ...string) []*operator.Operator {
 	status := plan.NewStatus(plan.StatusNoNeed, reason...)
 	return node.stopAt(step, status)
 }
 
-func (node *checkPlan) newSubCheck(checker string) *checkPlan {
-	if !node.cacheNode {
+func (node *checkPlanNode) newSubCheck(checker string) *checkPlanNode {
+	if !node.cache {
 		return node
 	}
-	child := newCheckPlan(checker, node.region, node.cacheNode)
+	child := newCheckPlan(checker, node.region, node.cache)
 	child.srcStoreID = node.srcStoreID
 	child.destStoreID = node.destStoreID
 	node.children = append(node.children, child)
 	return child
 }
 
-func (node *checkPlan) lastChild() *checkPlan {
+func (node *checkPlanNode) lastChild() *checkPlanNode {
 	len := len(node.children)
 	if len > 0 {
 		return node.children[len-1]
@@ -100,11 +100,11 @@ func (node *checkPlan) lastChild() *checkPlan {
 }
 
 // GetPlans returns the plans list for current check.
-func (node *checkPlan) GetPlans() plan.Plan {
+func (node *checkPlanNode) GetPlans() plan.Plan {
 	return node
 }
 
-func (node *checkPlan) ToString() []string {
+func (node *checkPlanNode) ToString() []string {
 	prefix := node.checker
 	plans := make([]string, 0)
 	if len(node.children) == 0 {

@@ -156,7 +156,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.True(hasTransferLeader)
 }
 
-func outPutPlans(plan *checkPlan) {
+func outPutPlans(plan *checkPlanNode) {
 	for id, plan := range plan.ToString() {
 		fmt.Println("plan:", id)
 		fmt.Println("checkpath:", plan)

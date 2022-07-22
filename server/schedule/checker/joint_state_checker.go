@@ -36,7 +36,7 @@ func NewJointStateChecker(cluster schedule.Cluster) *JointStateChecker {
 }
 
 // Check verifies a region's role,returns true if it create an operator
-func (c *JointStateChecker) Check(p *checkPlan) []*operator.Operator {
+func (c *JointStateChecker) Check(p *checkPlanNode) []*operator.Operator {
 	node := p.newSubCheck("joint_state_checker")
 	region := node.region
 	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
@@ -49,6 +49,7 @@ func (c *JointStateChecker) Check(p *checkPlan) []*operator.Operator {
 	}
 	// TODO return detail status get from operartor package.
 	op, err := operator.CreateLeaveJointStateOperator(operator.OpDescLeaveJointState, c.cluster, region)
+
 	if err != nil {
 		checkerCounter.WithLabelValues("joint_state_checker", "create-operator-fail").Inc()
 		log.Debug("fail to create leave joint state operator", errs.ZapError(err))

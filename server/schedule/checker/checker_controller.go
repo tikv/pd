@@ -96,8 +96,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	if c.opts.IsPlacementRulesEnabled() {
 		fit := c.priorityInspector.Inspect(region)
 		if ops := c.ruleChecker.CheckWithFit(checkPlan, fit); len(ops) > 0 {
-			rulePlan := checkPlan.lastChild()
-			coutCheck := rulePlan.newSubCheck("check-OperatorCount")
+			coutCheck := checkPlan.newSubCheck("check-OperatorCount")
 			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
 				return ops
 			}

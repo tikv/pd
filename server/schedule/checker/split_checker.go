@@ -47,7 +47,7 @@ func (c *SplitChecker) GetType() string {
 }
 
 // Check checks whether the region need to split and returns true if need to fix.
-func (c *SplitChecker) Check(p *checkPlan) []*operator.Operator {
+func (c *SplitChecker) Check(p *checkPlanNode) []*operator.Operator {
 	curPlan := p.newSubCheck(c.GetType())
 	checkerCounter.WithLabelValues("split_checker", "check").Inc()
 
