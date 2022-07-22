@@ -3,7 +3,7 @@ module github.com/tikv/pd/client
 go 1.16
 
 // TODO: Remove after kvproto merge
-replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220715053401-9a717ffca7c6
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20220721101402-e48eba4cc8f7
 
 require (
 	github.com/opentracing/opentracing-go v1.2.0
