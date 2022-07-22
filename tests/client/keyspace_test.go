@@ -36,7 +36,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace%d", start+i),
-			InitialConfig: map[string]string{
+			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
 			},
@@ -57,44 +57,11 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	// Loading non-existing keyspace should result in error.
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
-}
-
-func (suite *clientTestSuite) TestUpdateKeyspaceConfig() {
-	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
-	// Update keyspace configs.
-	for _, meta := range metas {
-		_, err := suite.client.UpdateKeyspaceConfig(suite.ctx, meta.Name, []*keyspacepb.Mutation{
-			{
-				Op:    keyspacepb.Op_PUT,
-				Key:   []byte(testConfig1),
-				Value: []byte("new val"),
-			},
-			{
-				Op:    keyspacepb.Op_PUT,
-				Key:   []byte("new config"),
-				Value: []byte("new val"),
-			},
-			{
-				Op:  keyspacepb.Op_DEL,
-				Key: []byte(testConfig2),
-			},
-		})
-		re.NoError(err)
-	}
-	// Verify updated keyspaces' configs matches the expectation.
-	expectedConfig := map[string]string{
-		testConfig1:  "new val",
-		"new config": "new val",
-	}
-	for _, meta := range metas {
-		loaded, err := suite.client.LoadKeyspace(suite.ctx, meta.Name)
-		re.NoError(err)
-		re.Equal(expectedConfig, loaded.Config)
-	}
-	// Updating a non-existing keyspace should result in error.
-	_, err := suite.client.UpdateKeyspaceConfig(suite.ctx, "non-existing keyspace", nil)
-	re.Error(err)
+	// Loading default keyspace should be successful.
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, "DEFAULT")
+	re.NoError(err)
+	re.Equal(uint32(0), keyspaceDefault.Id)
+	re.Equal("DEFAULT", keyspaceDefault.Name)
 }
 
 func (suite *clientTestSuite) TestWatchKeyspace() {
@@ -102,9 +69,12 @@ func (suite *clientTestSuite) TestWatchKeyspace() {
 	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
 	re.NoError(err)
-	// First batch of watchChan message should contain all existing keyspaces.
+	// First batch of watchChan message should contain all existing keyspaces, including the default.
 	initialLoaded := <-watchChan
-	re.Equal(initialKeyspaces, initialLoaded)
+	re.Equal(len(initialKeyspaces)+1, len(initialLoaded))
+	for i := range initialKeyspaces {
+		re.Equal(initialKeyspaces[i], initialLoaded[i+1])
+	}
 	// Each additional message contains extra put events.
 	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
 	re.NoError(err)
@@ -123,10 +93,21 @@ func (suite *clientTestSuite) TestWatchKeyspace() {
 	loaded := <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 	// Updates to config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(initialKeyspaces[0].Name, []*keyspacepb.Mutation{
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(initialKeyspaces[0].Name, []*keyspace.Mutation{
 		{
-			Op:  keyspacepb.Op_DEL,
-			Key: []byte(testConfig1),
+			Op:  keyspace.OpDel,
+			Key: testConfig1,
+		},
+	})
+	re.NoError(err)
+	loaded = <-watchChan
+	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
+	// Updates to default keyspace's config should also be captured.
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig("DEFAULT", []*keyspace.Mutation{
+		{
+			Op:    keyspace.OpPut,
+			Key:   "config",
+			Value: "value",
 		},
 	})
 	re.NoError(err)

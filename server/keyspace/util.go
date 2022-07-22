@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	spaceIDMin = uint32(1)       // 1 is the minimum value of spaceID, 0 is reserved.
 	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
 	// Name must be non-empty and contains only alphanumerical, `_` and `-`.
@@ -36,28 +35,37 @@ var (
 	ErrKeyspaceExists   = errors.New("keyspace already exists")
 	errKeyspaceArchived = errors.New("keyspace already archived")
 	errArchiveEnabled   = errors.New("cannot archive ENABLED keyspace")
+	errModifyDefault    = errors.New("cannot modify default keyspace's state")
 	errIllegalID        = errors.New("illegal keyspace ID")
 	errIllegalName      = errors.New("illegal keyspace name")
 	errIllegalOperation = errors.New("unknown operation")
 )
 
 // validateID check if keyspace falls within the acceptable range.
-// It throws errIllegalID when input id is our of range.
+// It throws errIllegalID when input id is our of range,
+// or if it collides with reserved id.
 func validateID(spaceID uint32) error {
-	if spaceID < spaceIDMin || spaceID > spaceIDMax {
+	if spaceID > spaceIDMax {
+		return errIllegalID
+	}
+	if spaceID == defaultKeyspaceID {
 		return errIllegalID
 	}
 	return nil
 }
 
-// validateName check if name contains illegal character.
-// It throws errIllegalName when name contains illegal character.
+// validateName check if user provided name is legal.
+// It throws errIllegalName when name contains illegal character,
+// or if it collides with reserved name.
 func validateName(name string) error {
 	isValid, err := regexp.MatchString(namePattern, name)
 	if err != nil {
 		return err
 	}
 	if !isValid {
+		return errIllegalName
+	}
+	if name == defaultKeyspaceName {
 		return errIllegalName
 	}
 	return nil
