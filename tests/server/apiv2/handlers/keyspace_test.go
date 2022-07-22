@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 	"io"
@@ -55,7 +56,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceTestSuite))
 }
 
-func (suite *keyspaceTestSuite) SetupSuite() {
+func (suite *keyspaceTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3)
@@ -67,7 +68,7 @@ func (suite *keyspaceTestSuite) SetupSuite() {
 	suite.NoError(suite.server.BootstrapCluster())
 }
 
-func (suite *keyspaceTestSuite) TearDownSuite() {
+func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cleanup()
 	suite.cluster.Destroy()
 }
@@ -79,11 +80,14 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
 	}
+	defaultKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.DefaultKeyspaceName)
+	re.Equal(keyspace.DefaultKeyspaceName, defaultKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
 	for _, created := range keyspaces {
 		config1val := "300"
 		updateRequest := &handlers.UpdateConfigParams{
@@ -99,7 +103,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
 	for _, created := range keyspaces {
 		// Should NOT allow archiving ENABLED keyspace.
 		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
@@ -121,8 +125,43 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.False(success)
 	}
 	// Changing default keyspace's state is NOT allowed.
-	success, _ := sendUpdateStateRequest(re, suite.server, "DEFAULT", "disable")
+	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, "disable")
 	re.False(success)
+}
+
+func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
+	re := suite.Require()
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 50)
+	loadResponse := sendLoadRangeRequest(re, suite.server, "", "")
+	re.Empty(loadResponse.NextPageToken) // Load response should contain no more pages.
+	// Load response should contain all created keyspace and a default.
+	re.Equal(len(keyspaces)+1, len(loadResponse.Keyspaces))
+	for i, created := range keyspaces {
+		re.Equal(created, loadResponse.Keyspaces[i+1].KeyspaceMeta)
+	}
+	re.Equal(keyspace.DefaultKeyspaceName, loadResponse.Keyspaces[0].Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, loadResponse.Keyspaces[0].State)
+}
+
+func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
+	// Construct load range request.
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspacesPrefix, nil)
+	re.NoError(err)
+	query := httpReq.URL.Query()
+	query.Add("page_token", token)
+	query.Add("limit", limit)
+	httpReq.URL.RawQuery = query.Encode()
+	// Send request.
+	httpResp, err := dialClient.Do(httpReq)
+	re.Equal(http.StatusOK, httpResp.StatusCode)
+	re.NoError(err)
+	// Receive & decode response.
+	data, err := io.ReadAll(httpResp.Body)
+	re.NoError(err)
+	re.NoError(httpResp.Body.Close())
+	resp := &handlers.LoadAllKeyspacesResponse{}
+	re.NoError(json.Unmarshal(data, resp))
+	return resp
 }
 
 func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, action string) (bool, *keyspacepb.KeyspaceMeta) {
@@ -150,7 +189,6 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, sta
 			Name:   fmt.Sprintf("test_keyspace%d", start+i),
 			Config: testConfig,
 		}
-		fmt.Println(createRequest)
 		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)
 	}
 	return resultMeta

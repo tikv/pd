@@ -109,7 +109,7 @@ func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err err
 	pageToken, set := c.GetQuery("page_token")
 	if !set || pageToken == "" {
 		// If pageToken is empty or unset, then scan from spaceID of 1.
-		scanStart = 1
+		scanStart = 0
 	} else {
 		scanStart64, err := strconv.ParseUint(pageToken, 10, 32)
 		if err != nil {
