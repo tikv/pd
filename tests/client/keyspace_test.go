@@ -58,10 +58,10 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
 	// Loading default keyspace should be successful.
-	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, "DEFAULT")
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
 	re.NoError(err)
-	re.Equal(uint32(0), keyspaceDefault.Id)
-	re.Equal("DEFAULT", keyspaceDefault.Name)
+	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.Id)
+	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.Name)
 }
 
 func (suite *clientTestSuite) TestWatchKeyspace() {
@@ -103,7 +103,7 @@ func (suite *clientTestSuite) TestWatchKeyspace() {
 	loaded = <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 	// Updates to default keyspace's config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig("DEFAULT", []*keyspace.Mutation{
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(keyspace.DefaultKeyspaceName, []*keyspace.Mutation{
 		{
 			Op:    keyspace.OpPut,
 			Key:   "config",
