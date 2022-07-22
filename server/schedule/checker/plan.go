@@ -29,14 +29,14 @@ var (
 )
 
 type checkPlan struct {
-	checker string
-	region  *core.RegionInfo
-	// srcStoreID  uint64
-	// destStoreID uint64
-	step      string
-	status    plan.Status
-	children  []*checkPlan
-	cacheNode bool
+	checker     string
+	region      *core.RegionInfo
+	srcStoreID  uint64
+	destStoreID uint64
+	step        string
+	status      plan.Status
+	children    []*checkPlan
+	cacheNode   bool
 }
 
 func newCheckPlan(checker string, region *core.RegionInfo, cache bool) *checkPlan {
@@ -85,6 +85,8 @@ func (node *checkPlan) newSubCheck(checker string) *checkPlan {
 		return node
 	}
 	child := newCheckPlan(checker, node.region, node.cacheNode)
+	child.srcStoreID = node.srcStoreID
+	child.destStoreID = node.destStoreID
 	node.children = append(node.children, child)
 	return child
 }
@@ -106,7 +108,7 @@ func (node *checkPlan) ToString() []string {
 	prefix := node.checker
 	plans := make([]string, 0)
 	if len(node.children) == 0 {
-		value := fmt.Sprintf("%s\nStep:%s\nStatus:%s", prefix, node.step, node.status.String())
+		value := fmt.Sprintf("%s\nStep:%s\nStatus:%s\nRegion:%d,SrcStore:%d,DescStore:%d", prefix, node.step, node.status.String(), node.region.GetID(), node.srcStoreID, node.destStoreID)
 		plans = append(plans, value)
 		return plans
 	}

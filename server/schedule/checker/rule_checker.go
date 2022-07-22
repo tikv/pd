@@ -190,6 +190,8 @@ func (c *RuleChecker) replaceUnexpectRulePeer(p *checkPlan, rf *placement.RuleFi
 	region := curPlan.region
 	ruleStores := c.getRuleFitStores(rf)
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	curPlan.srcStoreID = peer.GetStoreId()
+	curPlan.destStoreID = store
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		c.handleFilterState(region, filterByTempState)
