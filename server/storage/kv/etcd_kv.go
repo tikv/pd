@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -170,4 +171,98 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.WithStack(err)
+}
+
+// etcdTxn is used to record user's action during RunInTxn,
+// It stores load result in conditions and modification in operations.
+type etcdTxn struct {
+	kv  *etcdKVBase
+	ctx context.Context
+	// mu protects conditions and operations.
+	mu         syncutil.Mutex
+	conditions []clientv3.Cmp
+	operations []clientv3.Op
+}
+
+// RunInTxn runs user provided function f in a transaction.
+func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	txn := &etcdTxn{
+		kv:  kv,
+		ctx: ctx,
+	}
+	err := f(txn)
+	if err != nil {
+		return err
+	}
+	return txn.commit()
+}
+
+// Save puts a put operation into operations.
+func (txn *etcdTxn) Save(key, value string) error {
+	key = path.Join(txn.kv.rootPath, key)
+	operation := clientv3.OpPut(key, value)
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.operations = append(txn.operations, operation)
+	return nil
+}
+
+// Remove puts a delete operation into operations.
+func (txn *etcdTxn) Remove(key string) error {
+	key = path.Join(txn.kv.rootPath, key)
+	operation := clientv3.OpDelete(key)
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.operations = append(txn.operations, operation)
+	return nil
+}
+
+// Load loads the target value from etcd and puts a comparator into conditions.
+func (txn *etcdTxn) Load(key string) (string, error) {
+	value, err := txn.kv.Load(key)
+	// If Load failed, preserve the failure behavior of base Load.
+	if err != nil {
+		return value, err
+	}
+	// If load successful, must make sure value stays the same before commit.
+	fullKey := path.Join(txn.kv.rootPath, key)
+	condition := clientv3.Compare(clientv3.Value(fullKey), "=", value)
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.conditions = append(txn.conditions, condition)
+	return value, err
+}
+
+// LoadRange loads the target range from etcd,
+// Then for each value loaded, it puts a comparator into conditions.
+func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
+	keys, values, err = txn.kv.LoadRange(key, endKey, limit)
+	// If LoadRange failed, preserve the failure behavior of base LoadRange.
+	if err != nil {
+		return keys, values, err
+	}
+	// If LoadRange successful, must make sure values stay the same before commit.
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	for i := range keys {
+		fullKey := path.Join(txn.kv.rootPath, keys[i])
+		condition := clientv3.Compare(clientv3.Value(fullKey), "=", values[i])
+		txn.conditions = append(txn.conditions, condition)
+	}
+	return keys, values, err
+}
+
+// commit perform the operations on etcd, with pre-condition that values observed by user has not been changed.
+func (txn *etcdTxn) commit() error {
+	baseTxn := txn.kv.client.Txn(txn.ctx)
+	baseTxn.If(txn.conditions...)
+	baseTxn.Then(txn.operations...)
+	resp, err := baseTxn.Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	return nil
 }

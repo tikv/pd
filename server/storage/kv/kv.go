@@ -14,10 +14,31 @@
 
 package kv
 
-// Base is an abstract interface for load/save pd cluster data.
-type Base interface {
-	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
+import "context"
+
+// Txn bundles multiple operations into a single executable unit.
+// It enables kv to atomically apply a set of updates.
+type Txn interface {
 	Save(key, value string) error
 	Remove(key string) error
+	Load(key string) (string, error)
+	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
+}
+
+// Base is an abstract interface for load/save pd cluster data.
+type Base interface {
+	Txn
+	// RunInTxn runs the user provided function in a Transaction.
+	// If user provided function f returns a non-nil error, then
+	// transaction will not be committed, the same error will be
+	// returned by RunInTxn.
+	// Otherwise, it returns the error occurred during the
+	// transaction.
+	// Note:
+	// 1. Load and LoadRange operations provides only stale read.
+	// Values saved/ removed during transaction will not be immediately
+	// observable in the same transaction.
+	// 2. Only when storage is etcd, does RunInTxn checks that
+	// values loaded during transaction has not been modified before commit.
+	RunInTxn(ctx context.Context, f func(txn Txn) error) error
 }

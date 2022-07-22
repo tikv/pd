@@ -15,12 +15,15 @@
 package kv
 
 import (
+	"context"
+
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/syncutil"
 )
 
 // LevelDBKV is a kv store using LevelDB.
@@ -93,4 +96,70 @@ func (kv *LevelDBKV) SaveRegions(regions map[string]*metapb.Region) error {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	return nil
+}
+
+type levelDBTxn struct {
+	kv  *LevelDBKV
+	ctx context.Context
+	// mu protects batch.
+	mu    syncutil.Mutex
+	batch *leveldb.Batch
+}
+
+// RunInTxn runs user provided function f in a transaction.
+// If user provided function returns error, then transaction will not be committed.
+func (kv *LevelDBKV) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	txn := &levelDBTxn{
+		kv:    kv,
+		ctx:   ctx,
+		batch: new(leveldb.Batch),
+	}
+	err := f(txn)
+	if err != nil {
+		return err
+	}
+	return txn.commit()
+}
+
+// Save puts a save operation with target key value into levelDB batch.
+func (txn *levelDBTxn) Save(key, value string) error {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	txn.batch.Put([]byte(key), []byte(value))
+	return nil
+}
+
+// Remove puts a delete operation with target key into levelDB batch.
+func (txn *levelDBTxn) Remove(key string) error {
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	txn.batch.Delete([]byte(key))
+	return nil
+}
+
+// Load executes base's load.
+func (txn *levelDBTxn) Load(key string) (string, error) {
+	return txn.kv.Load(key)
+}
+
+// LoadRange executes base's load range.
+func (txn *levelDBTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
+	return txn.kv.LoadRange(key, endKey, limit)
+}
+
+// commit writes the batch constructed into levelDB.
+func (txn *levelDBTxn) commit() error {
+	// Check context first to make sure transaction is not cancelled.
+	select {
+	default:
+	case <-txn.ctx.Done():
+		return txn.ctx.Err()
+	}
+
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+
+	return txn.kv.Write(txn.batch, nil)
 }
