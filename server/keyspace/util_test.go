@@ -27,7 +27,7 @@ func TestValidateID(t *testing.T) {
 		id     uint32
 		hasErr bool
 	}{
-		{0, true}, // Reserved id should result in error.
+		{DefaultKeyspaceID, true}, // Reserved id should result in error.
 		{100, false},
 		{spaceIDMax - 1, false},
 		{spaceIDMax, false},
@@ -45,7 +45,7 @@ func TestValidateName(t *testing.T) {
 		name   string
 		hasErr bool
 	}{
-		{"DEFAULT", true}, // Reserved name should result in error.
+		{DefaultKeyspaceName, true}, // Reserved name should result in error.
 		{"keyspaceName1", false},
 		{"keyspace_name_1", false},
 		{"10", false},

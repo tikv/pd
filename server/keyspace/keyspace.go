@@ -29,9 +29,11 @@ const (
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
 	// AllocLabel is used to label keyspace idAllocator's metrics.
-	AllocLabel          = "keyspace-idAlloc"
-	defaultKeyspaceName = "DEFAULT"
-	defaultKeyspaceID   = uint32(0)
+	AllocLabel = "keyspace-idAlloc"
+	// DefaultKeyspaceName is the name reserved for default keyspace.
+	DefaultKeyspaceName = "DEFAULT"
+	// DefaultKeyspaceID is the id of default keyspace.
+	DefaultKeyspaceID = uint32(0)
 )
 
 // Manager manages keyspace related data.
@@ -66,7 +68,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 	manager.metaLock.Lock()
 	defer manager.metaLock.Unlock()
 	// Check if default keyspace already exists.
-	defaultExists, err := manager.store.LoadKeyspace(defaultKeyspaceID, &keyspacepb.KeyspaceMeta{})
+	defaultExists, err := manager.store.LoadKeyspace(DefaultKeyspaceID, &keyspacepb.KeyspaceMeta{})
 	if err != nil {
 		return nil, err
 	}
@@ -75,15 +77,15 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 	}
 	// Initialize default keyspace.
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
-		Id:    defaultKeyspaceID,
-		Name:  defaultKeyspaceName,
+		Id:    DefaultKeyspaceID,
+		Name:  DefaultKeyspaceName,
 		State: keyspacepb.KeyspaceState_ENABLED,
 	}
 	if err = manager.store.SaveKeyspace(defaultKeyspace); err != nil {
 		return nil, err
 	}
-	if err = manager.createNameToID(defaultKeyspaceID, defaultKeyspaceName); err != nil {
-		if removeErr := manager.store.RemoveKeyspace(defaultKeyspaceID); removeErr != nil {
+	if err = manager.createNameToID(DefaultKeyspaceID, DefaultKeyspaceName); err != nil {
+		if removeErr := manager.store.RemoveKeyspace(DefaultKeyspaceID); removeErr != nil {
 			return nil, errors.Wrap(removeErr, "failed to remove keyspace meta after save spaceID failure")
 		}
 		return nil, err
@@ -214,7 +216,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now time.Time) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if name == defaultKeyspaceName {
+	if name == DefaultKeyspaceName {
 		return nil, errModifyDefault
 	}
 	manager.metaLock.Lock()
@@ -263,7 +265,7 @@ func (manager *Manager) allocID() (uint32, error) {
 	}
 	id32 := uint32(id64)
 	// Skip reserved space ID.
-	if id32 == defaultKeyspaceID {
+	if id32 == DefaultKeyspaceID {
 		return manager.allocID()
 	}
 	if err = validateID(id32); err != nil {

@@ -48,7 +48,7 @@ func validateID(spaceID uint32) error {
 	if spaceID > spaceIDMax {
 		return errIllegalID
 	}
-	if spaceID == defaultKeyspaceID {
+	if spaceID == DefaultKeyspaceID {
 		return errIllegalID
 	}
 	return nil
@@ -65,7 +65,7 @@ func validateName(name string) error {
 	if !isValid {
 		return errIllegalName
 	}
-	if name == defaultKeyspaceName {
+	if name == DefaultKeyspaceName {
 		return errIllegalName
 	}
 	return nil
