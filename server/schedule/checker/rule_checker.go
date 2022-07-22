@@ -33,11 +33,12 @@ import (
 )
 
 var (
-	errNoStoreToAdd       = errors.New("no store to add peer")
-	errNoStoreToReplace   = errors.New("no store to replace peer")
-	errPeerCannotBeLeader = errors.New("peer cannot be leader")
-	errNoNewLeader        = errors.New("no new leader")
-	errRegionNoLeader     = errors.New("region no leader")
+	errNoStoreToAdd        = errors.New("no store to add peer")
+	errNoStoreToReplace    = errors.New("no store to replace peer")
+	errPeerCannotBeLeader  = errors.New("peer cannot be leader")
+	errPeerCannotBeWitness = errors.New("peer cannot be witness")
+	errNoNewLeader         = errors.New("no new leader")
+	errRegionNoLeader      = errors.New("region no leader")
 )
 
 const maxPendingListLen = 100000
@@ -266,15 +267,26 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
 		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
 	}
-	if core.IsVoter(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
-		checkerCounter.WithLabelValues("rule_checker", "set-voter-non-witness").Inc()
-		return operator.CreateNonWitnessVoterOperator("fix-non-witness-voter", c.cluster, region, peer)
+	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
+		return nil, errPeerCannotBeWitness
 	}
-	if core.IsLearner(peer) && core.IsWitness(peer) && !rf.Rule.IsWitness {
-		checkerCounter.WithLabelValues("rule_checker", "set-learner-non-witness").Inc()
-		return operator.CreateNonWitnessLearnerOperator("fix-non-witness-learner", c.cluster, region, peer)
+	if !core.IsWitness(peer) && rf.Rule.IsWitness {
+		lv := "set-voter-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-witness"
+		}
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
+	} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
+		lv := "set-voter-non-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-non-witness"
+		}
+		ruleStores := c.getRuleFitStores(rf)
+		targetStoreID, _ := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer, targetStoreID)
 	}
-
 	return nil, nil
 }
 
