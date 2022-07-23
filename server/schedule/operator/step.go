@@ -424,6 +424,10 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	regionSize := region.GetApproximateSize()
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	peer := region.GetStorePeer(rp.FromStore)
+	if peer != nil && peer.IsWitness {
+		from.WitnessCount--
+	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold
