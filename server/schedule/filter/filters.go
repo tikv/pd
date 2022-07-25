@@ -17,6 +17,7 @@ package filter
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/golang/protobuf/proto" //nolint:staticcheck
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -379,6 +380,16 @@ func (f *StoreStateFilter) exceedRemoveLimit(opt *config.PersistOptions, store *
 	return statusOK
 }
 
+func (f *StoreStateFilter) isOnStartApplyBusy(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
+	if !f.AllowTemporaryStates && (store.GetUptime() < time.Second*5 ||
+		store.IsApplyBusy() && store.GetUptime() < time.Second*600) {
+		f.Reason = "on-start-apply-busy"
+		return statusStoreApplyBusy
+	}
+	f.Reason = ""
+	return statusOK
+}
+
 func (f *StoreStateFilter) exceedAddLimit(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer) {
 		f.Reason = "exceed-add-limit"
@@ -448,7 +459,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
-			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.isOnStartApplyBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

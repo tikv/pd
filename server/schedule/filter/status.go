@@ -25,6 +25,7 @@ var (
 	statusStoreTombstone          = plan.NewStatus(plan.StatusStoreUnavailable, "store is tombstone")
 	statusStoreDisconnected       = plan.NewStatus(plan.StatusStoreUnavailable, "store is lost for more than 20s")
 	statusStoreBusy               = plan.NewStatus(plan.StatusStoreUnavailable, "store is busy")
+	statusStoreApplyBusy          = plan.NewStatus(plan.StatusStoreUnavailable, "store is apply busy")
 	statusStoresOffline           = plan.NewStatus(plan.StatusStoreDraining, "store is in the process of offline")
 	statusStoreLowSpace           = plan.NewStatus(plan.StatusStoreLowSpace, "store space is not enough, please scale out or change 'low-space-ratio' setting")
 	statusStoreExcluded           = plan.NewStatus(plan.StatusStoreExcluded, "there has already had a peer or the peer is unhealthy in the store")

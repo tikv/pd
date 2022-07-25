@@ -119,6 +119,12 @@ func (ss *storeStats) IsBusy() bool {
 	return ss.rawStats.GetIsBusy()
 }
 
+func (ss *storeStats) IsApplyBusy() bool {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.rawStats.GetIsApplyBusy()
+}
+
 // GetSendingSnapCount returns the current sending snapshot count of the store.
 func (ss *storeStats) GetSendingSnapCount() uint32 {
 	ss.mu.RLock()
