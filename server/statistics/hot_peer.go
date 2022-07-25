@@ -231,6 +231,7 @@ func (stat *HotPeerStat) GetStores() []uint64 {
 	return stores
 }
 
+// IsLearner indicates whether the item is learner.
 func (stat *HotPeerStat) IsLearner() bool {
 	return stat.isLearner
 }

@@ -215,7 +215,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 	// Check if the original hot regions are still reported by the store heartbeat.
 	for regionID := range previousHotStat {
 		// If it's not reported, we need to update the original information.
-		if region, ok := reportRegions[regionID]; !ok {
+		if region, ok := reportRegions[regionID]; !ok && region != nil {
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			// The region is not hot in the store, do nothing.
 			if oldItem == nil {
