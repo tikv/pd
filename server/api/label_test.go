@@ -277,7 +277,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 	}
 
 	for _, testCase := range testCases {
-		_, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -289,8 +289,9 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		})
 		if testCase.valid {
 			suite.NoError(err)
+			suite.Nil(resp.GetHeader().GetError())
 		} else {
-			suite.Contains(err.Error(), testCase.expectError)
+			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
 
@@ -301,7 +302,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		[]byte(`{"enable-placement-rules":"true"}`),
 		tu.StatusOK(suite.Require())))
 	for _, testCase := range testCases {
-		_, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -313,8 +314,9 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		})
 		if testCase.valid {
 			suite.NoError(err)
+			suite.Nil(resp.GetHeader().GetError())
 		} else {
-			suite.Contains(err.Error(), testCase.expectError)
+			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
 }
