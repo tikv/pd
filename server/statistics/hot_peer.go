@@ -100,6 +100,7 @@ type HotPeerStat struct {
 
 	actionType             ActionType
 	isLeader               bool
+	isLearner              bool
 	interval               uint64
 	thresholds             []float64
 	peers                  []*metapb.Peer
@@ -131,6 +132,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Uint64("store", stat.StoreID),
 		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("is-learner", stat.isLearner),
 		zap.String("type", stat.Kind.String()),
 		zap.Float64s("loads", stat.GetLoads()),
 		zap.Float64s("loads-instant", stat.Loads),
@@ -221,10 +223,14 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 }
 
 // GetStores returns stores of the item.
-func (stat *HotPeerStat) GetStores() []uint64{
-	stores:=[]uint64{}
+func (stat *HotPeerStat) GetStores() []uint64 {
+	stores := []uint64{}
 	for _, peer := range stat.peers {
 		stores = append(stores, peer.StoreId)
 	}
 	return stores
+}
+
+func (stat *HotPeerStat) IsLearner() bool {
+	return stat.isLearner
 }

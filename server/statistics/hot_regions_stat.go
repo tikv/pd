@@ -35,6 +35,8 @@ type HotPeersStat struct {
 type HotPeerStatShow struct {
 	StoreID        uint64    `json:"store_id"`
 	Stores         []uint64  `json:"stores"`
+	IsLeader       bool      `json:"is_leader"`
+	IsLearner      bool      `json:"is_learner"`
 	RegionID       uint64    `json:"region_id"`
 	HotDegree      int       `json:"hot_degree"`
 	ByteRate       float64   `json:"flow_bytes"`
