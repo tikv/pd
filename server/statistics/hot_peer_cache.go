@@ -58,6 +58,7 @@ type hotPeerCache struct {
 	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
 	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	previousRegions    map[uint64]*core.RegionInfo
 	topNTTL            time.Duration
 	reportIntervalSecs int
 	taskQueue          chan flowItemTask
@@ -215,10 +216,14 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 	// Check if the original hot regions are still reported by the store heartbeat.
 	for regionID := range previousHotStat {
 		// If it's not reported, we need to update the original information.
-		if region, ok := reportRegions[regionID]; !ok {
+		if _, ok := reportRegions[regionID]; !ok {
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			// The region is not hot in the store, do nothing.
 			if oldItem == nil {
+				continue
+			}
+			region, ok := f.previousRegions[regionID]
+			if !ok {
 				continue
 			}
 
@@ -230,7 +235,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				// use oldItem.thresholds to make the newItem won't affect the threshold
 				Loads:          oldItem.thresholds,
 				LastUpdateTime: time.Now(),
-				isLeader:       oldItem.isLeader,
+				isLeader:       region.GetLeader().GetStoreId() == storeID,
 				interval:       interval,
 				peers:          oldItem.peers,
 				actionType:     Update,
@@ -247,6 +252,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 			}
 		}
 	}
+	f.previousRegions = reportRegions
 	return
 }
 
