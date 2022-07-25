@@ -490,15 +490,9 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
 
-	// Create a new region with epoch(0, 0)
-	// the region has two peers with its peer id allocated incrementally.
-	// so the two peers are {peerid: 1, storeid: 1}, {peerid: 2, storeid: 2}
-	// The peer on store 1 is the leader
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
 	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
 	region = region.Clone(core.SetApproximateSize(20))
-	// Put region into cluster, otherwise, AddOperator will fail because of
-	// missing region
 	cluster.PutRegion(region)
 	cluster.AddRegionStore(1, 1)
 	cluster.AddRegionStore(3, 1)
@@ -547,8 +541,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 		core.WithIncConfVer(),
 	)
 	suite.True(steps[0].IsFinish(region2))
-	// push operator step
-	controller.Dispatch(region2, DispatchFromHeartBeat)
+	op.Check(region2)
 
 	influence = controller.GetOpInfluence(cluster)
 	check(influence, 1, &operator.StoreInfluence{
