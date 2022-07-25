@@ -215,7 +215,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 	// Check if the original hot regions are still reported by the store heartbeat.
 	for regionID := range previousHotStat {
 		// If it's not reported, we need to update the original information.
-		if region, ok := reportRegions[regionID]; !ok && region != nil {
+		if region, ok := reportRegions[regionID]; !ok {
 			oldItem := f.getOldHotPeerStat(regionID, storeID)
 			// The region is not hot in the store, do nothing.
 			if oldItem == nil {
@@ -230,8 +230,8 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				// use oldItem.thresholds to make the newItem won't affect the threshold
 				Loads:          oldItem.thresholds,
 				LastUpdateTime: time.Now(),
-				isLeader:       region.GetLeader().GetStoreId() == storeID,
-				isLearner:      core.IsLearner(region.GetPeer(storeID)),
+				isLeader:       oldItem.isLeader,
+				isLearner:      oldItem.isLearner,
 				interval:       interval,
 				peers:          oldItem.peers,
 				actionType:     Update,
