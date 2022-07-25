@@ -249,7 +249,7 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 		}
 		selected := pickPeersFromBinaryInt(candidates, binaryInt)
 		better = w.compareBest(selected, index) || better
-		// reset the seleted items to false.
+		// reset the selected items to false.
 		unSelectPeers(selected)
 		if w.exit {
 			break

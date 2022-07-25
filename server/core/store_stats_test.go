@@ -36,7 +36,6 @@ func TestStoreStats(t *testing.T) {
 	re.Equal(uint64(50*units.GiB), store.GetUsedSize())
 	re.Equal(uint64(150*units.GiB), store.GetAvailable())
 	re.Equal(uint64(150*units.GiB), store.GetAvgAvailable())
-	re.Equal(uint64(0), store.GetAvailableDeviation())
 
 	store = store.Clone(SetStoreStats(&pdpb.StoreStats{
 		Capacity:  uint64(200 * units.GiB),
@@ -47,6 +46,4 @@ func TestStoreStats(t *testing.T) {
 	re.Equal(uint64(160*units.GiB), store.GetAvailable())
 	re.Greater(store.GetAvgAvailable(), uint64(150*units.GiB))
 	re.Less(store.GetAvgAvailable(), uint64(160*units.GiB))
-	re.Greater(store.GetAvailableDeviation(), uint64(0))
-	re.Less(store.GetAvailableDeviation(), uint64(10*units.GiB))
 }
