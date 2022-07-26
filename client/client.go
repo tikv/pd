@@ -86,7 +86,7 @@ type Client interface {
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
 	//
-	BatchGetRegionScore(ctx context.Context, regionIDs uint64) ([]*pdpb.RegionScore, error)
+	BatchGetRegionScore(ctx context.Context, regionIDs []uint64) ([]*pdpb.RegionScore, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
