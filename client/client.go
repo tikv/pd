@@ -85,6 +85,8 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
+	//
+	BatchGetRegionScore(ctx context.Context, regionIDs uint64) ([]*pdpb.RegionScore, error)
 	// ScanRegion gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
@@ -1466,6 +1468,30 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
+}
+
+func (c *client) BatchGetRegionScore(ctx context.Context, regionIDs []uint64) ([]*pdpb.RegionScore, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.BatchGetRegionScore", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	var cancel context.CancelFunc
+	getCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		getCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
+		defer cancel()
+	}
+	req := &pdpb.BatchGetRegionScoreRequest{
+		Header:   c.requestHeader(),
+		RegionIds: regionIDs,
+	}
+	getCtx = grpcutil.BuildForwardContext(getCtx, c.GetLeaderAddr())
+	resp, err := c.getClient().BatchGetRegionScore(getCtx, req)
+	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return resp.Regions, nil
 }
 
 func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error) {

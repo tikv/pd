@@ -22,6 +22,7 @@ import (
 type HotStat struct {
 	*HotCache
 	*StoresStats
+	*PeerScoreStats
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
@@ -29,5 +30,7 @@ func NewHotStat(ctx context.Context) *HotStat {
 	return &HotStat{
 		HotCache:    NewHotCache(ctx),
 		StoresStats: NewStoresStats(),
+		PeerScoreStats: NewPeerScoreStats(ctx),
 	}
 }
+

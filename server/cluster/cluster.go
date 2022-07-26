@@ -732,6 +732,18 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	}
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+
+	cpuTotal := 0.0
+	if stats.CpuQuota > 0.0 {
+		cpuTotal = stats.CpuTotal / stats.CpuQuota
+	} else {
+		for _, usage := range stats.CpuUsages {
+			cpuTotal += float64(usage.Value) / 100
+		}
+		// hard code cpu quota as 8
+		cpuTotal /= 8.0
+	}
+	c.hotStat.UpdateRegionScoreAsync(statistics.NewUpdateRegionScoreTask(storeID, cpuTotal, regions))
 	return nil
 }
 

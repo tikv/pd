@@ -1041,6 +1041,39 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+func (s *GrpcServer) BatchGetRegionScore(ctx context.Context, request *pdpb.BatchGetRegionScoreRequest) (*pdpb.BatchGetRegionScoreResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).BatchGetRegionScore(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.BatchGetRegionScoreResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.BatchGetRegionScoreResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	regionScores := rc.GetHotStat().GetRegionScore(request.RegionIds)
+	resp := &pdpb.BatchGetRegionScoreResponse{
+		Header: s.header(),
+	}
+	for _, r := range regionScores {
+		peers := make([]*pdpb.PeerScore, 0, len(r.Peers))
+		for _, p := range r.Peers {
+			peers = append(peers, &pdpb.PeerScore{
+				PeerId: p.PeerID,
+				StoreId: p.StoreID,
+				Score: int32(p.Score),
+			})
+		}
+		resp.Regions = append(resp.Regions, &pdpb.RegionScore{Peers: peers})
+	}
+	return resp, nil
+}
+
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
