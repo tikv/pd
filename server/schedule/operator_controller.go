@@ -493,6 +493,11 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost == 0 || snapCost == 0 {
 				continue
 			}
+			log.Info("snapshot size consume",
+				zap.Uint64("store-id", storeID),
+				zap.Int64("snap-size", snapCost),
+				zap.Uint64("region-id", op.RegionID()),
+				zap.String("limit-type", n))
 			snapLimiter.Take(snapCost)
 			storeLimit.Take(stepCost)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
@@ -764,6 +769,11 @@ func (oc *OperatorController) Ack(op *operator.Operator) {
 			if snapLimiter == nil {
 				continue
 			}
+			log.Info("snapshot size will reset",
+				zap.Uint64("store-id", storeID),
+				zap.Int64("snap-size", snapCost),
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Stringer("limit-type", v))
 			snapLimiter.Ack(snapCost)
 		}
 	}

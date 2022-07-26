@@ -168,12 +168,6 @@ func (s *StoreInfo) IsAvailableSnap(snapType storelimit.Type) bool {
 
 	if notNil {
 		isAvailable := s.snapLimiter[snapType].Available(0)
-		log.Info("snapshot receiver is available for snapshot",
-			zap.Bool("notNil", notNil),
-			zap.Int64("used", s.snapLimiter[snapType].GetUsed()),
-			zap.Int64("capacity", s.snapLimiter[snapType].GetCapacity()),
-			zap.Bool("is available", isAvailable),
-			zap.Uint64("store-id", s.GetID()))
 		return isAvailable
 	}
 	return true

@@ -51,8 +51,10 @@ func (s *SlidingWindows) Ack(token int64) {
 	defer s.mu.Unlock()
 	if s.used > token {
 		s.used -= token
+	} else {
+		s.used = 0
 	}
-	s.used = 0
+
 }
 
 // Available returns false if there is no free size for the token.
