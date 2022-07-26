@@ -802,7 +802,10 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluen
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
-			AddOpInfluence(op, influence, cluster)
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.UnfinishedInfluence(influence, region)
+			}
 		}
 	}
 	return influence
@@ -819,11 +822,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 		if !ok {
 			continue
 		}
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
 	}
 }
 
