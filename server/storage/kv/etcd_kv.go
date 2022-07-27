@@ -174,7 +174,10 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 }
 
 // etcdTxn is used to record user's action during RunInTxn,
-// It stores load result in conditions and modification in operations.
+// It stores modification in operations to apply as a single transaction during commit.
+// All load/loadRange result will be stored in conditions.
+// Transaction commit will be successful only if all conditions are met,
+// aka, no other transaction has modified values loaded during current transaction.
 type etcdTxn struct {
 	kv  *etcdKVBase
 	ctx context.Context
@@ -198,6 +201,7 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 }
 
 // Save puts a put operation into operations.
+// Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
 	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpPut(key, value)

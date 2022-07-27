@@ -98,6 +98,8 @@ func (kv *LevelDBKV) SaveRegions(regions map[string]*metapb.Region) error {
 	return nil
 }
 
+// levelDBTxn implements kv.Txn.
+// It utilizes leveldb.Batch to batch user operations to an atomic execution unit.
 type levelDBTxn struct {
 	kv  *LevelDBKV
 	ctx context.Context

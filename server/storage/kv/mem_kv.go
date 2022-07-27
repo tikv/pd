@@ -90,7 +90,7 @@ func (kv *memoryKV) Remove(key string) error {
 	return nil
 }
 
-// memTxn implements kv.Txn
+// memTxn implements kv.Txn.
 type memTxn struct {
 	kv  *memoryKV
 	ctx context.Context

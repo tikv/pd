@@ -50,25 +50,6 @@ func TestEtcd(t *testing.T) {
 	testLoadConflict(re, kv)
 }
 
-func TestEtcdRunInTxn(t *testing.T) {
-	re := require.New(t)
-	cfg := newTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	defer etcd.Close()
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-
-	kv := NewEtcdKVBase(client, rootPath)
-	testReadWrite(re, kv)
-	testRange(re, kv)
-	testSaveMultiple(re, kv, 20)
-}
 func TestLevelDB(t *testing.T) {
 	re := require.New(t)
 	dir := t.TempDir()
@@ -77,6 +58,7 @@ func TestLevelDB(t *testing.T) {
 
 	testReadWrite(re, kv)
 	testRange(re, kv)
+	testSaveMultiple(re, kv, 20)
 }
 
 func TestMemKV(t *testing.T) {
@@ -162,8 +144,7 @@ func newTestSingleConfig(t *testing.T) *embed.Config {
 }
 
 func testSaveMultiple(re *require.Assertions, kv Base, count int) {
-	var err error
-	err = kv.RunInTxn(context.Background(), func(txn Txn) error {
+	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
 		var saveErr error
 		for i := 0; i < count; i++ {
 			saveErr = txn.Save("key"+strconv.Itoa(i), "val"+strconv.Itoa(i))
@@ -181,6 +162,9 @@ func testSaveMultiple(re *require.Assertions, kv Base, count int) {
 	}
 }
 
+// testLoadConflict checks that if any value loaded during the current transaction
+// has been modified by another transaction before the current one commit,
+// then the current transaction must fail.
 func testLoadConflict(re *require.Assertions, kv Base) {
 	re.NoError(kv.Save("testKey", "initialValue"))
 	// loader loads the test key value.

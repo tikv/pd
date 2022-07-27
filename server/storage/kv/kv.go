@@ -34,6 +34,7 @@ type Base interface {
 	// returned by RunInTxn.
 	// Otherwise, it returns the error occurred during the
 	// transaction.
+	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
 	// 1. Load and LoadRange operations provides only stale read.
 	// Values saved/ removed during transaction will not be immediately
