@@ -481,16 +481,10 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(stream.MsgLength(), Equals, 3)
 }
 
-<<<<<<< HEAD
-func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
+func (t *testOperatorControllerSuite) TestCalcInfluence(c *C) {
 	cluster := mockcluster.NewCluster(t.ctx, config.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
-=======
-func (suite *operatorControllerTestSuite) TestCalcInfluence() {
-	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
 
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
 	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
@@ -506,16 +500,16 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 		operator.RemovePeer{FromStore: 1},
 	}
 	op := operator.NewTestOperator(1, epoch, operator.OpRegion, steps...)
-	suite.True(controller.AddOperator(op))
+	c.Assert(controller.AddOperator(op), Equals, true)
 
 	check := func(influence operator.OpInfluence, id uint64, expect *operator.StoreInfluence) {
 		si := influence.GetStoreInfluence(id)
-		suite.Equal(si.LeaderCount, expect.LeaderCount)
-		suite.Equal(si.LeaderSize, expect.LeaderSize)
-		suite.Equal(si.RegionCount, expect.RegionCount)
-		suite.Equal(si.RegionSize, expect.RegionSize)
-		suite.Equal(si.StepCost[storelimit.AddPeer], expect.StepCost[storelimit.AddPeer])
-		suite.Equal(si.StepCost[storelimit.RemovePeer], expect.StepCost[storelimit.RemovePeer])
+		c.Assert(si.LeaderCount, Equals, expect.LeaderCount)
+		c.Assert(si.LeaderSize, Equals, expect.LeaderSize)
+		c.Assert(si.RegionCount, Equals, expect.RegionCount)
+		c.Assert(si.RegionSize, Equals, expect.RegionSize)
+		c.Assert(si.StepCost[storelimit.AddPeer], Equals, expect.StepCost[storelimit.AddPeer])
+		c.Assert(si.StepCost[storelimit.RemovePeer], Equals, expect.StepCost[storelimit.RemovePeer])
 	}
 
 	influence := controller.GetOpInfluence(cluster)
@@ -542,7 +536,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
 		core.WithIncConfVer(),
 	)
-	suite.True(steps[0].IsFinish(region2))
+	c.Assert(steps[0].IsFinish(region2), Equals, true)
 	op.Check(region2)
 
 	influence = controller.GetOpInfluence(cluster)
@@ -564,12 +558,10 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	})
 }
 
-func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
-	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
->>>>>>> e339c83bb (operator: fix bug for using `AddOpInfluence ` (#5312))
-
+func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
+	cluster := mockcluster.NewCluster(t.ctx, config.NewTestOptions())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewOperatorController(t.ctx, cluster, stream)
 	// Create a new region with epoch(0, 0)
 	// the region has two peers with its peer id allocated incrementally.
 	// so the two peers are {peerid: 1, storeid: 1}, {peerid: 2, storeid: 2}
