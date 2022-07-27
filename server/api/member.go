@@ -67,6 +67,9 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	if members.GetHeader().GetError() != nil {
+		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
+	}
 	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 	if err != nil {
 		return nil, errors.WithStack(err)

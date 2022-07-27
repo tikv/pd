@@ -782,8 +782,9 @@ func (suite *clientTestSuite) bootstrapServer(header *pdpb.RequestHeader, client
 		Store:  stores[0],
 		Region: region,
 	}
-	_, err := client.Bootstrap(context.Background(), req)
+	resp, err := client.Bootstrap(context.Background(), req)
 	suite.NoError(err)
+	suite.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
 func (suite *clientTestSuite) TestNormalTSO() {
