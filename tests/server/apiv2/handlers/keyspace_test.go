@@ -75,7 +75,7 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
 	for _, created := range keyspaces {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
@@ -87,7 +87,7 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
 	for _, created := range keyspaces {
 		config1val := "300"
 		updateRequest := &handlers.UpdateConfigParams{
@@ -103,7 +103,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 10)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
 	for _, created := range keyspaces {
 		// Should NOT allow archiving ENABLED keyspace.
 		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
@@ -131,7 +131,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 
 func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re := suite.Require()
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 0, 50)
+	keyspaces := mustMakeTestKeyspaces(re, suite.server, 50)
 	loadResponse := sendLoadRangeRequest(re, suite.server, "", "")
 	re.Empty(loadResponse.NextPageToken) // Load response should contain no more pages.
 	// Load response should contain all created keyspace and a default.
@@ -168,6 +168,7 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/"+name+"/"+action, nil)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
+	re.NoError(err)
 	if resp.StatusCode != http.StatusOK {
 		return false, nil
 	}
@@ -178,7 +179,7 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	re.NoError(json.Unmarshal(data, meta))
 	return true, meta.KeyspaceMeta
 }
-func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, start, count int) []*keyspacepb.KeyspaceMeta {
+func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
 	testConfig := map[string]string{
 		"config1": "100",
 		"config2": "200",
@@ -186,7 +187,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, sta
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
 	for i := 0; i < count; i++ {
 		createRequest := &handlers.CreateKeyspaceParams{
-			Name:   fmt.Sprintf("test_keyspace%d", start+i),
+			Name:   fmt.Sprintf("test_keyspace%d", i),
 			Config: testConfig,
 		}
 		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)
@@ -198,6 +199,7 @@ func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	data, err := json.Marshal(request)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix, bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -214,6 +216,7 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 	data, err := json.Marshal(request)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/updateConfig", bytes.NewBuffer(data))
+	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)

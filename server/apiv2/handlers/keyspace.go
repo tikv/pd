@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 )
 
+// RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
@@ -134,6 +135,8 @@ func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err err
 	return scanStart, scanLimit, nil
 }
 
+// LoadAllKeyspacesResponse represents response given when loading all keyspaces.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LoadAllKeyspacesResponse struct {
 	Keyspaces []*KeyspaceMeta `json:"keyspaces"`
 	// Token that can be used to read immediate next page.
@@ -254,7 +257,7 @@ func getMutations(patch map[string]*string) []*keyspace.Mutation {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // Router /keyspaces/{name}/enable [post]
 func EnableKeyspace(c *gin.Context) {
-	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_ENABLED)
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_ENABLED)
 }
 
 // DisableKeyspace disables target keyspace.
@@ -266,7 +269,7 @@ func EnableKeyspace(c *gin.Context) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // Router /keyspaces/{name}/disable [post]
 func DisableKeyspace(c *gin.Context) {
-	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_DISABLED)
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_DISABLED)
 }
 
 // ArchiveKeyspace archives target keyspace.
@@ -278,9 +281,9 @@ func DisableKeyspace(c *gin.Context) {
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // Router /keyspaces/{name}/archive [post]
 func ArchiveKeyspace(c *gin.Context) {
-	UpdateKeyspaceState(c, keyspacepb.KeyspaceState_ARCHIVED)
+	updateKeyspaceState(c, keyspacepb.KeyspaceState_ARCHIVED)
 }
-func UpdateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
+func updateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
