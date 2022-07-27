@@ -46,6 +46,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 	}
 	return keyspaces
 }
+
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
