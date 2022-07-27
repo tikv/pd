@@ -70,6 +70,10 @@ func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	}
 }
 
+// LoadKeyspace load and return target keyspace metadata.
+// Request must specify keyspace name.
+// On Error, keyspaceMeta in response will be nil,
+// error information will be encoded in response header with corresponding error type.
 func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -87,6 +91,8 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	}, nil
 }
 
+// WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
+// Note: It sends all existing keyspaces as it's first package to the client.
 func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
 	rc := s.GetRaftCluster()
 	if rc == nil {

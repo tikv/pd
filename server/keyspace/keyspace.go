@@ -164,16 +164,24 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return keyspace, nil
 }
 
+// Mutation represents a single operation to be applied on keyspace config.
 type Mutation struct {
 	Op    OpType
 	Key   string
 	Value string
 }
 
+// OpType defines the type of keyspace config operation.
 type OpType int
 
 const (
+	// OpPut denotes a put operation onto the given config.
+	// If target key exists, it will put a new value,
+	// otherwise, it creates a new config entry.
 	OpPut OpType = iota + 1 // Operation type starts at 1.
+	// OpDel denotes a deletion operation onto the given config.
+	// Note: OpDel is idempotent, deleting a non-existing key
+	// will not result in error.
 	OpDel
 )
 
