@@ -488,7 +488,10 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost > 0 && storeLimit != nil {
 				storeLimit.Take(stepCost)
 			}
+			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
+		}
 
+		for n, v := range storelimit.SnapTypeNameValue {
 			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
 			snapLimit := store.GetSnapLimit(v)
 			if snapCost > 0 && snapLimit != nil {
@@ -499,7 +502,6 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 					zap.String("limit-type", n))
 				snapLimit.Take(snapCost)
 			}
-			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
 	oc.updateCounts(oc.operators)
@@ -759,7 +761,7 @@ func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
 func (oc *OperatorController) Ack(op *operator.Operator) {
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
-		for _, v := range storelimit.TypeNameValue {
+		for _, v := range storelimit.SnapTypeNameValue {
 			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
 			log.Info("snapshot size will reset",
 				zap.Uint64("store-id", storeID),
@@ -951,20 +953,30 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {
-			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
-			limit, snapLimit := oc.getOrCreateStoreLimit(storeID, v)
-
-			if stepCost > 0 && limit != nil {
-				if !snapLimit.Available(snapCost) {
-					return true
-				}
+			if stepCost == 0 {
+				continue
 			}
+			limit := oc.getOrCreateStoreLimit(storeID, v)
+			if limit == nil {
+				continue
+			}
+			if !limit.Available(stepCost) {
+				return true
+			}
+		}
 
-			if snapCost > 0 && snapLimit != nil {
-				if !snapLimit.Available(snapCost) {
-					return true
-				}
+		for _, v := range storelimit.SnapTypeNameValue {
+			snapCost := opInfluence.GetStoreInfluence(storeID).GetSnapCost(v)
+			if snapCost == 0 {
+				continue
+			}
+			limit := oc.getOrCreateSnapLimit(storeID, v)
+			if limit == nil {
+				continue
+			}
+			if !limit.Available(snapCost) {
+				return true
 			}
 		}
 	}
@@ -972,12 +984,12 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) (*storelimit.StoreLimit, *storelimit.SlidingWindows) {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
-		return nil, nil
+		return nil
 	}
 	if s.GetStoreLimit(limitType) == nil {
 		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
@@ -985,5 +997,17 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
 		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
-	return s.GetStoreLimit(limitType), s.GetSnapLimit(limitType)
+	return s.GetStoreLimit(limitType)
+}
+
+func (oc *OperatorController) getOrCreateSnapLimit(storeID uint64, snapType storelimit.SnapType) *storelimit.SlidingWindows {
+	s := oc.cluster.GetStore(storeID)
+	if s == nil {
+		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
+		return nil
+	}
+	if s.GetSnapLimit(snapType) == nil {
+		oc.cluster.GetBasicCluster().ResetSnapLimit(storeID, snapType)
+	}
+	return s.GetSnapLimit(snapType)
 }

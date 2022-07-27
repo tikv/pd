@@ -371,8 +371,8 @@ func (f *StoreStateFilter) isBusy(opt *config.PersistOptions, store *core.StoreI
 }
 
 func (f *StoreStateFilter) exceedRecvSnapLimit(_ *config.PersistOptions, store *core.StoreInfo) plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailableSnap(storelimit.AddPeer) {
-		f.Reason = "exceed-recv-snap-limit"
+	if !f.AllowTemporaryStates && !store.IsAvailableSnap(storelimit.RecvSnapShot) {
+		f.Reason = "exceed-recv-snapshot-limit"
 		return statusStoreSnapRemoveLimit
 	}
 	f.Reason = ""

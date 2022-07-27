@@ -58,7 +58,7 @@ type StoreInfo struct {
 	leaderWeight        float64
 	regionWeight        float64
 	limiter             map[storelimit.Type]*storelimit.StoreLimit
-	snapLimiter         map[storelimit.Type]*storelimit.SlidingWindows
+	snapLimiter         map[storelimit.SnapType]*storelimit.SlidingWindows
 	minResolvedTS       uint64
 }
 
@@ -70,7 +70,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		leaderWeight:  1.0,
 		regionWeight:  1.0,
 		limiter:       make(map[storelimit.Type]*storelimit.StoreLimit),
-		snapLimiter:   make(map[storelimit.Type]*storelimit.SlidingWindows),
+		snapLimiter:   make(map[storelimit.SnapType]*storelimit.SlidingWindows),
 		minResolvedTS: 0,
 	}
 	for _, opt := range opts {
@@ -159,14 +159,12 @@ func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	return true
 }
 
-// IsAvailableSnap returns ture if the store snapshot available size is
-// over than the given token.
-func (s *StoreInfo) IsAvailableSnap(snapType storelimit.Type) bool {
+// IsAvailableSnap returns ture if the store have available size.
+func (s *StoreInfo) IsAvailableSnap(snapType storelimit.SnapType) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	notNil := s.snapLimiter != nil && s.snapLimiter[snapType] != nil
 
-	if notNil {
+	if s.snapLimiter != nil && s.snapLimiter[snapType] != nil {
 		isAvailable := s.snapLimiter[snapType].Available(0)
 		return isAvailable
 	}
@@ -319,8 +317,8 @@ func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLi
 	return s.limiter[limitType]
 }
 
-// GetSnapLimit returns the snapshot limit of the given storelimit.Type.
-func (s *StoreInfo) GetSnapLimit(snapType storelimit.Type) *storelimit.SlidingWindows {
+// GetSnapLimit returns the snapshot limit of the given store.
+func (s *StoreInfo) GetSnapLimit(snapType storelimit.SnapType) *storelimit.SlidingWindows {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.snapLimiter[snapType]
@@ -686,14 +684,21 @@ func (s *StoresInfo) SlowStoreRecovered(storeID uint64) {
 }
 
 // defaultSnapSize is the default snapshot size of the
-const defaultSnapSize = 100 * 10
+const defaultSnapSize = int64(100 * 10)
 
 // ResetStoreLimit resets the limit for a specific store.
 func (s *StoresInfo) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
 	if store, ok := s.stores[storeID]; ok {
 		s.stores[storeID] = store.Clone(
-			ResetStoreLimit(limitType, ratePerSec...),
-			ResetSnapLimit(limitType, defaultSnapSize))
+			ResetStoreLimit(limitType, ratePerSec...))
+	}
+}
+
+// ResetSnapLimit resets the snapshot limit for the given store.
+func (s *StoresInfo) ResetSnapLimit(storeID uint64, snapType storelimit.SnapType, cap ...int64) {
+	if store, ok := s.stores[storeID]; ok {
+		s.stores[storeID] = store.Clone(
+			ResetSnapLimit(snapType, cap...))
 	}
 }
 

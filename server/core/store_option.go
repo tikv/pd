@@ -236,18 +236,18 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	}
 }
 
-func ResetSnapLimit(snapType storelimit.Type, capacity int64) StoreCreateOption {
+func ResetSnapLimit(snapType storelimit.SnapType, capacity ...int64) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		if capacity == 0 {
-			store.snapLimiter[snapType] = nil
-			return
+		cap := defaultSnapSize
+		if len(capacity) > 0 {
+			cap = capacity[0]
 		}
 		if limiter := store.snapLimiter[snapType]; limiter != nil {
-			limiter.Adjust(capacity)
+			limiter.Adjust(cap)
 		} else {
-			store.snapLimiter[snapType] = storelimit.NewSlidingWindows(capacity)
+			store.snapLimiter[snapType] = storelimit.NewSlidingWindows(cap)
 		}
 	}
 }

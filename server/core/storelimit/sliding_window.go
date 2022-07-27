@@ -20,6 +20,31 @@ import (
 
 const snapSize = 10
 
+type SnapType int
+
+const (
+	// RecvSnapShot indicates the type of store limit that limits the adding peer rate
+	RecvSnapShot SnapType = iota
+	// SendSnapShot indicates the type of store limit that limits the leader peer rate
+	SendSnapShot
+)
+
+// SnapTypeNameValue indicates the name of store limit type and the enum value
+var SnapTypeNameValue = map[string]SnapType{
+	"recv-snapshot": RecvSnapShot,
+	"send-snapshot": SendSnapShot,
+}
+
+// String returns the representation of the Type
+func (t SnapType) String() string {
+	for n, v := range SnapTypeNameValue {
+		if v == t {
+			return n
+		}
+	}
+	return ""
+}
+
 // SlidingWindows limits the operators of a store
 type SlidingWindows struct {
 	mu       syncutil.Mutex

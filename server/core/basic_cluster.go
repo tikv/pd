@@ -185,6 +185,13 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 	bc.Stores.ResetStoreLimit(storeID, limitType, ratePerSec...)
 }
 
+// ResetSnapLimit resets the snapshot limit for the given store.
+func (bc *BasicCluster) ResetSnapLimit(storeID uint64, limitType storelimit.SnapType, cap ...int64) {
+	bc.Lock()
+	defer bc.Unlock()
+	bc.Stores.ResetSnapLimit(storeID, limitType, cap...)
+}
+
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	bc.Lock()
