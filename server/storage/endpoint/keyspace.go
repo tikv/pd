@@ -35,6 +35,7 @@ const (
 	spaceIDStrLen = 8
 )
 
+// KeyspaceStorage defines storage operations on keyspace related data.
 type KeyspaceStorage interface {
 	// SaveKeyspace saves the given keyspace to the storage.
 	SaveKeyspace(*keyspacepb.KeyspaceMeta) error
