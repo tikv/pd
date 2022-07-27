@@ -44,6 +44,100 @@ type testBalanceSpeedCase struct {
 	kind           core.SchedulePolicy
 }
 
+func TestShouldBalance(t *testing.T) {
+	// store size = 100GiB
+	// region size = 96MiB
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const R = 96
+	testCases := []testBalanceSpeedCase{
+		// target size is zero
+		{2, 0, R / 10, true, core.BySize},
+		{2, 0, R, false, core.BySize},
+		// all in high space stage
+		{10, 5, R / 10, true, core.BySize},
+		{10, 5, 2 * R, false, core.BySize},
+		{10, 10, R / 10, false, core.BySize},
+		{10, 10, 2 * R, false, core.BySize},
+		// all in transition stage
+		{700, 680, R / 10, true, core.BySize},
+		{700, 680, 5 * R, false, core.BySize},
+		{700, 700, R / 10, false, core.BySize},
+		// all in low space stage
+		{900, 890, R / 10, true, core.BySize},
+		{900, 890, 5 * R, false, core.BySize},
+		{900, 900, R / 10, false, core.BySize},
+		// one in high space stage, other in transition stage
+		{650, 550, R, true, core.BySize},
+		{650, 500, 50 * R, false, core.BySize},
+		// one in transition space stage, other in low space stage
+		{800, 700, R, true, core.BySize},
+		{800, 700, 50 * R, false, core.BySize},
+
+		// default leader tolerant ratio is 5, when schedule by count
+		// target size is zero
+		{2, 0, R / 10, false, core.ByCount},
+		{2, 0, R, false, core.ByCount},
+		// all in high space stage
+		{10, 5, R / 10, true, core.ByCount},
+		{10, 5, 2 * R, true, core.ByCount},
+		{10, 6, 2 * R, false, core.ByCount},
+		{10, 10, R / 10, false, core.ByCount},
+		{10, 10, 2 * R, false, core.ByCount},
+		// all in transition stage
+		{70, 50, R / 10, true, core.ByCount},
+		{70, 50, 5 * R, true, core.ByCount},
+		{70, 70, R / 10, false, core.ByCount},
+		// all in low space stage
+		{90, 80, R / 10, true, core.ByCount},
+		{90, 80, 5 * R, true, core.ByCount},
+		{90, 90, R / 10, false, core.ByCount},
+		// one in high space stage, other in transition stage
+		{65, 55, R / 2, true, core.ByCount},
+		{65, 50, 5 * R, true, core.ByCount},
+		// one in transition space stage, other in low space stage
+		{80, 70, R / 2, true, core.ByCount},
+		{80, 70, 5 * R, true, core.ByCount},
+	}
+
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetTolerantSizeRatio(2.5)
+	tc.SetRegionScoreFormulaVersion("v1")
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	// create a region to control average region size.
+	tc.AddLeaderRegion(1, 1, 2)
+
+	for _, testCase := range testCases {
+		tc.AddLeaderStore(1, int(testCase.sourceCount))
+		tc.AddLeaderStore(2, int(testCase.targetCount))
+		region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
+		tc.PutRegion(region)
+		tc.SetLeaderSchedulePolicy(testCase.kind.String())
+		kind := core.NewScheduleKind(core.LeaderKind, testCase.kind)
+		basePlan := NewBalanceSchedulerBasePlan()
+		plan := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
+		plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+		re.Equal(testCase.expectedResult, plan.shouldBalance(""))
+	}
+
+	for _, testCase := range testCases {
+		if testCase.kind.String() == core.BySize.String() {
+			tc.AddRegionStore(1, int(testCase.sourceCount))
+			tc.AddRegionStore(2, int(testCase.targetCount))
+			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
+			tc.PutRegion(region)
+			kind := core.NewScheduleKind(core.RegionKind, testCase.kind)
+			basePlan := NewBalanceSchedulerBasePlan()
+			plan := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
+			plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+			re.Equal(testCase.expectedResult, plan.shouldBalance(""))
+		}
+	}
+}
+
 func TestTolerantRatio(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
