@@ -139,7 +139,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerBasePlan()
-	collector := plan.NewPlanCollector(dryRun, basePlan)
+	collector := plan.NewCollector(dryRun, basePlan)
 
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
@@ -197,7 +197,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-
 			// Skip hot regions.
 			if cluster.IsRegionHot(solver.region) {
 				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
@@ -216,6 +215,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
+			basePlan.step--
 		}
 		s.retryQuota.Attenuate(solver.source)
 	}
@@ -224,7 +224,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.PlanCollector) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector) *operator.Operator {
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, solver.region.GetStoreIDs()),
 		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
@@ -249,18 +249,20 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Pl
 		if !solver.shouldBalance(s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed)))
-			solver.step--
 			continue
 		}
 
 		oldPeer := solver.region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: solver.target.GetID(), Role: oldPeer.Role}
+		solver.step++
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoOperator, err.Error())))
 			return nil
 		}
+		collector.Collect()
+		solver.step--
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,

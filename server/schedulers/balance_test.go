@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
 )
@@ -720,14 +721,17 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	op = ops[0]
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
 
-	//
 	opt.SetMaxReplicas(3)
-	ops, _ = sb.Schedule(tc, false)
+	ops, plans := sb.Schedule(tc, true)
+	re.Len(plans, 100)
 	re.Empty(ops)
+	re.Equal(plans[0].GetStatus().StatusCode, plan.StatusRegionNotReplicated)
 
 	opt.SetMaxReplicas(1)
-	ops, _ = sb.Schedule(tc, false)
+	ops, plans = sb.Schedule(tc, true)
 	re.NotEmpty(ops)
+	re.Len(plans, 3)
+	re.True(plans[0].GetStatus().IsOK())
 }
 
 func TestBalanceRegionReplicas3(t *testing.T) {

@@ -41,7 +41,7 @@ func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, filters ...Fi
 }
 
 // FilterSourceWithCollector keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSourceWithCollector(opt *config.PersistOptions, collector *plan.PlanCollector, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterSourceWithCollector(opt *config.PersistOptions, collector *plan.Collector, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectSourceStoresWithCollector(c.Stores, filters, opt, collector)
 	return c
 }
@@ -53,7 +53,7 @@ func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, filters ...Fi
 }
 
 // FilterTargetWithCollector keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTargetWithCollector(opt *config.PersistOptions, collector *plan.PlanCollector, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterTargetWithCollector(opt *config.PersistOptions, collector *plan.Collector, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStoresWithCollector(c.Stores, filters, opt, collector)
 	return c
 }

@@ -49,13 +49,14 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 }
 
 // SelectOneRegionWithCollector selects one region that be selected from the list.
-func SelectOneRegionWithCollector(regions []*core.RegionInfo, collector *plan.PlanCollector, filters ...RegionFilter) *core.RegionInfo {
+func SelectOneRegionWithCollector(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
 		if slice.AllOf(filters,
 			func(i int) bool {
 				status := filters[i].Select(r)
 				if !status.IsOK() {
-					collector.Collect(plan.SetRegion(r), plan.SetStatus(status))
+					collector.Collect(plan.GenerateCoreResource(r.GetID()), plan.SetStatus(status))
+					return false
 				}
 				return true
 			}) {
@@ -69,6 +70,7 @@ func SelectOneRegionWithCollector(regions []*core.RegionInfo, collector *plan.Pl
 type RegionFilter interface {
 	// Return true if the region can be used to schedule.
 	Select(region *core.RegionInfo) plan.Status
+	Name() string
 }
 
 type regionPengdingFilter struct {
@@ -77,6 +79,10 @@ type regionPengdingFilter struct {
 // NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
 func NewRegionPengdingFilter() RegionFilter {
 	return &regionPengdingFilter{}
+}
+
+func (f *regionPengdingFilter) Name() string {
+	return "regionPending"
 }
 
 func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
@@ -94,6 +100,10 @@ func NewRegionDownFilter() RegionFilter {
 	return &regionDownFilter{}
 }
 
+func (f *regionDownFilter) Name() string {
+	return "regionDown"
+}
+
 func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
@@ -108,6 +118,10 @@ type regionReplicatedFilter struct {
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
 func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionReplicatedFilter{cluster: cluster}
+}
+
+func (f *regionReplicatedFilter) Name() string {
+	return "regionReplicated"
 }
 
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
@@ -130,6 +144,10 @@ type regionEmptyFilter struct {
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
 func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
+}
+
+func (f *regionEmptyFilter) Name() string {
+	return "regionEmptyFilter"
 }
 
 func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {

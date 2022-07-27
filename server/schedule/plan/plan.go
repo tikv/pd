@@ -14,34 +14,34 @@
 
 package plan
 
-import (
-	"github.com/tikv/pd/server/core"
-)
-
 // Plan is the basic unit for both scheduling and diagnosis.
 // TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
 type Plan interface {
-	GetSourceStore() *core.StoreInfo
-	GetRegion() *core.RegionInfo
-	GetTargetStore() *core.StoreInfo
-	SetSourceStore(store *core.StoreInfo)
-	SetRegion(region *core.RegionInfo)
-	SetTargetStore(store *core.StoreInfo)
-	SetStatus(status Status)
+	// generate plan for clone option
+	GenerateCoreResource(uint64)
+	GetStep() int
+	GetCoreResource(step int) *CoreResource
+	GetMaxSelectStep() int
+	SetStatus(Status)
 	GetStatus() Status
-	Step() int
-	Clone(...PlanOption) Plan
+
+	Clone(ops ...Option) Plan
+
+	// temp function
+	Desc() string
 }
 
-type PlanCollector struct {
+// Collector is a plan collector
+type Collector struct {
 	basePlan           Plan
 	unschedulablePlans []Plan
 	schedulablePlans   []Plan
 	enable             bool
 }
 
-func NewPlanCollector(enable bool, plan Plan) *PlanCollector {
-	return &PlanCollector{
+// NewCollector returns a new Collector
+func NewCollector(enable bool, plan Plan) *Collector {
+	return &Collector{
 		basePlan:           plan,
 		unschedulablePlans: make([]Plan, 0),
 		schedulablePlans:   make([]Plan, 0),
@@ -49,7 +49,8 @@ func NewPlanCollector(enable bool, plan Plan) *PlanCollector {
 	}
 }
 
-func (c *PlanCollector) Collect(opts ...PlanOption) {
+// Collect is used to collect a new Plan and save it into PlanCollector
+func (c *Collector) Collect(opts ...Option) {
 	if c.enable {
 		plan := c.basePlan.Clone(opts...)
 		if plan.GetStatus().IsOK() {
@@ -60,32 +61,24 @@ func (c *PlanCollector) Collect(opts ...PlanOption) {
 	}
 }
 
-func (c *PlanCollector) GetPlans() []Plan {
+// GetPlans returns all plans and the first part plans are schedulable
+func (c *Collector) GetPlans() []Plan {
 	return append(c.schedulablePlans, c.unschedulablePlans...)
 }
 
-type PlanOption func(plan Plan)
+// Option is to do some action for plan
+type Option func(plan Plan)
 
-func SetStatus(status Status) PlanOption {
+// SetStatus is used to set status for plan
+func SetStatus(status Status) Option {
 	return func(plan Plan) {
 		plan.SetStatus(status)
 	}
 }
 
-func SetSourceStore(store *core.StoreInfo) PlanOption {
+// GenerateCoreResource is used to generate Resource for plan
+func GenerateCoreResource(id uint64) Option {
 	return func(plan Plan) {
-		plan.SetSourceStore(store)
-	}
-}
-
-func SetRegion(region *core.RegionInfo) PlanOption {
-	return func(plan Plan) {
-		plan.SetRegion(region)
-	}
-}
-
-func SetTargetStore(store *core.StoreInfo) PlanOption {
-	return func(plan Plan) {
-		plan.SetTargetStore(store)
+		plan.GenerateCoreResource(id)
 	}
 }

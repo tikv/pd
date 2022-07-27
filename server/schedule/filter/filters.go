@@ -47,7 +47,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectSourceStoresWithCollector selects stores that be selected as source store from the list.
-func SelectSourceStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.PlanCollector) []*core.StoreInfo {
+func SelectSourceStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
@@ -56,7 +56,7 @@ func SelectSourceStoresWithCollector(stores []*core.StoreInfo, filters []Filter,
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetSourceStore(s), plan.SetStatus(status))
+				collector.Collect(plan.GenerateCoreResource(s.GetID()), plan.SetStatus(status))
 				return false
 			}
 			return true
@@ -86,7 +86,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectTargetStoresWithCollector selects stores that be selected as target store from the list.
-func SelectTargetStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.PlanCollector) []*core.StoreInfo {
+func SelectTargetStoresWithCollector(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
@@ -100,7 +100,7 @@ func SelectTargetStoresWithCollector(stores []*core.StoreInfo, filters []Filter,
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetTargetStore(s), plan.SetStatus(status))
+				collector.Collect(plan.GenerateCoreResource(s.GetID()), plan.SetStatus(status))
 				return false
 			}
 			return true
