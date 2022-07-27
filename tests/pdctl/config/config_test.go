@@ -572,8 +572,11 @@ func (s *configTestSuite) TestReplicationMode(c *C) {
 		ReplicationMode: "majority",
 		DRAutoSync: config.DRAutoSyncReplicationConfig{
 			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
+<<<<<<< HEAD
 			WaitSyncTimeout:  typeutil.NewDuration(time.Minute),
 			WaitAsyncTimeout: typeutil.NewDuration(2 * time.Minute),
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 		},
 	}
 	check := func() {

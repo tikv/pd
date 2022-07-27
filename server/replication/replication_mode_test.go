@@ -65,7 +65,10 @@ func (s *testReplicationMode) TestInitial(c *C) {
 		PrimaryReplicas:  2,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	rep, err = NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	c.Assert(err, IsNil)
@@ -83,8 +86,12 @@ func (s *testReplicationMode) TestInitial(c *C) {
 func (s *testReplicationMode) TestStatus(c *C) {
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+<<<<<<< HEAD
 		LabelKey:        "dr-label",
 		WaitSyncTimeout: typeutil.Duration{Duration: time.Minute},
+=======
+		LabelKey: "dr-label",
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
@@ -181,7 +188,10 @@ func (s *testReplicationMode) TestStateSwitch(c *C) {
 		PrimaryReplicas:  4,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
@@ -365,7 +375,10 @@ func (s *testReplicationMode) TestReplicateState(c *C) {
 		PrimaryReplicas:  2,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
@@ -405,8 +418,11 @@ func (s *testReplicationMode) TestAsynctimeout(c *C) {
 		PrimaryReplicas:  2,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
 		WaitAsyncTimeout: typeutil.Duration{Duration: 2 * time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	var replicator mockFileReplicator
@@ -459,7 +475,10 @@ func (s *testReplicationMode) TestRecoverProgress(c *C) {
 		PrimaryReplicas:  2,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
@@ -519,7 +538,10 @@ func (s *testReplicationMode) TestRecoverProgressWithSplitAndMerge(c *C) {
 		PrimaryReplicas:  2,
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+<<<<<<< HEAD
 		WaitSyncTimeout:  typeutil.Duration{Duration: time.Minute},
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	}}
 	cluster := mockcluster.NewCluster(s.ctx, config.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})

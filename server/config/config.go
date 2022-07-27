@@ -246,8 +246,11 @@ const (
 	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
+<<<<<<< HEAD
 	defaultDRWaitSyncTimeout  = time.Minute
 	defaultDRWaitAsyncTimeout = 2 * time.Minute
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -1395,8 +1398,11 @@ type DRAutoSyncReplicationConfig struct {
 	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
 	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
 	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+<<<<<<< HEAD
 	WaitSyncTimeout  typeutil.Duration `toml:"wait-sync-timeout" json:"wait-sync-timeout"`
 	WaitAsyncTimeout typeutil.Duration `toml:"wait-async-timeout" json:"wait-async-timeout"`
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
@@ -1404,12 +1410,15 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
+<<<<<<< HEAD
 	if !meta.IsDefined("wait-sync-timeout") {
 		c.WaitSyncTimeout = typeutil.NewDuration(defaultDRWaitSyncTimeout)
 	}
 	if !meta.IsDefined("wait-async-timeout") {
 		c.WaitAsyncTimeout = typeutil.NewDuration(defaultDRWaitAsyncTimeout)
 	}
+=======
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 }
 
 // SecurityConfig indicates the security configuration for pd server

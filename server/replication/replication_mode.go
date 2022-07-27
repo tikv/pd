@@ -39,8 +39,9 @@ import (
 )
 
 const (
-	modeMajority   = "majority"
-	modeDRAutoSync = "dr-auto-sync"
+	modeMajority                 = "majority"
+	modeDRAutoSync               = "dr-auto-sync"
+	defaultDRTiKVSyncTimeoutHint = time.Minute
 )
 
 func modeToPB(m string) pb.ReplicationMode {
@@ -150,10 +151,18 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	case modeMajority:
 	case modeDRAutoSync:
 		p.DrAutoSync = &pb.DRAutoSync{
+<<<<<<< HEAD
 			LabelKey:            m.config.DRAutoSync.LabelKey,
 			State:               pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
 			StateId:             m.drAutoSync.StateID,
 			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.WaitSyncTimeout.Seconds()),
+=======
+			LabelKey: m.config.DRAutoSync.LabelKey,
+			State:    pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
+			StateId:  m.drAutoSync.StateID,
+			// TODO: make it works, ref https://github.com/tikv/tikv/issues/7945
+			WaitSyncTimeoutHint: int32(defaultDRTiKVSyncTimeoutHint.Seconds()),
+>>>>>>> f0d5a0373 (config: remove useless configuration for dr-auto-sync (#5359))
 			AvailableStores:     m.drAutoSync.AvailableStores,
 			PauseRegionSplit:    m.config.DRAutoSync.PauseRegionSplit && m.drAutoSync.State != drStateSync,
 		}
