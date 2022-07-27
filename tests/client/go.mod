@@ -94,7 +94,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/log v0.0.0-20211215031037-e024ba4eb0ee // indirect
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20220721122240-4b0e162a009b // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20220727050344-426fb40b0379 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
