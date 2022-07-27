@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
@@ -29,11 +30,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/versioninfo"
-)
-
-const (
-	KB = 1024
-	MB = 1024 * KB
 )
 
 type replicaCheckerTestSuite struct {
@@ -469,10 +465,10 @@ func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
-	tc.UpdateStoreRegionSize(1, 500*MB)
+	tc.UpdateStoreRegionSize(1, 500*units.MiB)
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(2, 0.1, 0.9)
-	tc.UpdateStoreRegionSize(2, 100*MB)
+	tc.UpdateStoreRegionSize(2, 100*units.MiB)
 	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
 	tc.AddLabelsStore(4, 31, map[string]string{"zone": "z3"})
 

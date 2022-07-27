@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -29,8 +30,8 @@ const (
 	// tick
 	defaultSimTickInterval = 100 * time.Millisecond
 	// store
-	defaultStoreCapacityGB    = 1024
-	defaultStoreAvailableGB   = 1024
+	defaultStoreCapacityGB    = units.GiB / units.MiB
+	defaultStoreAvailableGB   = units.GiB / units.MiB
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreVersion       = "2.1.0"
 	// server
