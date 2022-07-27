@@ -68,7 +68,8 @@ func TestInfluenceAmp(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
 	tc.PutRegion(region)
-	plan := newBalancePlan(kind, tc, influence)
+	basePlan := NewBalanceSchedulerBasePlan()
+	plan := newSolver(basePlan, kind, tc, influence)
 	plan.source, plan.target, plan.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 	re.True(plan.shouldBalance(""))
 
