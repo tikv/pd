@@ -733,10 +733,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 
-	// it is possible to use `regions` here to avoid the call, but in my benchmark
-	// only update part of the regions leads to a much longer balance period
-	storeRegions := c.GetStoreRegions(storeID)
-	c.hotStat.UpdateRegionScoreAsync(statistics.NewUpdateRegionScoreTask(storeID, stats.CpuTotal/stats.CpuQuota, storeRegions))
+	cpuPercent := stats.CpuTotal/stats.CpuQuota
+	if c.hotStat.ShouldUpdateForStore(storeID, cpuPercent) {
+		// it is possible to use `regions` here to avoid the call, but in my benchmark
+		// only update part of the regions leads to a much longer balance period
+		storeRegions := c.GetStoreRegions(storeID)
+		c.hotStat.UpdateRegionScoreAsync(statistics.NewUpdateRegionScoreTask(storeID, cpuPercent, storeRegions))
+	}
 	return nil
 }
 

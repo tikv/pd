@@ -16,30 +16,41 @@ package statistics
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 )
 
+// PeerScoreStats contains the score info of regions
 type PeerScoreStats struct {
 	ctx          context.Context
-	storeLoads   map[uint64]float64
+	mu struct {
+		sync.Mutex
+		// store_id --> CPU percentage
+		storeCPUs   map[uint64]float64
+	}
 	regionScores map[uint64]*RegionScore
 	taskQueue    chan *RegionScoreTask
 }
 
+// NewPeerScoreStats build an empty PeerScoreStats
 func NewPeerScoreStats(ctx context.Context) *PeerScoreStats {
 	s := &PeerScoreStats{
 		ctx:          ctx,
-		storeLoads:   make(map[uint64]float64),
+		mu: struct {
+			sync.Mutex
+			storeCPUs map[uint64]float64
+		}{storeCPUs: make(map[uint64]float64)},
 		regionScores: make(map[uint64]*RegionScore),
 		taskQueue:    make(chan *RegionScoreTask, 1024),
 	}
-	go s.HandleTasks(s.taskQueue)
+	go s.handleTasks(s.taskQueue)
 	return s
 }
 
+// UpdateRegionScoreAsync add an update region score task to task chan.
 func (w *PeerScoreStats) UpdateRegionScoreAsync(task *RegionScoreTask) {
 	select {
 	case w.taskQueue <- task:
@@ -47,6 +58,7 @@ func (w *PeerScoreStats) UpdateRegionScoreAsync(task *RegionScoreTask) {
 	}
 }
 
+// GetRegionScore return the region score of target regions
 func (w *PeerScoreStats) GetRegionScore(regionIds []uint64) []*RegionScore {
 	respChan := make(chan GetRegionScoreResp, 1)
 	task := NewGetRegionScoreTask(regionIds, respChan)
@@ -60,7 +72,27 @@ func (w *PeerScoreStats) GetRegionScore(regionIds []uint64) []*RegionScore {
 	}
 }
 
-func (w *PeerScoreStats) HandleTasks(queue <-chan *RegionScoreTask) {
+// ShouldUpdateForStore check if region scores adjust can be skipped. This can avoid too much traverse
+// of the region tree in the common case when the storage CPU usage is not high.
+func (w *PeerScoreStats) ShouldUpdateForStore(storeId uint64, cpuPercent float64) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	lastCpu := w.mu.storeCPUs[storeId]
+	return lastCpu <= storeCPUPercentWaterMarkLow && cpuPercent <= storeCPUPercentWaterMarkLow
+}
+
+const (
+	// the low watermark of store CPU usage, should reset region score under this.
+	storeCPUPercentWaterMarkLow float64 = 0.5
+	// the high watermark of store CPU usage, should increase replica score
+	// if cpu percent exceed this threshold.
+	storeCPUPercentWaterMarkHigh float64 = 0.7
+	// the period of time that replica score is valid after updated.
+	replicaScoreExpireDuration time.Duration = 30 * time.Second
+)
+
+
+func (w *PeerScoreStats) handleTasks(queue <-chan *RegionScoreTask) {
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -87,7 +119,13 @@ func (w *PeerScoreStats) HandleTasks(queue <-chan *RegionScoreTask) {
 }
 
 func (w *PeerScoreStats) updateRegionScore(task updateRegionScoreTask) {
-	w.storeLoads[task.storeID] = task.storeLoad
+	storeCpus := make(map[uint64]float64)
+	w.mu.Lock()
+	w.mu.storeCPUs[task.storeID] = task.storeCpuPercent
+	for id, cpu := range w.mu.storeCPUs {
+		storeCpus[id] = cpu
+	}
+	w.mu.Unlock()
 	now := time.Now()
 	for _, r := range task.regions {
 		var peerID uint64
@@ -113,7 +151,7 @@ func (w *PeerScoreStats) updateRegionScore(task updateRegionScoreTask) {
 		}
 		regionScore.Epoch = r.GetMeta().RegionEpoch
 
-		leaderStoreLoad, ok := w.storeLoads[r.GetLeader().StoreId]
+		leaderStoreCPU, ok := storeCpus[r.GetLeader().StoreId]
 		if !ok {
 			continue
 		}
@@ -126,20 +164,20 @@ func (w *PeerScoreStats) updateRegionScore(task updateRegionScoreTask) {
 		}
 
 		newScore := peerScore.Score
-		if task.storeLoad <= 0.5 {
+		if task.storeCpuPercent <= storeCPUPercentWaterMarkLow {
 			newScore = 0
-		} else if task.storeLoad < 0.7 {
+		} else if task.storeCpuPercent < storeCPUPercentWaterMarkHigh {
 			// try to decrease the peer scores a bit in favor of closest read
-			delta := int((leaderStoreLoad - task.storeLoad) * 5)
+			delta := int((leaderStoreCPU - task.storeCpuPercent) * 5)
 			if delta < 1 {
 				delta = 1
 			}
 			newScore -= delta
-		} else if task.storeLoad <= leaderStoreLoad*0.9 {
-			delta := int((leaderStoreLoad - task.storeLoad) * 10)
+		} else if task.storeCpuPercent <= leaderStoreCPU*0.9 {
+			delta := int((leaderStoreCPU - task.storeCpuPercent) * 10)
 			newScore -= delta
-		} else if task.storeLoad >= leaderStoreLoad*1.1 {
-			delta := int((task.storeLoad - leaderStoreLoad) * 25)
+		} else if task.storeCpuPercent >= leaderStoreCPU*1.1 {
+			delta := int((task.storeCpuPercent - leaderStoreCPU) * 25)
 			newScore += delta
 		}
 		if newScore > 100 {
@@ -160,7 +198,7 @@ func (w *PeerScoreStats) batchGetRegionScores(task getRegionScoreTask) {
 	respRegions := make([]*RegionScore, 0, len(task.regionIDs))
 	for _, id := range task.regionIDs {
 		if regionScore, ok := w.regionScores[id]; ok {
-			respRegions = append(respRegions, regionScore.valid(now))
+			respRegions = append(respRegions, regionScore.filter(now))
 		}
 	}
 	task.respChan <- GetRegionScoreResp{regions: respRegions}
@@ -173,16 +211,15 @@ type RegionScore struct {
 	RegionId uint64
 }
 
-func (r *RegionScore) valid(ts time.Time) *RegionScore {
+// filter outdated replica scores.
+func (r *RegionScore) filter(ts time.Time) *RegionScore {
 	peers := make(map[uint64]*PeerScore, len(r.Peers))
-	peerScores := make([]int, 0, len(r.Peers))
 	for storeID, p := range r.Peers {
-		if ts.Sub(p.UpdatedAt) > time.Second*30 {
+		if ts.Sub(p.UpdatedAt) > replicaScoreExpireDuration {
 			continue
 		}
-		copyed := *p
-		peers[storeID] = &copyed
-		peerScores = append(peerScores, copyed.Score)
+		cloned := *p
+		peers[storeID] = &cloned
 	}
 	return &RegionScore{
 		Peers:    peers,
@@ -214,9 +251,9 @@ func NewUpdateRegionScoreTask(storeID uint64, storeLoad float64, regions []*core
 	return &RegionScoreTask{
 		taskType: updateTaskType,
 		data: updateRegionScoreTask{
-			storeID:   storeID,
-			storeLoad: storeLoad,
-			regions:   regions,
+			storeID:         storeID,
+			storeCpuPercent: storeLoad,
+			regions:         regions,
 		},
 	}
 }
@@ -232,9 +269,9 @@ func NewGetRegionScoreTask(regionIDs []uint64, respCh chan GetRegionScoreResp) *
 }
 
 type updateRegionScoreTask struct {
-	storeID   uint64
-	storeLoad float64
-	regions   []*core.RegionInfo
+	storeID         uint64
+	storeCpuPercent float64
+	regions         []*core.RegionInfo
 }
 
 type getRegionScoreTask struct {

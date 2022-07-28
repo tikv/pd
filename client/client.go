@@ -1476,6 +1476,7 @@ func (c *client) BatchGetRegionScore(ctx context.Context, regionIDs []uint64) ([
 		defer span.Finish()
 	}
 	start := time.Now()
+	defer func() { cmdDurationGetRegionScores.Observe(time.Since(start).Seconds()) }()
 	var cancel context.CancelFunc
 	getCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
