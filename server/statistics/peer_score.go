@@ -204,9 +204,12 @@ func (w *PeerScoreStats) batchGetRegionScores(task getRegionScoreTask) {
 	task.respChan <- GetRegionScoreResp{regions: respRegions}
 }
 
+// RegionScore contains the score for all peers of this region.
 type RegionScore struct {
-	// store_id --> peer score
+	// last updated region epoch
 	Epoch    *metapb.RegionEpoch
+	// store_id --> peer score
+	// NOTE: it may not contains all peers, missing peer mean the score is 0.
 	Peers    map[uint64]*PeerScore
 	RegionId uint64
 }
@@ -228,9 +231,12 @@ func (r *RegionScore) filter(ts time.Time) *RegionScore {
 	}
 }
 
+// PeerScore represent the score of a single region replica.
 type PeerScore struct {
 	PeerID    uint64
 	StoreID   uint64
+	// Score is a num between [0, 100], represent the percentage that a read request
+	// should be dispatch to region lead instead of the closest peer.
 	Score     int
 	UpdatedAt time.Time
 }
