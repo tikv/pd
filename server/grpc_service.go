@@ -717,6 +717,10 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
+		failpoint.Inject("grpcClientClosed", func() {
+			err = status.Error(codes.Canceled, "grpc client closed")
+			request = nil
+		})
 		if err == io.EOF {
 			return nil
 		}
@@ -724,6 +728,9 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			return errors.WithStack(err)
 		}
 		forwardedHost := getForwardedHost(stream.Context())
+		failpoint.Inject("grpcClientClosed", func() {
+			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
+		})
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1746,6 +1753,9 @@ func getForwardedHost(ctx context.Context) string {
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
+	failpoint.Inject("useForwardRequest", func() {
+		failpoint.Return(false)
+	})
 	if forwardedHost == "" {
 		return true
 	}
