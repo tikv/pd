@@ -1064,12 +1064,12 @@ func (s *GrpcServer) BatchGetRegionScore(ctx context.Context, request *pdpb.Batc
 		peers := make([]*pdpb.PeerScore, 0, len(r.Peers))
 		for _, p := range r.Peers {
 			peers = append(peers, &pdpb.PeerScore{
-				PeerId: p.PeerID,
+				PeerId:  p.PeerID,
 				StoreId: p.StoreID,
-				Score: int32(p.Score),
+				Score:   int32(p.Score),
 			})
 		}
-		resp.Regions = append(resp.Regions, &pdpb.RegionScore{Peers: peers})
+		resp.Regions = append(resp.Regions, &pdpb.RegionScore{RegionId: r.RegionId, RegionEpoch: r.Epoch, Peers: peers})
 	}
 	return resp, nil
 }

@@ -16,23 +16,25 @@ package statistics
 
 import (
 	"context"
-	"github.com/tikv/pd/server/core"
 	"time"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/server/core"
 )
 
 type PeerScoreStats struct {
-	ctx context.Context
-	storeLoads map[uint64]float64
+	ctx          context.Context
+	storeLoads   map[uint64]float64
 	regionScores map[uint64]*RegionScore
-	taskQueue chan *RegionScoreTask
+	taskQueue    chan *RegionScoreTask
 }
 
 func NewPeerScoreStats(ctx context.Context) *PeerScoreStats {
 	s := &PeerScoreStats{
-		ctx: ctx,
-		storeLoads: make(map[uint64]float64),
+		ctx:          ctx,
+		storeLoads:   make(map[uint64]float64),
 		regionScores: make(map[uint64]*RegionScore),
-		taskQueue: make(chan *RegionScoreTask, 1024),
+		taskQueue:    make(chan *RegionScoreTask, 1024),
 	}
 	go s.HandleTasks(s.taskQueue)
 	return s
@@ -86,32 +88,30 @@ func (w *PeerScoreStats) HandleTasks(queue <-chan *RegionScoreTask) {
 
 func (w *PeerScoreStats) updateRegionScore(task updateRegionScoreTask) {
 	w.storeLoads[task.storeID] = task.storeLoad
-
 	now := time.Now()
-	for regionID, r := range task.regions {
+	for _, r := range task.regions {
 		var peerID uint64
 		meta := r.GetMeta()
 		for _, p := range meta.Peers {
 			if p.StoreId == task.storeID {
-				peerID = p.StoreId
+				peerID = p.Id
 				break
 			}
 		}
 		if peerID == 0 {
 			continue
 		}
-		var leaderID uint64
-		leader := r.GetLeader()
-		if leader == nil {
+		if r.GetLeader() == nil {
 			continue
 		}
-		regionScore := w.regionScores[regionID]
+		regionScore := w.regionScores[r.GetID()]
 		if regionScore == nil {
 			regionScore = &RegionScore{
-				Peers: make(map[uint64]*PeerScore),
-				leaderID: leaderID,
+				Peers:    make(map[uint64]*PeerScore),
+				RegionId: r.GetID(),
 			}
 		}
+		regionScore.Epoch = r.GetMeta().RegionEpoch
 
 		leaderStoreLoad, ok := w.storeLoads[r.GetLeader().StoreId]
 		if !ok {
@@ -120,47 +120,38 @@ func (w *PeerScoreStats) updateRegionScore(task updateRegionScoreTask) {
 		peerScore := regionScore.Peers[task.storeID]
 		if peerScore == nil {
 			peerScore = &PeerScore{
-				PeerID: peerID,
+				PeerID:  peerID,
 				StoreID: task.storeID,
-				Score: 100,
 			}
 		}
 
 		newScore := peerScore.Score
 		if task.storeLoad <= 0.5 {
-			newScore = 100
+			newScore = 0
 		} else if task.storeLoad < 0.7 {
-			delta := int((leaderStoreLoad - task.storeLoad) * 5.0)
-			if delta > 10 {
-				delta = 10
-			}
+			// try to decrease the peer scores a bit in favor of closest read
+			delta := int((leaderStoreLoad - task.storeLoad) * 5)
 			if delta < 1 {
 				delta = 1
 			}
+			newScore -= delta
+		} else if task.storeLoad <= leaderStoreLoad*0.9 {
+			delta := int((leaderStoreLoad - task.storeLoad) * 10)
+			newScore -= delta
+		} else if task.storeLoad >= leaderStoreLoad*1.1 {
+			delta := int((task.storeLoad - leaderStoreLoad) * 25)
 			newScore += delta
-		} else if task.storeLoad <= leaderStoreLoad * 0.8 {
-			delta := int((leaderStoreLoad - task.storeLoad) * 5)
-			if delta > 10 {
-				delta = 10
-			}
-			newScore -= delta
-		} else if task.storeLoad >= leaderStoreLoad * 1.2 {
-			delta := int((task.storeLoad - leaderStoreLoad) * 5)
-			if delta > 10 {
-				delta = 10
-			}
-			newScore -= delta
-			//newScore -= math.Min(int((task.storeLoad - leaderStoreLoad) * 5), 10)
 		}
 		if newScore > 100 {
 			newScore = 100
 		} else if newScore < 0 {
 			newScore = 0
 		}
+
 		peerScore.Score = newScore
 		peerScore.UpdatedAt = now
 		regionScore.Peers[task.storeID] = peerScore
-		w.regionScores[regionID] = regionScore
+		w.regionScores[r.GetID()] = regionScore
 	}
 }
 
@@ -177,31 +168,35 @@ func (w *PeerScoreStats) batchGetRegionScores(task getRegionScoreTask) {
 
 type RegionScore struct {
 	// store_id --> peer score
-	Peers map[uint64]*PeerScore
-	leaderID uint64
+	Epoch    *metapb.RegionEpoch
+	Peers    map[uint64]*PeerScore
+	RegionId uint64
 }
 
 func (r *RegionScore) valid(ts time.Time) *RegionScore {
 	peers := make(map[uint64]*PeerScore, len(r.Peers))
+	peerScores := make([]int, 0, len(r.Peers))
 	for storeID, p := range r.Peers {
-		if ts.Sub(p.UpdatedAt) > time.Second * 10 {
+		if ts.Sub(p.UpdatedAt) > time.Second*30 {
 			continue
 		}
-		peers[storeID] = &*p
+		copyed := *p
+		peers[storeID] = &copyed
+		peerScores = append(peerScores, copyed.Score)
 	}
 	return &RegionScore{
-		Peers: peers,
-		leaderID: r.leaderID,
+		Peers:    peers,
+		Epoch:    r.Epoch,
+		RegionId: r.RegionId,
 	}
 }
 
 type PeerScore struct {
-	PeerID   uint64
-	StoreID  uint64
-	Score    int
+	PeerID    uint64
+	StoreID   uint64
+	Score     int
 	UpdatedAt time.Time
 }
-
 
 type regionScoreTaskKind uint32
 
@@ -215,39 +210,38 @@ type RegionScoreTask struct {
 	data     interface{}
 }
 
-func NewUpdateRegionScoreTask(storeID uint64, storeLoad float64, regions map[uint64]*core.RegionInfo) *RegionScoreTask {
-	return &RegionScoreTask {
+func NewUpdateRegionScoreTask(storeID uint64, storeLoad float64, regions []*core.RegionInfo) *RegionScoreTask {
+	return &RegionScoreTask{
 		taskType: updateTaskType,
 		data: updateRegionScoreTask{
-			storeID: storeID,
+			storeID:   storeID,
 			storeLoad: storeLoad,
-			regions: regions,
+			regions:   regions,
 		},
 	}
 }
 
 func NewGetRegionScoreTask(regionIDs []uint64, respCh chan GetRegionScoreResp) *RegionScoreTask {
-	return &RegionScoreTask {
+	return &RegionScoreTask{
 		taskType: getTaskType,
 		data: getRegionScoreTask{
 			regionIDs: regionIDs,
-			respChan: respCh,
+			respChan:  respCh,
 		},
 	}
 }
 
 type updateRegionScoreTask struct {
-	storeID uint64
+	storeID   uint64
 	storeLoad float64
-	regions map[uint64]*core.RegionInfo
+	regions   []*core.RegionInfo
 }
 
 type getRegionScoreTask struct {
 	regionIDs []uint64
-	respChan chan GetRegionScoreResp
+	respChan  chan GetRegionScoreResp
 }
 
 type GetRegionScoreResp struct {
 	regions []*RegionScore
 }
-
