@@ -15,6 +15,7 @@
 package cases
 
 import (
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -30,8 +31,8 @@ func newRegionSplit() *Case {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:        uint64(i),
 			Status:    metapb.StoreState_Up,
-			Capacity:  1 * TB,
-			Available: 900 * GB,
+			Capacity:  1 * units.TiB,
+			Available: 900 * units.GiB,
 			Version:   "2.1.0",
 		})
 	}
@@ -42,17 +43,17 @@ func newRegionSplit() *Case {
 		ID:     5,
 		Peers:  peers,
 		Leader: peers[0],
-		Size:   1 * MB,
+		Size:   1 * units.MiB,
 		Keys:   10000,
 	})
 
-	simCase.RegionSplitSize = 128 * MB
+	simCase.RegionSplitSize = 128 * units.MiB
 	simCase.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
 	e.Step = func(tick int64) map[string]int64 {
 		return map[string]int64{
-			"foobar": 8 * MB,
+			"foobar": 8 * units.MiB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}

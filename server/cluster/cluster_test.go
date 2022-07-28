@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
@@ -137,7 +138,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	// After hot heartbeat, we can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
@@ -150,14 +151,14 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 0)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
@@ -382,7 +383,7 @@ func TestReuseAddress(t *testing.T) {
 		}
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsRemoved() {
-			// try to start a new store with the same address with store which is physically destryed or tombstone should be success
+			// try to start a new store with the same address with store which is physically destroyed or tombstone should be success
 			re.NoError(cluster.PutStore(newStore))
 		} else {
 			re.Error(cluster.PutStore(newStore))
@@ -614,7 +615,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	stats = cluster.hotStat.RegionStats(statistics.Write, 0)
 	re.Len(stats[1], 1)
-	re.Len(stats[2], 0)
+	re.Empty(stats[2])
 	re.Len(stats[3], 1)
 	re.Len(stats[4], 1)
 }
@@ -675,7 +676,7 @@ func TestBucketHeartbeat(t *testing.T) {
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	re.NoError(cluster.processRegionHeartbeat(newRegion2))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.Len(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), 0)
+	re.Empty(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys())
 }
 
 func TestRegionHeartbeat(t *testing.T) {
@@ -1365,7 +1366,78 @@ func TestTopologyWeight(t *testing.T) {
 		}
 	}
 
-	re.Equal(1.0/3/3/4, getStoreTopoWeight(testStore, stores, labels))
+	re.Equal(1.0/3/3/4, getStoreTopoWeight(testStore, stores, labels, 3))
+}
+
+func TestTopologyWeight1(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6}
+
+	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
+	re.Equal(1.0/3/4, getStoreTopoWeight(store1, stores, labels, 3))
+	re.Equal(1.0/3/4, getStoreTopoWeight(store6, stores, labels, 3))
+}
+
+func TestTopologyWeight2(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5}
+
+	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
+	re.Equal(1.0/3/3, getStoreTopoWeight(store1, stores, labels, 3))
+}
+
+func TestTopologyWeight3(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
+	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
+
+	store7 := core.NewStoreInfoWithLabel(7, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
+	store8 := core.NewStoreInfoWithLabel(8, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
+	store9 := core.NewStoreInfoWithLabel(9, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
+	store10 := core.NewStoreInfoWithLabel(10, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6, store7, store8, store9, store10}
+
+	re.Equal(1.0/5/2, getStoreTopoWeight(store7, stores, labels, 5))
+	re.Equal(1.0/5/4, getStoreTopoWeight(store8, stores, labels, 5))
+	re.Equal(1.0/5/4, getStoreTopoWeight(store9, stores, labels, 5))
+	re.Equal(1.0/5/2, getStoreTopoWeight(store10, stores, labels, 5))
+}
+
+func TestTopologyWeight4(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+
+	stores := []*core.StoreInfo{store1, store2, store3, store4}
+
+	re.Equal(1.0/3/2, getStoreTopoWeight(store1, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store3, stores, labels, 3))
+	re.Equal(1.0/3, getStoreTopoWeight(store4, stores, labels, 3))
 }
 
 func TestCalculateStoreSize1(t *testing.T) {
@@ -1610,11 +1682,13 @@ func Test(t *testing.T) {
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 	}
 
+	pendingFilter := filter.NewRegionPengdingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for i := uint64(0); i < n; i++ {
-		region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
-		region = tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 		re.NotEqual(i, region.GetLeader().GetStoreId())
 
 		re.NotNil(region.GetStorePeer(i))
@@ -1630,14 +1704,14 @@ func Test(t *testing.T) {
 	// All regions will be filtered out if they have pending peers.
 	for i := uint64(0); i < n; i++ {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
-			region := tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy)
+			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			cache.SetRegion(newRegion)
 		}
-		re.Nil(tc.RandLeaderRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
+		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 	for i := uint64(0); i < n; i++ {
-		re.Nil(tc.RandFollowerRegion(i, []core.KeyRange{core.NewKeyRange("", "")}, schedule.IsRegionHealthy))
+		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), pendingFilter, downFilter))
 	}
 }
 
