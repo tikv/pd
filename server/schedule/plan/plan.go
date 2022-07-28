@@ -61,6 +61,17 @@ func (c *Collector) Collect(opts ...Option) {
 	}
 }
 
+// Append is used to collector a full plan
+func (c *Collector) Append(plan Plan) {
+	if c.enable {
+		if plan.GetStatus().IsOK() {
+			c.schedulablePlans = append(c.schedulablePlans, plan)
+		} else {
+			c.unschedulablePlans = append(c.unschedulablePlans, plan)
+		}
+	}
+}
+
 // GetPlans returns all plans and the first part plans are schedulable
 func (c *Collector) GetPlans() []Plan {
 	return append(c.schedulablePlans, c.unschedulablePlans...)

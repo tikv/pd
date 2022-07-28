@@ -151,6 +151,24 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	return true
 }
 
+// SourceWithCollector checks if store can pass all Filters as source store.
+func SourceWithCollector(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter, collector *plan.Collector) bool {
+	storeAddress := store.GetAddress()
+	storeID := strconv.FormatUint(store.GetID(), 10)
+	for _, filter := range filters {
+		status := filter.Source(opt, store)
+		if !status.IsOK() {
+			sourceID := storeID
+			targetID := ""
+			filterCounter.WithLabelValues("filter-source", storeAddress,
+				sourceID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
+			collector.Collect(plan.GenerateCoreResource(store.GetID()), plan.SetStatus(status))
+			return false
+		}
+	}
+	return true
+}
+
 // Target checks if store can pass all Filters as target store.
 func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeAddress := store.GetAddress()
@@ -165,6 +183,28 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 			}
 			filterCounter.WithLabelValues("filter-target", storeAddress,
 				targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
+			return false
+		}
+	}
+	return true
+}
+
+// TargetWithCollector checks if store can pass all Filters as target store.
+func TargetWithCollector(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter, collector *plan.Collector) bool {
+	storeAddress := store.GetAddress()
+	storeID := strconv.FormatUint(store.GetID(), 10)
+	for _, filter := range filters {
+		status := filter.Target(opt, store)
+		if !status.IsOK() {
+			cfilter, ok := filter.(comparingFilter)
+			targetID := storeID
+			sourceID := ""
+			if ok {
+				sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+			}
+			filterCounter.WithLabelValues("filter-target", storeAddress,
+				targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
+			collector.Collect(plan.GenerateCoreResource(store.GetID()), plan.SetStatus(status))
 			return false
 		}
 	}

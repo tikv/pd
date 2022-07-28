@@ -155,26 +155,26 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 
 func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster), nil
+	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster, dryRun)
 }
 
-func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	h.Lock()
 	defer h.Unlock()
 
 	h.prepareForBalance(typ, cluster)
 	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {
-		return nil
+		return nil, nil
 	}
 
 	switch typ {
 	case statistics.Read:
-		return h.balanceHotReadRegions(cluster)
+		return h.balanceHotReadRegions(cluster, dryRun)
 	case statistics.Write:
-		return h.balanceHotWriteRegions(cluster)
+		return h.balanceHotWriteRegions(cluster, dryRun)
 	}
-	return nil
+	return nil, nil
 }
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
@@ -264,70 +264,89 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
-	leaderOps := leaderSolver.solve()
+	leaderOps := leaderSolver.solve(dryRun)
 	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
-	peerOps := peerSolver.solve()
+	peerOps := peerSolver.solve(dryRun)
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
-		return nil
+		return nil, append(leaderSolver.collector.GetPlans(), peerSolver.collector.GetPlans()...)
 	}
 	if len(leaderOps) == 0 {
 		if peerSolver.tryAddPendingInfluence() {
-			return peerOps
+			peerSolver.collector.Append(peerSolver.best)
+			return peerOps, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 		}
+		peerSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
-		return nil
+		return nil, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 	}
 	if len(peerOps) == 0 {
 		if leaderSolver.tryAddPendingInfluence() {
-			return leaderOps
+			leaderSolver.collector.Append(peerSolver.best)
+			return leaderOps, append(leaderSolver.collector.GetPlans(), peerSolver.collector.GetPlans()...)
 		}
+		leaderSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
-		return nil
+		return nil, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 	}
 	leaderSolver.cur = leaderSolver.best
 	if leaderSolver.betterThan(peerSolver.best) {
+		peerSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNotBest))))
 		if leaderSolver.tryAddPendingInfluence() {
-			return leaderOps
+			leaderSolver.collector.Append(peerSolver.best)
+			return leaderOps, append(leaderSolver.collector.GetPlans(), peerSolver.collector.GetPlans()...)
 		}
+		leaderSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 		if peerSolver.tryAddPendingInfluence() {
-			return peerOps
+			peerSolver.collector.Append(peerSolver.best)
+			return peerOps, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 		}
+		peerSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 	} else {
 		if peerSolver.tryAddPendingInfluence() {
-			return peerOps
+			peerSolver.collector.Append(peerSolver.best)
+			return peerOps, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 		}
+		peerSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 		if leaderSolver.tryAddPendingInfluence() {
-			return leaderOps
+			leaderSolver.collector.Append(peerSolver.best)
+			return leaderOps, append(leaderSolver.collector.GetPlans(), peerSolver.collector.GetPlans()...)
 		}
+		leaderSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 	}
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
-	return nil
+	return nil, append(peerSolver.collector.GetPlans(), leaderSolver.collector.GetPlans()...)
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
+	plans := make([]plan.Plan, 0)
 	switch {
 	case s < int(schedulePeerPr*100):
 		peerSolver := newBalanceSolver(h, cluster, statistics.Write, movePeer)
-		ops := peerSolver.solve()
+		ops := peerSolver.solve(dryRun)
 		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
-			return ops
+			peerSolver.collector.Append(peerSolver.best)
+			return ops, peerSolver.collector.GetPlans()
 		}
+		peerSolver.collector.Append(peerSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
+		plans = peerSolver.collector.GetPlans()
 	default:
 	}
 
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Write, transferLeader)
-	ops := leaderSolver.solve()
+	ops := leaderSolver.solve(dryRun)
 	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {
-		return ops
+		leaderSolver.collector.Append(leaderSolver.best)
+		return ops, append(leaderSolver.collector.GetPlans(), plans...)
 	}
+	leaderSolver.collector.Append(leaderSolver.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed))))
 
 	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
-	return nil
+	return nil, append(leaderSolver.collector.GetPlans(), plans...)
 }
 
 type solution struct {
@@ -348,6 +367,9 @@ type solution struct {
 	// 1 indicates that this is a non-optimizable solution.
 	// See `calcProgressiveRank` for more about progressive rank.
 	progressiveRank int64
+
+	status plan.Status
+	step   int
 }
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
@@ -394,6 +416,115 @@ func (s *solution) isAvailable() bool {
 	return s.progressiveRank < -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
 }
 
+func (s *solution) GenerateCoreResource(id uint64) {
+	switch s.step {
+	case 0:
+		s.srcStore = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfo(&metapb.Store{Id: id})}}
+	case 1:
+		s.region = core.NewRegionInfo(&metapb.Region{Id: id}, nil)
+	case 2:
+		s.dstStore = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfo(&metapb.Store{Id: id})}}
+	case 3:
+		s.revertRegion = core.NewRegionInfo(&metapb.Region{Id: id}, nil)
+	}
+}
+
+func (s *solution) GetStep() int {
+	return s.step
+}
+
+func (s *solution) GetCoreResource(step int) *plan.CoreResource {
+	switch step {
+	case 0:
+		if s.step < 0 {
+			return nil
+		}
+		return plan.NewStoreResource(s.srcStore.GetID())
+	case 1:
+		if s.step < 1 {
+			return nil
+		}
+		return plan.NewRegionResource(s.region.GetID())
+	case 2:
+		if s.step < 2 {
+			return nil
+		}
+		return plan.NewStoreResource(s.dstStore.GetID())
+	}
+	return nil
+}
+
+func (s *solution) GetMaxSelectStep() int {
+	if s.revertRegion != nil {
+		return 4
+	}
+	return 3
+}
+
+func (s *solution) GetStatus() plan.Status {
+	return s.status
+}
+
+func (s *solution) SetStatus(status plan.Status) {
+	s.status = status
+}
+
+func (s *solution) Desc() string {
+	ret := ""
+	if s.step < 0 {
+		return ret + fmt.Sprintf(" status %s step %d", s.status.String(), s.step)
+	}
+	if s.srcStore != nil {
+		ret += fmt.Sprintf("source store %d", s.srcStore.GetID())
+	}
+	if s.step < 1 {
+		return ret + fmt.Sprintf(" status %s step %d", s.status.String(), s.step)
+	}
+	if s.region != nil {
+		ret += fmt.Sprintf(" region %d", s.region.GetID())
+	}
+	if s.step < 2 {
+		return ret + fmt.Sprintf(" status %s step %d", s.status.String(), s.step)
+	}
+	if s.dstStore != nil {
+		ret += fmt.Sprintf(" target store %d", s.dstStore.GetID())
+	}
+	if s.step < 3 {
+		return ret + fmt.Sprintf(" status %s step %d", s.status.String(), s.step)
+	}
+	if s.revertRegion != nil {
+		ret += fmt.Sprintf(" revert region %d", s.revertRegion.GetID())
+	}
+	return ret + fmt.Sprintf(" status %s step %d", s.status.String(), s.step)
+}
+
+func (s *solution) Clone(opts ...plan.Option) plan.Plan {
+	plan := &solution{
+		status: s.status,
+		step:   s.step,
+	}
+	if s.step > 0 {
+		plan.srcStore = s.srcStore
+	}
+	if s.step > 1 {
+		plan.region = s.region
+	}
+	if s.step > 2 {
+		plan.dstStore = s.dstStore
+	}
+	if s.step > 3 && s.revertRegion != nil {
+		plan.revertRegion = s.revertRegion
+	}
+	for _, opt := range opts {
+		opt(plan)
+	}
+	return plan
+}
+
 type balanceSolver struct {
 	schedule.Cluster
 	sche         *hotScheduler
@@ -402,7 +533,8 @@ type balanceSolver struct {
 	opTy         opType
 	resourceTy   resourceType
 
-	cur *solution
+	cur       *solution
+	collector *plan.Collector
 
 	best *solution
 	ops  []*operator.Operator
@@ -509,17 +641,19 @@ func (bs *balanceSolver) isValid() bool {
 
 // solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
 // The comparing between solutions is based on calcProgressiveRank.
-func (bs *balanceSolver) solve() []*operator.Operator {
+func (bs *balanceSolver) solve(dryRun bool) []*operator.Operator {
 	if !bs.isValid() {
 		return nil
 	}
 
 	bs.cur = &solution{}
+	bs.collector = plan.NewCollector(dryRun, bs.cur)
 	tryUpdateBestSolution := func(isUniformFirstPriority bool) {
 		if bs.cur.progressiveRank == -1 && isUniformFirstPriority {
 			// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 			// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
 			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+			bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed, "this store is uniform store and progressiveRank is -1.")))
 			return
 		}
 		if bs.cur.isAvailable() && bs.betterThan(bs.best) {
@@ -529,6 +663,24 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.best = &clone
 			}
 		}
+		if !bs.cur.isAvailable() {
+			bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed, "this plan is not available.")))
+			return
+		}
+		if !bs.betterThan(bs.best) {
+			bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNotBest)))
+			return
+		}
+		bs.cur.step++
+		if newOps := bs.buildOperators(); len(newOps) > 0 {
+			bs.collector.Append(bs.best.Clone(plan.SetStatus(plan.NewStatus(plan.StatusNotBest))))
+			bs.ops = newOps
+			clone := *bs.cur
+			bs.best = &clone
+		} else {
+			bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoOperator)))
+		}
+		bs.cur.step--
 	}
 
 	// Whether to allow move region peer from dstStore to srcStore
@@ -549,22 +701,28 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		srcStoreID := srcStore.GetID()
 		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(srcStore), bs.isUniformSecondPriority(srcStore)
 		if isUniformFirstPriority && isUniformSecondPriority {
+			bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed, "this store is uniform store.")))
 			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(srcStore.GetID(), 10)).Inc()
 			continue
 		}
+		bs.cur.step++
 		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
+				bs.collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusNoNeed, "region needs split before moving peer")))
 				schedulerCounter.WithLabelValues(bs.sche.GetName(), "need_split_before_move_peer").Inc()
 				continue
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-
+			bs.cur.step++
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
+
+				bs.cur.step++
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution(isUniformFirstPriority)
+				bs.cur.step--
 
 				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
 					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
@@ -577,22 +735,33 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 					//     * The current best solution contain revert regions.
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
+					bs.cur.step++
 					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
-						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
+						if revertRegion == nil {
+							continue
+						}
+						if revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) {
+							bs.collector.Collect(plan.GenerateCoreResource(bs.cur.region.GetID()),
+								plan.SetStatus(plan.NewStatus(plan.StatusNoNeed, "revert region doesn't need.")))
 							continue
 						}
 						bs.cur.revertPeerStat = revertPeerStat
 						bs.cur.revertRegion = revertRegion
+						bs.cur.step++
 						bs.calcProgressiveRank()
 						tryUpdateBestSolution(isUniformFirstPriority)
+						bs.cur.step--
 					}
 					bs.cur.revertPeerStat = nil
 					bs.cur.revertRegion = nil
+					bs.cur.step--
 				}
 			}
+			bs.cur.step--
 		}
+		bs.cur.step--
 	}
 	searchRevertRegions = bs.allowSearchRevertRegions()
 	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
@@ -663,14 +832,23 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		srcToleranceRatio := confSrcToleranceRatio
 		if detail.IsTiFlash() {
 			if !confEnableForTiFlash {
+				bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+					plan.StatusNoNeed, "this store is TiFlash and hot-region-scheduler is disable for TiFlash.",
+				)))
 				continue
 			}
 			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
+				bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+					plan.StatusNoNeed, "this store is TiFlash and hot-region-scheduler only support write and move-peer type for TiFlash.",
+				)))
 				continue
 			}
 			srcToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if len(detail.HotPeers) == 0 {
+			bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+				plan.StatusNoNeed, "there is no hot peers.",
+			)))
 			continue
 		}
 
@@ -678,6 +856,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		} else {
+			bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+				plan.StatusNoNeed,
+			)))
 			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
 		}
 	}
@@ -697,10 +878,18 @@ func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *
 // The returned hotPeer count in controlled by `max-peer-number`.
 func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
 	appendItem := func(item *statistics.HotPeerStat) {
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
-			// no in pending operator and no need cool down after transfer leader
-			ret = append(ret, item)
+		// no in pending operator and no need cool down after transfer leader
+		if _, ok := bs.sche.regionPendings[item.ID()]; ok {
+			bs.collector.Collect(plan.GenerateCoreResource(item.RegionID),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionInPeendingOperator)))
+			return
 		}
+		if item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
+			bs.collector.Collect(plan.GenerateCoreResource(item.RegionID),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionCoolDown)))
+			return
+		}
+		ret = append(ret, item)
 	}
 
 	src := storeLoad.HotPeers
@@ -765,23 +954,31 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 
 	if influence, ok := bs.sche.regionPendings[region.GetID()]; ok {
 		if bs.opTy == transferLeader {
+			bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionInPeendingOperator)))
 			return false
 		}
 		op := influence.op
 		if op.Kind()&operator.OpRegion != 0 ||
 			(op.Kind()&operator.OpLeader != 0 && !op.IsEnd()) {
+			bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionInPeendingOperator)))
 			return false
 		}
 	}
 
 	if !filter.IsRegionHealthyAllowPending(region) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
+		bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
+			plan.SetStatus(plan.NewStatus(plan.StatusRegionUnhealthy)))
 		return false
 	}
 
 	if !filter.IsRegionReplicated(bs.Cluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "abnormal-replica").Inc()
+		bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
+			plan.SetStatus(plan.NewStatus(plan.StatusRegionNotReplicated)))
 		return false
 	}
 
@@ -801,6 +998,8 @@ func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uin
 			log.Debug("region does not have a peer on source store, maybe stat out of date",
 				zap.Uint64("region-id", peerStat.ID()),
 				zap.Uint64("leader-store-id", storeID))
+			bs.collector.Collect(plan.GenerateCoreResource(peerStat.ID()),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionUnhealthy, "region does not have a peer on source store, maybe stat out of date")))
 			return nil
 		}
 	case transferLeader:
@@ -808,6 +1007,8 @@ func (bs *balanceSolver) getRegion(peerStat *statistics.HotPeerStat, storeID uin
 			log.Debug("region leader is not on source store, maybe stat out of date",
 				zap.Uint64("region-id", peerStat.ID()),
 				zap.Uint64("leader-store-id", storeID))
+			bs.collector.Collect(plan.GenerateCoreResource(peerStat.ID()),
+				plan.SetStatus(plan.NewStatus(plan.StatusRegionUnhealthy, "region leader is not on source store, maybe stat out of date")))
 			return nil
 		}
 	default:
@@ -867,19 +1068,28 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		dstToleranceRatio := confDstToleranceRatio
 		if detail.IsTiFlash() {
 			if !confEnableForTiFlash {
+				bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+					plan.StatusNoNeed, "this store is TiFlash and hot-region-scheduler is disable for TiFlash.",
+				)))
 				continue
 			}
 			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
+				bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+					plan.StatusNoNeed, "this store is TiFlash and hot-region-scheduler only support write and move-peer type for TiFlash.",
+				)))
 				continue
 			}
 			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
-		if filter.Target(bs.GetOpts(), store, filters) {
+		if filter.TargetWithCollector(bs.GetOpts(), store, filters, bs.collector) {
 			id := store.GetID()
 			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
 			} else {
+				bs.collector.Collect(plan.GenerateCoreResource(detail.GetID()), plan.SetStatus(plan.NewStatus(
+					plan.StatusNoNeed,
+				)))
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed", strconv.FormatUint(id, 10)).Inc()
 			}
 		}

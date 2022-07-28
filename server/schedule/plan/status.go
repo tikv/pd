@@ -28,6 +28,8 @@ const (
 	StatusPaused
 	// StatusNoOperator represents the plan can't create operator successfully
 	StatusNoOperator
+	// StatusNotBest represents the plan is not best.
+	StatusNotBest
 
 	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
 	StatusStoreThrottled
@@ -50,6 +52,10 @@ const (
 	StatusRegionEmpty
 	// StatusRegionNotReplicated represents the region does not have enough replicas.
 	StatusRegionNotReplicated
+	// StatusRegionInPeendingOperator represents the region have pending Operator.
+	StatusRegionInPeendingOperator
+	// StatusRegionCoolDown represents the region need cool down.
+	StatusRegionCoolDown
 
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
 	StatusLabelNotMatch
@@ -69,9 +75,11 @@ const (
 )
 
 var statusText = map[StatusCode]string{
-	StatusOK:     "OK",
-	StatusNoNeed: "No Need",
-	StatusPaused: "Paused",
+	StatusOK:         "OK",
+	StatusNoNeed:     "No Need",
+	StatusPaused:     "Paused",
+	StatusNoOperator: "No Operator",
+	StatusNotBest:    "Not Best",
 
 	// store
 	StatusStoreThrottled:   "Store Throttled",
@@ -82,10 +90,12 @@ var statusText = map[StatusCode]string{
 	StatusStoreExcluded:    "Region Excluded",
 
 	// region
-	StatusRegionHot:           "Region Hot",
-	StatusRegionUnhealthy:     "Region Unhealthy",
-	StatusRegionEmpty:         "Region Empty",
-	StatusRegionNotReplicated: "Region Not Replicated",
+	StatusRegionHot:                "Region Hot",
+	StatusRegionUnhealthy:          "Region Unhealthy",
+	StatusRegionEmpty:              "Region Empty",
+	StatusRegionNotReplicated:      "Region Not Replicated",
+	StatusRegionInPeendingOperator: "Region Has Peending Influence",
+	StatusRegionCoolDown:           "Region Need Cool Down.",
 
 	StatusLabelNotMatch:     "Label Not Match",
 	StatusRuleNotMatch:      "Rule Not Match",
