@@ -952,21 +952,6 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if influence, ok := bs.sche.regionPendings[region.GetID()]; ok {
-		if bs.opTy == transferLeader {
-			bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
-				plan.SetStatus(plan.NewStatus(plan.StatusRegionInPeendingOperator)))
-			return false
-		}
-		op := influence.op
-		if op.Kind()&operator.OpRegion != 0 ||
-			(op.Kind()&operator.OpLeader != 0 && !op.IsEnd()) {
-			bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
-				plan.SetStatus(plan.NewStatus(plan.StatusRegionInPeendingOperator)))
-			return false
-		}
-	}
-
 	if !filter.IsRegionHealthyAllowPending(region) {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
 		bs.collector.Collect(plan.GenerateCoreResource(region.GetID()),
