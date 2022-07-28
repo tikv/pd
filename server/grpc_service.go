@@ -720,6 +720,9 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err == io.EOF {
 			return nil
 		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
 		forwardedHost := getForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
