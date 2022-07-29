@@ -810,6 +810,12 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		return c.Check(r.Buckets, IsNil)
 	})
 	config.EnableRegionBucket = true
+	c.Check(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`), IsNil)
+	c.Check(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`), IsNil)
+	c.Check(s.reportBucket.Send(breq), IsNil)
+	c.Check(s.reportBucket.RecvMsg(breq), IsNil)
+	c.Check(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"), IsNil)
+	c.Check(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"), IsNil)
 	c.Succeed()
 }
 
