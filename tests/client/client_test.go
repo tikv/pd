@@ -810,17 +810,14 @@ func (s *testClientSuite) TestGetRegion(c *C) {
 		return c.Check(r.Buckets, IsNil)
 	})
 	config.EnableRegionBucket = true
-<<<<<<< HEAD
-	c.Succeed()
-=======
 
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
-	suite.NoError(suite.reportBucket.Send(breq))
-	suite.Error(suite.reportBucket.RecvMsg(breq))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"))
->>>>>>> e949ddf17 (grpc: fix the wrong error handler. (#5374))
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`), IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`), IsNil)
+	c.Assert(s.reportBucket.Send(breq), IsNil)
+	c.Assert(s.reportBucket.RecvMsg(breq), NotNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"), IsNil)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"), IsNil)
+	c.Succeed()
 }
 
 func (s *testClientSuite) TestGetPrevRegion(c *C) {
