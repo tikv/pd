@@ -531,6 +531,15 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.GetScheduleConfig().EnableLocationReplacement
 }
 
+// GetSendSnapshotSize returns the send snapshot size.
+func (o *PersistOptions) GetSendSnapshotSize() int64 {
+	size := o.GetScheduleConfig().SendSnapshotSize
+	if size <= 0 {
+		size = defaultSendSnapshotSize
+	}
+	return size
+}
+
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
 	size := o.GetScheduleConfig().MaxMovableHotPeerSize

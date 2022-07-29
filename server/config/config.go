@@ -258,6 +258,8 @@ const (
 	defaultLogFormat = "text"
 
 	defaultMaxMovableHotPeerSize = int64(512)
+
+	defaultSendSnapshotSize = int64(1000)
 )
 
 // Special keys for Labels
@@ -762,6 +764,8 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	SendSnapshotSize int64 `toml:"send-snapshot-size" json:"send-snapshot-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -862,6 +866,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
+	}
+
+	if !meta.IsDefined("send-snapshot-size") {
+		adjustInt64(&c.SendSnapshotSize, defaultSendSnapshotSize)
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
