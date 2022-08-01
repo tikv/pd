@@ -168,7 +168,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
-	basePlan.step++
+	basePlan.step.Add()
 	for _, solver.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
 		for i := 0; i < retryLimit; i++ {
@@ -209,13 +209,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 				continue
 			}
-			basePlan.step++
+			basePlan.step.Add()
 			if op := s.transferPeer(solver, collector); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
-			basePlan.step--
+			basePlan.step.Sub()
 		}
 		s.retryQuota.Attenuate(solver.source)
 	}
@@ -238,7 +238,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		Sort(filter.RegionScoreComparer(solver.GetOpts()))
 
 	if len(candidates.Stores) != 0 {
-		solver.step++
+		solver.step.Add()
 	}
 	for _, solver.target = range candidates.Stores {
 		regionID := solver.region.GetID()
@@ -254,7 +254,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 		oldPeer := solver.region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: solver.target.GetID(), Role: oldPeer.Role}
-		solver.step++
+		solver.step.Add()
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
@@ -262,7 +262,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			return nil
 		}
 		collector.Collect()
-		solver.step--
+		solver.step.Sub()
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
@@ -277,7 +277,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
 	if len(candidates.Stores) != 0 {
-		solver.step--
+		solver.step.Sub()
 	}
 	return nil
 }

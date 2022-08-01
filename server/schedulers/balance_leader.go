@@ -353,11 +353,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
 	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
-	plan := newSolver(basePlan, kind, cluster, opInfluence)
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
-		return store.LeaderScore(plan.kind.Policy, plan.GetOpInfluence(store.GetID()))
+		return store.LeaderScore(solver.kind.Policy, solver.GetOpInfluence(store.GetID()))
 	}
 	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), false, scoreFunc)
 	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), true, scoreFunc)
@@ -367,24 +367,24 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
-			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, plan, usedRegions)
+			op := createTransferLeaderOperator(sourceCandidate, transferOut, l, solver, usedRegions)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
 					return result, nil
 				}
-				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
+				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 		// next choose target
 		if targetCandidate.hasStore() {
-			op := createTransferLeaderOperator(targetCandidate, transferIn, l, plan, usedRegions)
+			op := createTransferLeaderOperator(targetCandidate, transferIn, l, solver, usedRegions)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
 					return result, nil
 				}
-				makeInfluence(op, plan, usedRegions, sourceCandidate, targetCandidate)
+				makeInfluence(op, solver, usedRegions, sourceCandidate, targetCandidate)
 			}
 		}
 	}

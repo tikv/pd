@@ -22,12 +22,24 @@ const (
 	resourceRegion CoreResourceKind = iota
 	// resourceStore identifies store
 	resourceStore
+	// resourceEmpty identifies no resource
+	resourceEmpty
 )
+
+var resourceName = map[int]string{
+	int(resourceRegion): "region",
+	int(resourceStore):  "store",
+	int(resourceEmpty):  "plan",
+}
 
 // CoreResource identifies core resource
 type CoreResource struct {
 	ID   uint64
 	Kind CoreResourceKind
+}
+
+func (c *CoreResource) GetResourceName() string {
+	return resourceName[int(c.Kind)]
 }
 
 // NewRegionResource returns a region resource
@@ -43,5 +55,12 @@ func NewStoreResource(id uint64) *CoreResource {
 	return &CoreResource{
 		ID:   id,
 		Kind: resourceStore,
+	}
+}
+
+// NewEmptyResource returns a store resource
+func NewEmptyResource() *CoreResource {
+	return &CoreResource{
+		Kind: resourceEmpty,
 	}
 }
