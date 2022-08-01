@@ -481,11 +481,87 @@ func (t *testOperatorControllerSuite) TestDispatchOutdatedRegion(c *C) {
 	c.Assert(stream.MsgLength(), Equals, 3)
 }
 
-func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
+func (t *testOperatorControllerSuite) TestCalcInfluence(c *C) {
 	cluster := mockcluster.NewCluster(t.ctx, config.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(t.ctx, cluster, stream)
 
+	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
+	region = region.Clone(core.SetApproximateSize(20))
+	cluster.PutRegion(region)
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(3, 1)
+
+	steps := []operator.OpStep{
+		operator.AddLearner{ToStore: 3, PeerID: 3},
+		operator.PromoteLearner{ToStore: 3, PeerID: 3},
+		operator.TransferLeader{FromStore: 1, ToStore: 3},
+		operator.RemovePeer{FromStore: 1},
+	}
+	op := operator.NewTestOperator(1, epoch, operator.OpRegion, steps...)
+	c.Assert(controller.AddOperator(op), Equals, true)
+
+	check := func(influence operator.OpInfluence, id uint64, expect *operator.StoreInfluence) {
+		si := influence.GetStoreInfluence(id)
+		c.Assert(si.LeaderCount, Equals, expect.LeaderCount)
+		c.Assert(si.LeaderSize, Equals, expect.LeaderSize)
+		c.Assert(si.RegionCount, Equals, expect.RegionCount)
+		c.Assert(si.RegionSize, Equals, expect.RegionSize)
+		c.Assert(si.StepCost[storelimit.AddPeer], Equals, expect.StepCost[storelimit.AddPeer])
+		c.Assert(si.StepCost[storelimit.RemovePeer], Equals, expect.StepCost[storelimit.RemovePeer])
+	}
+
+	influence := controller.GetOpInfluence(cluster)
+	check(influence, 1, &operator.StoreInfluence{
+		LeaderSize:  -20,
+		LeaderCount: -1,
+		RegionSize:  -20,
+		RegionCount: -1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.RemovePeer: 200,
+		},
+	})
+	check(influence, 3, &operator.StoreInfluence{
+		LeaderSize:  20,
+		LeaderCount: 1,
+		RegionSize:  20,
+		RegionCount: 1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer: 200,
+		},
+	})
+
+	region2 := region.Clone(
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
+		core.WithIncConfVer(),
+	)
+	c.Assert(steps[0].IsFinish(region2), Equals, true)
+	op.Check(region2)
+
+	influence = controller.GetOpInfluence(cluster)
+	check(influence, 1, &operator.StoreInfluence{
+		LeaderSize:  -20,
+		LeaderCount: -1,
+		RegionSize:  -20,
+		RegionCount: -1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.RemovePeer: 200,
+		},
+	})
+	check(influence, 3, &operator.StoreInfluence{
+		LeaderSize:  20,
+		LeaderCount: 1,
+		RegionSize:  0,
+		RegionCount: 0,
+		StepCost:    make(map[storelimit.Type]int64),
+	})
+}
+
+func (t *testOperatorControllerSuite) TestDispatchUnfinishedStep(c *C) {
+	cluster := mockcluster.NewCluster(t.ctx, config.NewTestOptions())
+	stream := hbstream.NewTestHeartbeatStreams(t.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewOperatorController(t.ctx, cluster, stream)
 	// Create a new region with epoch(0, 0)
 	// the region has two peers with its peer id allocated incrementally.
 	// so the two peers are {peerid: 1, storeid: 1}, {peerid: 2, storeid: 2}
