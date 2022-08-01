@@ -44,7 +44,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetServer(cluster.GetLeader())
-
+	re.NotNil(leader)
 	re.Empty(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig)
 	limitCfg := make(map[string]ratelimit.DimensionConfig)
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
@@ -70,7 +70,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	}
 	server.MustWaitLeader(re, servers)
 	leader = cluster.GetServer(cluster.GetLeader())
-
+	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 }

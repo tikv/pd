@@ -118,6 +118,9 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	if members.GetHeader().GetError() != nil {
+		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
+	}
 	return members, nil
 }
 
@@ -245,6 +248,9 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if resp.GetHeader().GetError() != nil {
+		return 0, errors.Errorf("alloc id failed: %s", resp.GetHeader().GetError().String())
+	}
 	return resp.GetId(), nil
 }
 
@@ -263,13 +269,16 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	if err != nil {
 		return err
 	}
-	_, err = c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
+	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  proto.Clone(store).(*metapb.Store),
 		Region: proto.Clone(region).(*metapb.Region),
 	})
 	if err != nil {
 		return err
+	}
+	if res.GetHeader().GetError() != nil {
+		return errors.Errorf("bootstrap failed: %s", resp.GetHeader().GetError().String())
 	}
 	return nil
 }
