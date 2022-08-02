@@ -35,7 +35,7 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
-	router.PATCH("/:name/updateConfig", UpdateKeyspaceConfig)
+	router.POST("/:name/update-config", UpdateKeyspaceConfig)
 	router.POST("/:name/enable", EnableKeyspace)
 	router.POST("/:name/disable", DisableKeyspace)
 	router.POST("/:name/archive", ArchiveKeyspace)
@@ -201,6 +201,8 @@ type UpdateConfigParams struct {
 }
 
 // UpdateKeyspaceConfig updates target keyspace's config.
+// This is a custom action that supports PATCH semantics and uses the JSON merge patch
+// format and processing rules.
 // @Tags keyspaces
 // @Summary Update keyspace config.
 // @Param name path string true "Keyspace Name"
@@ -208,7 +210,7 @@ type UpdateConfigParams struct {
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name}/updateConfig [patch]
+// Router /keyspaces/{name}/update-config [post]
 func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()

@@ -215,7 +215,7 @@ func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/updateConfig", bytes.NewBuffer(data))
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/"+name+"/update-config", bytes.NewBuffer(data))
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
