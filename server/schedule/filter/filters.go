@@ -34,7 +34,8 @@ import (
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
-			if !filters[i].Source(opt, s).IsOK() {
+			status := filters[i].Source(opt, s)
+			if !status.IsOK() && status != statusStoreTombstone {
 				sourceID := strconv.FormatUint(s.GetID(), 10)
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
@@ -51,7 +52,8 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
-			if !filter.Target(opt, s).IsOK() {
+			status := filter.Target(opt, s)
+			if !status.IsOK() && status != statusStoreTombstone {
 				cfilter, ok := filter.(comparingFilter)
 				targetID := strconv.FormatUint(s.GetID(), 10)
 				sourceID := ""
@@ -99,7 +101,8 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeAddress := store.GetAddress()
 	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
-		if !filter.Source(opt, store).IsOK() {
+		status := filter.Source(opt, store)
+		if !status.IsOK() && status != statusStoreTombstone {
 			sourceID := storeID
 			targetID := ""
 			filterCounter.WithLabelValues("filter-source", storeAddress,
@@ -115,7 +118,8 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	storeAddress := store.GetAddress()
 	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
-		if !filter.Target(opt, store).IsOK() {
+		status := filter.Target(opt, store)
+		if !status.IsOK() && status != statusStoreTombstone {
 			cfilter, ok := filter.(comparingFilter)
 			targetID := storeID
 			sourceID := ""
