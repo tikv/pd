@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
@@ -76,6 +77,8 @@ const (
 )
 
 var (
+	hotLogger = logutil.GetPluggableLogger("hot", true)
+
 	// schedulePeerPr the probability of schedule the hot peer.
 	schedulePeerPr = 0.66
 	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
@@ -531,6 +534,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() {
 		return nil
 	}
+	hotLogger.Info("balanceSolver.solve start", zap.String("op-type", bs.opTy.String()), zap.String("rw-type", bs.rwTy.String()))
 
 	bs.cur = &solution{}
 	tryUpdateBestSolution := func() {
@@ -610,6 +614,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if searchRevertRegions {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "allow-search-revert-regions").Inc()
 	}
+
+	hotLogger.Info("balanceSolver.solve end", zap.Int("final-ops-len", len(bs.ops)))
 	return bs.ops
 }
 

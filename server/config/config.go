@@ -1249,6 +1249,14 @@ func (c *Config) SetupLogger() error {
 	c.logger = lg
 	c.logProps = p
 	logutil.SetRedactLog(c.Security.RedactInfoLog)
+	// Add hot dedicated logger.
+	hotLogConfig := c.Log
+	hotLogConfig.File.Filename = strings.ReplaceAll(c.Log.File.Filename, "pd.log", "pd-hot.log")
+	lg, _, err = log.InitLogger(&hotLogConfig, zap.AddStacktrace(zapcore.FatalLevel))
+	if err != nil {
+		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
+	}
+	logutil.GetPluggableLogger("hot", true).PlugLogger(lg)
 	return nil
 }
 
