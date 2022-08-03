@@ -80,9 +80,6 @@ var (
 	schedulePeerPr = 0.66
 	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
 	pendingAmpFactor = 2.0
-	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
-	// as it implies that this dimension is sufficiently uniform.
-	stddevThreshold = 0.1
 )
 
 type hotScheduler struct {
@@ -388,8 +385,6 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
-
-	pick func(s interface{}, p func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -429,11 +424,6 @@ func (bs *balanceSolver) init() {
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
-
-	bs.pick = slice.AnyOf
-	if bs.sche.conf.IsStrictPickingStoreEnabled() {
-		bs.pick = slice.AllOf
-	}
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -483,14 +473,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		return nil
 	}
 	bs.cur = &solution{}
-
-	tryUpdateBestSolution := func(isUniformFirstPriority bool) {
-		if bs.cur.progressiveRank == -1 && isUniformFirstPriority {
-			// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
-			// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
-			return
-		}
+	tryUpdateBestSolution := func() {
 		if bs.cur.progressiveRank < 0 && bs.betterThan(bs.best) {
 			if newOps, newInfl := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
@@ -504,11 +487,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
-		if isUniformFirstPriority && isUniformSecondPriority {
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.srcStore.GetID(), 10)).Inc()
-			continue
-		}
+
 		for _, srcPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(srcPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
@@ -521,7 +500,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				tryUpdateBestSolution(isUniformFirstPriority)
+				tryUpdateBestSolution()
 			}
 		}
 	}
@@ -586,12 +565,15 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(minLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
-		}
-		return true
-	})
+	if bs.sche.conf.IsStrictPickingStoreEnabled() {
+		return slice.AllOf(minLoad.Loads, func(i int) bool {
+			if bs.isSelectedDim(i) {
+				return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
+			}
+			return true
+		})
+	}
+	return minLoad.Loads[bs.firstPriority] > toleranceRatio*expectLoad.Loads[bs.firstPriority]
 }
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
@@ -789,21 +771,15 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(maxLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
-		}
-		return true
-	})
-}
-
-func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
-	// first priority should be more uniform than second priority
-	return store.IsUniform(bs.firstPriority, stddevThreshold*0.5)
-}
-
-func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDetail) bool {
-	return store.IsUniform(bs.secondPriority, stddevThreshold)
+	if bs.sche.conf.IsStrictPickingStoreEnabled() {
+		return slice.AllOf(maxLoad.Loads, func(i int) bool {
+			if bs.isSelectedDim(i) {
+				return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
+			}
+			return true
+		})
+	}
+	return maxLoad.Loads[bs.firstPriority]*toleranceRatio < expect.Loads[bs.firstPriority]
 }
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.

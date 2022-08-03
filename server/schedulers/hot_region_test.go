@@ -887,13 +887,6 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	tc.SetHotRegionCacheHitsThreshold(0)
 	key, err := hex.DecodeString("")
 	re.NoError(err)
-	// skip stddev check
-	origin := stddevThreshold
-	stddevThreshold = -1.0
-	defer func() {
-		stddevThreshold = origin
-	}()
-
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -1827,12 +1820,6 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
-	// skip stddev check
-	origin := stddevThreshold
-	stddevThreshold = -1.0
-	defer func() {
-		stddevThreshold = origin
-	}()
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1902,7 +1889,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5) // two dims will be better
+	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	tc.UpdateStorageWrittenStats(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -1917,66 +1904,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5) // two dims will be better
-	clearPendingInfluence(hb.(*hotScheduler))
-}
-
-func TestHotScheduleWithStddev(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(0.0)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.(*hotScheduler).conf.StrictPickingStore = false
-
-	// skip uniform cluster
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-	stddevThreshold = 0.1
-	ops, _ := hb.Schedule(tc, false)
-	re.Empty(ops)
-	stddevThreshold = -1.0
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	clearPendingInfluence(hb.(*hotScheduler))
-
-	// skip -1 case (uniform cluster)
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 100*units.MiB*statistics.StoreHeartBeatReportInterval) // two dims are not uniform.
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-	stddevThreshold = 0.1
-	ops, _ = hb.Schedule(tc, false)
-	re.Empty(ops)
-	stddevThreshold = -1.0
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 }
 
