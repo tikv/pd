@@ -507,6 +507,24 @@ func (bs *balanceSolver) isValid() bool {
 	return true
 }
 
+func (bs *balanceSolver) filterUniformStore() (string, bool) {
+	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
+	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
+	if isUniformFirstPriority && isUniformSecondPriority {
+		// If both dims are enough uniform, any schedule is unnecessary.
+		return "all-dim", true
+	}
+	if isUniformFirstPriority && (bs.cur.progressiveRank == -1 || bs.cur.progressiveRank == -3) {
+		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+		return dimToString(bs.firstPriority), true
+	}
+	if isUniformSecondPriority && bs.cur.progressiveRank == -2 {
+		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+		return dimToString(bs.secondPriority), true
+	}
+	return "", false
+}
+
 // solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
 // The comparing between solutions is based on calcProgressiveRank.
 func (bs *balanceSolver) solve() []*operator.Operator {
@@ -515,11 +533,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	bs.cur = &solution{}
-	tryUpdateBestSolution := func(isUniformFirstPriority bool) {
-		if bs.cur.progressiveRank == -1 && isUniformFirstPriority {
-			// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
-			// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Inc()
+	tryUpdateBestSolution := func() {
+		if label, ok := bs.filterUniformStore(); ok {
+			schedulerCounter.WithLabelValues(bs.sche.GetName(), fmt.Sprintf("%s-skip-%s-uniform-store", bs.rwTy.String(), label)).Inc()
 			return
 		}
 		if bs.cur.isAvailable() && bs.betterThan(bs.best) {
@@ -547,11 +563,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(srcStore), bs.isUniformSecondPriority(srcStore)
-		if isUniformFirstPriority && isUniformSecondPriority {
-			hotSchedulerResultCounter.WithLabelValues("skip-uniform-store", strconv.FormatUint(srcStore.GetID(), 10)).Inc()
-			continue
-		}
 		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
@@ -564,7 +575,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
-				tryUpdateBestSolution(isUniformFirstPriority)
+				tryUpdateBestSolution()
 
 				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
 					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
@@ -586,7 +597,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						bs.cur.revertPeerStat = revertPeerStat
 						bs.cur.revertRegion = revertRegion
 						bs.calcProgressiveRank()
-						tryUpdateBestSolution(isUniformFirstPriority)
+						tryUpdateBestSolution()
 					}
 					bs.cur.revertPeerStat = nil
 					bs.cur.revertRegion = nil

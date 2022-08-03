@@ -221,6 +221,18 @@ func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
 	return conf.GreatDecRatio
 }
 
+func (conf *hotRegionSchedulerConfig) SetGreatDecRatio(r float64) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.GreatDecRatio = r
+}
+
+func (conf *hotRegionSchedulerConfig) SetStrictPickingStore(v bool) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.StrictPickingStore = v
+}
+
 func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
