@@ -1291,7 +1291,6 @@ func TestSkipUniformStore(t *testing.T) {
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetStrictPickingStore(false)
-	// hb.(*hotScheduler).conf.SetGreatDecRatio(1.1) //avoid similar store but cannot schedule
 	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
