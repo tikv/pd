@@ -48,6 +48,7 @@ const (
 	StatusRegionEmpty
 	// StatusRegionNotReplicated represents the region does not have enough replicas.
 	StatusRegionNotReplicated
+	// StatusRegionWithNoLeader represents the region does not have leader.
 	StatusRegionWithNoLeader
 
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
