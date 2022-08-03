@@ -155,9 +155,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	})
 
 	pendingFilter := filter.NewRegionPendingFilter()
-	downFilter := filter.NewRegionDownFilter()
-	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter}
+	transferRegionFilter := filter.NewRegionTransferPeerFilter(cluster)
+	baseRegionFilters := []filter.RegionFilter{transferRegionFilter}
 	switch cluster.(type) {
 	case *schedule.RangeCluster:
 		// allow empty region to be scheduled in range cluster
@@ -193,20 +192,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-
-			// Skip hot regions.
-			if cluster.IsRegionHot(plan.region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
-				continue
-			}
-			// Check region whether have leader
-			if plan.region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
-				continue
-			}
-
 			if op := s.transferPeer(plan); op != nil {
 				s.retryQuota.ResetLimit(plan.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
