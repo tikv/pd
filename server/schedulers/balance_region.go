@@ -169,7 +169,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	}
 
 	filtersExceptPending := append(baseRegionFilters, pendingFilter)
-
 	pickFromFollowerRegionFunc := func(storeID uint64) *core.RegionInfo {
 		return filter.SelectOneRegion(cluster.RandFollowerRegions(storeID, s.conf.Ranges),
 			filtersExceptPending...)
@@ -181,7 +180,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	}
 
 	pickFromLearnerFunc := func(storeID uint64) *core.RegionInfo {
-
 		return filter.SelectOneRegion(cluster.RandLearnerRegions(storeID, s.conf.Ranges),
 			filtersExceptPending...)
 	}
@@ -209,7 +207,6 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 					break
 				}
 			}
-
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 				break
