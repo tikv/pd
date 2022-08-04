@@ -1663,10 +1663,12 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 			hb.prepareForBalance(testCase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
-			re.Empty(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)) // skip schedule
+			hotPeers, _, _ := leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)
+			re.Empty(hotPeers) // skip schedule
 			threshold := tc.GetHotRegionCacheHitsThreshold()
 			leaderSolver.minHotDegree = 0
-			re.Len(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), 1)
+			hotPeers, _, _ = leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)
+			re.Len(hotPeers, 1)
 			leaderSolver.minHotDegree = threshold
 		}
 
@@ -1754,11 +1756,15 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	}}
 
 	leaderSolver.maxPeerNum = 1
-	u := leaderSolver.sortHotPeers(hotPeers)
+	_, firstSortedPeers := leaderSolver.sortHotPeers(hotPeers, leaderSolver.firstPriority)
+	_, secondSortedPeers := leaderSolver.sortHotPeers(hotPeers, leaderSolver.secondPriority)
+	u := leaderSolver.selectHotPeers(firstSortedPeers, secondSortedPeers)
 	checkSortResult(re, []uint64{1}, u)
 
 	leaderSolver.maxPeerNum = 2
-	u = leaderSolver.sortHotPeers(hotPeers)
+	_, firstSortedPeers = leaderSolver.sortHotPeers(hotPeers, leaderSolver.firstPriority)
+	_, secondSortedPeers = leaderSolver.sortHotPeers(hotPeers, leaderSolver.secondPriority)
+	u = leaderSolver.selectHotPeers(firstSortedPeers, secondSortedPeers)
 	checkSortResult(re, []uint64{1, 2}, u)
 }
 
