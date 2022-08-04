@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -351,12 +352,24 @@ type solution struct {
 	// 1 indicates that this is a non-optimizable solution.
 	// See `calcProgressiveRank` for more about progressive rank.
 	progressiveRank int64
+
+	debugMessage []string
 }
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
 func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
-	if s.getPeersRateFromCache(dim) >= 0 {
+	srcCurrentLoad := s.srcStore.LoadPred.Current.Loads[dim]
+	srcFutureLoad := s.srcStore.LoadPred.Future.Loads[dim]
+	dstCurrentLoad := s.dstStore.LoadPred.Current.Loads[dim]
+	dstFutureLoad := s.dstStore.LoadPred.Future.Loads[dim]
+	peersRate := s.getPeersRateFromCache(dim)
+
+	s.debugMessage = append(s.debugMessage,
+		fmt.Sprintf("src-cur-load: %.0f, src-fut-load: %.0f, dst-cur-load: %.0f, dst-fut-load: %.0f, peersRate: %0.f",
+			srcCurrentLoad, srcFutureLoad, dstCurrentLoad, dstFutureLoad, peersRate))
+
+	if peersRate >= 0 {
 		return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
 	}
 	return s.srcStore.LoadPred.Max().Loads[dim], s.dstStore.LoadPred.Min().Loads[dim]
@@ -944,6 +957,7 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = 1
+	bs.cur.debugMessage = nil
 	bs.cur.calcPeersRate(bs.rwTy, bs.firstPriority, bs.secondPriority)
 	if bs.cur.getPeersRateFromCache(bs.firstPriority) < bs.getMinRate(bs.firstPriority) &&
 		bs.cur.getPeersRateFromCache(bs.secondPriority) < bs.getMinRate(bs.secondPriority) {
@@ -979,6 +993,8 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		// It's a solution that cannot be used directly, but can be optimized.
 		bs.cur.progressiveRank = 0
 	}
+
+	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("final-rank: %d", bs.cur.progressiveRank))
 }
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
@@ -1026,6 +1042,8 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	// minBetterRate <= peersRate <= maxBetterRate     ====> cmp == 1
 	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == 0
 	// peersRate > maxNotWorsenedRate                  ====> cmp == -1
+	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-dim, %s-type, %s-type",
+		dimToString(dim), bs.rwTy.String(), bs.opTy.String()))
 
 	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
@@ -1036,6 +1054,9 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		peersRate = -peersRate
 		reverse = true
 	}
+
+	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("high-rate: %.0f, low-rate: %.0f, peersRate: %.0f, reverse: %t",
+		highRate, lowRate, peersRate, reverse))
 
 	if highRate*bs.balancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in the balanced state, and cmp = 1 will not be judged.
@@ -1051,12 +1072,15 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		}
 
 		if peersRate >= minNotWorsenedRate && peersRate <= maxNotWorsenedRate {
+			bs.cur.debugMessage = append(bs.cur.debugMessage, "balanced-state, cmp: 0")
 			return 0
 		}
+		bs.cur.debugMessage = append(bs.cur.debugMessage, "balanced-state, cmp: -1")
 		return -1
 	}
 
 	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
+	var state string
 	if highRate*bs.preBalancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in pre-balanced state.
 		// Only the schedules that reach the balanced state will be judged as 1,
@@ -1068,6 +1092,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
+		state = "pre-balanced"
 	} else {
 		// At this time, it is considered to be in the unbalanced state.
 		// As long as the balance is significantly improved, it is judged as 1.
@@ -1086,21 +1111,29 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		if maxNotWorsenedRate < maxBetterRate {
 			maxNotWorsenedRate = maxBalancedRate
 		}
+		state = "non-balanced"
 	}
 
+	var otherMessage string
 	switch {
 	case minBetterRate <= peersRate && peersRate <= maxBetterRate:
+		greaterMinRate := peersRate >= bs.getMinRate(dim)
+		isTolerance := bs.isTolerance(dim, reverse)
+		otherMessage = fmt.Sprintf(", >=min-rate: %t, is-tolerance: %t", greaterMinRate, isTolerance)
 		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) {
-			return 1
+			cmp = 1
+		} else {
+			cmp = 0
 		}
-		return 0
 	case minNotWorsenedRate <= peersRate && peersRate < minBetterRate:
-		return 0
+		cmp = 0
 	case maxBetterRate < peersRate && peersRate <= maxNotWorsenedRate:
-		return 0
+		cmp = 0
 	default:
-		return -1
+		cmp = -1
 	}
+	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-state, cmp: %d%s", state, cmp, otherMessage))
+	return
 }
 
 /*
@@ -1434,27 +1467,17 @@ func (bs *balanceSolver) logBestSolution() {
 	if best == nil {
 		return
 	}
-
+	best.debugMessage = append(best.debugMessage, fmt.Sprintf("src-id: %d, dst-id: %d, region-id: %d",
+		best.srcStore.GetID(), best.dstStore.GetID(), best.region.GetID()))
 	if best.revertRegion != nil {
-		// Log more information on solutions containing revertRegion
-		srcFirstRate, dstFirstRate := best.getExtremeLoad(bs.firstPriority)
-		srcSecondRate, dstSecondRate := best.getExtremeLoad(bs.secondPriority)
 		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
 		mainSecondRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
-		log.Info("use solution with revert regions",
-			zap.Uint64("src-store", best.srcStore.GetID()),
-			zap.Float64("src-first-rate", srcFirstRate),
-			zap.Float64("src-second-rate", srcSecondRate),
-			zap.Uint64("dst-store", best.dstStore.GetID()),
-			zap.Float64("dst-first-rate", dstFirstRate),
-			zap.Float64("dst-second-rate", dstSecondRate),
-			zap.Uint64("main-region", best.region.GetID()),
-			zap.Float64("main-first-rate", mainFirstRate),
-			zap.Float64("main-second-rate", mainSecondRate),
-			zap.Uint64("revert-regions", best.revertRegion.GetID()),
-			zap.Float64("peers-first-rate", best.getPeersRateFromCache(bs.firstPriority)),
-			zap.Float64("peers-second-rate", best.getPeersRateFromCache(bs.secondPriority)))
+		revertFirstRate := best.revertPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
+		revertSecondRate := best.revertPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
+		best.debugMessage = append(best.debugMessage, fmt.Sprintf("revert-region-id: %d, main-first-rate: %.0f, main-second-rate: %.0f, revert-first-rate: %.0f, revert-second-rate: %.0f",
+			best.revertRegion.GetID(), mainFirstRate, mainSecondRate, revertFirstRate, revertSecondRate))
 	}
+	hotLogger.Info("log best solution debug message", zap.String("msg", strings.Join(best.debugMessage, "|||")))
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]

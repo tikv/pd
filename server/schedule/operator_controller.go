@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -45,6 +46,8 @@ const (
 )
 
 var (
+	hotLogger = logutil.GetPluggableLogger("hot", true)
+
 	slowNotifyInterval = 5 * time.Second
 	fastNotifyInterval = 2 * time.Second
 	// PushOperatorTickInterval is the interval try to push the operator.
@@ -451,6 +454,10 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
 		zap.String("additional-info", op.GetAdditionalInfo()))
+	hotLogger.Info("add operator",
+		zap.Uint64("region-id", regionID),
+		zap.Reflect("operator", op),
+		zap.String("additional-info", op.GetAdditionalInfo()))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -564,6 +571,11 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 	switch st {
 	case operator.SUCCESS:
 		log.Info("operator finish",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Duration("takes", op.RunningTime()),
+			zap.Reflect("operator", op),
+			zap.String("additional-info", op.GetAdditionalInfo()))
+		hotLogger.Info("operator finish",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
