@@ -159,7 +159,10 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 
 func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster), nil
+	if h.conf.GetMinorDecRatio() > 0.95 {
+		return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster), nil
+	}
+	return h.dispatch(statistics.Read, cluster), nil
 }
 
 func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
@@ -176,7 +179,9 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 	case statistics.Read:
 		return h.balanceHotReadRegions(cluster)
 	case statistics.Write:
-		return h.balanceHotWriteRegions(cluster)
+		if h.conf.GetMinorDecRatio() > 0.95 {
+			return h.balanceHotWriteRegions(cluster)
+		}
 	}
 	return nil
 }
