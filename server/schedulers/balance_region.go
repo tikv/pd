@@ -163,33 +163,56 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	default:
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
+	pickFromPendingRegionFunc := func(storeID uint64) *core.RegionInfo {
+		return filter.SelectOneRegion(cluster.RandPendingRegions(storeID, s.conf.Ranges),
+			baseRegionFilters...)
+	}
+
+	filtersExceptPending := append(baseRegionFilters, pendingFilter)
+
+	pickFromFollowerRegionFunc := func(storeID uint64) *core.RegionInfo {
+		return filter.SelectOneRegion(cluster.RandFollowerRegions(storeID, s.conf.Ranges),
+			filtersExceptPending...)
+	}
+
+	pickFromLeaderRegionFunc := func(storeID uint64) *core.RegionInfo {
+		return filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, s.conf.Ranges),
+			filtersExceptPending...)
+	}
+
+	pickFromLearnerFunc := func(storeID uint64) *core.RegionInfo {
+
+		return filter.SelectOneRegion(cluster.RandLearnerRegions(storeID, s.conf.Ranges),
+			filtersExceptPending...)
+	}
+
+	// pick functions, order by priority.
+	pickRegionFuncs := []func(storeID uint64) *core.RegionInfo{
+		// Priority pick the region that has a pending peer.
+		// Pending region may means the disk is overload, remove the pending region firstly.
+		pickFromPendingRegionFunc,
+		// Then pick the region that has a follower in the source store.
+		pickFromFollowerRegionFunc,
+		// Then pick the region has the leader in the source store.
+		pickFromLeaderRegionFunc,
+		// Finally pick learner.
+		pickFromLearnerFunc}
 
 	for _, plan.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(plan.source)
+		pickStartIdx := 0
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
-			// Priority pick the region that has a pending peer.
-			// Pending region may means the disk is overload, remove the pending region firstly.
-			plan.region = filter.SelectOneRegion(cluster.RandPendingRegions(plan.SourceStoreID(), s.conf.Ranges),
-				baseRegionFilters...)
-			if plan.region == nil {
-				// Then pick the region that has a follower in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.SourceStoreID(), s.conf.Ranges),
-					append(baseRegionFilters, pendingFilter)...)
+			for ; pickStartIdx < len(pickRegionFuncs); pickStartIdx++ {
+				plan.region = pickRegionFuncs[pickStartIdx](plan.source.GetID())
+				if plan.region != nil {
+					break
+				}
 			}
-			if plan.region == nil {
-				// Then pick the region has the leader in the source store.
-				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.SourceStoreID(), s.conf.Ranges),
-					append(baseRegionFilters, pendingFilter)...)
-			}
-			if plan.region == nil {
-				// Finally pick learner.
-				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.SourceStoreID(), s.conf.Ranges),
-					append(baseRegionFilters, pendingFilter)...)
-			}
+
 			if plan.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-				continue
+				break
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
 			if op := s.transferPeer(plan); op != nil {
