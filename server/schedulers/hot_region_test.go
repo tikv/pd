@@ -887,13 +887,6 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	tc.SetHotRegionCacheHitsThreshold(0)
 	key, err := hex.DecodeString("")
 	re.NoError(err)
-	// skip stddev check
-	origin := stddevThreshold
-	stddevThreshold = -1.0
-	defer func() {
-		stddevThreshold = origin
-	}()
-
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -1827,12 +1820,6 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
-	// skip stddev check
-	origin := stddevThreshold
-	stddevThreshold = -1.0
-	defer func() {
-		stddevThreshold = origin
-	}()
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1902,7 +1889,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5) // two dims will be better
+	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	tc.UpdateStorageWrittenStats(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -1917,268 +1904,8 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5) // two dims will be better
+	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
-}
-
-func TestHotScheduleWithStddev(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(0.0)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.(*hotScheduler).conf.StrictPickingStore = false
-
-	// skip uniform cluster
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-	stddevThreshold = 0.1
-	ops, _ := hb.Schedule(tc, false)
-	re.Empty(ops)
-	stddevThreshold = -1.0
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	clearPendingInfluence(hb.(*hotScheduler))
-
-	// skip -1 case (uniform cluster)
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 100*units.MiB*statistics.StoreHeartBeatReportInterval) // two dims are not uniform.
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*statistics.StoreHeartBeatReportInterval, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*statistics.StoreHeartBeatReportInterval, 5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-	stddevThreshold = 0.1
-	ops, _ = hb.Schedule(tc, false)
-	re.Empty(ops)
-	stddevThreshold = -1.0
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	clearPendingInfluence(hb.(*hotScheduler))
-}
-
-func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -2.
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	sche, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-
-	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 16*units.MiB*statistics.StoreHeartBeatReportInterval, 20*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 14*units.MiB*statistics.StoreHeartBeatReportInterval, 10*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 2 * units.MiB, 3 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 2 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	// No operators can be generated when StrictPickingStore is true.
-	ops, _ := hb.Schedule(tc, false)
-	re.Empty(ops)
-	re.True(hb.searchRevertRegions[writePeer])
-	// Two operators can be generated when StrictPickingStore is false.
-	hb.conf.StrictPickingStore = false
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 2)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
-	re.True(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-	// When there is a better solution, there will only be one operator.
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{8, []uint64{3, 2, 4}, 0.5 * units.MiB, 3 * units.MiB, 0},
-	})
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	re.False(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-}
-
-func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -3.
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	sche, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-
-	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 20*units.MiB*statistics.StoreHeartBeatReportInterval, 14*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 10*units.MiB*statistics.StoreHeartBeatReportInterval, 16*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
-	})
-	// One operator can be generated when StrictPickingStore is true.
-	ops, _ := hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	re.True(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-	// Two operators can be generated when StrictPickingStore is false.
-	hb.conf.StrictPickingStore = false
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 2)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
-	re.True(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-}
-
-func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -1.
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	sche, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
-
-	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(2, 20*units.MiB*statistics.StoreHeartBeatReportInterval, 14*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(3, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(4, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenStats(5, 10*units.MiB*statistics.StoreHeartBeatReportInterval, 16*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 3 * units.MiB, 0.1 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 3 * units.MiB, 0},
-	})
-	// searchRevertRegions becomes true after the first `Schedule`.
-	hb.conf.StrictPickingStore = false
-	ops, _ := hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	re.True(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-	// There is still the solution with one operator after that.
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	re.True(hb.searchRevertRegions[writePeer])
-	clearPendingInfluence(hb)
-}
-
-func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -2.
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	statistics.Denoising = false
-	opt := config.NewTestOptions()
-	sche, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	tc := mockcluster.NewCluster(ctx, opt)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
-	tc.AddRegionStore(1, 20)
-	tc.AddRegionStore(2, 20)
-	tc.AddRegionStore(3, 20)
-	tc.AddRegionStore(4, 20)
-	tc.AddRegionStore(5, 20)
-	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
-
-	tc.UpdateStorageReadStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadStats(2, 16*units.MiB*statistics.StoreHeartBeatReportInterval, 20*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadStats(3, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadStats(4, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageReadStats(5, 14*units.MiB*statistics.StoreHeartBeatReportInterval, 10*units.MiB*statistics.StoreHeartBeatReportInterval)
-	addRegionInfo(tc, statistics.Read, []testRegionInfo{
-		{6, []uint64{2, 1, 5}, 2 * units.MiB, 3 * units.MiB, 0},
-		{7, []uint64{5, 4, 2}, 2 * units.MiB, 0.1 * units.MiB, 0},
-	})
-	// No operators can be generated when StrictPickingStore is true.
-	ops, _ := hb.Schedule(tc, false)
-	re.Empty(ops)
-	re.True(hb.searchRevertRegions[readLeader])
-	// Two operators can be generated when StrictPickingStore is false.
-	hb.conf.StrictPickingStore = false
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 2)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)
-	re.True(hb.searchRevertRegions[readLeader])
-	clearPendingInfluence(hb)
-	// When there is a better solution, there will only be one operator.
-	addRegionInfo(tc, statistics.Read, []testRegionInfo{
-		{8, []uint64{2, 1, 5}, 0.5 * units.MiB, 3 * units.MiB, 0},
-	})
-	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
-	re.False(hb.searchRevertRegions[readLeader])
-	clearPendingInfluence(hb)
 }
 
 func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
