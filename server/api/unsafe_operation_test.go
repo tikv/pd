@@ -83,14 +83,3 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
 	suite.NoError(err)
 }
-
-func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresForce() {
-	input := map[string]interface{}{"stores": []uint64{}}
-	data, _ := json.Marshal(input)
-	re := suite.Require()
-
-	input = map[string]interface{}{"stores": []uint64{1}, "force": ""}
-	data, _ = json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
-	suite.NoError(err)
-}
