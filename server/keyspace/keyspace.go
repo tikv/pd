@@ -42,7 +42,7 @@ type Manager struct {
 	// idLock guards keyspace name to id lookup entries.
 	idLock syncutil.Mutex
 	// metaLock guards keyspace meta.
-	metaLock syncutil.Mutex
+	metaLock *lockGroup
 	// idAllocator allocates keyspace id.
 	idAllocator id.Allocator
 	// store is the storage for keyspace related information.
@@ -63,10 +63,9 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 	manager := &Manager{
 		store:       store,
 		idAllocator: idAllocator,
+		metaLock:    newLockGroup(),
 	}
 
-	manager.metaLock.Lock()
-	defer manager.metaLock.Unlock()
 	// Check if default keyspace already exists.
 	defaultExists, err := manager.store.LoadKeyspace(DefaultKeyspaceID, &keyspacepb.KeyspaceMeta{})
 	if err != nil {
@@ -115,9 +114,19 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		StateChangedAt: request.Now.Unix(),
 		Config:         request.Config,
 	}
-	manager.metaLock.Lock()
-	defer manager.metaLock.Unlock()
-	// Check if keyspace with that id already exists.
+	manager.idLock.Lock()
+	defer manager.idLock.Unlock()
+	// Check if keyspace id with that name already exists.
+	nameExists, _, err := manager.store.LoadKeyspaceIDByName(request.Name)
+	if err != nil {
+		return nil, err
+	}
+	if nameExists {
+		return nil, ErrKeyspaceExists
+	}
+	manager.metaLock.lock(newID)
+	defer manager.metaLock.unlock(newID)
+	// Check if keyspace meta with that id already exists.
 	keyspaceExists, err := manager.store.LoadKeyspace(newID, &keyspacepb.KeyspaceMeta{})
 	if err != nil {
 		return nil, err
@@ -152,9 +161,13 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	if !loaded {
 		return nil, ErrKeyspaceNotFound
 	}
+	return manager.loadKeyspaceByID(spaceID)
+}
+
+func (manager *Manager) loadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	// Load the keyspace with target ID.
 	keyspace := &keyspacepb.KeyspaceMeta{}
-	loaded, err = manager.store.LoadKeyspace(spaceID, keyspace)
+	loaded, err := manager.store.LoadKeyspace(spaceID, keyspace)
 	if err != nil {
 		return nil, err
 	}
@@ -188,10 +201,18 @@ const (
 // UpdateKeyspaceConfig changes target keyspace's config in the order specified in mutations.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
-	manager.metaLock.Lock()
-	defer manager.metaLock.Unlock()
-	// Load keyspace by name.
-	keyspace, err := manager.LoadKeyspace(name)
+	// First get KeyspaceID from Name.
+	loaded, spaceID, err := manager.store.LoadKeyspaceIDByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if !loaded {
+		return nil, ErrKeyspaceNotFound
+	}
+	manager.metaLock.lock(spaceID)
+	defer manager.metaLock.unlock(spaceID)
+	// Load keyspace by id.
+	keyspace, err := manager.loadKeyspaceByID(spaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -227,10 +248,18 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	if name == DefaultKeyspaceName {
 		return nil, errModifyDefault
 	}
-	manager.metaLock.Lock()
-	defer manager.metaLock.Unlock()
-	// Load keyspace by name.
-	keyspace, err := manager.LoadKeyspace(name)
+	// First get KeyspaceID from Name.
+	loaded, spaceID, err := manager.store.LoadKeyspaceIDByName(name)
+	if err != nil {
+		return nil, err
+	}
+	if !loaded {
+		return nil, ErrKeyspaceNotFound
+	}
+	manager.metaLock.lock(spaceID)
+	defer manager.metaLock.unlock(spaceID)
+	// Load keyspace by id.
+	keyspace, err := manager.loadKeyspaceByID(spaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -283,17 +312,7 @@ func (manager *Manager) allocID() (uint32, error) {
 }
 
 // createNameToID create a keyspace name to ID lookup entry.
-// It returns error if saving keyspace name meet error or if name has already been taken.
+// It returns error if saving keyspace name meet error.
 func (manager *Manager) createNameToID(spaceID uint32, name string) error {
-	manager.idLock.Lock()
-	defer manager.idLock.Unlock()
-
-	nameExists, _, err := manager.store.LoadKeyspaceIDByName(name)
-	if err != nil {
-		return err
-	}
-	if nameExists {
-		return ErrKeyspaceExists
-	}
 	return manager.store.SaveKeyspaceIDByName(spaceID, name)
 }
