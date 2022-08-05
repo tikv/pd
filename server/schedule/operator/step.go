@@ -48,6 +48,7 @@ type OpStep interface {
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	Timeout(start time.Time, regionSize int64) bool
+	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -115,6 +116,20 @@ func (tl TransferLeader) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
+	for _, storeID := range tl.ToStores {
+		peers = append(peers, region.GetStorePeer(storeID))
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		TransferLeader: &pdpb.TransferLeader{
+			Peer:  region.GetStorePeer(tl.ToStore),
+			Peers: peers,
+		},
+	}
+}
+
 // AddPeer is an OpStep that adds a region peer.
 type AddPeer struct {
 	ToStore, PeerID uint64
@@ -171,6 +186,16 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 // Timeout returns true if the step is timeout.
 func (ap AddPeer) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > slowStepWaitDuration(regionSize)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	peer := region.GetStorePeer(ap.ToStore)
+	if peer != nil {
+		// The newly added peer is pending.
+		return nil
+	}
+	return addNode(ap.PeerID, ap.ToStore, useConfChangeV2)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -237,6 +262,15 @@ func (al AddLearner) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > slowStepWaitDuration(regionSize)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if region.GetStorePeer(al.ToStore) != nil {
+		// The newly added peer is pending.
+		return nil
+	}
+	return addLearnerNode(al.PeerID, al.ToStore, useConfChangeV2)
+}
+
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
 type PromoteLearner struct {
 	ToStore, PeerID uint64
@@ -266,7 +300,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 // CheckInProgress checks if the step is in the progress of advancing.
 func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
-	if peer.GetId() != pl.PeerID {
+	if peer == nil || peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
 	return nil
@@ -278,6 +312,15 @@ func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 // Timeout returns true if the step is timeout.
 func (pl PromoteLearner) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (pl PromoteLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	peer := region.GetStorePeer(pl.ToStore)
+	if peer == nil {
+		return nil
+	}
+	return addNode(pl.PeerID, pl.ToStore, useConfChangeV2)
 }
 
 // RemovePeer is an OpStep that removes a region peer.
@@ -336,6 +379,11 @@ func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (rp RemovePeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	return removeNode(region.GetStorePeer(rp.FromStore), useConfChangeV2)
+}
+
 // MergeRegion is an OpStep that merge two regions.
 type MergeRegion struct {
 	FromRegion *metapb.Region
@@ -389,6 +437,18 @@ func (mr MergeRegion) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)*10
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (mr MergeRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if mr.IsPassive {
+		return nil
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		Merge: &pdpb.Merge{
+			Target: mr.ToRegion,
+		},
+	}
+}
+
 // SplitRegion is an OpStep that splits a region.
 type SplitRegion struct {
 	StartKey, EndKey []byte
@@ -431,6 +491,16 @@ func (sr SplitRegion) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		SplitRegion: &pdpb.SplitRegion{
+			Policy: sr.Policy,
+			Keys:   sr.SplitKeys,
+		},
+	}
+}
+
 // DemoteVoter is very similar to DemoteFollower. But it allows Demote Leader.
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
@@ -461,6 +531,15 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 // Timeout returns true if the step is timeout.
 func (dv DemoteVoter) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (dv DemoteVoter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	peer := region.GetStorePeer(dv.ToStore)
+	if peer == nil {
+		return nil
+	}
+	return addLearnerNode(dv.PeerID, dv.ToStore, useConfChangeV2)
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -576,38 +655,30 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.Reg
 // Influence calculates the store difference that current step makes.
 func (cpe ChangePeerV2Enter) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
-// GetRequest get the ChangePeerV2 request
-func (cpe ChangePeerV2Enter) GetRequest() *pdpb.ChangePeerV2 {
-	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
-	for _, pl := range cpe.PromoteLearners {
-		changes = append(changes, &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddNode,
-			Peer: &metapb.Peer{
-				Id:      pl.PeerID,
-				StoreId: pl.ToStore,
-				Role:    metapb.PeerRole_Voter,
-			},
-		})
-	}
-	for _, dv := range cpe.DemoteVoters {
-		changes = append(changes, &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-			Peer: &metapb.Peer{
-				Id:      dv.PeerID,
-				StoreId: dv.ToStore,
-				Role:    metapb.PeerRole_Learner,
-			},
-		})
-	}
-	return &pdpb.ChangePeerV2{
-		Changes: changes,
-	}
-}
-
 // Timeout returns true if the step is timeout.
 func (cpe ChangePeerV2Enter) Timeout(start time.Time, regionSize int64) bool {
 	count := uint64(len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) + 1
 	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// only supported in ChangePeerV2
+		return nil
+	}
+	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
+	for _, pl := range cpe.PromoteLearners {
+		changes = append(changes, pl.GetCmd(region, useConfChangeV2).ChangePeer)
+	}
+	for _, dv := range cpe.DemoteVoters {
+		changes = append(changes, dv.GetCmd(region, useConfChangeV2).ChangePeer)
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeerV2: &pdpb.ChangePeerV2{
+			Changes: changes,
+		},
+	}
 }
 
 // ChangePeerV2Leave is an OpStep that leaves the joint state.
@@ -735,6 +806,17 @@ func (cpl ChangePeerV2Leave) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// only supported in ChangePeerV2
+		return nil
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeerV2: &pdpb.ChangePeerV2{},
+	}
+}
+
 func validateStore(ci ClusterInformer, id uint64) error {
 	store := ci.GetBasicCluster().GetStore(id)
 	if store == nil {
@@ -762,4 +844,50 @@ func fastStepWaitDuration(regionSize int64) time.Duration {
 		wait = FastOperatorWaitTime
 	}
 	return wait
+}
+
+func addNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	change := &pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_AddNode,
+		Peer: &metapb.Peer{
+			Id:      id,
+			StoreId: storeID,
+			Role:    metapb.PeerRole_Voter,
+		},
+	}
+	return createResponse(change, useConfChangeV2)
+}
+
+func addLearnerNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	change := &pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+		Peer: &metapb.Peer{
+			Id:      id,
+			StoreId: storeID,
+			Role:    metapb.PeerRole_Learner,
+		},
+	}
+	return createResponse(change, useConfChangeV2)
+}
+
+func removeNode(peer *metapb.Peer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	change := &pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_RemoveNode,
+		Peer:       peer,
+	}
+	return createResponse(change, useConfChangeV2)
+}
+
+func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if useConfChangeV2 {
+		return &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: &pdpb.ChangePeerV2{
+				Changes: []*pdpb.ChangePeer{change},
+			},
+		}
+	} else {
+		return &pdpb.RegionHeartbeatResponse{
+			ChangePeer: change,
+		}
+	}
 }
