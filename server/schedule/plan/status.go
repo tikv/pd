@@ -26,9 +26,12 @@ const (
 	StatusNoNeed
 	// StatusPaused represents the scheduler or checker is paused.
 	StatusPaused
+)
 
+// status for store.
+const (
 	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
-	StatusStoreThrottled
+	StatusStoreThrottled StatusCode = iota + 400
 	// StatusStoreUnavailable represents the store cannot be selected due to it's state.
 	StatusStoreUnavailable
 	// StatusStoreLowSpace represents the store cannot be selected because it runs out of space.
@@ -39,27 +42,34 @@ const (
 	StatusStoreBlocked
 	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
 	StatusStoreExcluded
+)
 
+// status for region
+const (
 	// StatusRegionHot represents the region cannot be selected due to the heavy load.
-	StatusRegionHot
+	StatusRegionHot StatusCode = iota + 500
 	// StatusRegionUnhealthy represents the region cannot be selected due to the region health.
 	StatusRegionUnhealthy
 	// StatusRegionEmpty represents the region cannot be selected due to the region is empty.
 	StatusRegionEmpty
 	// StatusRegionNotReplicated represents the region does not have enough replicas.
 	StatusRegionNotReplicated
+)
 
+// status for rules.
+const (
 	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
-	StatusLabelNotMatch
+	StatusLabelNotMatch StatusCode = iota + 550
 	// StatusRuleNotMatch represents the placement rule cannot satisfy the requirement.
 	StatusRuleNotMatch
 	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
 	StatusIsolationNotMatch
+)
 
-	// TODO: The below status is not used for now. Once it is used, Please remove this comment.
-
+// TODO: The below status is not used for now. Once it is used, Please remove this comment.
+const (
 	// StatusStoreNotExisted represents the store cannot be found in PD.
-	StatusStoreNotExisted
+	StatusStoreNotExisted StatusCode = iota + 600
 	// StatusNoTargetRegion represents the target region of merge operation cannot be found.
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
