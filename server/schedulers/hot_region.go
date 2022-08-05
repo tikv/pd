@@ -363,7 +363,7 @@ type solution struct {
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
-func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
+func (s *solution) getExtremeLoad(dim int) (srcLoad, dstLoad, maxPendingLoad float64) {
 	srcCurrentLoad := s.srcStore.LoadPred.Current.Loads[dim]
 	srcFutureLoad := s.srcStore.LoadPred.Future.Loads[dim]
 	dstCurrentLoad := s.dstStore.LoadPred.Current.Loads[dim]
@@ -374,10 +374,15 @@ func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
 		fmt.Sprintf("src-cur-load: %.0f, src-fut-load: %.0f, dst-cur-load: %.0f, dst-fut-load: %.0f, peersRate: %0.f",
 			srcCurrentLoad, srcFutureLoad, dstCurrentLoad, dstFutureLoad, peersRate))
 
-	if peersRate >= 0 {
-		return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
+	maxPendingLoad = math.Abs(srcFutureLoad-srcCurrentLoad) + math.Abs(dstFutureLoad-dstCurrentLoad)
+	if srcCurrentLoad-peersRate >= dstCurrentLoad+peersRate {
+		srcLoad = math.Min(srcCurrentLoad, srcFutureLoad)
+		dstLoad = math.Max(dstCurrentLoad, dstFutureLoad)
+	} else {
+		srcLoad = math.Max(srcCurrentLoad, srcFutureLoad)
+		dstLoad = math.Min(dstCurrentLoad, dstFutureLoad)
 	}
-	return s.srcStore.LoadPred.Max().Loads[dim], s.dstStore.LoadPred.Min().Loads[dim]
+	return
 }
 
 // getCurrentLoad returns the current load of the src store and the dst store.
@@ -1050,7 +1055,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-dim, %s-type, %s-type",
 		dimToString(dim), bs.rwTy.String(), bs.opTy.String()))
 
-	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
+	srcRate, dstRate, maxPendingRate := bs.cur.getExtremeLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
 	reverse := false
@@ -1125,7 +1130,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		greaterMinRate := peersRate >= bs.getMinRate(dim)
 		isTolerance := bs.isTolerance(dim, reverse)
 		otherMessage = fmt.Sprintf(", >=min-rate: %t, is-tolerance: %t", greaterMinRate, isTolerance)
-		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) {
+		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) && (state == "non-balanced" || maxPendingRate < 1) {
 			cmp = 1
 		} else {
 			cmp = 0
