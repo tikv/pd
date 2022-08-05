@@ -43,6 +43,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Run:   removeFailedStoresCommandFunc,
 	}
 	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
+	cmd.PersistentFlags().Bool("force", false, "ignore failed store ids safety check")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	return cmd
 }
@@ -75,6 +76,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	postInput := map[string]interface{}{
 		"stores": stores,
 	}
+
 	timeout, err := cmd.Flags().GetFloat64("timeout")
 	if err != nil {
 		cmd.Println(err)
@@ -82,6 +84,15 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	} else if timeout != 300 {
 		postInput["timeout"] = timeout
 	}
+
+	force, err := cmd.Flags().GetBool("force")
+	if err != nil {
+		cmd.Println(err)
+		return
+	} else if force {
+		postInput["force"] = ""
+	}
+
 	postJSON(cmd, prefix, postInput)
 }
 
