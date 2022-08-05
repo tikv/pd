@@ -133,7 +133,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 		FilterSource(cluster.GetOpts(), s.filters...).
 		Shuffle()
 
-	pendingFilter := filter.NewRegionPengdingFilter()
+	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	for _, source := range candidates.Stores {

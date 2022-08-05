@@ -894,6 +894,13 @@ func (suite *clientTestSuite) TestGetRegion() {
 		return r.Buckets == nil
 	})
 	config.EnableRegionBucket = true
+
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
+	suite.NoError(suite.reportBucket.Send(breq))
+	suite.Error(suite.reportBucket.RecvMsg(breq))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"))
 }
 
 func (suite *clientTestSuite) TestGetPrevRegion() {
