@@ -36,7 +36,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
-				if status != statusStoreTombstone {
+				if status != statusStoreRemoved {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
 					targetID := ""
 					filterCounter.WithLabelValues("filter-source", s.GetAddress(),
@@ -56,7 +56,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
-				if status != statusStoreTombstone {
+				if status != statusStoreRemoved {
 					cfilter, ok := filter.(comparingFilter)
 					targetID := strconv.FormatUint(s.GetID(), 10)
 					sourceID := ""
@@ -107,7 +107,7 @@ func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	for _, filter := range filters {
 		status := filter.Source(opt, store)
 		if !status.IsOK() {
-			if status != statusStoreTombstone {
+			if status != statusStoreRemoved {
 				sourceID := storeID
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", storeAddress,
@@ -126,7 +126,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 	for _, filter := range filters {
 		status := filter.Target(opt, store)
 		if !status.IsOK() {
-			if status != statusStoreTombstone {
+			if status != statusStoreRemoved {
 				cfilter, ok := filter.(comparingFilter)
 				targetID := storeID
 				sourceID := ""
@@ -167,14 +167,14 @@ func (f *excludedFilter) Type() string {
 
 func (f *excludedFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if _, ok := f.sources[store.GetID()]; ok {
-		return statusStoreExcluded
+		return statusStoreAlreadyHasPeer
 	}
 	return statusOK
 }
 
 func (f *excludedFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if _, ok := f.targets[store.GetID()]; ok {
-		return statusStoreExcluded
+		return statusStoreAlreadyHasPeer
 	}
 	return statusOK
 }
@@ -280,7 +280,7 @@ func (f *distinctScoreFilter) Target(opt *config.PersistOptions, store *core.Sto
 		}
 	default:
 	}
-	return statusStoreIsolation
+	return statusStoreNotMatchIsolation
 }
 
 // GetSourceStoreID implements the ComparingFilter
@@ -321,7 +321,7 @@ type conditionFunc func(*config.PersistOptions, *core.StoreInfo) plan.Status
 func (f *StoreStateFilter) isRemoved(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if store.IsRemoved() {
 		f.Reason = "tombstone"
-		return statusStoreTombstone
+		return statusStoreRemoved
 	}
 	f.Reason = ""
 	return statusOK
@@ -340,7 +340,7 @@ func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreI
 func (f *StoreStateFilter) isRemoving(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if store.IsRemoving() {
 		f.Reason = "offline"
-		return statusStoresOffline
+		return statusStoresRemoving
 	}
 	f.Reason = ""
 	return statusOK
@@ -349,7 +349,7 @@ func (f *StoreStateFilter) isRemoving(opt *config.PersistOptions, store *core.St
 func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if !store.AllowLeaderTransfer() {
 		f.Reason = "pause-leader"
-		return statusStorePauseLeader
+		return statusStoreRejectLeader
 	}
 	f.Reason = ""
 	return statusOK
@@ -358,7 +358,7 @@ func (f *StoreStateFilter) pauseLeaderTransfer(opt *config.PersistOptions, store
 func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if store.EvictedAsSlowStore() {
 		f.Reason = "slow-store"
-		return statusStoreSlow
+		return statusStoreRejectLeader
 	}
 	f.Reason = ""
 	return statusOK
@@ -404,7 +404,7 @@ func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *c
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount()) {
 		f.Reason = "too-many-snapshot"
-		return statusStoreTooManySnapshot
+		return statusStoreSnapshotThrottled
 	}
 	f.Reason = ""
 	return statusOK
@@ -415,7 +415,7 @@ func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
 		f.Reason = "too-many-pending-peer"
-		return statusStoreTooManyPendingPeer
+		return statusStorePendingPeerThrottled
 	}
 	f.Reason = ""
 	return statusOK
@@ -538,7 +538,7 @@ func (f labelConstraintFilter) Source(opt *config.PersistOptions, store *core.St
 	if placement.MatchLabelConstraints(store, f.constraints) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 // Target filters stores when select them as schedule target.
@@ -546,7 +546,7 @@ func (f labelConstraintFilter) Target(opt *config.PersistOptions, store *core.St
 	if placement.MatchLabelConstraints(store, f.constraints) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 type ruleFitFilter struct {
@@ -592,7 +592,7 @@ func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.Store
 	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
 		return statusOK
 	}
-	return statusStoreRule
+	return statusStoreNotMatchRule
 }
 
 // GetSourceStoreID implements the ComparingFilter
@@ -638,7 +638,7 @@ func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core
 	targetPeer := f.region.GetStorePeer(store.GetID())
 	if targetPeer == nil {
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-		return statusStoreRule
+		return statusStoreNotMatchRule
 	}
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(),
@@ -647,7 +647,7 @@ func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core
 	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
 		return statusOK
 	}
-	return statusStoreRule
+	return statusStoreNotMatchRule
 }
 
 func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
@@ -698,14 +698,14 @@ func (f *engineFilter) Source(opt *config.PersistOptions, store *core.StoreInfo)
 	if f.constraint.MatchStore(store) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 func (f *engineFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if f.constraint.MatchStore(store) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 type specialUseFilter struct {
@@ -741,14 +741,14 @@ func (f *specialUseFilter) Source(opt *config.PersistOptions, store *core.StoreI
 	if store.IsLowSpace(opt.GetLowSpaceRatio()) || !f.constraint.MatchStore(store) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 func (f *specialUseFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if !f.constraint.MatchStore(store) {
 		return statusOK
 	}
-	return statusStoreLabel
+	return statusStoreNotMatchRule
 }
 
 const (
@@ -818,7 +818,7 @@ func (f *isolationFilter) Source(opt *config.PersistOptions, store *core.StoreIn
 func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	// No isolation constraint to fit
 	if len(f.constraintSet) == 0 {
-		return statusStoreIsolation
+		return statusStoreNotMatchIsolation
 	}
 	for _, constrainList := range f.constraintSet {
 		match := true
@@ -827,7 +827,7 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 			match = store.GetLabelValue(f.locationLabels[idx]) == constraint && match
 		}
 		if len(constrainList) > 0 && match {
-			return statusStoreIsolation
+			return statusStoreNotMatchIsolation
 		}
 	}
 	return statusOK
@@ -890,5 +890,5 @@ func (f *RegionScoreFilter) Target(opt *config.PersistOptions, store *core.Store
 	if score < f.score {
 		return statusOK
 	}
-	return statusNoNeed
+	return statusScoreAlmostSame
 }
