@@ -746,7 +746,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
 	region := cluster.GetRegion(op.RegionID())
 	if region != nil {
-		op.UnfinishedInfluence(influence, region)
+		op.TotalInfluence(influence, region)
 	}
 }
 
