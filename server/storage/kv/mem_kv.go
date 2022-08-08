@@ -23,13 +23,15 @@ import (
 
 type memoryKV struct {
 	syncutil.RWMutex
-	tree *btree.BTree
+	tree *btree.BTreeG[memoryKVItem]
 }
 
 // NewMemoryKV returns an in-memory kvBase for testing.
 func NewMemoryKV() Base {
 	return &memoryKV{
-		tree: btree.New(2),
+		tree: btree.NewG(2, func(i, j memoryKVItem) bool {
+			return i.Less(&j)
+		}),
 	}
 }
 
@@ -37,18 +39,18 @@ type memoryKVItem struct {
 	key, value string
 }
 
-func (s memoryKVItem) Less(than btree.Item) bool {
-	return s.key < than.(memoryKVItem).key
+func (s *memoryKVItem) Less(than *memoryKVItem) bool {
+	return s.key < than.key
 }
 
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	item := kv.tree.Get(memoryKVItem{key, ""})
-	if item == nil {
+	item, ok := kv.tree.Get(memoryKVItem{key, ""})
+	if !ok {
 		return "", nil
 	}
-	return item.(memoryKVItem).value, nil
+	return item.value, nil
 }
 
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
@@ -62,9 +64,9 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	defer kv.RUnlock()
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
-	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item btree.Item) bool {
-		keys = append(keys, item.(memoryKVItem).key)
-		values = append(values, item.(memoryKVItem).value)
+	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
+		keys = append(keys, item.key)
+		values = append(values, item.value)
 		if limit > 0 {
 			return len(keys) < limit
 		}

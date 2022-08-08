@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
@@ -212,12 +213,14 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
+	pendingFilter := filter.NewRegionPendingFilter()
+	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWitRanges {
-		region := cluster.RandLeaderRegion(id, ranges, schedule.IsRegionHealthy)
+		region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, ranges), pendingFilter, downFilter)
 		if region == nil {
 			continue
 		}
@@ -236,7 +239,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		ops = append(ops, op)
 	}
 
-	return ops
+	return ops, nil
 }
 
 type evictLeaderHandler struct {
@@ -320,9 +323,9 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
-	router.HandleFunc("/list", h.ListConfig).Methods("GET")
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods("DELETE")
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
 	return router
 }
 

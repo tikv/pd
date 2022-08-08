@@ -113,7 +113,7 @@ func TestFitRegion(t *testing.T) {
 	re := require.New(t)
 	stores := makeStores()
 
-	cases := []struct {
+	testCases := []struct {
 		region   string
 		rules    []string
 		fitPeers string
@@ -138,14 +138,14 @@ func TestFitRegion(t *testing.T) {
 		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
 	}
 
-	for _, cc := range cases {
-		region := makeRegion(cc.region)
+	for _, testCase := range testCases {
+		region := makeRegion(testCase.region)
 		var rules []*Rule
-		for _, r := range cc.rules {
+		for _, r := range testCase.rules {
 			rules = append(rules, makeRule(r))
 		}
 		rf := fitRegion(stores.GetStores(), region, rules)
-		expects := strings.Split(cc.fitPeers, "/")
+		expects := strings.Split(testCase.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			re.True(checkPeerMatch(f.Peers, expects[i]))
 		}
@@ -180,10 +180,42 @@ func TestIsolationScore(t *testing.T) {
 		return peers
 	}
 
-	for _, tc := range testCases {
-		peers1, peers2 := makePeers(tc.peers1), makePeers(tc.peers2)
+	for _, testCase := range testCases {
+		peers1, peers2 := makePeers(testCase.peers1), makePeers(testCase.peers2)
 		score1 := isolationScore(peers1, []string{"zone", "rack", "host"})
 		score2 := isolationScore(peers2, []string{"zone", "rack", "host"})
-		tc.checker(score1, score2)
+		testCase.checker(score1, score2)
+	}
+}
+
+func TestPickPeersFromBinaryInt(t *testing.T) {
+	re := require.New(t)
+	var candidates []*fitPeer
+	for id := uint64(1); id <= 10; id++ {
+		candidates = append(candidates, &fitPeer{
+			Peer: &metapb.Peer{Id: id},
+		})
+	}
+	testCases := []struct {
+		binary        string
+		expectedPeers []uint64
+	}{
+		{"0", []uint64{}},
+		{"1", []uint64{1}},
+		{"101", []uint64{1, 3}},
+		{"111", []uint64{1, 2, 3}},
+		{"1011", []uint64{1, 2, 4}},
+		{"100011", []uint64{1, 2, 6}},
+		{"1000001111", []uint64{1, 2, 3, 4, 10}},
+	}
+
+	for _, c := range testCases {
+		binaryNumber, err := strconv.ParseUint(c.binary, 2, 64)
+		re.NoError(err)
+		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
+		re.Len(selected, len(c.expectedPeers))
+		for id := 0; id < len(selected); id++ {
+			re.Equal(selected[id].Id, c.expectedPeers[id])
+		}
 	}
 }

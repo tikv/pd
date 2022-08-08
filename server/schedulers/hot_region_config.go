@@ -221,6 +221,12 @@ func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
 	return conf.GreatDecRatio
 }
 
+func (conf *hotRegionSchedulerConfig) SetStrictPickingStore(v bool) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.StrictPickingStore = v
+}
+
 func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -289,8 +295,8 @@ func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool 
 
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
-	router.HandleFunc("/list", conf.handleGetConfig).Methods("GET")
-	router.HandleFunc("/config", conf.handleSetConfig).Methods("POST")
+	router.HandleFunc("/list", conf.handleGetConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", conf.handleSetConfig).Methods(http.MethodPost)
 	router.ServeHTTP(w, r)
 }
 

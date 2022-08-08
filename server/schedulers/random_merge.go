@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
@@ -99,7 +100,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Operator {
+func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
@@ -107,12 +108,14 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 		RandomPick()
 	if store == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
-		return nil
+		return nil, nil
 	}
-	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, schedule.IsRegionHealthy)
+	pendingFilter := filter.NewRegionPendingFilter()
+	downFilter := filter.NewRegionDownFilter()
+	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), pendingFilter, downFilter)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
-		return nil
+		return nil, nil
 	}
 
 	other, target := cluster.GetAdjacentRegions(region)
@@ -121,28 +124,28 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster) []*operator.Op
 	}
 	if target == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
-		return nil
+		return nil, nil
 	}
 
 	if !s.allowMerge(cluster, region, target) {
 		schedulerCounter.WithLabelValues(s.GetName(), "not-allowed").Inc()
-		return nil
+		return nil, nil
 	}
 
 	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
-		return nil
+		return nil, nil
 	}
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-	return ops
+	return ops, nil
 }
 
 func (s *randomMergeScheduler) allowMerge(cluster schedule.Cluster, region, target *core.RegionInfo) bool {
-	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionHealthy(target) {
+	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}
-	if !schedule.IsRegionReplicated(cluster, region) || !schedule.IsRegionReplicated(cluster, target) {
+	if !filter.IsRegionReplicated(cluster, region) || !filter.IsRegionReplicated(cluster, target) {
 		return false
 	}
 	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {

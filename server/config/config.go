@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -203,12 +204,12 @@ const (
 	defaultLeaderLease             = int64(3)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
-	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
 
 	// The default max bytes for grpc message
 	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
-	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
-	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
+	defaultMaxRequestBytes = uint(150 * units.MiB) // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -245,8 +246,7 @@ const (
 
 	defaultDashboardAddress = "auto"
 
-	defaultDRWaitStoreTimeout    = time.Minute
-	defaultDRTiKVSyncTimeoutHint = time.Minute
+	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -963,6 +963,9 @@ func (c *ScheduleConfig) Validate() error {
 	if c.LowSpaceRatio <= c.HighSpaceRatio {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
 	}
+	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
+		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
+	}
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
@@ -1202,6 +1205,9 @@ func (c *PDServerConfig) Validate() error {
 			return err
 		}
 	}
+	if c.KeyType != "table" && c.KeyType != "raw" && c.KeyType != "txn" {
+		return errors.Errorf("key-type %v is invalid", c.KeyType)
+	}
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
@@ -1393,22 +1399,18 @@ func NormalizeReplicationMode(m string) string {
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
 type DRAutoSyncReplicationConfig struct {
-	LabelKey            string            `toml:"label-key" json:"label-key"`
-	Primary             string            `toml:"primary" json:"primary"`
-	DR                  string            `toml:"dr" json:"dr"`
-	PrimaryReplicas     int               `toml:"primary-replicas" json:"primary-replicas"`
-	DRReplicas          int               `toml:"dr-replicas" json:"dr-replicas"`
-	WaitStoreTimeout    typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
-	TiKVSyncTimeoutHint typeutil.Duration `toml:"tikv-sync-timeout-hint" json:"tikv-sync-timeout-hint"`
-	PauseRegionSplit    bool              `toml:"pause-region-split" json:"pause-region-split,string"`
+	LabelKey         string            `toml:"label-key" json:"label-key"`
+	Primary          string            `toml:"primary" json:"primary"`
+	DR               string            `toml:"dr" json:"dr"`
+	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
-	}
-	if !meta.IsDefined("tikv-sync-timeout-hint") {
-		c.TiKVSyncTimeoutHint = typeutil.NewDuration(defaultDRTiKVSyncTimeoutHint)
 	}
 }
 

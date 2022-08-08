@@ -109,11 +109,11 @@ func testRange(re *require.Assertions, kv Base) {
 		{start: "test", end: clientv3.GetPrefixRangeEnd("test/"), limit: 100, expect: []string{"test", "test-a", "test-a/a", "test-a/ab", "test/a", "test/ab"}},
 	}
 
-	for _, tc := range testCases {
-		ks, vs, err := kv.LoadRange(tc.start, tc.end, tc.limit)
+	for _, testCase := range testCases {
+		ks, vs, err := kv.LoadRange(testCase.start, testCase.end, testCase.limit)
 		re.NoError(err)
-		re.Equal(tc.expect, ks)
-		re.Equal(tc.expect, vs)
+		re.Equal(testCase.expect, ks)
+		re.Equal(testCase.expect, vs)
 	}
 }
 

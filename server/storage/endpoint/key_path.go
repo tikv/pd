@@ -17,7 +17,6 @@ package endpoint
 import (
 	"fmt"
 	"path"
-	"strconv"
 )
 
 const (
@@ -33,8 +32,12 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
-	keyspaceSafePointPath      = "keyspace/gc_safe_point"
+	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
 	keyspaceGCSafePointSuffix  = "gc"
+	keyspacePrefix             = "keyspaces"
+	keyspaceMetaInfix          = "meta"
+	keyspaceIDInfix            = "id"
+	keyspaceAllocID            = "alloc_id"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -108,39 +111,65 @@ func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
 }
 
-// KeyspaceSafePointPrefix returns prefix for given keyspace's safe points
-// Prefix: /keyspace/gc_safe_point/{space_id}
-func KeyspaceSafePointPrefix(spaceID uint32) string {
-	spaceIDStr := strconv.FormatUint(uint64(spaceID), 10)
-	return path.Join(keyspaceSafePointPath, spaceIDStr)
+// KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
+// Prefix: /keyspaces/gc_safepoint/{space_id}/service/
+func KeySpaceServiceSafePointPrefix(spaceID string) string {
+	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
 }
 
-// KeyspaceGCSafePointPath returns the gc safe point's path of the given keyspace.
-// Path: /keyspace/gc_safe_point/{space_id}/gc
-func KeyspaceGCSafePointPath(spaceID uint32) string {
-	return path.Join(KeyspaceSafePointPrefix(spaceID), keyspaceGCSafePointSuffix)
+// KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
+// Path: /keyspaces/gc_safepoint/{space_id}/gc
+func KeySpaceGCSafePointPath(spaceID string) string {
+	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
 }
 
-// KeyspaceServiceSafePointPrefix returns the prefix of given service's service safe point.
-// Prefix: /keyspace/gc_safe_point/{space_id}/service/
-func KeyspaceServiceSafePointPrefix(spaceID uint32) string {
-	return path.Join(KeyspaceSafePointPrefix(spaceID), "service") + "/"
+// KeySpaceServiceSafePointPath returns the path of given service's service safe point.
+// Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
+func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
+	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
-// KeyspaceServiceSafePointPath returns the path of given service's service safe point.
-// Path: /keyspace/gc_safe_point/{space_id}/service/{service_id}
-func KeyspaceServiceSafePointPath(spaceID uint32, serviceID string) string {
-	return path.Join(KeyspaceServiceSafePointPrefix(spaceID), serviceID)
+// KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
+// Path: /keyspaces/gc_safepoint/
+func KeySpaceSafePointPrefix() string {
+	return keyspaceSafePointPrefix + "/"
 }
 
-// KeyspaceSafePointPath returns the path to keyspace safe point storage.
-// Path: keyspace/gc_safe_point/
-func KeyspaceSafePointPath() string {
-	return keyspaceSafePointPath + "/"
-}
-
-// KeySpaceGCSafePointSuffix returns the suffix for any gc safe point.
+// KeySpaceGCSafePointSuffix returns the suffix for any gc safepoint.
 // Postfix: /gc
 func KeySpaceGCSafePointSuffix() string {
 	return "/" + keyspaceGCSafePointSuffix
+}
+
+// KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
+// Prefix: keyspaces/meta/
+func KeyspaceMetaPrefix() string {
+	return path.Join(keyspacePrefix, keyspaceMetaInfix) + "/"
+}
+
+// KeyspaceMetaPath returns the path to the given keyspace's metadata.
+// Path: keyspaces/meta/{space_id}
+func KeyspaceMetaPath(spaceID uint32) string {
+	idStr := encodeKeyspaceID(spaceID)
+	return path.Join(KeyspaceMetaPrefix(), idStr)
+}
+
+// KeyspaceIDPath returns the path to keyspace id from the given name.
+// Path: keyspaces/id/{name}
+func KeyspaceIDPath(name string) string {
+	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
+}
+
+// KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
+// Path: keyspaces/alloc_id
+func KeyspaceIDAlloc() string {
+	return path.Join(keyspacePrefix, keyspaceAllocID)
+}
+
+// encodeKeyspaceID from uint32 to string.
+// It adds extra padding to make encoded ID ordered.
+// Encoded ID can be decoded directly with strconv.ParseUint.
+// Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
+func encodeKeyspaceID(spaceID uint32) string {
+	return fmt.Sprintf("%08d", spaceID)
 }
