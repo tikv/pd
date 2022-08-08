@@ -17,8 +17,6 @@ package endpoint
 import (
 	"fmt"
 	"path"
-	"strconv"
-	"strings"
 )
 
 const (
@@ -34,8 +32,8 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
-	keySpaceSafePointPrefix    = "key_space/gc_safepoint"
-	keySpaceGCSafePointSuffix  = "gc"
+	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
+	keyspaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
@@ -114,33 +112,33 @@ func MinResolvedTSPath() string {
 }
 
 // KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
-// Prefix: /key_space/gc_safepoint/{space_id}/service/
+// Prefix: /keyspaces/gc_safepoint/{space_id}/service/
 func KeySpaceServiceSafePointPrefix(spaceID string) string {
-	return path.Join(keySpaceSafePointPrefix, spaceID, "service") + "/"
+	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
 }
 
 // KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
-// Path: /key_space/gc_safepoint/{space_id}/gc
+// Path: /keyspaces/gc_safepoint/{space_id}/gc
 func KeySpaceGCSafePointPath(spaceID string) string {
-	return path.Join(keySpaceSafePointPrefix, spaceID, keySpaceGCSafePointSuffix)
+	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
 }
 
 // KeySpaceServiceSafePointPath returns the path of given service's service safe point.
-// Path: /key_space/gc_safepoint/{space_id}/service/{service_id}
+// Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
 func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
 	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
 // KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
-// Path: /key_space/gc_safepoint/
+// Path: /keyspaces/gc_safepoint/
 func KeySpaceSafePointPrefix() string {
-	return keySpaceSafePointPrefix + "/"
+	return keyspaceSafePointPrefix + "/"
 }
 
 // KeySpaceGCSafePointSuffix returns the suffix for any gc safepoint.
 // Postfix: /gc
 func KeySpaceGCSafePointSuffix() string {
-	return "/" + keySpaceGCSafePointSuffix
+	return "/" + keyspaceGCSafePointSuffix
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
@@ -171,7 +169,7 @@ func KeyspaceIDAlloc() string {
 // encodeKeyspaceID from uint32 to string.
 // It adds extra padding to make encoded ID ordered.
 // Encoded ID can be decoded directly with strconv.ParseUint.
+// Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 func encodeKeyspaceID(spaceID uint32) string {
-	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
-	return strings.Repeat("0", spaceIDStrLen-len(idStr)) + idStr
+	return fmt.Sprintf("%08d", spaceID)
 }

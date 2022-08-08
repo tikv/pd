@@ -27,10 +27,10 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-func TestRegionPengdingFilter(t *testing.T) {
+func TestRegionPendingFilter(t *testing.T) {
 	re := require.New(t)
 
-	filter := NewRegionPengdingFilter()
+	filter := NewRegionPendingFilter()
 	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
 		{StoreId: 1, Id: 1},
 		{StoreId: 2, Id: 2},
