@@ -653,7 +653,7 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.Stringer("step", step),
 		zap.String("source", source))
 
-	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.cluster.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
+	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.cluster.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
