@@ -123,13 +123,13 @@ func KeySpaceGCSafePointPath(spaceID string) string {
 }
 
 // KeySpaceServiceSafePointPath returns the path of given service's service safe point.
-// Path: /key_space/gc_safepoint/{space_id}/service/{service_id}
+// Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
 func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
 	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
 // KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
-// Path: /key_space/gc_safepoint/
+// Path: /keyspaces/gc_safepoint/
 func KeySpaceSafePointPrefix() string {
 	return keyspaceSafePointPrefix + "/"
 }
