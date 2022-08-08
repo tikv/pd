@@ -307,7 +307,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			continue
 		}
 		var filters []filter.Filter
-		pendingFilter := filter.NewRegionPengdingFilter()
+		pendingFilter := filter.NewRegionPendingFilter()
 		downFilter := filter.NewRegionDownFilter()
 		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), pendingFilter, downFilter)
 		if region == nil {

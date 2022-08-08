@@ -116,7 +116,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
 		return nil, nil
 	}
-	pendingFilter := filter.NewRegionPengdingFilter()
+	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	region := filter.SelectOneRegion(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), pendingFilter, downFilter)
 	if region == nil {

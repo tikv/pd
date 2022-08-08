@@ -73,19 +73,19 @@ type RegionFilter interface {
 	Name() string
 }
 
-type regionPengdingFilter struct {
+type regionPendingFilter struct {
 }
 
-// NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
-func NewRegionPengdingFilter() RegionFilter {
-	return &regionPengdingFilter{}
+// NewRegionPendingFilter creates a RegionFilter that filters all regions with pending peers.
+func NewRegionPendingFilter() RegionFilter {
+	return &regionPendingFilter{}
 }
 
-func (f *regionPengdingFilter) Name() string {
+func (f *regionPendingFilter) Name() string {
 	return "regionPending"
 }
 
-func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionPendingFilter) Select(region *core.RegionInfo) plan.Status {
 	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
