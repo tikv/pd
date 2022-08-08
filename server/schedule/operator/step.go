@@ -885,9 +885,8 @@ func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionH
 				Changes: []*pdpb.ChangePeer{change},
 			},
 		}
-	} else {
-		return &pdpb.RegionHeartbeatResponse{
-			ChangePeer: change,
-		}
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: change,
 	}
 }
