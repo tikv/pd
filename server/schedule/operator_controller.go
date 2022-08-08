@@ -636,6 +636,14 @@ func (oc *OperatorController) GetOperator(regionID uint64) *operator.Operator {
 	return oc.operators[regionID]
 }
 
+// IsAvailableSend return ture if the store has free size to send snapshot.
+func (oc *OperatorController) IsAvailableSend(storeID uint64) bool {
+	oc.RLock()
+	defer oc.RUnlock()
+	store := oc.cluster.GetStore(storeID)
+	return store.IsAvailableSnap(storelimit.SendSnapShot)
+}
+
 // GetOperators gets operators from the running operators.
 func (oc *OperatorController) GetOperators() []*operator.Operator {
 	oc.RLock()

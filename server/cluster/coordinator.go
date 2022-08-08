@@ -17,6 +17,7 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"github.com/tikv/pd/server/core/storelimit"
 	"net/http"
 	"strconv"
 	"sync"
@@ -147,6 +148,11 @@ func (c *coordinator) patrolRegions() {
 		for _, region := range regions {
 			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
+				continue
+			}
+
+			store := c.cluster.GetStore(region.GetLeader().GetStoreId())
+			if store == nil || !store.IsAvailableSnap(storelimit.SendSnapShot) {
 				continue
 			}
 
