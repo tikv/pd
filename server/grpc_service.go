@@ -105,9 +105,8 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	members, err := s.Server.GetMembers()
 	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
+		// Should return a gRPC error to let the client, e.g, TiKV, retry.
+		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
@@ -122,9 +121,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
 	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
+		return nil, status.Errorf(codes.Unknown, err.Error())
 	}
 
 	leader := s.member.GetLeader()
