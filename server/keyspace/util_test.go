@@ -66,7 +66,7 @@ func TestValidateName(t *testing.T) {
 func TestLockGroup(t *testing.T) {
 	re := require.New(t)
 	group := newLockGroup()
-	concurrency := 2000
+	concurrency := 20
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -82,7 +82,7 @@ func TestLockGroup(t *testing.T) {
 
 // mustSequentialUpdateSingle checks that for any given update, update is sequential.
 func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *lockGroup) {
-	concurrency := 1000
+	concurrency := 100
 	total := 0
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
