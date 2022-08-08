@@ -161,7 +161,7 @@ func KeyspaceIDPath(name string) string {
 }
 
 // KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
-// Path: keyspace/alloc_id
+// Path: keyspaces/alloc_id
 func KeyspaceIDAlloc() string {
 	return path.Join(keyspacePrefix, keyspaceAllocID)
 }
