@@ -15,7 +15,11 @@
 package cases
 
 import (
+	"encoding/json"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/server/statistics"
 	"math/rand"
+	"os"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -77,6 +81,91 @@ func newHotRead() *Case {
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderCount := make([]int, storeNum)
+		for id := range readFlow {
+			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
+			leaderCount[int(leaderStore-1)]++
+		}
+		simutil.Logger.Info("current hot region counts", zap.Reflect("hot-region", leaderCount))
+
+		// check count diff < 2.
+		var min, max int
+		for i := range leaderCount {
+			if leaderCount[i] > leaderCount[max] {
+				max = i
+			}
+			if leaderCount[i] < leaderCount[min] {
+				min = i
+			}
+		}
+		return leaderCount[max]-leaderCount[min] < 2
+	}
+
+	return &simCase
+}
+
+func newHotReadFromFile() *Case {
+	var simCase Case
+
+	// unmarshal file
+	path := "/Users/thomas/Downloads/8.txt"
+	file, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatal("open file error", zap.Error(err))
+		return nil
+	}
+	var hotReadInfos statistics.StoreHotPeersInfos
+	err = json.Unmarshal(file, &hotReadInfos)
+	if err != nil {
+		log.Fatal("json unmarshal error", zap.Error(err))
+		return nil
+	}
+
+	// build case
+	regions := make(map[uint64]int)
+	readFlow := make(map[uint64]int64)
+	for storeID, store := range hotReadInfos.AsLeader {
+		simCase.Stores = append(simCase.Stores, &Store{
+			ID:        storeID,
+			Status:    metapb.StoreState_Up,
+			Capacity:  6 * units.TiB,
+			Available: 6 * units.GiB,
+			Version:   "2.1.0",
+		})
+		for _, region := range store.Stats {
+			if _, ok := regions[region.RegionID]; ok {
+				continue
+			}
+			regions[region.RegionID] = 1
+			readFlow[region.RegionID] = int64(statistics.StoreHeartBeatReportInterval*region.ByteRate/1024/1024) * units.MiB
+			var peers []*metapb.Peer
+			peers = append(peers, &metapb.Peer{
+				StoreId: storeID,
+			})
+			for _, peerStoreId := range region.Stores {
+				if peerStoreId == storeID {
+					continue
+				}
+				peers = append(peers, &metapb.Peer{
+					StoreId: peerStoreId,
+				})
+			}
+			simCase.Regions = append(simCase.Regions, Region{
+				Peers:  peers,
+				Leader: peers[0],
+				Size:   96 * units.MiB,
+				Keys:   960000,
+			})
+		}
+	}
+
+	e := &ReadFlowOnRegionDescriptor{}
+	e.Step = func(tick int64) map[uint64]int64 {
+		return readFlow
+	}
+	simCase.Events = []EventDescriptor{e}
+	// Checker description
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+		leaderCount := make([]int, len(hotReadInfos.AsLeader))
 		for id := range readFlow {
 			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
 			leaderCount[int(leaderStore-1)]++

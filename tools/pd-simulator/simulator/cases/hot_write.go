@@ -15,11 +15,15 @@
 package cases
 
 import (
+	"encoding/json"
+	"github.com/pingcap/log"
 	"math/rand"
+	"os"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -79,6 +83,102 @@ func newHotWrite() *Case {
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		leaderCount := make([]int, storeNum)
 		peerCount := make([]int, storeNum)
+		for id := range writeFlow {
+			region := regions.GetRegion(id)
+			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
+			for _, p := range region.GetPeers() {
+				peerCount[int(p.GetStoreId()-1)]++
+			}
+		}
+		simutil.Logger.Info("current hot region counts", zap.Reflect("leader", leaderCount), zap.Reflect("peer", peerCount))
+
+		// check count diff <= 2.
+		var minLeader, maxLeader, minPeer, maxPeer int
+		for i := range leaderCount {
+			if leaderCount[i] > leaderCount[maxLeader] {
+				maxLeader = i
+			}
+			if leaderCount[i] < leaderCount[minLeader] {
+				minLeader = i
+			}
+			if peerCount[i] > peerCount[maxPeer] {
+				maxPeer = i
+			}
+			if peerCount[i] < peerCount[minPeer] {
+				minPeer = i
+			}
+		}
+		return leaderCount[maxLeader]-leaderCount[minLeader] <= 2 && peerCount[maxPeer]-peerCount[minPeer] <= 2
+	}
+
+	return &simCase
+}
+
+func newHotWriteFromFile() *Case {
+	var simCase Case
+
+	// unmarshal file
+	path := "/Users/thomas/Downloads/8w.txt"
+	file, err := os.ReadFile(path)
+	if err != nil {
+		log.Error(err.Error())
+		return nil
+	}
+	var hotWriteInfos statistics.StoreHotPeersInfos
+	err = json.Unmarshal(file, &hotWriteInfos)
+	if err != nil {
+		log.Error(err.Error())
+		return nil
+	}
+
+	// build case
+	regions := make(map[uint64]int)
+	writeFlow := make(map[uint64]int64)
+	for storeID, store := range hotWriteInfos.AsLeader {
+		simCase.Stores = append(simCase.Stores, &Store{
+			ID:        storeID,
+			Status:    metapb.StoreState_Up,
+			Capacity:  6 * units.TiB,
+			Available: 6 * units.GiB,
+			Version:   "2.1.0",
+		})
+		for _, region := range store.Stats {
+			if _, ok := regions[region.RegionID]; ok {
+				continue
+			}
+			regions[region.RegionID] = 1
+			writeFlow[region.RegionID] = int64(statistics.StoreHeartBeatReportInterval*region.ByteRate/1024/1024) * units.MiB
+			var peers []*metapb.Peer
+			peers = append(peers, &metapb.Peer{
+				StoreId: storeID,
+			})
+			for _, peerStoreId := range region.Stores {
+				if peerStoreId == storeID {
+					continue
+				}
+				peers = append(peers, &metapb.Peer{
+					StoreId: peerStoreId,
+				})
+			}
+			simCase.Regions = append(simCase.Regions, Region{
+				Peers:  peers,
+				Leader: peers[0],
+				Size:   96 * units.MiB,
+				Keys:   960000,
+			})
+		}
+	}
+	e := &WriteFlowOnRegionDescriptor{}
+	e.Step = func(tick int64) map[uint64]int64 {
+		return writeFlow
+	}
+
+	simCase.Events = []EventDescriptor{e}
+
+	// Checker description
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+		leaderCount := make([]int, len(hotWriteInfos.AsLeader))
+		peerCount := make([]int, len(hotWriteInfos.AsLeader))
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
 			leaderCount[int(region.GetLeader().GetStoreId()-1)]++

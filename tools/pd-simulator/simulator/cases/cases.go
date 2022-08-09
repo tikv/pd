@@ -91,7 +91,9 @@ var CaseMap = map[string]func() *Case{
 	"region-split":             newRegionSplit,
 	"region-merge":             newRegionMerge,
 	"hot-read":                 newHotRead,
+	"hot-read-from-file":       newHotReadFromFile,
 	"hot-write":                newHotWrite,
+	"hot-write-from-file":      newHotWriteFromFile,
 	"makeup-down-replicas":     newMakeupDownReplicas,
 	"import-data":              newImportData,
 }
