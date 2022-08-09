@@ -702,7 +702,7 @@
       "timeFrom": "1s",
       "title": "Abnormal stores",
       "transform": "timeseries_aggregations",
-      "type": "table-old"
+      "type": "table"
     },
     {
       "alert": {
@@ -1280,7 +1280,7 @@
           "timeFrom": "1s",
           "title": "PD scheduler config",
           "transform": "timeseries_aggregations",
-          "type": "table-old"
+          "type": "table"
         },
         {
           "columns": [],
@@ -1403,7 +1403,7 @@
           "timeShift": null,
           "title": "Store limit",
           "transform": "table",
-          "type": "table-old"
+          "type": "table"
         },
         {
           "cacheTimeout": null,
@@ -1468,7 +1468,7 @@
           "timeShift": null,
           "title": "Cluster ID",
           "transform": "timeseries_aggregations",
-          "type": "table-old"
+          "type": "table"
         },
         {
           "columns": [
@@ -1548,7 +1548,7 @@
           "timeShift": null,
           "title": "Region label isolation level",
           "transform": "timeseries_aggregations",
-          "type": "table-old"
+          "type": "table"
         },
         {
           "columns": [
@@ -1635,7 +1635,7 @@
           "timeFrom": "1s",
           "title": "Label distribution",
           "transform": "timeseries_aggregations",
-          "type": "table-old"
+          "type": "table"
         },
         {
           "cacheTimeout": null,
