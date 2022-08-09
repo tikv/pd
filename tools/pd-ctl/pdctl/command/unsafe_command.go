@@ -43,7 +43,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Run:   removeFailedStoresCommandFunc,
 	}
 	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
-	cmd.PersistentFlags().Bool("force", false, "ignore failed store ids safety check")
+	cmd.PersistentFlags().Bool("auto-detect", false, "detect failed stores automatically without needing to pass failed store ids, and all stores not in PD store information are regarded as failed")
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	return cmd
 }
@@ -85,12 +85,12 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 		postInput["timeout"] = timeout
 	}
 
-	force, err := cmd.Flags().GetBool("force")
+	autoDetect, err := cmd.Flags().GetBool("auto-detect")
 	if err != nil {
 		cmd.Println(err)
 		return
-	} else if force {
-		postInput["force"] = ""
+	} else if autoDetect {
+		postInput["auto-detect"] = ""
 	}
 
 	postJSON(cmd, prefix, postInput)

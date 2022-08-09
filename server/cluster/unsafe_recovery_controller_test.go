@@ -514,7 +514,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	re.Equal(demoteFailedVoter, recoveryController.GetStage())
 }
 
-func TestForceMode(t *testing.T) {
+func TestAutoDetectMode(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

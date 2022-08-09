@@ -48,13 +48,13 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err)
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	_, force := input["force"]
+	_, autoDetect := input["auto_detect"]
 	stores := make(map[uint64]struct{})
-	if !force {
+	if !autoDetect {
 		storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
 		if !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
@@ -71,7 +71,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		timeout = uint64(rawTimeout)
 	}
 
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout, force); err != nil {
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout, autoDetect); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
