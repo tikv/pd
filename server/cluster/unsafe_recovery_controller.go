@@ -452,7 +452,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		// TODO: clean up existing operators
 		output.Info = "Unsafe recovery enters collect report stage"
 		if u.autoDetect {
-			output.Details = append(output.Details, fmt.Sprintf("auto detect mode with no specified failed stores"))
+			output.Details = append(output.Details, "auto detect mode with no specified failed stores")
 		} else {
 			stores := ""
 			count := 0
