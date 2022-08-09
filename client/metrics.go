@@ -99,7 +99,6 @@ var (
 	cmdDurationGetOperator               = cmdDuration.WithLabelValues("get_operator")
 	cmdDurationSplitRegions              = cmdDuration.WithLabelValues("split_regions")
 	cmdDurationSplitAndScatterRegions    = cmdDuration.WithLabelValues("split_and_scatter_regions")
-	cmdDurationListGCSafePoints          = cmdDuration.WithLabelValues("list_gc_safe_points")
 	cmdDurationUpdateKeyspaceGCSafePoint = cmdDuration.WithLabelValues("update_keyspace_gc_safe_point")
 	cmdDurationUpdateServiceSafePoint    = cmdDuration.WithLabelValues("update_service_safe_point")
 
@@ -113,7 +112,6 @@ var (
 	cmdFailedDurationGetAllStores              = cmdFailedDuration.WithLabelValues("get_all_stores")
 	cmdFailedDurationUpdateGCSafePoint         = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	cmdFailedDurationUpdateServiceGCSafePoint  = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
-	cmdFailedDurationListGCSafePoints          = cmdFailedDuration.WithLabelValues("list_gc_safe_points")
 	cmdFailedDurationUpdateKeyspaceGCSafePoint = cmdFailedDuration.WithLabelValues("update_keyspace_gc_safe_point")
 	cmdFailedDurationUpdateServiceSafePoint    = cmdFailedDuration.WithLabelValues("update_service_safe_point")
 

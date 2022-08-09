@@ -30,8 +30,8 @@ import (
 
 // KeyspaceGCClient provides gc related functionalities at keyspace level.
 type KeyspaceGCClient interface {
-	// ListGCSafePoints returns gc safe point for each key spaces.
-	ListGCSafePoints(ctx context.Context) ([]*gcpb.GCSafePoint, error)
+	// WatchGCSafePoints watches GC safe point change.
+	WatchGCSafePoints(ctx context.Context) (chan []*gcpb.SafePointEvent, error)
 	// UpdateKeyspaceGCSafePoint updates given keyspace's gc safe point, which
 	// is checked by TiKV to do GC if it's necessary.
 	// If the given safe point is less than the current one, it will not be updated.
@@ -76,28 +76,38 @@ func (c *client) gcClient() gcpb.GCClient {
 	return c.leaderGCClient()
 }
 
-func (c *client) ListGCSafePoints(ctx context.Context) ([]*gcpb.GCSafePoint, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ListGCSafePoints", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	start := time.Now()
-	defer func() { cmdDurationListGCSafePoints.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &gcpb.ListGCSafePointsRequest{
+func (c *client) WatchGCSafePoints(ctx context.Context) (chan []*gcpb.SafePointEvent, error) {
+	watcherChan := make(chan []*gcpb.SafePointEvent)
+	req := &gcpb.WatchGCSafePointsRequest{
 		Header: c.requestHeader(),
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.gcClient().ListGCSafePoints(ctx, req)
-	cancel()
-
+	stream, err := c.gcClient().WatchGCSafePoints(ctx, req)
 	if err != nil {
-		cmdFailedDurationListGCSafePoints.Observe(time.Since(start).Seconds())
-		c.ScheduleCheckLeader()
-		return nil, errors.WithStack(err)
+		close(watcherChan)
+		return nil, err
 	}
-
-	return resp.GetSafePoints(), nil
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in gc client `WatchGCSafePoints`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				close(watcherChan)
+				return
+			default:
+				resp, err := stream.Recv()
+				if err != nil {
+					return
+				}
+				watcherChan <- resp.Events
+			}
+		}
+	}()
+	return watcherChan, err
 }
 
 func (c *client) UpdateKeyspaceGCSafePoint(ctx context.Context, spaceID uint32, safePoint uint64) (newSafePoint uint64, err error) {
