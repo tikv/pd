@@ -827,7 +827,7 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	return cfg
 }
 
-// SetEnableLocalTSO
+// SetEnableLocalTSO sets enable-local-tso flag of Server .
 func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
 	s.cfg.EnableLocalTSO = enableLocalTSO
 }
