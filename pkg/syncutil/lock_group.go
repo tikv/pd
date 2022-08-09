@@ -16,36 +16,45 @@ package syncutil
 
 import "fmt"
 
-// LockGroup is a map of mutex that locks each keyspace separately.
-// It's used to guarantee that operations on different keyspace won't block each other.
+// LockGroup is a map of mutex that locks entries with different id separately.
+// It's used levitate lock contentions of using a global lock.
 type LockGroup struct {
 	groupLock Mutex             // protects group.
-	entries   map[uint32]*Mutex // map of locks with keyspaceID as key.
-	// hashFn hashes spaceID to map key, it's main purpose is to limit the total
-	// number of mutexes in the group, as using a mutex for every keyspace is too memory heavy.
-	hashFn func(spaceID uint32) uint32
+	entries   map[uint32]*Mutex // map of locks with id as key.
+	// hashFn hashes id to map key, it's main purpose is to limit the total
+	// number of mutexes in the group, as using a mutex for every id is too memory heavy.
+	hashFn func(id uint32) uint32
 }
 
-// NewLockGroup create and return an empty lockGroup.
-func NewLockGroup() *LockGroup {
-	return &LockGroup{
-		entries: make(map[uint32]*Mutex),
-		// A simple mask is applied to spaceID to use its last byte as map key,
-		// limiting the maximum map length to 256.
-		// Since keyspaceID is sequentially allocated, this can also reduce the chance
-		// of collision when comparing with random hashes.
-		hashFn: func(spaceID uint32) uint32 {
-			return spaceID & 0xFF
-		},
+// LockGroupOption configures the lock group.
+type LockGroupOption func(lg *LockGroup)
+
+// WithHash sets the lockGroup's hash function to provided hashFn.
+func WithHash(hashFn func(id uint32) uint32) LockGroupOption {
+	return func(lg *LockGroup) {
+		lg.hashFn = hashFn
 	}
 }
 
-// Lock locks the given keyspace based on the hash of the spaceID.
-func (g *LockGroup) Lock(spaceID uint32) {
+// NewLockGroup create and return an empty lockGroup.
+func NewLockGroup(options ...LockGroupOption) *LockGroup {
+	lockGroup := &LockGroup{
+		entries: make(map[uint32]*Mutex),
+		// If no custom hash function provided, use identity hash.
+		hashFn: func(id uint32) uint32 { return id },
+	}
+	for _, op := range options {
+		op(lockGroup)
+	}
+	return lockGroup
+}
+
+// Lock locks the target mutex base on the hash of id.
+func (g *LockGroup) Lock(id uint32) {
 	g.groupLock.Lock()
-	hashedID := spaceID & 0xFF
+	hashedID := g.hashFn(id)
 	e, ok := g.entries[hashedID]
-	// If target keyspace's lock has not been initialized, create a new lock.
+	// If target id's lock has not been initialized, create a new lock.
 	if !ok {
 		e = &Mutex{}
 		g.entries[hashedID] = e
@@ -54,15 +63,15 @@ func (g *LockGroup) Lock(spaceID uint32) {
 	e.Lock()
 }
 
-// Unlock unlocks the keyspace based on the hash of the spaceID.
-func (g *LockGroup) Unlock(spaceID uint32) {
+// Unlock unlocks the target mutex based on the hash of the id.
+func (g *LockGroup) Unlock(id uint32) {
 	g.groupLock.Lock()
-	hashedID := spaceID & 0xFF
+	hashedID := g.hashFn(id)
 	e, ok := g.entries[hashedID]
 	if !ok {
 		// Entry must exist, otherwise there should be a run-time error and panic.
 		g.groupLock.Unlock()
-		panic(fmt.Errorf("unlock requested for key %v, but no entry found", spaceID))
+		panic(fmt.Errorf("unlock requested for key %v, but no entry found", id))
 	}
 	g.groupLock.Unlock()
 	e.Unlock()

@@ -24,8 +24,8 @@ import (
 
 func TestLockGroup(t *testing.T) {
 	re := require.New(t)
-	group := NewLockGroup()
-	concurrency := 20
+	group := NewLockGroup(WithHash(func(id uint32) uint32 { return id & 0xFF }))
+	concurrency := 300
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -41,7 +41,7 @@ func TestLockGroup(t *testing.T) {
 
 // mustSequentialUpdateSingle checks that for any given update, update is sequential.
 func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *LockGroup) {
-	concurrency := 100
+	concurrency := 50
 	total := 0
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
