@@ -49,6 +49,10 @@ func (se *StorageEndpoint) SaveServiceSafePoint(spaceID uint32, ssp *ServiceSafe
 		return errors.New("service id of service safepoint cannot be empty")
 	}
 
+	if ssp.ServiceID == keyspaceGCSafePointSuffix {
+		return errors.New("service id of service safepoint collides with gc safe point suffix")
+	}
+
 	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
@@ -191,18 +195,19 @@ func (se *StorageEndpoint) LoadKeyspaceGCSafePoint(spaceID uint32) (uint64, erro
 	return safePoint, nil
 }
 
-// LoadAllKeyspaceGCSafePoints returns slice of KeySpaceGCSafePoint.
+// LoadAllKeyspaceGCSafePoints returns a slice containing GC safe points for all keyspaces.
 func (se *StorageEndpoint) LoadAllKeyspaceGCSafePoints() ([]*gcpb.GCSafePoint, error) {
-	prefix := KeyspaceSafePointPath()
+	prefix := KeyspaceSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	suffix := KeySpaceGCSafePointSuffix()
+	suffix := KeyspaceGCSafePointSuffix()
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return nil, err
 	}
 	safePoints := make([]*gcpb.GCSafePoint, 0, len(values))
 	for i := range keys {
-		// skip non gc safe points
+		// Since gc safe points and service safe points share common prefix,
+		// non-gc safe points need to be skipped.
 		if !strings.HasSuffix(keys[i], suffix) {
 			continue
 		}

@@ -111,33 +111,35 @@ func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
 }
 
-// KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
+// KeyspaceServiceSafePointPrefix returns the prefix of given service's service safe point.
 // Prefix: /keyspaces/gc_safepoint/{space_id}/service/
-func KeySpaceServiceSafePointPrefix(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
+func KeyspaceServiceSafePointPrefix(spaceID uint32) string {
+	idStr := encodeKeyspaceID(spaceID)
+	return path.Join(keyspaceSafePointPrefix, idStr, "service") + "/"
 }
 
-// KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
+// KeyspaceGCSafePointPath returns the gc safe point's path of the given keyspace.
 // Path: /keyspaces/gc_safepoint/{space_id}/gc
-func KeySpaceGCSafePointPath(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
+func KeyspaceGCSafePointPath(spaceID uint32) string {
+	idStr := encodeKeyspaceID(spaceID)
+	return path.Join(keyspaceSafePointPrefix, idStr, keyspaceGCSafePointSuffix)
 }
 
-// KeySpaceServiceSafePointPath returns the path of given service's service safe point.
+// KeyspaceServiceSafePointPath returns the path of given service's service safe point.
 // Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
-func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
-	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
+func KeyspaceServiceSafePointPath(spaceID uint32, serviceID string) string {
+	return path.Join(KeyspaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
-// KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
-// Path: /keyspaces/gc_safepoint/
-func KeySpaceSafePointPrefix() string {
+// KeyspaceSafePointPrefix returns prefix for all keyspace's safe points.
+// Prefix: /keyspaces/gc_safepoint/
+func KeyspaceSafePointPrefix() string {
 	return keyspaceSafePointPrefix + "/"
 }
 
-// KeySpaceGCSafePointSuffix returns the suffix for any gc safepoint.
-// Postfix: /gc
-func KeySpaceGCSafePointSuffix() string {
+// KeyspaceGCSafePointSuffix returns the suffix for any gc safepoint.
+// Suffix: /gc
+func KeyspaceGCSafePointSuffix() string {
 	return "/" + keyspaceGCSafePointSuffix
 }
 
