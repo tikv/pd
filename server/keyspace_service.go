@@ -24,50 +24,36 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// KeyspaceServer wraps Server to provide keyspace service.
+// KeyspaceServer wraps GrpcServer to provide keyspace service.
 type KeyspaceServer struct {
-	*Server
-}
-
-func (s *KeyspaceServer) header() *pdpb.ResponseHeader {
-	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
-}
-
-func (s *KeyspaceServer) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
-	return &pdpb.ResponseHeader{
-		ClusterId: s.clusterID,
-		Error:     err,
-	}
-}
-
-func (s *KeyspaceServer) notBootstrappedHeader() *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
-		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
-		Message: "cluster is not bootstrapped",
-	})
+	*GrpcServer
 }
 
 // getErrorHeader returns corresponding ResponseHeader based on err.
 func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
 	case keyspace.ErrKeyspaceExists:
-		return s.errorHeader(&pdpb.Error{
-			Type:    pdpb.ErrorType_DUPLICATED_ENTRY,
-			Message: err.Error(),
-		})
+		return s.wrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
 	case keyspace.ErrKeyspaceNotFound:
-		return s.errorHeader(&pdpb.Error{
-			Type:    pdpb.ErrorType_ENTRY_NOT_FOUND,
-			Message: err.Error(),
-		})
+		return s.wrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
 	default:
-		return s.errorHeader(&pdpb.Error{
-			Type:    pdpb.ErrorType_UNKNOWN,
-			Message: err.Error(),
-		})
+		return s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
 	}
+}
+
+// validateRequest checks that server is serving and cluster id matches the requested.
+func (s *KeyspaceServer) validateRequest(header *pdpb.RequestHeader) error {
+	if s.IsClosed() {
+		return ErrNotStarted
+	}
+	if header.GetClusterId() != s.clusterID {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	}
+	return nil
 }
 
 // LoadKeyspace load and return target keyspace metadata.
@@ -75,6 +61,9 @@ func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 // On Error, keyspaceMeta in response will be nil,
 // error information will be encoded in response header with corresponding error type.
 func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil
@@ -93,7 +82,10 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 
 // WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
 // Note: It sends all existing keyspaces as it's first package to the client.
-func (s *KeyspaceServer) WatchKeyspaces(_ *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
+func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return err
+	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.notBootstrappedHeader()})
