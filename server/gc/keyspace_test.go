@@ -15,17 +15,36 @@
 package gc
 
 import (
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/storage/kv"
 	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/server/keyspace"
+	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/kv"
 )
 
-func newKeyspaceGCStorage() endpoint.KeyspaceGCSafePointStorage {
-	return endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+func mustNewKeyspaceSafePointManager(re *require.Assertions) *KeyspaceSafePointManager {
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	allocator := mockid.NewIDAllocator()
+	keyspaceManager, err := keyspace.NewKeyspaceManager(store, allocator)
+	re.NoError(err)
+	// Create 10 keyspaces for testing.
+	now := time.Now()
+	for i := 0; i < 10; i++ {
+		_, err = keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+			Name:   strconv.Itoa(i),
+			Config: nil,
+			Now:    now,
+		})
+		re.NoError(err)
+	}
+
+	return NewKeyspaceSafePointManager(store, keyspaceManager)
 }
 
 func mustSequentialUpdateGCSafePoint(manager *KeyspaceSafePointManager, re *require.Assertions, spaceID uint32) {
@@ -77,7 +96,6 @@ func mustConcurrentUpdateGCSafePoint(manager *KeyspaceSafePointManager, re *requ
 }
 
 func mustUpdateServiceSafePoint(manager *KeyspaceSafePointManager, re *require.Assertions, spaceID uint32) {
-
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
@@ -158,17 +176,17 @@ func mustUpdateServiceSafePoint(manager *KeyspaceSafePointManager, re *require.A
 }
 
 func TestSingleKeyspaceSequentialUpdate(t *testing.T) {
-	manager := NewKeyspaceSafePointManager(newKeyspaceGCStorage())
 	re := require.New(t)
-	mustSequentialUpdateGCSafePoint(manager, re, 100)
+	manager := mustNewKeyspaceSafePointManager(re)
+	mustSequentialUpdateGCSafePoint(manager, re, 0)
 }
 
 func TestMultipleKeyspaceSequentialUpdate(t *testing.T) {
-	manager := NewKeyspaceSafePointManager(newKeyspaceGCStorage())
 	re := require.New(t)
+	manager := mustNewKeyspaceSafePointManager(re)
 	wg := sync.WaitGroup{}
 
-	for spaceID := uint32(100); spaceID < 110; spaceID++ {
+	for spaceID := uint32(0); spaceID < 11; spaceID++ {
 		wg.Add(1)
 		go func(spaceID uint32) {
 			mustSequentialUpdateGCSafePoint(manager, re, spaceID)
@@ -179,11 +197,11 @@ func TestMultipleKeyspaceSequentialUpdate(t *testing.T) {
 }
 
 func TestMultipleKeyspaceConcurrentUpdate(t *testing.T) {
-	manager := NewKeyspaceSafePointManager(newKeyspaceGCStorage())
 	re := require.New(t)
+	manager := mustNewKeyspaceSafePointManager(re)
 	wg := sync.WaitGroup{}
 
-	for spaceID := uint32(100); spaceID < 110; spaceID++ {
+	for spaceID := uint32(0); spaceID < 11; spaceID++ {
 		wg.Add(1)
 		go func(spaceID uint32) {
 			mustConcurrentUpdateGCSafePoint(manager, re, spaceID)
@@ -194,11 +212,11 @@ func TestMultipleKeyspaceConcurrentUpdate(t *testing.T) {
 }
 
 func TestUpdateServiceSafePoint(t *testing.T) {
-	manager := NewKeyspaceSafePointManager(newKeyspaceGCStorage())
 	re := require.New(t)
+	manager := mustNewKeyspaceSafePointManager(re)
 	wg := sync.WaitGroup{}
 
-	for spaceID := uint32(100); spaceID < 110; spaceID++ {
+	for spaceID := uint32(0); spaceID < 11; spaceID++ {
 		wg.Add(1)
 		go func(spaceID uint32) {
 			mustUpdateServiceSafePoint(manager, re, spaceID)

@@ -156,6 +156,15 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return manager.loadKeyspaceByID(spaceID)
 }
 
+// LoadState returns the state of the keyspace specified by ID.
+func (manager *Manager) LoadState(spaceID uint32) (keyspacepb.KeyspaceState, error) {
+	meta, err := manager.loadKeyspaceByID(spaceID)
+	if err != nil {
+		return 0, err
+	}
+	return meta.State, nil
+}
+
 func (manager *Manager) loadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	// Load the keyspace with target ID.
 	keyspace := &keyspacepb.KeyspaceMeta{}

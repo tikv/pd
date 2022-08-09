@@ -138,6 +138,8 @@ type Server struct {
 	gcSafePointManager *gc.SafePointManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
+	// keyspace safe point manager
+	keyspaceSafePointManager *gc.KeyspaceSafePointManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -286,7 +288,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
-		gcpb.RegisterGCServer(gs, &GcServer{Server: s})
+		gcpb.RegisterGCServer(gs, &GcServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -432,6 +434,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.keyspaceSafePointManager = gc.NewKeyspaceSafePointManager(s.storage, s.keyspaceManager)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
