@@ -30,11 +30,13 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto" //nolint:staticcheck
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/gcpb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -55,6 +57,7 @@ import (
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
@@ -81,6 +84,9 @@ const (
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
 	pdClusterIDPath = "/pd/cluster_id"
+	// idAllocPath for idAllocator to save persistent window's end.
+	idAllocPath  = "alloc_id"
+	idAllocLabel = "idalloc"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -130,6 +136,10 @@ type Server struct {
 	storage storage.Storage
 	// safepoint manager
 	gcSafePointManager *gc.SafePointManager
+	// keyspace manager
+	keyspaceManager *keyspace.Manager
+	// keyspace safe point manager
+	keyspaceSafePointManager *gc.KeyspaceSafePointManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -275,7 +285,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
+		grpcServer := &GrpcServer{Server: s}
+		pdpb.RegisterPDServer(gs, grpcServer)
+		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
+		gcpb.RegisterGCServer(gs, &GcServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -381,7 +394,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
-	s.idAllocator = id.NewAllocator(s.client, s.rootPath, s.member.MemberValue())
+	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: idAllocPath,
+		Label:     idAllocLabel,
+		Member:    s.member.MemberValue(),
+	})
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg,
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -403,6 +422,19 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: endpoint.KeyspaceIDAlloc(),
+		Label:     keyspace.AllocLabel,
+		Member:    s.member.MemberValue(),
+		Step:      keyspace.AllocStep,
+	})
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
+	if err != nil {
+		return err
+	}
+	s.keyspaceSafePointManager = gc.NewKeyspaceSafePointManager(s.storage, s.keyspaceManager)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -778,6 +810,11 @@ func (s *Server) GetAllocator() id.Allocator {
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
+}
+
+// GetKeyspaceManager returns the keyspace manager of server.
+func (s *Server) GetKeyspaceManager() *keyspace.Manager {
+	return s.keyspaceManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -1517,19 +1554,14 @@ func (s *Server) reloadConfigFromKV() error {
 		return err
 	}
 	s.loadRateLimitConfig()
-	switchableStorage, ok := s.storage.(interface {
-		SwitchToRegionStorage()
-		SwitchToDefaultStorage()
-	})
-	if !ok {
-		return nil
-	}
-	if s.persistOptions.IsUseRegionStorage() {
-		switchableStorage.SwitchToRegionStorage()
-		log.Info("server enable region storage")
-	} else {
-		switchableStorage.SwitchToDefaultStorage()
-		log.Info("server disable region storage")
+	useRegionStorage := s.persistOptions.IsUseRegionStorage()
+	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
+	if regionStorage != nil {
+		if useRegionStorage {
+			log.Info("server enable region storage")
+		} else {
+			log.Info("server disable region storage")
+		}
 	}
 	return nil
 }

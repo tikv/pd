@@ -59,7 +59,7 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	var resp []*labeler.LabelRule
 	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
 	suite.NoError(err)
-	suite.Len(resp, 0)
+	suite.Empty(resp)
 
 	rules := []*labeler.LabelRule{
 		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},

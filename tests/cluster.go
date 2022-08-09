@@ -260,9 +260,9 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, err := s.grpcServer.GetMembers(context.TODO(), req)
-	if err != nil {
-		return "", errors.WithStack(err)
+	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
+	if members.Header.GetError() != nil {
+		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -275,6 +275,9 @@ func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
+	}
+	if members.GetHeader().GetError() != nil {
+		return 0, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
 	return members.GetEtcdLeader().GetMemberId(), nil
 }
@@ -365,9 +368,12 @@ func (s *TestServer) BootstrapCluster() error {
 		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	_, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
+	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
 		return err
+	}
+	if resp.GetHeader().GetError() != nil {
+		return errors.New(resp.GetHeader().GetError().String())
 	}
 	return nil
 }

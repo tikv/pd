@@ -98,6 +98,7 @@ func TestCommand(t *testing.T) {
 	for i := uint64(0); i < 2*allocStep; i++ {
 		resp, err := grpcPDClient.AllocID(context.Background(), req)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 		re.Greater(resp.GetId(), last)
 		last = resp.GetId()
 	}

@@ -220,7 +220,7 @@ func (suite *configTestSuite) TestConfigLabelProperty() {
 	}
 
 	cfg := loadProperties()
-	suite.Len(cfg, 0)
+	suite.Empty(cfg)
 
 	cmds := []string{
 		`{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn1"}`,

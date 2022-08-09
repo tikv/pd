@@ -25,6 +25,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -123,10 +124,10 @@ func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core
 	newOpts := []core.RegionCreateOption{
 		core.SetApproximateKeys(10),
 		core.SetApproximateSize(10),
-		core.SetWrittenBytes(100 * 1024 * 1024),
-		core.SetWrittenKeys(1 * 1024 * 1024),
-		core.SetReadBytes(200 * 1024 * 1024),
-		core.SetReadKeys(2 * 1024 * 1024),
+		core.SetWrittenBytes(100 * units.MiB),
+		core.SetWrittenKeys(1 * units.MiB),
+		core.SetReadBytes(200 * units.MiB),
+		core.SetReadKeys(2 * units.MiB),
 	}
 	newOpts = append(newOpts, opts...)
 	region := core.NewRegionInfo(metaRegion, leader, newOpts...)
@@ -413,7 +414,7 @@ func (suite *regionTestSuite) TestTopN() {
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
-			suite.Len(writtenBytes, len(topN))
+			suite.Len(topN, len(writtenBytes))
 		} else {
 			suite.Len(topN, n)
 		}
@@ -505,7 +506,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
@@ -514,7 +515,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
@@ -523,7 +524,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	suite.NoError(err)
-	suite.Equal(regions.Count, len(regionIDs))
+	suite.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}

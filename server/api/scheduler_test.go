@@ -108,7 +108,7 @@ func (suite *scheduleTestSuite) TestOriginAPI() {
 	statusCode, err = apiutil.DoDelete(testDialClient, deleteURL)
 	suite.NoError(err)
 	suite.Equal(200, statusCode)
-	suite.Len(rc.GetSchedulers(), 0)
+	suite.Empty(rc.GetSchedulers())
 	suite.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, 404)))
 	statusCode, _ = apiutil.DoDelete(testDialClient, deleteURL)
 	suite.Equal(404, statusCode)
@@ -120,7 +120,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 		opt   string
 		value interface{}
 	}
-	cases := []struct {
+	testCases := []struct {
 		name          string
 		createdName   string
 		args          []arg
@@ -321,25 +321,25 @@ func (suite *scheduleTestSuite) TestAPI() {
 			},
 		},
 	}
-	for _, ca := range cases {
+	for _, testCase := range testCases {
 		input := make(map[string]interface{})
-		input["name"] = ca.name
-		for _, a := range ca.args {
+		input["name"] = testCase.name
+		for _, a := range testCase.args {
 			input[a.opt] = a.value
 		}
 		body, err := json.Marshal(input)
 		suite.NoError(err)
-		suite.testPauseOrResume(ca.name, ca.createdName, body)
+		suite.testPauseOrResume(testCase.name, testCase.createdName, body)
 	}
 
 	// test pause and resume all schedulers.
 
 	// add schedulers.
-	cases = cases[:3]
-	for _, ca := range cases {
+	testCases = testCases[:3]
+	for _, testCase := range testCases {
 		input := make(map[string]interface{})
-		input["name"] = ca.name
-		for _, a := range ca.args {
+		input["name"] = testCase.name
+		for _, a := range testCase.args {
 			input[a.opt] = a.value
 		}
 		body, err := json.Marshal(input)
@@ -355,10 +355,10 @@ func (suite *scheduleTestSuite) TestAPI() {
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
 	handler := suite.svr.GetHandler()
-	for _, ca := range cases {
-		createdName := ca.createdName
+	for _, testCase := range testCases {
+		createdName := testCase.createdName
 		if createdName == "" {
-			createdName = ca.name
+			createdName = testCase.name
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		suite.NoError(err)
@@ -370,10 +370,10 @@ func (suite *scheduleTestSuite) TestAPI() {
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
 	time.Sleep(time.Second)
-	for _, ca := range cases {
-		createdName := ca.createdName
+	for _, testCase := range testCases {
+		createdName := testCase.createdName
 		if createdName == "" {
-			createdName = ca.name
+			createdName = testCase.name
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		suite.NoError(err)
@@ -391,10 +391,10 @@ func (suite *scheduleTestSuite) TestAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	for _, ca := range cases {
-		createdName := ca.createdName
+	for _, testCase := range testCases {
+		createdName := testCase.createdName
 		if createdName == "" {
-			createdName = ca.name
+			createdName = testCase.name
 		}
 		isPaused, err := handler.IsSchedulerPaused(createdName)
 		suite.NoError(err)
@@ -402,10 +402,10 @@ func (suite *scheduleTestSuite) TestAPI() {
 	}
 
 	// delete schedulers.
-	for _, ca := range cases {
-		createdName := ca.createdName
+	for _, testCase := range testCases {
+		createdName := testCase.createdName
 		if createdName == "" {
-			createdName = ca.name
+			createdName = testCase.name
 		}
 		suite.deleteScheduler(createdName)
 	}

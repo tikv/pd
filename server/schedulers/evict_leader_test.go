@@ -17,10 +17,11 @@ package schedulers
 import (
 	"bytes"
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -30,13 +31,11 @@ import (
 	"github.com/tikv/pd/server/storage"
 )
 
-var _ = Suite(&testEvictLeaderSuite{})
-
-type testEvictLeaderSuite struct{}
-
-func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
+func TestEvictLeader(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
@@ -50,21 +49,23 @@ func (s *testEvictLeaderSuite) TestEvictLeader(c *C) {
 	tc.AddLeaderRegion(3, 3, 1)
 
 	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(sl.IsScheduleAllowed(tc), IsTrue)
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2, 3})
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsFalse)
-	c.Assert(op[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})), IsTrue)
+	re.NoError(err)
+	re.True(sl.IsScheduleAllowed(tc))
+	ops, _ := sl.Schedule(tc, false)
+	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
+	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
+	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 }
 
-func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
+func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	sl, err := schedule.CreateScheduler(EvictLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
 	// Add stores 1, 2, 3
 	tc.AddLeaderStore(1, 0)
@@ -81,32 +82,35 @@ func (s *testEvictLeaderSuite) TestEvictLeaderWithUnhealthyPeer(c *C) {
 
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
-	op := sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{3})
+	ops, _ := sl.Schedule(tc, false)
+	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
-	op = sl.Schedule(tc)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
+	ops, _ = sl.Schedule(tc, false)
+	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
-	c.Assert(sl.Schedule(tc), HasLen, 0)
+	ops, _ = sl.Schedule(tc, false)
+	re.Empty(ops)
 }
 
-func (s *testEvictLeaderSuite) TestConfigClone(c *C) {
+func TestConfigClone(t *testing.T) {
+	re := require.New(t)
+
 	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
 	con2 := emptyConf.Clone()
-	c.Assert(emptyConf.getKeyRangesByID(1), IsNil)
-	c.Assert(con2.BuildWithArgs([]string{"1"}), IsNil)
-	c.Assert(con2.getKeyRangesByID(1), NotNil)
-	c.Assert(emptyConf.getKeyRangesByID(1), IsNil)
+	re.Empty(emptyConf.getKeyRangesByID(1))
+	re.NoError(con2.BuildWithArgs([]string{"1"}))
+	re.NotEmpty(con2.getKeyRangesByID(1))
+	re.Empty(emptyConf.getKeyRangesByID(1))
 
 	con3 := con2.Clone()
 	con3.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
-	c.Assert(emptyConf.getKeyRangesByID(1), IsNil)
-	c.Assert(len(con3.getRanges(1)) == len(con2.getRanges(1)), IsFalse)
+	re.Empty(emptyConf.getKeyRangesByID(1))
+	re.False(len(con3.getRanges(1)) == len(con2.getRanges(1)))
 
 	con4 := con3.Clone()
-	c.Assert(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey), IsTrue)
+	re.True(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
 	con4.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
-	c.Assert(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey), IsFalse)
+	re.False(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
 }

@@ -18,6 +18,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -43,10 +44,10 @@ const (
 )
 
 var minHotThresholds = [RegionStatCount]float64{
-	RegionWriteBytes: 1 * 1024,
+	RegionWriteBytes: 1 * units.KiB,
 	RegionWriteKeys:  32,
 	RegionWriteQuery: 32,
-	RegionReadBytes:  8 * 1024,
+	RegionReadBytes:  8 * units.KiB,
 	RegionReadKeys:   128,
 	RegionReadQuery:  128,
 }
@@ -181,6 +182,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		Loads:          loads,
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
+		isLearner:      core.IsLearner(region.GetPeer(storeID)),
 		interval:       interval,
 		peers:          region.GetPeers(),
 		actionType:     Update,
@@ -230,6 +232,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				Loads:          oldItem.thresholds,
 				LastUpdateTime: time.Now(),
 				isLeader:       oldItem.isLeader,
+				isLearner:      oldItem.isLearner,
 				interval:       interval,
 				peers:          oldItem.peers,
 				actionType:     Update,
