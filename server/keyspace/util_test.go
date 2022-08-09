@@ -16,8 +16,6 @@ package keyspace
 
 import (
 	"math"
-	"math/rand"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -61,39 +59,4 @@ func TestValidateName(t *testing.T) {
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateName(testCase.name) != nil)
 	}
-}
-
-func TestLockGroup(t *testing.T) {
-	re := require.New(t)
-	group := newLockGroup()
-	concurrency := 20
-	var wg sync.WaitGroup
-	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
-		go func(spaceID uint32) {
-			defer wg.Done()
-			mustSequentialUpdateSingle(re, spaceID, group)
-		}(rand.Uint32())
-	}
-	wg.Wait()
-	// Check that size of the lock group is limited.
-	re.LessOrEqual(len(group.entries), 1<<8)
-}
-
-// mustSequentialUpdateSingle checks that for any given update, update is sequential.
-func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *lockGroup) {
-	concurrency := 100
-	total := 0
-	var wg sync.WaitGroup
-	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
-		go func() {
-			defer wg.Done()
-			group.lock(spaceID)
-			defer group.unlock(spaceID)
-			total++
-		}()
-	}
-	wg.Wait()
-	re.Equal(concurrency, total)
 }
