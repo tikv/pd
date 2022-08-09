@@ -282,8 +282,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
-		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{Server: s})
+		grpcServer := &GrpcServer{Server: s}
+		pdpb.RegisterPDServer(gs, grpcServer)
+		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg

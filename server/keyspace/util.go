@@ -36,8 +36,6 @@ var (
 	errKeyspaceArchived = errors.New("keyspace already archived")
 	errArchiveEnabled   = errors.New("cannot archive ENABLED keyspace")
 	errModifyDefault    = errors.New("cannot modify default keyspace's state")
-	errIllegalID        = errors.New("illegal keyspace ID")
-	errIllegalName      = errors.New("illegal keyspace name")
 	errIllegalOperation = errors.New("unknown operation")
 )
 
@@ -46,10 +44,10 @@ var (
 // or if it collides with reserved id.
 func validateID(spaceID uint32) error {
 	if spaceID > spaceIDMax {
-		return errIllegalID
+		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", spaceID, spaceIDMax)
 	}
 	if spaceID == DefaultKeyspaceID {
-		return errIllegalID
+		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", spaceID)
 	}
 	return nil
 }
@@ -63,10 +61,19 @@ func validateName(name string) error {
 		return err
 	}
 	if !isValid {
-		return errIllegalName
+		return errors.Errorf("illegal keyspace name %s, should contain only alphanumerical and underline", name)
 	}
 	if name == DefaultKeyspaceName {
-		return errIllegalName
+		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
 	}
 	return nil
+}
+
+// SpaceIDHash is used to hash the spaceID inside the lockGroup.
+// A simple mask is applied to spaceID to use its last byte as map key,
+// limiting the maximum map length to 256.
+// Since keyspaceID is sequentially allocated, this can also reduce the chance
+// of collision when comparing with random hashes.
+func SpaceIDHash(spaceID uint32) uint32 {
+	return spaceID & 0xFF
 }

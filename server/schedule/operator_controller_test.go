@@ -485,6 +485,83 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	suite.Equal(3, stream.MsgLength())
 }
 
+func (suite *operatorControllerTestSuite) TestCalcInfluence() {
+	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewOperatorController(suite.ctx, cluster, stream)
+
+	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
+	region = region.Clone(core.SetApproximateSize(20))
+	cluster.PutRegion(region)
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(3, 1)
+
+	steps := []operator.OpStep{
+		operator.AddLearner{ToStore: 3, PeerID: 3},
+		operator.PromoteLearner{ToStore: 3, PeerID: 3},
+		operator.TransferLeader{FromStore: 1, ToStore: 3},
+		operator.RemovePeer{FromStore: 1},
+	}
+	op := operator.NewTestOperator(1, epoch, operator.OpRegion, steps...)
+	suite.True(controller.AddOperator(op))
+
+	check := func(influence operator.OpInfluence, id uint64, expect *operator.StoreInfluence) {
+		si := influence.GetStoreInfluence(id)
+		suite.Equal(si.LeaderCount, expect.LeaderCount)
+		suite.Equal(si.LeaderSize, expect.LeaderSize)
+		suite.Equal(si.RegionCount, expect.RegionCount)
+		suite.Equal(si.RegionSize, expect.RegionSize)
+		suite.Equal(si.StepCost[storelimit.AddPeer], expect.StepCost[storelimit.AddPeer])
+		suite.Equal(si.StepCost[storelimit.RemovePeer], expect.StepCost[storelimit.RemovePeer])
+	}
+
+	influence := controller.GetOpInfluence(cluster)
+	check(influence, 1, &operator.StoreInfluence{
+		LeaderSize:  -20,
+		LeaderCount: -1,
+		RegionSize:  -20,
+		RegionCount: -1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.RemovePeer: 200,
+		},
+	})
+	check(influence, 3, &operator.StoreInfluence{
+		LeaderSize:  20,
+		LeaderCount: 1,
+		RegionSize:  20,
+		RegionCount: 1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.AddPeer: 200,
+		},
+	})
+
+	region2 := region.Clone(
+		core.WithAddPeer(&metapb.Peer{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}),
+		core.WithIncConfVer(),
+	)
+	suite.True(steps[0].IsFinish(region2))
+	op.Check(region2)
+
+	influence = controller.GetOpInfluence(cluster)
+	check(influence, 1, &operator.StoreInfluence{
+		LeaderSize:  -20,
+		LeaderCount: -1,
+		RegionSize:  -20,
+		RegionCount: -1,
+		StepCost: map[storelimit.Type]int64{
+			storelimit.RemovePeer: 200,
+		},
+	})
+	check(influence, 3, &operator.StoreInfluence{
+		LeaderSize:  20,
+		LeaderCount: 1,
+		RegionSize:  0,
+		RegionCount: 0,
+		StepCost:    make(map[storelimit.Type]int64),
+	})
+}
+
 func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
@@ -702,4 +779,24 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 	// no space left, new operator can not be added.
 	suite.Equal(0, controller.AddWaitingOperator(addPeerOp(0)))
+}
+
+// issue #5279
+func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(suite.ctx, tc, stream)
+	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
+	tc.AddRegionStore(1, 1)
+	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(4, 1)
+	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
+	}
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	suite.True(oc.addOperatorLocked(op))
+	// Although store 3 does not exist in PD, PD can also send op to TiKV.
+	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }

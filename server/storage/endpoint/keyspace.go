@@ -29,10 +29,6 @@ const (
 	// spaceIDBitSizeMax is the max bitSize of spaceID.
 	// It's currently set to 24 (3bytes).
 	spaceIDBitSizeMax = 24
-	// spaceIDStrLen is the length of spaceID when written in spaceIDBase.
-	// It's currently set to 8 (base10 of uint24max is 16777215)
-	// It's used to pad all spaceIDs in etcd path to the same length.
-	spaceIDStrLen = 8
 )
 
 // KeyspaceStorage defines storage operations on keyspace related data.
