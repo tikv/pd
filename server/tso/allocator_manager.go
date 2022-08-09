@@ -245,20 +245,34 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 	return infoPtr.clone(), true
 }
 
-// CleanUpDCLocations cleans up all DCLocationInfo
-func (am *AllocatorManager) CleanUpDCLocations() error {
+// CleanUpDCLocation cleans up certain server's DCLocationInfo
+func (am *AllocatorManager) CleanUpDCLocation() error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
+
+	// Check if there is any dc-location to clean up
+	serverID := am.member.ID()
+	dcLocationKey := am.member.GetDCLocationPath(serverID)
+	if resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpGet(dcLocationKey)).
+		Commit(); err != nil {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	} else if !resp.Succeeded {
+		return nil
+	}
+
 	// remove etcd
 	if _, err := etcdutil.EtcdKVDelete(
 		am.member.Client(),
-		am.member.GetDCLocationPathPrefix(),
+		dcLocationKey,
 		clientv3.WithPrefix()); err != nil {
 		return err
 	}
-	for dcLocation := range am.mu.clusterDCLocations {
-		delete(am.mu.clusterDCLocations, dcLocation)
-	}
+	log.Info("delete dc-location which in etcd",
+		zap.String("dcLocation-key", dcLocationKey),
+		zap.Uint64("server-id", serverID))
+	go am.ClusterDCLocationChecker()
 	return nil
 }
 

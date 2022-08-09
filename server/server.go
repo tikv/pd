@@ -397,8 +397,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 	// When disable local TSO after enabling local TSO, we should clean up the local TSO allocator's dc location map and etcd.
-	if s.tsoAllocatorManager.GetClusterDCLocations() != nil && !s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.CleanUpDCLocations(); err != nil {
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
 			return err
 		}
 	}
