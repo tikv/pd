@@ -278,6 +278,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/leader/resign", leaderHandler.ResignLeader, setMethods(http.MethodPost), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/leader/transfer/{next_leader}", leaderHandler.TransferLeader, setMethods(http.MethodPost), setAuditBackend(localLog))
 
+	diagnosticsHandler := newDiagnosticsHandler(svr, rd)
+	registerFunc(clusterRouter, "/debug/diagnostics/{name}", diagnosticsHandler.GetDiagnosticsResult)
+
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet))
 

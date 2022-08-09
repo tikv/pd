@@ -302,14 +302,14 @@ func checkRegionAndOperator(re *require.Assertions, tc *testCluster, co *coordin
 	}
 }
 
-func TestDiagnosisDryRun(t *testing.T) {
+func TestDiagnosticsDryRun(t *testing.T) {
 	re := require.New(t)
 
 	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
-	err := co.diagnosis.diagnosisDryRun(schedulers.EvictLeaderName)
+	err := co.diagnosticsManager.dryRun(schedulers.EvictLeaderName)
 	re.Error(err)
-	err = co.diagnosis.diagnosisDryRun(schedulers.BalanceRegionName)
+	err = co.diagnosticsManager.dryRun(schedulers.BalanceRegionName)
 	re.NoError(err)
 }
 

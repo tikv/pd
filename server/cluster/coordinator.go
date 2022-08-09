@@ -61,19 +61,19 @@ const (
 type coordinator struct {
 	syncutil.RWMutex
 
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	cluster         *RaftCluster
-	prepareChecker  *prepareChecker
-	checkers        *checker.Controller
-	regionScatterer *schedule.RegionScatterer
-	regionSplitter  *schedule.RegionSplitter
-	schedulers      map[string]*scheduleController
-	opController    *schedule.OperatorController
-	hbStreams       *hbstream.HeartbeatStreams
-	pluginInterface *schedule.PluginInterface
-	diagnosis       *diagnosisManager
+	wg                 sync.WaitGroup
+	ctx                context.Context
+	cancel             context.CancelFunc
+	cluster            *RaftCluster
+	prepareChecker     *prepareChecker
+	checkers           *checker.Controller
+	regionScatterer    *schedule.RegionScatterer
+	regionSplitter     *schedule.RegionSplitter
+	schedulers         map[string]*scheduleController
+	opController       *schedule.OperatorController
+	hbStreams          *hbstream.HeartbeatStreams
+	pluginInterface    *schedule.PluginInterface
+	diagnosticsManager *diagnosticsManager
 }
 
 // newCoordinator creates a new coordinator.
@@ -82,18 +82,18 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
-		ctx:             ctx,
-		cancel:          cancel,
-		cluster:         cluster,
-		prepareChecker:  newPrepareChecker(),
-		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
-		regionScatterer: schedule.NewRegionScatterer(ctx, cluster),
-		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      schedulers,
-		opController:    opController,
-		hbStreams:       hbStreams,
-		pluginInterface: schedule.NewPluginInterface(),
-		diagnosis:       newDiagnosisManager(cluster, schedulers),
+		ctx:                ctx,
+		cancel:             cancel,
+		cluster:            cluster,
+		prepareChecker:     newPrepareChecker(),
+		checkers:           checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		regionScatterer:    schedule.NewRegionScatterer(ctx, cluster),
+		regionSplitter:     schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
+		schedulers:         schedulers,
+		opController:       opController,
+		hbStreams:          hbStreams,
+		pluginInterface:    schedule.NewPluginInterface(),
+		diagnosticsManager: newDiagnosticsManager(cluster, schedulers),
 	}
 }
 
@@ -853,6 +853,14 @@ func (c *coordinator) isCheckerPaused(name string) (bool, error) {
 	return p.IsPaused(), nil
 }
 
+func (c *coordinator) GetDiagnosticsResult(name string) (*DiagnosticsResult, error) {
+	err := c.diagnosticsManager.dryRun(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.diagnosticsManager.analyze(name)
+}
+
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
@@ -905,7 +913,7 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 	return nil
 }
 
-func (s *scheduleController) DiagnoseDryRun() ([]*operator.Operator, []plan.Plan) {
+func (s *scheduleController) DryRun() ([]*operator.Operator, []plan.Plan) {
 	cacheCluster := newCacheCluster(s.cluster)
 	return s.Scheduler.Schedule(cacheCluster, true)
 }
@@ -940,60 +948,6 @@ func (s *scheduleController) GetDelayUntil() int64 {
 		return atomic.LoadInt64(&s.delayUntil)
 	}
 	return 0
-}
-
-const maxDiagnosisResultNum = 6
-
-// diagnosisManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
-type diagnosisManager struct {
-	cluster      *RaftCluster
-	schedulers   map[string]*scheduleController
-	dryRunResult map[string]*cache.FIFO
-}
-
-func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosisManager {
-	return &diagnosisManager{
-		cluster:      cluster,
-		schedulers:   schedulerControllers,
-		dryRunResult: make(map[string]*cache.FIFO),
-	}
-}
-
-func (d *diagnosisManager) diagnosisDryRun(name string) error {
-	if _, ok := d.schedulers[name]; !ok {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	ops, plans := d.schedulers[name].DiagnoseDryRun()
-	result := newDiagnosisResult(ops, plans)
-	if _, ok := d.dryRunResult[name]; !ok {
-		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosisResultNum)
-	}
-	queue := d.dryRunResult[name]
-	queue.Put(result.timestamp, result)
-	return nil
-}
-
-type diagnosisResult struct {
-	timestamp          uint64
-	unschedulablePlans []plan.Plan
-	schedulablePlans   []plan.Plan
-}
-
-func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
-	index := len(ops)
-	if len(ops) > 0 {
-		if ops[0].Kind()&operator.OpMerge != 0 {
-			index /= 2
-		}
-	}
-	if index > len(result) {
-		return nil
-	}
-	return &diagnosisResult{
-		timestamp:          uint64(time.Now().Unix()),
-		unschedulablePlans: result[index:],
-		schedulablePlans:   result[:index],
-	}
 }
 
 func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
