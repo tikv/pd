@@ -782,8 +782,9 @@ func (suite *clientTestSuite) bootstrapServer(header *pdpb.RequestHeader, client
 		Store:  stores[0],
 		Region: region,
 	}
-	_, err := client.Bootstrap(context.Background(), req)
+	resp, err := client.Bootstrap(context.Background(), req)
 	suite.NoError(err)
+	suite.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
 func (suite *clientTestSuite) TestNormalTSO() {
@@ -893,6 +894,13 @@ func (suite *clientTestSuite) TestGetRegion() {
 		return r.Buckets == nil
 	})
 	config.EnableRegionBucket = true
+
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
+	suite.NoError(suite.reportBucket.Send(breq))
+	suite.Error(suite.reportBucket.RecvMsg(breq))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"))
 }
 
 func (suite *clientTestSuite) TestGetPrevRegion() {

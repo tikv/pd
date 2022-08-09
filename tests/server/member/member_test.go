@@ -116,7 +116,7 @@ func TestMemberDelete(t *testing.T) {
 		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
 		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
 		re.NoError(err)
-		re.Len(resp.Kvs, 0)
+		re.Empty(resp.Kvs)
 	}
 }
 

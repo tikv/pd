@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,8 +43,8 @@ func TestTiKVConfig(t *testing.T) {
 
 		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
 		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
-		re.Equal(15*1024, int(config.GetRegionMaxSize()))
-		re.Equal(uint64(10*1024), config.GetRegionSplitSize())
+		re.Equal(15*units.GiB/units.MiB, int(config.GetRegionMaxSize()))
+		re.Equal(uint64(10*units.GiB/units.MiB), config.GetRegionSplitSize())
 	}
 	//case2: empty config.
 	{

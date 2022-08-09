@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -159,8 +160,9 @@ func TestDamagedRegion(t *testing.T) {
 	// To put stores.
 	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
-		_, err = svr.PutStore(context.Background(), store)
+		resp, err := svr.PutStore(context.Background(), store)
 		re.NoError(err)
+		re.Nil(resp.GetHeader().GetError())
 	}
 
 	// To validate remove peer op be added.
@@ -233,56 +235,65 @@ func TestGetPutConfig(t *testing.T) {
 
 func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftCluster, grpcPDClient pdpb.PDClient, store *metapb.Store) {
 	// Update store.
-	_, err := putStore(grpcPDClient, clusterID, store)
+	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+
 	updatedStore := getStore(re, clusterID, grpcPDClient, store.GetId())
 	re.Equal(store, updatedStore)
 
 	// Update store again.
-	_, err = putStore(grpcPDClient, clusterID, store)
+	resp, err = putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
 	rc.GetAllocator().Alloc()
 	id, err := rc.GetAllocator().Alloc()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is up will fail.
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
-	re.Error(err)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
 	id, err = rc.GetAllocator().Alloc()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Offline)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
-	re.Error(err)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
 	id, err = rc.GetAllocator().Alloc()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Tombstone)
 	rc.GetStore(store.GetId())
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
 	id, err = rc.GetAllocator().Alloc()
 	re.NoError(err)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	s := rc.GetStore(id).GetMeta()
 	re.Equal(deployPath, s.DeployPath)
 
 	deployPath = fmt.Sprintf("move/test/store%d", id)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, deployPath))
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	s = rc.GetStore(id).GetMeta()
 	re.Equal(deployPath, s.DeployPath)
 
 	// Put an existed store with duplicated address with other old stores.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Up)
-	_, err = putStore(grpcPDClient, clusterID, newMetaStore(store.GetId(), testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(store.GetId())))
-	re.Error(err)
+	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(store.GetId(), testMetaStoreAddr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(store.GetId())))
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 }
 
 func getTestDeployPath(storeID uint64) string {
@@ -485,6 +496,7 @@ func TestGetPDMembers(t *testing.T) {
 	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID)}
 	resp, err := grpcPDClient.GetMembers(context.Background(), req)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// A more strict test can be found at api/member_test.go
 	re.NotEmpty(resp.GetMembers())
 }
@@ -536,8 +548,9 @@ func TestStoreVersionChange(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}()
 	time.Sleep(100 * time.Millisecond)
 	svr.SetClusterVersion("1.0.0")
@@ -574,8 +587,9 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 		stores = append(stores, store)
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}
 
 	var wg sync.WaitGroup
@@ -585,13 +599,14 @@ func TestConcurrentHandleRegion(t *testing.T) {
 			Header: testutil.NewRequestHeader(clusterID),
 			Stats: &pdpb.StoreStats{
 				StoreId:   store.GetId(),
-				Capacity:  1000 * (1 << 20),
-				Available: 1000 * (1 << 20),
+				Capacity:  1000 * units.MiB,
+				Available: 1000 * units.MiB,
 			},
 		}
 		grpcServer := &server.GrpcServer{Server: leaderServer.GetServer()}
-		_, err := grpcServer.StoreHeartbeat(context.TODO(), req)
+		resp, err := grpcServer.StoreHeartbeat(context.TODO(), req)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 		stream, err := grpcPDClient.RegionHeartbeat(ctx)
 		re.NoError(err)
 		peerID, err := id.Alloc()
@@ -756,13 +771,13 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(err)
 	re.Nil(raftCluster)
 
-	storage := rc.GetStorage()
+	testStorage := rc.GetStorage()
 	basicCluster := rc.GetBasicCluster()
 	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
-	re.NoError(storage.SaveMeta(meta))
+	re.NoError(testStorage.SaveMeta(meta))
 	stores := make([]*metapb.Store, 0, n)
 	for i := 0; i < n; i++ {
 		store := &metapb.Store{Id: uint64(i)}
@@ -770,7 +785,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(testStorage.SaveStore(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -785,12 +800,12 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		re.NoError(storage.SaveRegion(region))
+		re.NoError(testStorage.SaveRegion(region))
 	}
-	re.NoError(storage.Flush())
+	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, storage, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, testStorage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -819,9 +834,9 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, region := range regions {
-		re.NoError(storage.SaveRegion(region))
+		re.NoError(testStorage.SaveRegion(region))
 	}
-	raftCluster.GetStorage().LoadRegionsOnce(ctx, raftCluster.GetBasicCluster().PutRegion)
+	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
 	re.Equal(n, raftCluster.GetRegionCount())
 }
 
@@ -848,15 +863,18 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	}
 
 	// cannot put TiFlash node without placement rules
-	_, err = putStore(grpcPDClient, clusterID, tiflashStore)
-	re.Error(err)
+	resp, err := putStore(grpcPDClient, clusterID, tiflashStore)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
+
 	rep := leaderServer.GetConfig().Replication
 	rep.EnablePlacementRules = true
 	svr := leaderServer.GetServer()
 	err = svr.SetReplicationConfig(rep)
 	re.NoError(err)
-	_, err = putStore(grpcPDClient, clusterID, tiflashStore)
+	resp, err = putStore(grpcPDClient, clusterID, tiflashStore)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
 	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
@@ -869,7 +887,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	err = svr.SetReplicationConfig(rep)
 	re.NoError(err)
-	re.Equal(0, len(svr.GetScheduleConfig().StoreLimit))
+	re.Empty(svr.GetScheduleConfig().StoreLimit)
 }
 
 func TestReplicationModeStatus(t *testing.T) {
@@ -922,8 +940,9 @@ func newBootstrapRequest(clusterID uint64) *pdpb.BootstrapRequest {
 // helper function to check and bootstrap.
 func bootstrapCluster(re *require.Assertions, clusterID uint64, grpcPDClient pdpb.PDClient) {
 	req := newBootstrapRequest(clusterID)
-	_, err := grpcPDClient.Bootstrap(context.Background(), req)
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
 func putStore(grpcPDClient pdpb.PDClient, clusterID uint64, store *metapb.Store) (*pdpb.PutStoreResponse, error) {
@@ -939,6 +958,7 @@ func getStore(re *require.Assertions, clusterID uint64, grpcPDClient pdpb.PDClie
 		StoreId: storeID,
 	})
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	re.Equal(storeID, resp.GetStore().GetId())
 	return resp.GetStore()
 }
@@ -996,8 +1016,9 @@ func TestOfflineStoreLimit(t *testing.T) {
 		storeID, err := id.Alloc()
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}
 	for i := uint64(1); i <= 2; i++ {
 		r := &metapb.Region{
@@ -1083,8 +1104,9 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	re.NotNil(rc)
 	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
-	_, err = putStore(grpcPDClient, clusterID, store)
+	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	r := &metapb.Region{
 		Id: 1,
 		RegionEpoch: &metapb.RegionEpoch{
@@ -1150,8 +1172,9 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		peerID, err := id.Alloc()
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "3.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 		peers = append(peers, &metapb.Peer{
 			Id:      peerID,
 			StoreId: storeID,
@@ -1272,8 +1295,9 @@ func TestMinResolvedTS(t *testing.T) {
 		if isTiflash {
 			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
 		}
-		_, err = putStore(grpcPDClient, clusterID, store)
+		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 		req := &pdpb.ReportMinResolvedTsRequest{
 			Header:        testutil.NewRequestHeader(clusterID),
 			StoreId:       storeID,

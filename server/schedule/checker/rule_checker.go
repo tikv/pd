@@ -270,7 +270,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster.GetOpts(), s) {
+	if !stateFilter.Target(c.cluster.GetOpts(), s).IsOK() {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
