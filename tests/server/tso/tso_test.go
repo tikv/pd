@@ -115,7 +115,6 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 	requestLocalTSOs(re, cluster, dcLocationConfig)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`))
 
 	// Reboot the cluster.
 	re.NoError(cluster.StopAll())

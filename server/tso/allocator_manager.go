@@ -250,24 +250,16 @@ func (am *AllocatorManager) CleanUpDCLocation() error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	// Check if there is any dc-location to clean up
 	serverID := am.member.ID()
 	dcLocationKey := am.member.GetDCLocationPath(serverID)
+	// remove etcd
 	if resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
-		Then(clientv3.OpGet(dcLocationKey)).
+		Then(clientv3.OpDelete(dcLocationKey)).
 		Commit(); err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	} else if !resp.Succeeded {
-		return nil
-	}
-
-	// remove etcd
-	if _, err := etcdutil.EtcdKVDelete(
-		am.member.Client(),
-		dcLocationKey,
-		clientv3.WithPrefix()); err != nil {
-		return err
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	log.Info("delete dc-location which in etcd",
 		zap.String("dcLocation-key", dcLocationKey),

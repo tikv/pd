@@ -396,7 +396,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
-	// When disable local TSO after enabling local TSO, we should clean up the local TSO allocator's dc location map and etcd.
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
 			return err
@@ -827,7 +827,7 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	return cfg
 }
 
-// SetEnableLocalTSO sets enable-local-tso flag of Server .
+// SetEnableLocalTSO sets enable-local-tso flag of Server. This function only for test.
 func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
 	s.cfg.EnableLocalTSO = enableLocalTSO
 }
