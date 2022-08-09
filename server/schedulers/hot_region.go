@@ -566,7 +566,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() {
 		return nil
 	}
-	hotLogger.Info("balanceSolver.solve start", zap.String("op-type", bs.opTy.String()), zap.String("rw-type", bs.rwTy.String()))
+	hotLogger.Debug("balanceSolver.solve start", zap.String("op-type", bs.opTy.String()), zap.String("rw-type", bs.rwTy.String()))
 
 	bs.cur = &solution{}
 	tryUpdateBestSolution := func() {
@@ -650,7 +650,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "allow-search-revert-regions").Inc()
 	}
 
-	hotLogger.Info("balanceSolver.solve end", zap.Int("final-ops-len", len(bs.ops)))
+	hotLogger.Debug("balanceSolver.solve end", zap.Int("final-ops-len", len(bs.ops)))
 	return bs.ops
 }
 

@@ -454,10 +454,12 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
 		zap.String("additional-info", op.GetAdditionalInfo()))
-	hotLogger.Info("add operator",
-		zap.Uint64("region-id", regionID),
-		zap.Reflect("operator", op),
-		zap.String("additional-info", op.GetAdditionalInfo()))
+	if (op.Kind() & operator.OpHotRegion) != 0 {
+		hotLogger.Info("add operator",
+			zap.Uint64("region-id", regionID),
+			zap.Reflect("operator", op),
+			zap.String("additional-info", op.GetAdditionalInfo()))
+	}
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -575,11 +577,13 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()))
-		hotLogger.Info("operator finish",
-			zap.Uint64("region-id", op.RegionID()),
-			zap.Duration("takes", op.RunningTime()),
-			zap.Reflect("operator", op),
-			zap.String("additional-info", op.GetAdditionalInfo()))
+		if (op.Kind() & operator.OpHotRegion) != 0 {
+			hotLogger.Info("operator finish",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("takes", op.RunningTime()),
+				zap.Reflect("operator", op),
+				zap.String("additional-info", op.GetAdditionalInfo()))
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 		for _, counter := range op.FinishedCounters {
@@ -591,12 +595,25 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()))
+		if (op.Kind() & operator.OpHotRegion) != 0 {
+			hotLogger.Info("replace old operator",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("takes", op.RunningTime()),
+				zap.Reflect("operator", op),
+				zap.String("additional-info", op.GetAdditionalInfo()))
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "replace").Inc()
 	case operator.EXPIRED:
 		log.Info("operator expired",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("lives", op.ElapsedTime()),
 			zap.Reflect("operator", op))
+		if (op.Kind() & operator.OpHotRegion) != 0 {
+			hotLogger.Info("operator expired",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("lives", op.ElapsedTime()),
+				zap.Reflect("operator", op))
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "expire").Inc()
 	case operator.TIMEOUT:
 		log.Info("operator timeout",
@@ -604,6 +621,13 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()))
+		if (op.Kind() & operator.OpHotRegion) != 0 {
+			hotLogger.Info("operator timeout",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("takes", op.RunningTime()),
+				zap.Reflect("operator", op),
+				zap.String("additional-info", op.GetAdditionalInfo()))
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case operator.CANCELED:
 		fields := []zap.Field{
@@ -616,6 +640,11 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		log.Info("operator canceled",
 			fields...,
 		)
+		if (op.Kind() & operator.OpHotRegion) != 0 {
+			hotLogger.Info("operator canceled",
+				fields...,
+			)
+		}
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
 
