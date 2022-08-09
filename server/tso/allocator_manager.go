@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/errors"
 	"math"
 	"path"
 	"strconv"
@@ -25,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -243,6 +243,23 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 		return DCLocationInfo{}, false
 	}
 	return infoPtr.clone(), true
+}
+
+// CleanUpDCLocations cleans up all DCLocationInfo
+func (am *AllocatorManager) CleanUpDCLocations() error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	// remove etcd
+	if _, err := etcdutil.EtcdKVDelete(
+		am.member.Client(),
+		am.member.GetDCLocationPathPrefix(),
+		clientv3.WithPrefix()); err != nil {
+		return err
+	}
+	for dcLocation := range am.mu.clusterDCLocations {
+		delete(am.mu.clusterDCLocations, dcLocation)
+	}
+	return nil
 }
 
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,
@@ -1163,4 +1180,9 @@ func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 // EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
 func (am *AllocatorManager) EnableLocalTSO() bool {
 	return am.enableLocalTSO
+}
+
+// SetEnableLocalTSO set the value of AllocatorManager.enableLocalTSO.
+func (am *AllocatorManager) SetEnableLocalTSO(enableLocalTSO bool) {
+	am.enableLocalTSO = enableLocalTSO
 }

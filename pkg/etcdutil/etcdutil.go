@@ -129,6 +129,25 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	return resp, nil
 }
 
+// EtcdKVDelete returns the etcd DeleteResponse by given key or key prefix
+func EtcdKVDelete(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	defer cancel()
+
+	start := time.Now()
+	resp, err := clientv3.NewKV(c).Delete(ctx, key, opts...)
+	if cost := time.Since(start); cost > DefaultSlowRequestTime {
+		log.Warn("kv deletes too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
+	}
+
+	if err != nil {
+		e := errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
+		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(e))
+		return resp, e
+	}
+	return resp, nil
+}
+
 // GetValue gets value with key from etcd.
 func GetValue(c *clientv3.Client, key string, opts ...clientv3.OpOption) ([]byte, error) {
 	resp, err := get(c, key, opts...)
