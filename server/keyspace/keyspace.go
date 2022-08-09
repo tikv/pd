@@ -63,7 +63,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 	manager := &Manager{
 		store:       store,
 		idAllocator: idAllocator,
-		metaLock:    syncutil.NewLockGroup(),
+		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(SpaceIDHash)),
 	}
 	now := time.Now()
 	// Initialize default keyspace.

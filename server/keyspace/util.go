@@ -68,3 +68,12 @@ func validateName(name string) error {
 	}
 	return nil
 }
+
+// SpaceIDHash is used to hash the spaceID inside the lockGroup.
+// A simple mask is applied to spaceID to use its last byte as map key,
+// limiting the maximum map length to 256.
+// Since keyspaceID is sequentially allocated, this can also reduce the chance
+// of collision when comparing with random hashes.
+func SpaceIDHash(spaceID uint32) uint32 {
+	return spaceID & 0xFF
+}
