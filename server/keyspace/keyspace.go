@@ -65,8 +65,16 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 		idAllocator: idAllocator,
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(SpaceIDHash)),
 	}
-	now := time.Now()
+	// If default keyspace already exists, skip initialization.
+	defaultExist, _, err := manager.store.LoadKeyspaceIDByName(DefaultKeyspaceName)
+	if err != nil {
+		return nil, err
+	}
+	if defaultExist {
+		return manager, nil
+	}
 	// Initialize default keyspace.
+	now := time.Now()
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
@@ -74,8 +82,8 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 		CreatedAt:      now.Unix(),
 		StateChangedAt: now.Unix(),
 	}
-	_, err := manager.saveNewKeyspace(defaultKeyspace)
-	if err != nil {
+	_, err = manager.saveNewKeyspace(defaultKeyspace)
+	if err != nil && err != ErrKeyspaceExists {
 		return nil, err
 	}
 	return manager, nil
