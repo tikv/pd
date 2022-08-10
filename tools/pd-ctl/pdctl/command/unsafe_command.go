@@ -43,7 +43,9 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Run:   removeFailedStoresCommandFunc,
 	}
 	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
-	cmd.PersistentFlags().Bool("auto-detect", false, "detect failed stores automatically without needing to pass failed store ids, and all stores not in PD store information are regarded as failed")
+	cmd.PersistentFlags().Bool("auto-detect", false, `detect failed stores automatically without needing to pass failed store ids, and all stores not in PD stores list are regarded as failed; 
+Note: DO NOT RECOMMEND to use this flag for general use, it's used only for case that PD doesn't have the store information of failed stores after pd-recover;
+Note: Do it with caution to make sure all live stores's heartbeats has been reported PD already, otherwise it may regarded some stores as failed mistakenly.`)
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	return cmd
 }
