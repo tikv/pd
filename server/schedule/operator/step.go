@@ -300,7 +300,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 // CheckInProgress checks if the step is in the progress of advancing.
 func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
-	if peer == nil || peer.GetId() != pl.PeerID {
+	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
 	return nil
