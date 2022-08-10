@@ -120,9 +120,7 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	re.NoError(cluster.StopAll())
 	for _, server := range cluster.GetServers() {
 		server.SetEnableLocalTSO(false)
-		server.GetTSOAllocatorManager().SetEnableLocalTSO(false)
 	}
-
 	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 

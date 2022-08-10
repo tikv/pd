@@ -247,9 +247,6 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 
 // CleanUpDCLocation cleans up certain server's DCLocationInfo
 func (am *AllocatorManager) CleanUpDCLocation() error {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
 	serverID := am.member.ID()
 	dcLocationKey := am.member.GetDCLocationPath(serverID)
 	// remove etcd
@@ -1186,9 +1183,4 @@ func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 // EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
 func (am *AllocatorManager) EnableLocalTSO() bool {
 	return am.enableLocalTSO
-}
-
-// SetEnableLocalTSO set the value of AllocatorManager.enableLocalTSO.
-func (am *AllocatorManager) SetEnableLocalTSO(enableLocalTSO bool) {
-	am.enableLocalTSO = enableLocalTSO
 }
