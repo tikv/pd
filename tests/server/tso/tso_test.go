@@ -142,4 +142,8 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+	// Test whether the number of existing DCs is as expected.
+	dcLocations, err := leaderServer.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+	re.NoError(err)
+	re.Equal(0, len(dcLocations))
 }

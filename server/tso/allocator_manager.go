@@ -258,8 +258,7 @@ func (am *AllocatorManager) CleanUpDCLocation() error {
 	} else if !resp.Succeeded {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-	log.Info("delete dc-location which in etcd",
-		zap.String("dcLocation-key", dcLocationKey),
+	log.Info("delete the dc-location key previously written in etcd",
 		zap.Uint64("server-id", serverID))
 	go am.ClusterDCLocationChecker()
 	return nil
