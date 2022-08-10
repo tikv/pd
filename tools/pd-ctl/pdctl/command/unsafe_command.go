@@ -38,7 +38,7 @@ func NewUnsafeCommand() *cobra.Command {
 // NewRemoveFailedStoresCommand returns the unsafe remove failed stores command.
 func NewRemoveFailedStoresCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "remove-failed-stores <store_id1>[,<store_id2>,...]",
+		Use:   "remove-failed-stores [<store_id1>,<store_id2>,...]",
 		Short: "Remove failed stores unsafely",
 		Run:   removeFailedStoresCommandFunc,
 	}
@@ -61,22 +61,38 @@ func NewRemoveFailedStoresShowCommand() *cobra.Command {
 
 func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/remove-failed-stores", unsafePrefix)
-	if len(args) < 1 {
-		cmd.Usage()
+	postInput := make(map[string]interface{}, 3)
+
+	autoDetect, err := cmd.Flags().GetBool("auto-detect")
+	if err != nil {
+		cmd.Println(err)
 		return
 	}
-	strStores := strings.Split(args[0], ",")
-	var stores []uint64
-	for _, strStore := range strStores {
-		store, err := strconv.ParseUint(strStore, 10, 64)
-		if err != nil {
-			cmd.Println(err)
+
+	if autoDetect {
+		if len(args) > 0 {
+			cmd.Println("The flag `auto-detect` is set, no need to specify failed store ids")
 			return
 		}
-		stores = append(stores, store)
-	}
-	postInput := map[string]interface{}{
-		"stores": stores,
+		postInput["auto-detect"] = autoDetect
+	} else {
+		if len(args) < 1 {
+			cmd.Println("Failed store ids are not specified")
+			cmd.Usage()
+			return
+		}
+
+		strStores := strings.Split(args[0], ",")
+		var stores []uint64
+		for _, strStore := range strStores {
+			store, err := strconv.ParseUint(strStore, 10, 64)
+			if err != nil {
+				cmd.Println(err)
+				return
+			}
+			stores = append(stores, store)
+		}
+		postInput["stores"] = stores
 	}
 
 	timeout, err := cmd.Flags().GetFloat64("timeout")
@@ -85,14 +101,6 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	} else if timeout != 300 {
 		postInput["timeout"] = timeout
-	}
-
-	autoDetect, err := cmd.Flags().GetBool("auto-detect")
-	if err != nil {
-		cmd.Println(err)
-		return
-	} else if autoDetect {
-		postInput["auto-detect"] = ""
 	}
 
 	postJSON(cmd, prefix, postInput)

@@ -83,3 +83,25 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
 	suite.NoError(err)
 }
+
+func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
+	input := map[string]interface{}{"stores": []uint64{}}
+	data, _ := json.Marshal(input)
+	re := suite.Require()
+
+	input = map[string]interface{}{"auto-detect": false}
+	data, _ = json.Marshal(input)
+	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
+	suite.NoError(err)
+
+	input = map[string]interface{}{"auto-detect": true}
+	data, _ = json.Marshal(input)
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	suite.NoError(err)
+
+	// Test show
+	var output []cluster.StageOutput
+	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
+	suite.NoError(err)
+}

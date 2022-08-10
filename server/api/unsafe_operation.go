@@ -52,9 +52,9 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		return
 	}
 
-	_, autoDetect := input["auto_detect"]
 	stores := make(map[uint64]struct{})
-	if !autoDetect {
+	autoDetect, exists := input["auto-detect"].(bool)
+	if !exists || !autoDetect {
 		storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
 		if !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
@@ -66,8 +66,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	}
 
 	timeout := uint64(600)
-	rawTimeout, exists := input["timeout"].(float64)
-	if exists {
+	if rawTimeout, exists := input["timeout"].(float64); exists {
 		timeout = uint64(rawTimeout)
 	}
 
