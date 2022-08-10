@@ -72,7 +72,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.Name)
 	if err != nil {
-		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, err
+		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, nil
 	}
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   s.header(),
