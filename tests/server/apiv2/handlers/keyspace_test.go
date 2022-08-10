@@ -19,6 +19,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"testing"
+
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -27,9 +31,6 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
-	"io"
-	"net/http"
-	"testing"
 )
 
 const keyspacesPrefix = "/pd/api/v2/keyspaces"
@@ -153,12 +154,12 @@ func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, toke
 	httpReq.URL.RawQuery = query.Encode()
 	// Send request.
 	httpResp, err := dialClient.Do(httpReq)
-	re.Equal(http.StatusOK, httpResp.StatusCode)
 	re.NoError(err)
+	defer httpResp.Body.Close()
+	re.Equal(http.StatusOK, httpResp.StatusCode)
 	// Receive & decode response.
 	data, err := io.ReadAll(httpResp.Body)
 	re.NoError(err)
-	re.NoError(httpResp.Body.Close())
 	resp := &handlers.LoadAllKeyspacesResponse{}
 	re.NoError(json.Unmarshal(data, resp))
 	return resp
@@ -169,12 +170,12 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return false, nil
 	}
 	data, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.NoError(resp.Body.Close())
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	return true, meta.KeyspaceMeta
@@ -202,10 +203,10 @@ func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
+	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.NoError(resp.Body.Close())
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	checkCreateRequest(re, request, meta.KeyspaceMeta)
@@ -219,10 +220,10 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
+	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.NoError(resp.Body.Close())
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	return meta.KeyspaceMeta
@@ -231,10 +232,10 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
 	resp, err := dialClient.Get(server.GetAddr() + keyspacesPrefix + "/" + name)
 	re.NoError(err)
+	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	data, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.NoError(resp.Body.Close())
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	return meta.KeyspaceMeta
