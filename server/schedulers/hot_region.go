@@ -1130,7 +1130,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		greaterMinRate := peersRate >= bs.getMinRate(dim)
 		isTolerance := bs.isTolerance(dim, reverse)
 		otherMessage = fmt.Sprintf(", >=min-rate: %t, is-tolerance: %t", greaterMinRate, isTolerance)
-		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) && (state == "non-balanced" || maxPendingRate < 1) {
+		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) && maxPendingRate < 1 {
 			cmp = 1
 		} else {
 			cmp = 0
