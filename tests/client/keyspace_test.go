@@ -16,11 +16,12 @@ package client_test
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/keyspace"
-	"time"
 )
 
 const (
@@ -49,7 +50,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 100, 10)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.Name)
 		re.NoError(err)
@@ -65,7 +66,10 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.Name)
 }
 
-func (suite *clientTestSuite) TestWatchKeyspace() {
+func (suite *clientTestSuite) TestWatchKeyspaces() {
+	// Use a new cluster test watch keyspace.
+	suite.TearDownSuite()
+	suite.SetupSuite()
 	re := suite.Require()
 	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
