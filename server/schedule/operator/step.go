@@ -381,7 +381,10 @@ func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (rp RemovePeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	return removeNode(region.GetStorePeer(rp.FromStore), useConfChangeV2)
+	return createResponse(&pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_RemoveNode,
+		Peer:       region.GetStorePeer(rp.FromStore),
+	}, useConfChangeV2)
 }
 
 // MergeRegion is an OpStep that merge two regions.
@@ -866,14 +869,6 @@ func addLearnerNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartb
 			StoreId: storeID,
 			Role:    metapb.PeerRole_Learner,
 		},
-	}
-	return createResponse(change, useConfChangeV2)
-}
-
-func removeNode(peer *metapb.Peer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	change := &pdpb.ChangePeer{
-		ChangeType: eraftpb.ConfChangeType_RemoveNode,
-		Peer:       peer,
 	}
 	return createResponse(change, useConfChangeV2)
 }
