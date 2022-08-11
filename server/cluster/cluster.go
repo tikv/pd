@@ -593,6 +593,11 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	return nil
 }
 
+// IsPrepared return true if the prepare checker is ready.
+func (c *RaftCluster) IsPrepared() bool {
+	return c.prepareChecker.isPrepared()
+}
+
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
@@ -663,7 +668,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
-	if isNew {
+	if !c.IsPrepared() && isNew {
 		c.prepareChecker.collect(region)
 	}
 
@@ -716,13 +721,6 @@ func (c *RaftCluster) updateStoreStatusLocked(id uint64) {
 	leaderRegionSize := c.core.GetStoreLeaderRegionSize(id)
 	regionSize := c.core.GetStoreRegionSize(id)
 	c.core.UpdateStoreStatus(id, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize)
-}
-
-//nolint:unused
-func (c *RaftCluster) getClusterID() uint64 {
-	c.RLock()
-	defer c.RUnlock()
-	return c.meta.GetId()
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
@@ -1445,13 +1443,6 @@ func (c *RaftCluster) GetComponentManager() *component.Manager {
 	return c.componentManager
 }
 
-// isPrepared if the cluster information is collected
-func (c *RaftCluster) isPrepared() bool {
-	c.RLock()
-	defer c.RUnlock()
-	return c.prepareChecker.check(c)
-}
-
 // GetStoresLoads returns load stats of all stores.
 func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	c.RLock()
@@ -1504,10 +1495,11 @@ func (c *RaftCluster) FitRegion(region *core.RegionInfo) *placement.RegionFit {
 }
 
 type prepareChecker struct {
+	sync.RWMutex
 	reactiveRegions map[uint64]int
 	start           time.Time
 	sum             int
-	isPrepared      bool
+	prepared        bool
 }
 
 func newPrepareChecker() *prepareChecker {
@@ -1519,7 +1511,13 @@ func newPrepareChecker() *prepareChecker {
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
 func (checker *prepareChecker) check(c *RaftCluster) bool {
-	if checker.isPrepared || time.Since(checker.start) > collectTimeout {
+	checker.Lock()
+	defer checker.Unlock()
+	if checker.prepared {
+		return true
+	}
+	if time.Since(checker.start) > collectTimeout {
+		checker.prepared = true
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
@@ -1536,15 +1534,23 @@ func (checker *prepareChecker) check(c *RaftCluster) bool {
 			return false
 		}
 	}
-	checker.isPrepared = true
+	checker.prepared = true
 	return true
 }
 
 func (checker *prepareChecker) collect(region *core.RegionInfo) {
+	checker.Lock()
+	defer checker.Unlock()
 	for _, p := range region.GetPeers() {
 		checker.reactiveRegions[p.GetStoreId()]++
 	}
 	checker.sum++
+}
+
+func (checker *prepareChecker) isPrepared() bool {
+	checker.RLock()
+	defer checker.RUnlock()
+	return checker.prepared
 }
 
 // GetHotWriteRegions gets hot write regions' info.
