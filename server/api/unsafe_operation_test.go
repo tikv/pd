@@ -98,9 +98,4 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
 	data, _ = json.Marshal(input)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	suite.NoError(err)
-
-	// Test show
-	var output []cluster.StageOutput
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
-	suite.NoError(err)
 }
