@@ -569,7 +569,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	ops, _ := lb.Schedule(suite.tc, false)
 	suite.NotEmpty(ops)
 	suite.Len(ops, 1)
-	suite.Len(ops[0].Counters, 2)
+	suite.Len(ops[0].Counters, 1)
 	suite.Len(ops[0].FinishedCounters, 3)
 	lb, err = schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	suite.NoError(err)

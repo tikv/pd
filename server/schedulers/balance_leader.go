@@ -400,11 +400,9 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	switch dir {
 	case transferOut:
 		plan.source, plan.target = store, nil
-		l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 		creator = l.transferLeaderOut
 	case transferIn:
 		plan.source, plan.target = nil, store
-		l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 		creator = l.transferLeaderIn
 	}
 	var op *operator.Operator
@@ -419,7 +417,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	if op != nil {
 		l.retryQuota.ResetLimit(store)
-		op.Counters = append(op.Counters, l.counter.WithLabelValues(dir, plan.SourceMetricLabel()))
 	} else {
 		l.Attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()))
