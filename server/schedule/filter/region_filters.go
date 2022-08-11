@@ -55,7 +55,7 @@ func SelectOneRegionWithCollector(regions []*core.RegionInfo, collector *plan.Co
 			func(i int) bool {
 				status := filters[i].Select(r)
 				if !status.IsOK() {
-					collector.Collect(plan.GenerateCoreResource(r.GetID()), plan.SetStatus(status))
+					collector.Collect(plan.GenerateCoreResource(r), plan.SetStatus(status))
 					return false
 				}
 				return true

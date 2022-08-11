@@ -763,7 +763,7 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	ops, plans := sb.Schedule(tc, true)
 	re.Len(plans, 100)
 	re.Empty(ops)
-	re.Equal(plans[0].GetStatus().StatusCode, plan.StatusRegionNotReplicated)
+	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
 
 	opt.SetMaxReplicas(1)
 	ops, plans = sb.Schedule(tc, true)
