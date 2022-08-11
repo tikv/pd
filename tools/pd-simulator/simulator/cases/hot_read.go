@@ -107,7 +107,7 @@ func newHotReadFromFile() *Case {
 	var simCase Case
 
 	// unmarshal file
-	path := "/Users/thomas/Downloads/8.txt"
+	path := "/Users/thomas/Downloads/2.txt"
 	file, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal("open file error", zap.Error(err))
@@ -139,6 +139,7 @@ func newHotReadFromFile() *Case {
 			readFlow[region.RegionID] = int64(statistics.StoreHeartBeatReportInterval*region.ByteRate/1024/1024) * units.MiB
 			var peers []*metapb.Peer
 			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
 				StoreId: storeID,
 			})
 			for _, peerStoreId := range region.Stores {
@@ -146,10 +147,12 @@ func newHotReadFromFile() *Case {
 					continue
 				}
 				peers = append(peers, &metapb.Peer{
+					Id:      IDAllocator.nextID(),
 					StoreId: peerStoreId,
 				})
 			}
 			simCase.Regions = append(simCase.Regions, Region{
+				ID:     IDAllocator.nextID(),
 				Peers:  peers,
 				Leader: peers[0],
 				Size:   96 * units.MiB,
@@ -165,24 +168,25 @@ func newHotReadFromFile() *Case {
 	simCase.Events = []EventDescriptor{e}
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		leaderCount := make([]int, len(hotReadInfos.AsLeader))
-		for id := range readFlow {
-			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
-			leaderCount[int(leaderStore-1)]++
-		}
-		simutil.Logger.Info("current hot region counts", zap.Reflect("hot-region", leaderCount))
-
-		// check count diff < 2.
-		var min, max int
-		for i := range leaderCount {
-			if leaderCount[i] > leaderCount[max] {
-				max = i
-			}
-			if leaderCount[i] < leaderCount[min] {
-				min = i
-			}
-		}
-		return leaderCount[max]-leaderCount[min] < 2
+		//leaderCount := make([]int, len(hotReadInfos.AsLeader))
+		//for id := range readFlow {
+		//	leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
+		//	leaderCount[int(leaderStore-1)]++
+		//}
+		//simutil.Logger.Info("current hot region counts", zap.Reflect("hot-region", leaderCount))
+		//
+		//// check count diff < 2.
+		//var min, max int
+		//for i := range leaderCount {
+		//	if leaderCount[i] > leaderCount[max] {
+		//		max = i
+		//	}
+		//	if leaderCount[i] < leaderCount[min] {
+		//		min = i
+		//	}
+		//}
+		//return leaderCount[max]-leaderCount[min] < 2
+		return false
 	}
 
 	return &simCase
