@@ -37,7 +37,7 @@ func TestUnsafeOperationTestSuite(t *testing.T) {
 	suite.Run(t, new(unsafeOperationTestSuite))
 }
 
-func (suite *unsafeOperationTestSuite) SetupSuite() {
+func (suite *unsafeOperationTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
@@ -49,14 +49,15 @@ func (suite *unsafeOperationTestSuite) SetupSuite() {
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
 }
 
-func (suite *unsafeOperationTestSuite) TearDownSuite() {
+func (suite *unsafeOperationTestSuite) TearDownTest() {
 	suite.cleanup()
 }
 
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
+	re := suite.Require()
+
 	input := map[string]interface{}{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
-	re := suite.Require()
 	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
 	suite.NoError(err)
@@ -85,12 +86,10 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 }
 
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
-	input := map[string]interface{}{"stores": []uint64{}}
-	data, _ := json.Marshal(input)
 	re := suite.Require()
 
-	input = map[string]interface{}{"auto-detect": false}
-	data, _ = json.Marshal(input)
+	input := map[string]interface{}{"auto-detect": false}
+	data, _ := json.Marshal(input)
 	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	suite.NoError(err)
