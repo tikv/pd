@@ -39,7 +39,7 @@ const (
 )
 
 type solver struct {
-	*balanceSchedulerBasePlan
+	*balanceSchedulerPlan
 	schedule.Cluster
 	kind              core.ScheduleKind
 	opInfluence       operator.OpInfluence
@@ -49,13 +49,13 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *balanceSchedulerBasePlan, kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *balanceSchedulerPlan, kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
 	return &solver{
-		balanceSchedulerBasePlan: basePlan,
-		Cluster:                  cluster,
-		kind:                     kind,
-		opInfluence:              opInfluence,
-		tolerantSizeRatio:        adjustTolerantRatio(cluster, kind),
+		balanceSchedulerPlan: basePlan,
+		Cluster:              cluster,
+		kind:                 kind,
+		opInfluence:          opInfluence,
+		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
 	}
 }
 

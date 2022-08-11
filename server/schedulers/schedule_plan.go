@@ -16,9 +16,8 @@ package schedulers
 
 import (
 	"fmt"
-	"strconv"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -53,7 +52,7 @@ func (b *balanceStep) Sub() {
 	*b--
 }
 
-type balanceSchedulerBasePlan struct {
+type balanceSchedulerPlan struct {
 	source *core.StoreInfo
 	target *core.StoreInfo
 	region *core.RegionInfo
@@ -61,56 +60,31 @@ type balanceSchedulerBasePlan struct {
 	step   *balanceStep
 }
 
-// NewBalanceSchedulerBasePlan returns a new balanceSchedulerBasePlan
-func NewBalanceSchedulerBasePlan() *balanceSchedulerBasePlan {
+// NewBalanceSchedulerPlan returns a new balanceSchedulerBasePlan
+func NewBalanceSchedulerPlan() *balanceSchedulerPlan {
 	step := balanceStep(0)
-	basePlan := &balanceSchedulerBasePlan{
+	basePlan := &balanceSchedulerPlan{
 		step: &step,
 	}
 	return basePlan
 }
 
-func (p *balanceSchedulerBasePlan) GetStep() plan.Step {
+func (p *balanceSchedulerPlan) GetStep() plan.Step {
 	return p.step
 }
 
-func (p *balanceSchedulerBasePlan) GenerateCoreResource(id uint64) {
+func (p *balanceSchedulerPlan) GenerateCoreResource(resource interface{}) {
 	switch *p.step {
 	case 0:
-		p.source = core.NewStoreInfo(&metapb.Store{Id: id})
+		p.source = resource.(*core.StoreInfo)
 	case 1:
-		p.region = core.NewRegionInfo(&metapb.Region{Id: id}, nil)
+		p.region = resource.(*core.RegionInfo)
 	case 2:
-		p.target = core.NewStoreInfo(&metapb.Store{Id: id})
+		p.target = resource.(*core.StoreInfo)
 	}
 }
 
-func (p *balanceSchedulerBasePlan) GetPhases() []map[string]string {
-	ret := make([]map[string]string, 0)
-	if *p.step >= 0 {
-		ret = append(ret, map[string]string{
-			"select source store": strconv.FormatUint(p.source.GetID(), 10)})
-	}
-	if *p.step >= 1 {
-		ret = append(ret, map[string]string{
-			"select region": strconv.FormatUint(p.region.GetID(), 10)})
-	}
-	if *p.step >= 2 {
-		ret = append(ret, map[string]string{
-			"select target store": strconv.FormatUint(p.target.GetID(), 10)})
-	}
-	if *p.step >= 3 {
-		ret = append(ret, map[string]string{
-			"verify the plan": ""})
-	}
-	if *p.step >= 4 {
-		ret = append(ret, map[string]string{
-			"create operator": ""})
-	}
-	return ret
-}
-
-func (p *balanceSchedulerBasePlan) GetCoreResource(step plan.Step) *plan.CoreResource {
+func (p *balanceSchedulerPlan) GetCoreResource(step plan.Step) *plan.CoreResource {
 	switch step.Number() {
 	case 0:
 		if *p.step < 0 {
@@ -131,43 +105,20 @@ func (p *balanceSchedulerBasePlan) GetCoreResource(step plan.Step) *plan.CoreRes
 	return plan.NewEmptyResource()
 }
 
-func (p *balanceSchedulerBasePlan) GetMaxSelectStep() int {
+func (p *balanceSchedulerPlan) GetMaxSelectStep() int {
 	return 3
 }
 
-func (p *balanceSchedulerBasePlan) GetStatus() plan.Status {
+func (p *balanceSchedulerPlan) GetStatus() plan.Status {
 	return p.status
 }
 
-func (p *balanceSchedulerBasePlan) SetStatus(status plan.Status) {
+func (p *balanceSchedulerPlan) SetStatus(status plan.Status) {
 	p.status = status
 }
 
-func (p *balanceSchedulerBasePlan) Desc() string {
-	ret := ""
-	if *p.step < 0 {
-		return ret + fmt.Sprintf(" status %s step %d", p.status.String(), p.step)
-	}
-	if p.source != nil {
-		ret += fmt.Sprintf("source store %d", p.source.GetID())
-	}
-	if *p.step < 1 {
-		return ret + fmt.Sprintf(" status %s step %d", p.status.String(), p.step)
-	}
-	if p.region != nil {
-		ret += fmt.Sprintf(" region %d", p.region.GetID())
-	}
-	if *p.step < 2 {
-		return ret + fmt.Sprintf(" status %s step %d", p.status.String(), p.step)
-	}
-	if p.target != nil {
-		ret += fmt.Sprintf(" target store %d", p.target.GetID())
-	}
-	return ret + fmt.Sprintf(" status %s step %d", p.status.String(), p.step)
-}
-
-func (p *balanceSchedulerBasePlan) Clone(opts ...plan.Option) plan.Plan {
-	plan := &balanceSchedulerBasePlan{
+func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
+	plan := &balanceSchedulerPlan{
 		status: p.status,
 	}
 	step := *p.step
@@ -185,4 +136,53 @@ func (p *balanceSchedulerBasePlan) Clone(opts ...plan.Option) plan.Plan {
 		opt(plan)
 	}
 	return plan
+}
+
+type BalanceSchedulerPlanAnalyzer struct {
+}
+
+func (a *BalanceSchedulerPlanAnalyzer) Summary(plans interface{}) (string, error) {
+	ps, ok := plans.([]*balanceSchedulerPlan)
+	if !ok {
+		return "", errs.ErrDiagnoseLoadPlanError
+	}
+	secondGroup := make(map[plan.Status]uint64)
+	var firstGroup map[uint64]map[plan.Status]int
+	maxStep := -1
+	for _, p := range ps {
+		step := p.GetStep().Number()
+		if step > maxStep {
+			firstGroup = make(map[uint64]map[plan.Status]int)
+			maxStep = p.GetStep().Number()
+		} else if step < maxStep {
+			continue
+		}
+		var store uint64
+		if step == 1 {
+			store = p.source.GetID()
+		} else {
+			store = p.GetCoreResource(p.GetStep()).ID
+		}
+		if _, ok := firstGroup[store]; !ok {
+			firstGroup[store] = make(map[plan.Status]int)
+		}
+		firstGroup[store][p.status]++
+	}
+
+	for _, status := range firstGroup {
+		max := 0
+		curstat := plan.NewStatus(plan.StatusOK)
+		for stat, c := range status {
+			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) {
+				max = c
+				curstat = stat
+			}
+		}
+		secondGroup[curstat] += 1
+	}
+	var resstr string
+	for k, v := range secondGroup {
+		resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
+	}
+	return resstr, nil
 }

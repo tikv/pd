@@ -138,7 +138,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 }
 
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	basePlan := NewBalanceSchedulerBasePlan()
+	basePlan := NewBalanceSchedulerPlan()
 	collector := plan.NewCollector(dryRun, basePlan)
 
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()

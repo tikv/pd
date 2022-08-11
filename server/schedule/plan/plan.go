@@ -17,13 +17,12 @@ package plan
 // Plan is the basic unit for both scheduling and diagnosis.
 // TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
 type Plan interface {
-	GetPhases() []map[string]string
 	GetStep() Step
 	GetStatus() Status
 	GetCoreResource(step Step) *CoreResource
 
 	Clone(ops ...Option) Plan // generate plan for clone option
-	GenerateCoreResource(uint64)
+	GenerateCoreResource(interface{})
 	SetStatus(Status)
 }
 
@@ -78,8 +77,8 @@ func SetStatus(status Status) Option {
 }
 
 // GenerateCoreResource is used to generate Resource for plan
-func GenerateCoreResource(id uint64) Option {
+func GenerateCoreResource(resource interface{}) Option {
 	return func(plan Plan) {
-		plan.GenerateCoreResource(id)
+		plan.GenerateCoreResource(resource)
 	}
 }
