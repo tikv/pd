@@ -19,17 +19,13 @@ package plan
 type Plan interface {
 	GetStep() Step
 	GetStatus() Status
-	GetCoreResource(step Step) *CoreResource
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	GenerateCoreResource(interface{})
 	SetStatus(Status)
 }
 
-type Analyzer interface {
-	Summary(interface{}) (string, error)
-}
-
+// Step identifes plan step
 type Step interface {
 	Number() int
 	Desc() string

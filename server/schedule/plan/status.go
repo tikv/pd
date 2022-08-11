@@ -92,6 +92,11 @@ const (
 	StatusRegionLabelReject
 )
 
+const (
+	// StatusCreateOperatorFailed represents the plan can not create operators.
+	StatusCreateOperatorFailed = iota + 2000
+)
+
 var statusText = map[StatusCode]string{
 	StatusOK: "OK",
 
@@ -129,6 +134,9 @@ var statusText = map[StatusCode]string{
 	// non-filter
 	StatusNoTargetRegion:    "No Target Region",
 	StatusRegionLabelReject: "Region Label Reject",
+
+	// operator
+	StatusCreateOperatorFailed: "Create Operator Failed",
 }
 
 // StatusText turns the status code into string.
@@ -158,10 +166,6 @@ func NewStatus(statusCode StatusCode, reason ...string) Status {
 // IsOK returns true if the status code is StatusOK.
 func (s Status) IsOK() bool {
 	return s.StatusCode == StatusOK
-}
-
-func (s Status) Priority() int {
-	return int(s.StatusCode) / 100
 }
 
 func (s Status) String() string {

@@ -15,9 +15,6 @@
 package schedulers
 
 import (
-	"fmt"
-
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -84,31 +81,6 @@ func (p *balanceSchedulerPlan) GenerateCoreResource(resource interface{}) {
 	}
 }
 
-func (p *balanceSchedulerPlan) GetCoreResource(step plan.Step) *plan.CoreResource {
-	switch step.Number() {
-	case 0:
-		if *p.step < 0 {
-			return nil
-		}
-		return plan.NewStoreResource(p.source.GetID())
-	case 1:
-		if *p.step < 1 {
-			return nil
-		}
-		return plan.NewRegionResource(p.region.GetID())
-	case 2:
-		if *p.step < 2 {
-			return nil
-		}
-		return plan.NewStoreResource(p.target.GetID())
-	}
-	return plan.NewEmptyResource()
-}
-
-func (p *balanceSchedulerPlan) GetMaxSelectStep() int {
-	return 3
-}
-
 func (p *balanceSchedulerPlan) GetStatus() plan.Status {
 	return p.status
 }
@@ -136,53 +108,4 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 		opt(plan)
 	}
 	return plan
-}
-
-type BalanceSchedulerPlanAnalyzer struct {
-}
-
-func (a *BalanceSchedulerPlanAnalyzer) Summary(plans interface{}) (string, error) {
-	ps, ok := plans.([]*balanceSchedulerPlan)
-	if !ok {
-		return "", errs.ErrDiagnoseLoadPlanError
-	}
-	secondGroup := make(map[plan.Status]uint64)
-	var firstGroup map[uint64]map[plan.Status]int
-	maxStep := -1
-	for _, p := range ps {
-		step := p.GetStep().Number()
-		if step > maxStep {
-			firstGroup = make(map[uint64]map[plan.Status]int)
-			maxStep = p.GetStep().Number()
-		} else if step < maxStep {
-			continue
-		}
-		var store uint64
-		if step == 1 {
-			store = p.source.GetID()
-		} else {
-			store = p.GetCoreResource(p.GetStep()).ID
-		}
-		if _, ok := firstGroup[store]; !ok {
-			firstGroup[store] = make(map[plan.Status]int)
-		}
-		firstGroup[store][p.status]++
-	}
-
-	for _, status := range firstGroup {
-		max := 0
-		curstat := plan.NewStatus(plan.StatusOK)
-		for stat, c := range status {
-			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) {
-				max = c
-				curstat = stat
-			}
-		}
-		secondGroup[curstat] += 1
-	}
-	var resstr string
-	for k, v := range secondGroup {
-		resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
-	}
-	return resstr, nil
 }

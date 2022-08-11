@@ -258,7 +258,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusScoreAlmostSame)))
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
 			return nil
 		}
 		collector.Collect()
