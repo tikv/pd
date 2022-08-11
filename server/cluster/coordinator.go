@@ -40,7 +40,7 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	collectFactor             = 0.8
+	collectFactor             = 0.9
 	collectTimeout            = 5 * time.Minute
 	maxScheduleRetries        = 10
 	maxLoadConfigRetries      = 10
