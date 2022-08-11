@@ -1248,7 +1248,14 @@ func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	return nil
 }
 
+<<<<<<< HEAD
 func (s *Server) header() *pdpb.ResponseHeader {
+=======
+func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
+>>>>>>> ab0135541 (grcp_server: return err if cluster id is not ready . (#5412))
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
