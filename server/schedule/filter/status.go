@@ -17,32 +17,35 @@ package filter
 import "github.com/tikv/pd/server/schedule/plan"
 
 var (
-	statusOK     = plan.NewStatus(plan.StatusOK)
-	statusNoNeed = plan.NewStatus(plan.StatusNoNeed)
+	statusOK = plan.NewStatus(plan.StatusOK)
 
-	// store filter status
-	statusStoreDown               = plan.NewStatus(plan.StatusStoreUnavailable, "store is lost for longer than 'max-store-down-time' setting")
-	statusStoreTombstone          = plan.NewStatus(plan.StatusStoreUnavailable, "store is tombstone")
-	statusStoreDisconnected       = plan.NewStatus(plan.StatusStoreUnavailable, "store is lost for more than 20s")
-	statusStoreBusy               = plan.NewStatus(plan.StatusStoreUnavailable, "store is busy")
-	statusStoresOffline           = plan.NewStatus(plan.StatusStoreDraining, "store is in the process of offline")
-	statusStoreLowSpace           = plan.NewStatus(plan.StatusStoreLowSpace, "store space is not enough, please scale out or change 'low-space-ratio' setting")
-	statusStoreExcluded           = plan.NewStatus(plan.StatusStoreExcluded, "there has already had a peer or the peer is unhealthy in the store")
-	statusStoreIsolation          = plan.NewStatus(plan.StatusIsolationNotMatch)
-	statusStoreTooManySnapshot    = plan.NewStatus(plan.StatusStoreThrottled, "store snapshot has been piled up, the related setting is 'max-snapshot-count'")
-	statusStoreTooManyPendingPeer = plan.NewStatus(plan.StatusStoreThrottled, "store has too many pending peers, the related setting is 'max-pending-peer-count'")
-	statusStoreAddLimit           = plan.NewStatus(plan.StatusStoreThrottled, "store's add limit is exhausted, please check the setting of 'store limit'")
-	statusStoreRemoveLimit        = plan.NewStatus(plan.StatusStoreThrottled, "store's remove limit is exhausted, please check the setting of 'store limit'")
-	statusStoreLabel              = plan.NewStatus(plan.StatusLabelNotMatch)
-	statusStoreRule               = plan.NewStatus(plan.StatusRuleNotMatch)
-	statusStorePauseLeader        = plan.NewStatus(plan.StatusStoreBlocked, "the store is not allowed to transfer leader, there might be an evict-leader-scheduler")
-	statusStoreRejectLeader       = plan.NewStatus(plan.StatusStoreBlocked, "the store is not allowed to transfer leader, please check 'label-property'")
-	statusStoreSlow               = plan.NewStatus(plan.StatusStoreBlocked, "the store is slow and are evicting leaders, there might be an evict-slow-store-scheduler")
+	statusScoreAlmostSame     = plan.NewStatus(plan.StatusScoreAlmostSame)
+	statusStoreAlreadyHasPeer = plan.NewStatus(plan.StatusStoreAlreadyHasPeer)
+
+	// store hard limitation
+	statusStoreDown         = plan.NewStatus(plan.StatusStoreDown)
+	statusStoreRemoved      = plan.NewStatus(plan.StatusStoreRemoved)
+	statusStoreDisconnected = plan.NewStatus(plan.StatusStoreDisconnected)
+	statusStoresRemoving    = plan.NewStatus(plan.StatusStoreRemoving)
+	statusStoreLowSpace     = plan.NewStatus(plan.StatusStoreLowSpace)
+	statusStoreBusy         = plan.NewStatus(plan.StatusStoreBusy)
+
+	// store soft limitation
+	statusStoreSnapshotThrottled    = plan.NewStatus(plan.StatusStoreSnapshotThrottled)
+	statusStorePendingPeerThrottled = plan.NewStatus(plan.StatusStorePendingPeerThrottled)
+	statusStoreAddLimit             = plan.NewStatus(plan.StatusStoreAddLimitThrottled)
+	statusStoreRemoveLimit          = plan.NewStatus(plan.StatusStoreRemoveLimitThrottled)
+
+	// store config limitation
+	statusStoreRejectLeader = plan.NewStatus(plan.StatusStoreRejectLeader)
+
+	statusStoreNotMatchRule      = plan.NewStatus(plan.StatusStoreNotMatchRule)
+	statusStoreNotMatchIsolation = plan.NewStatus(plan.StatusStoreNotMatchIsolation)
 
 	// region filter status
-	statusRegionPendingPeer   = plan.NewStatus(plan.StatusRegionUnhealthy, "region has pending peers")
-	statusRegionDownPeer      = plan.NewStatus(plan.StatusRegionUnhealthy, "region has down peers")
+	statusRegionPendingPeer   = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionDownPeer      = plan.NewStatus(plan.StatusRegionUnhealthy)
 	statusRegionEmpty         = plan.NewStatus(plan.StatusRegionEmpty)
-	statusRegionRule          = plan.NewStatus(plan.StatusRuleNotMatch)
+	statusRegionNotMatchRule  = plan.NewStatus(plan.StatusRegionNotMatchRule)
 	statusRegionNotReplicated = plan.NewStatus(plan.StatusRegionNotReplicated)
 )

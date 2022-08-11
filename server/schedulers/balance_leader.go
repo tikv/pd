@@ -346,7 +346,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
-	basePlan := NewBalanceSchedulerBasePlan()
+	basePlan := NewBalanceSchedulerPlan()
 	batch := l.conf.Batch
 	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
 

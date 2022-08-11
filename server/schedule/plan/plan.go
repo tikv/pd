@@ -26,6 +26,10 @@ type Plan interface {
 	SetStatus(Status)
 }
 
+type Analyzer interface {
+	Summary(interface{}) (string, error)
+}
+
 type Step interface {
 	Number() int
 	Desc() string

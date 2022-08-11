@@ -68,7 +68,7 @@ func TestInfluenceAmp(t *testing.T) {
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
 	tc.PutRegion(region)
-	basePlan := NewBalanceSchedulerBasePlan()
+	basePlan := NewBalanceSchedulerPlan()
 	solver := newSolver(basePlan, kind, tc, influence)
 	solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 	re.True(solver.shouldBalance(""))
@@ -154,7 +154,7 @@ func TestShouldBalance(t *testing.T) {
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(testCase.kind.String())
 		kind := core.NewScheduleKind(core.LeaderKind, testCase.kind)
-		basePlan := NewBalanceSchedulerBasePlan()
+		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 		solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 		re.Equal(testCase.expectedResult, solver.shouldBalance(""))
@@ -167,7 +167,7 @@ func TestShouldBalance(t *testing.T) {
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 			tc.PutRegion(region)
 			kind := core.NewScheduleKind(core.RegionKind, testCase.kind)
-			basePlan := NewBalanceSchedulerBasePlan()
+			basePlan := NewBalanceSchedulerPlan()
 			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 			solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 			re.Equal(testCase.expectedResult, solver.shouldBalance(""))
@@ -219,7 +219,7 @@ func TestTolerantRatio(t *testing.T) {
 	}
 	for _, t := range tbl {
 		tc.SetTolerantSizeRatio(t.ratio)
-		basePlan := NewBalanceSchedulerBasePlan()
+		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, t.kind, tc, operator.OpInfluence{})
 		solver.region = region
 		re.Equal(t.expectTolerantResource(t.kind), solver.getTolerantResource())
