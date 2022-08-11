@@ -586,8 +586,7 @@ func TestReplicationMode(t *testing.T) {
 	conf := config.ReplicationModeConfig{
 		ReplicationMode: "majority",
 		DRAutoSync: config.DRAutoSyncReplicationConfig{
-			WaitStoreTimeout:    typeutil.NewDuration(time.Minute),
-			TiKVSyncTimeoutHint: typeutil.NewDuration(time.Minute),
+			WaitStoreTimeout: typeutil.NewDuration(time.Minute),
 		},
 	}
 	check := func() {
