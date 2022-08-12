@@ -130,6 +130,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionUnhealthy:     "Region Unhealthy",
 	StatusRegionEmpty:         "Region Empty",
 	StatusRegionNotReplicated: "Region Not Replicated",
+	StatusRegionNotMatchRule:  "Region Not Match Rule",
 
 	// non-filter
 	StatusNoTargetRegion:    "No Target Region",
@@ -166,6 +167,11 @@ func NewStatus(statusCode StatusCode, reason ...string) Status {
 // IsOK returns true if the status code is StatusOK.
 func (s Status) IsOK() bool {
 	return s.StatusCode == StatusOK
+}
+
+// Priority returns the priority of status for diagnose
+func (s Status) Priority() int {
+	return int(s.StatusCode) / 100
 }
 
 func (s Status) String() string {
