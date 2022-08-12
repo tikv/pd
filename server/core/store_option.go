@@ -17,7 +17,6 @@ package core
 import (
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -29,7 +28,7 @@ type StoreCreateOption func(region *StoreInfo)
 // SetStoreAddress sets the address for the store.
 func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.Address = address
 		meta.StatusAddress = statusAddress
 		meta.PeerAddress = peerAddress
@@ -40,7 +39,7 @@ func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOpti
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.Labels = labels
 		store.meta = meta
 	}
@@ -49,7 +48,7 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 // SetStoreStartTime sets the start timestamp for the store.
 func SetStoreStartTime(startTS int64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.StartTimestamp = startTS
 		store.meta = meta
 	}
@@ -58,7 +57,7 @@ func SetStoreStartTime(startTS int64) StoreCreateOption {
 // SetStoreVersion sets the version for the store.
 func SetStoreVersion(githash, version string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.Version = version
 		meta.GitHash = githash
 		store.meta = meta
@@ -68,7 +67,7 @@ func SetStoreVersion(githash, version string) StoreCreateOption {
 // SetStoreDeployPath sets the deploy path for the store.
 func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.DeployPath = deployPath
 		store.meta = meta
 	}
@@ -77,7 +76,7 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 // OfflineStore offline a store
 func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.State = metapb.StoreState_Offline
 		meta.NodeState = metapb.NodeState_Removing
 		meta.PhysicallyDestroyed = physicallyDestroyed
@@ -88,7 +87,7 @@ func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 // UpStore up a store
 func UpStore() StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.State = metapb.StoreState_Up
 		meta.NodeState = metapb.NodeState_Serving
 		store.meta = meta
@@ -98,7 +97,7 @@ func UpStore() StoreCreateOption {
 // TombstoneStore set a store to tombstone.
 func TombstoneStore() StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := proto.Clone(store.meta).(*metapb.Store)
+		meta := store.cloneMetaStore()
 		meta.State = metapb.StoreState_Tombstone
 		meta.NodeState = metapb.NodeState_Removed
 		store.meta = meta

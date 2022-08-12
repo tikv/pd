@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -477,8 +478,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
 		if store == nil {
-			log.Error("invalid store ID", zap.Uint64("store-id", storeID))
-			return false
+			log.Info("missing store", zap.Uint64("store-id", storeID))
+			continue
 		}
 		for n, v := range storelimit.TypeNameValue {
 			storeLimit := store.GetStoreLimit(v)
@@ -652,11 +653,11 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.Stringer("step", step),
 		zap.String("source", source))
 
-	cmd := step.GetCmd(region)
+	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.cluster.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
+	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
 	}
-
 	oc.hbStreams.SendMsg(region, cmd)
 }
 
@@ -717,7 +718,10 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluen
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
-			AddOpInfluence(op, influence, cluster)
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.UnfinishedInfluence(influence, region)
+			}
 		}
 	}
 	return influence
@@ -734,11 +738,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 		if !ok {
 			continue
 		}
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
 	}
 }
 

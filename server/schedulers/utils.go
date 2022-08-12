@@ -33,7 +33,7 @@ const (
 	adjustRatio                  float64 = 0.005
 	leaderTolerantSizeRatio      float64 = 5.0
 	minTolerantSizeRatio         float64 = 1.0
-	influenceAmp                 int64   = 100
+	influenceAmp                 int64   = 5
 	defaultMinRetryLimit                 = 1
 	defaultRetryQuotaAttenuation         = 2
 )

@@ -313,7 +313,8 @@ func createTransferWitnessOperator(cs *candidateStores, l *BalanceWitnessSchedul
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the witness.
 func (l *BalanceWitnessScheduler) transferWitnessOut(plan *balancePlan) *operator.Operator {
-	plan.region = plan.RandWitnessRegion(plan.SourceStoreID(), l.conf.Ranges, schedule.IsRegionHealthy)
+	plan.region = filter.SelectOneRegion(plan.RandWitnessRegions(plan.SourceStoreID(), l.conf.Ranges),
+		filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no witness", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-witness-region").Inc()

@@ -18,9 +18,10 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
@@ -30,9 +31,8 @@ import (
 	"github.com/tikv/pd/server/storage"
 )
 
-var _ = Suite(&testEvictSlowStoreSuite{})
-
-type testEvictSlowStoreSuite struct {
+type evictSlowStoreTestSuite struct {
+	suite.Suite
 	ctx    context.Context
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
@@ -41,65 +41,72 @@ type testEvictSlowStoreSuite struct {
 	oc     *schedule.OperatorController
 }
 
-func (s *testEvictSlowStoreSuite) SetUpTest(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
-	s.tc = mockcluster.NewCluster(s.ctx, opt)
-
-	// Add stores 1, 2
-	s.tc.AddLeaderStore(1, 0)
-	s.tc.AddLeaderStore(2, 0)
-	s.tc.AddLeaderStore(3, 0)
-	// Add regions 1, 2 with leaders in stores 1, 2
-	s.tc.AddLeaderRegion(1, 1, 2)
-	s.tc.AddLeaderRegion(2, 2, 1)
-	s.tc.UpdateLeaderCount(2, 16)
-
-	s.oc = schedule.NewOperatorController(s.ctx, nil, nil)
-	storage := storage.NewStorageWithMemoryBackend()
-	var err error
-	s.es, err = schedule.CreateScheduler(EvictSlowStoreType, s.oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
-	c.Assert(err, IsNil)
-	s.bs, err = schedule.CreateScheduler(BalanceLeaderType, s.oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
-	c.Assert(err, IsNil)
+func TestEvictSlowStoreTestSuite(t *testing.T) {
+	suite.Run(t, new(evictSlowStoreTestSuite))
 }
 
-func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
-	defer s.cancel()
-	storeInfo := s.tc.GetStore(1)
+func (suite *evictSlowStoreTestSuite) SetupTest() {
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	opt := config.NewTestOptions()
+	suite.tc = mockcluster.NewCluster(suite.ctx, opt)
+
+	// Add stores 1, 2
+	suite.tc.AddLeaderStore(1, 0)
+	suite.tc.AddLeaderStore(2, 0)
+	suite.tc.AddLeaderStore(3, 0)
+	// Add regions 1, 2 with leaders in stores 1, 2
+	suite.tc.AddLeaderRegion(1, 1, 2)
+	suite.tc.AddLeaderRegion(2, 2, 1)
+	suite.tc.UpdateLeaderCount(2, 16)
+
+	suite.oc = schedule.NewOperatorController(suite.ctx, nil, nil)
+	storage := storage.NewStorageWithMemoryBackend()
+	var err error
+	suite.es, err = schedule.CreateScheduler(EvictSlowStoreType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
+	suite.NoError(err)
+	suite.bs, err = schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.NoError(err)
+}
+
+func (suite *evictSlowStoreTestSuite) TearDownTest() {
+	suite.cancel()
+}
+
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
+	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 100
 	})
-	s.tc.PutStore(newStoreInfo)
-	c.Assert(s.es.IsScheduleAllowed(s.tc), IsTrue)
+	suite.tc.PutStore(newStoreInfo)
+	suite.True(suite.es.IsScheduleAllowed(suite.tc))
 	// Add evict leader scheduler to store 1
-	op, _ := s.es.Schedule(s.tc, false)
-	testutil.CheckMultiTargetTransferLeader(c, op[0], operator.OpLeader, 1, []uint64{2})
-	c.Assert(op[0].Desc(), Equals, EvictSlowStoreType)
+	ops, _ := suite.es.Schedule(suite.tc, false)
+	testutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2})
+	suite.Equal(EvictSlowStoreType, ops[0].Desc())
 	// Cannot balance leaders to store 1
-	op, _ = s.bs.Schedule(s.tc, false)
-	c.Assert(op, HasLen, 0)
+	ops, _ = suite.bs.Schedule(suite.tc, false)
+	suite.Empty(ops)
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
 	})
-	s.tc.PutStore(newStoreInfo)
+	suite.tc.PutStore(newStoreInfo)
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced to store 1
-	op, _ = s.es.Schedule(s.tc, false)
-	c.Check(op, IsNil)
-	op, _ = s.bs.Schedule(s.tc, false)
-	testutil.CheckTransferLeader(c, op[0], operator.OpLeader, 2, 1)
+	ops, _ = suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
+	ops, _ = suite.bs.Schedule(suite.tc, false)
+	testutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 2, 1)
 
 	// no slow store need to evict.
-	op, _ = s.es.Schedule(s.tc, false)
-	c.Assert(op, IsNil)
+	ops, _ = suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
 
-	es2, ok := s.es.(*evictSlowStoreScheduler)
-	c.Assert(ok, IsTrue)
-	c.Assert(es2.conf.evictStore(), Equals, uint64(0))
+	es2, ok := suite.es.(*evictSlowStoreScheduler)
+	suite.True(ok)
+	suite.Zero(es2.conf.evictStore())
 
 	// check the value from storage.
 	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
-	c.Assert(err, IsNil)
+	suite.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {
 		if strings.EqualFold(sche, EvictSlowStoreName) {
@@ -109,39 +116,38 @@ func (s *testEvictSlowStoreSuite) TestEvictSlowStore(c *C) {
 
 	var persistValue evictSlowStoreSchedulerConfig
 	err = json.Unmarshal([]byte(valueStr), &persistValue)
-	c.Assert(err, IsNil)
-	c.Assert(persistValue.EvictedStores, DeepEquals, es2.conf.EvictedStores)
-	c.Assert(persistValue.evictStore(), Equals, uint64(0))
+	suite.NoError(err)
+	suite.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
+	suite.Zero(persistValue.evictStore())
 }
 
-func (s *testEvictSlowStoreSuite) TestEvictSlowStorePrepare(c *C) {
-	defer s.cancel()
-	es2, ok := s.es.(*evictSlowStoreScheduler)
-	c.Assert(ok, IsTrue)
-	c.Assert(es2.conf.evictStore(), Equals, uint64(0))
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
+	es2, ok := suite.es.(*evictSlowStoreScheduler)
+	suite.True(ok)
+	suite.Zero(es2.conf.evictStore())
 	// prepare with no evict store.
-	s.es.Prepare(s.tc)
+	suite.es.Prepare(suite.tc)
 
 	es2.conf.setStoreAndPersist(1)
-	c.Assert(es2.conf.evictStore(), Equals, uint64(1))
+	suite.Equal(uint64(1), es2.conf.evictStore())
 	// prepare with evict store.
-	s.es.Prepare(s.tc)
+	suite.es.Prepare(suite.tc)
 }
 
-func (s *testEvictSlowStoreSuite) TestEvictSlowStorePersistFail(c *C) {
-	defer s.cancel()
+func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
 	persisFail := "github.com/tikv/pd/server/schedulers/persistFail"
-	c.Assert(failpoint.Enable(persisFail, "return(true)"), IsNil)
-	storeInfo := s.tc.GetStore(1)
+	suite.NoError(failpoint.Enable(persisFail, "return(true)"))
+
+	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 100
 	})
-	s.tc.PutStore(newStoreInfo)
-	c.Assert(s.es.IsScheduleAllowed(s.tc), IsTrue)
+	suite.tc.PutStore(newStoreInfo)
+	suite.True(suite.es.IsScheduleAllowed(suite.tc))
 	// Add evict leader scheduler to store 1
-	op, _ := s.es.Schedule(s.tc, false)
-	c.Assert(op, IsNil)
-	c.Assert(failpoint.Disable(persisFail), IsNil)
-	op, _ = s.es.Schedule(s.tc, false)
-	c.Assert(op, NotNil)
+	ops, _ := suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
+	suite.NoError(failpoint.Disable(persisFail))
+	ops, _ = suite.es.Schedule(suite.tc, false)
+	suite.NotEmpty(ops)
 }

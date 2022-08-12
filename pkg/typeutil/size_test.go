@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,7 +50,7 @@ func TestParseMbFromText(t *testing.T) {
 		size: uint64(10),
 	}, {
 		body: []string{"10GiB", "10Gib", "10G", "10GB"},
-		size: uint64(10 * 1024),
+		size: uint64(10 * units.GiB / units.MiB),
 	}, {
 		body: []string{"10yiB", "10aib"},
 		size: uint64(1),

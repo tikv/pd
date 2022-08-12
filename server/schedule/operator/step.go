@@ -48,7 +48,7 @@ type OpStep interface {
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	Timeout(start time.Time, regionSize int64) bool
-	GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse
+	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -117,7 +117,7 @@ func (tl TransferLeader) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (tl TransferLeader) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
 	for _, storeID := range tl.ToStores {
 		peers = append(peers, region.GetStorePeer(storeID))
@@ -202,13 +202,13 @@ func (ap AddPeer) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (ap AddPeer) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil {
-		// The newly added peer is pending.
+		// The newly added per is pending.
 		return nil
 	}
-	return addNode(ap.PeerID, ap.ToStore, ap.IsWitness)
+	return addNode(ap.PeerID, ap.ToStore, ap.IsWitness, useConfChangeV2)
 }
 
 // BecomeWitness is an OpStep that makes a peer become a witness.
@@ -266,11 +266,15 @@ func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bw BecomeWitness) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// witness is only supported in v2
+		return nil
+	}
 	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
-		return addLearnerNode(bw.PeerID, bw.StoreID, true)
+		return addLearnerNode(bw.PeerID, bw.StoreID, true, useConfChangeV2)
 	} else {
-		return addNode(bw.PeerID, bw.StoreID, true)
+		return addNode(bw.PeerID, bw.StoreID, true, useConfChangeV2)
 	}
 }
 
@@ -351,12 +355,12 @@ func (al AddLearner) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (al AddLearner) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	if region.GetStorePeer(al.ToStore) != nil {
 		// The newly added peer is pending.
 		return nil
 	}
-	return addLearnerNode(al.PeerID, al.ToStore, al.IsWitness)
+	return addLearnerNode(al.PeerID, al.ToStore, al.IsWitness, useConfChangeV2)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -388,7 +392,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 // CheckInProgress checks if the step is in the progress of advancing.
 func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
-	if peer == nil || peer.GetId() != pl.PeerID {
+	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
 	}
 	return nil
@@ -403,12 +407,12 @@ func (pl PromoteLearner) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (pl PromoteLearner) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (pl PromoteLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer == nil {
 		return nil
 	}
-	return addNode(pl.PeerID, pl.ToStore, peer.IsWitness)
+	return addNode(pl.PeerID, pl.ToStore, peer.IsWitness, useConfChangeV2)
 }
 
 // RemovePeer is an OpStep that removes a region peer.
@@ -471,13 +475,11 @@ func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (rp RemovePeer) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_RemoveNode,
-			Peer:       region.GetStorePeer(rp.FromStore),
-		},
-	}
+func (rp RemovePeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	return createResponse(&pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_RemoveNode,
+		Peer:       region.GetStorePeer(rp.FromStore),
+	}, useConfChangeV2)
 }
 
 // MergeRegion is an OpStep that merge two regions.
@@ -534,7 +536,7 @@ func (mr MergeRegion) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (mr MergeRegion) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (mr MergeRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	if mr.IsPassive {
 		return nil
 	}
@@ -588,7 +590,7 @@ func (sr SplitRegion) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (sr SplitRegion) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	return &pdpb.RegionHeartbeatResponse{
 		SplitRegion: &pdpb.SplitRegion{
 			Policy: sr.Policy,
@@ -630,12 +632,12 @@ func (dv DemoteVoter) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (dv DemoteVoter) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (dv DemoteVoter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	peer := region.GetStorePeer(dv.ToStore)
 	if peer == nil {
 		return nil
 	}
-	return addLearnerNode(dv.PeerID, dv.ToStore, peer.IsWitness)
+	return addLearnerNode(dv.PeerID, dv.ToStore, peer.IsWitness, useConfChangeV2)
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -758,13 +760,17 @@ func (cpe ChangePeerV2Enter) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// only supported in ChangePeerV2
+		return nil
+	}
 	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
 	for _, pl := range cpe.PromoteLearners {
-		changes = append(changes, pl.GetCmd(region).ChangePeer)
+		changes = append(changes, pl.GetCmd(region, useConfChangeV2).ChangePeer)
 	}
 	for _, dv := range cpe.DemoteVoters {
-		changes = append(changes, dv.GetCmd(region).ChangePeer)
+		changes = append(changes, dv.GetCmd(region, useConfChangeV2).ChangePeer)
 	}
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeerV2: &pdpb.ChangePeerV2{
@@ -899,7 +905,11 @@ func (cpl ChangePeerV2Leave) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo) *pdpb.RegionHeartbeatResponse {
+func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// only supported in ChangePeerV2
+		return nil
+	}
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeerV2: &pdpb.ChangePeerV2{},
 	}
@@ -934,30 +944,41 @@ func fastStepWaitDuration(regionSize int64) time.Duration {
 	return wait
 }
 
-func addNode(id, storeID uint64, isWitness bool) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddNode,
-			Peer: &metapb.Peer{
-				Id:        id,
-				StoreId:   storeID,
-				Role:      metapb.PeerRole_Voter,
-				IsWitness: isWitness,
-			},
+func addNode(id, storeID uint64, isWitness bool, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	change := &pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_AddNode,
+		Peer: &metapb.Peer{
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Voter,
+			IsWitness: isWitness,
 		},
 	}
+	return createResponse(change, useConfChangeV2)
 }
 
-func addLearnerNode(id, storeID uint64, isWitness bool) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-			Peer: &metapb.Peer{
-				Id:        id,
-				StoreId:   storeID,
-				Role:      metapb.PeerRole_Learner,
-				IsWitness: isWitness,
-			},
+func addLearnerNode(id, storeID uint64, isWitness bool, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	change := &pdpb.ChangePeer{
+		ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+		Peer: &metapb.Peer{
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Learner,
+			IsWitness: isWitness,
 		},
+	}
+	return createResponse(change, useConfChangeV2)
+}
+
+func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if useConfChangeV2 {
+		return &pdpb.RegionHeartbeatResponse{
+			ChangePeerV2: &pdpb.ChangePeerV2{
+				Changes: []*pdpb.ChangePeer{change},
+			},
+		}
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		ChangePeer: change,
 	}
 }
