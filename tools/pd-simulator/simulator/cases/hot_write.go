@@ -150,6 +150,7 @@ func newHotWriteFromFile() *Case {
 			writeFlow[region.RegionID] = int64(statistics.StoreHeartBeatReportInterval*region.ByteRate/1024/1024) * units.MiB
 			var peers []*metapb.Peer
 			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
 				StoreId: storeID,
 			})
 			for _, peerStoreId := range region.Stores {
@@ -157,10 +158,12 @@ func newHotWriteFromFile() *Case {
 					continue
 				}
 				peers = append(peers, &metapb.Peer{
+					Id:      IDAllocator.nextID(),
 					StoreId: peerStoreId,
 				})
 			}
 			simCase.Regions = append(simCase.Regions, Region{
+				ID:     IDAllocator.nextID(),
 				Peers:  peers,
 				Leader: peers[0],
 				Size:   96 * units.MiB,
@@ -177,34 +180,36 @@ func newHotWriteFromFile() *Case {
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		leaderCount := make([]int, len(hotWriteInfos.AsLeader))
-		peerCount := make([]int, len(hotWriteInfos.AsLeader))
-		for id := range writeFlow {
-			region := regions.GetRegion(id)
-			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
-			for _, p := range region.GetPeers() {
-				peerCount[int(p.GetStoreId()-1)]++
-			}
-		}
-		simutil.Logger.Info("current hot region counts", zap.Reflect("leader", leaderCount), zap.Reflect("peer", peerCount))
+		//leaderCount := make([]int, len(hotWriteInfos.AsLeader))
+		//peerCount := make([]int, len(hotWriteInfos.AsLeader))
+		//for id := range writeFlow {
+		//	region := regions.GetRegion(id)
+		//	leaderCount[int(region.GetLeader().GetStoreId()-1)]++
+		//	for _, p := range region.GetPeers() {
+		//		peerCount[int(p.GetStoreId()-1)]++
+		//	}
+		//}
+		//simutil.Logger.Info("current hot region counts", zap.Reflect("leader", leaderCount), zap.Reflect("peer", peerCount))
+		//
+		//// check count diff <= 2.
+		//var minLeader, maxLeader, minPeer, maxPeer int
+		//for i := range leaderCount {
+		//	if leaderCount[i] > leaderCount[maxLeader] {
+		//		maxLeader = i
+		//	}
+		//	if leaderCount[i] < leaderCount[minLeader] {
+		//		minLeader = i
+		//	}
+		//	if peerCount[i] > peerCount[maxPeer] {
+		//		maxPeer = i
+		//	}
+		//	if peerCount[i] < peerCount[minPeer] {
+		//		minPeer = i
+		//	}
+		//}
+		//return leaderCount[maxLeader]-leaderCount[minLeader] <= 2 && peerCount[maxPeer]-peerCount[minPeer] <= 2
 
-		// check count diff <= 2.
-		var minLeader, maxLeader, minPeer, maxPeer int
-		for i := range leaderCount {
-			if leaderCount[i] > leaderCount[maxLeader] {
-				maxLeader = i
-			}
-			if leaderCount[i] < leaderCount[minLeader] {
-				minLeader = i
-			}
-			if peerCount[i] > peerCount[maxPeer] {
-				maxPeer = i
-			}
-			if peerCount[i] < peerCount[minPeer] {
-				minPeer = i
-			}
-		}
-		return leaderCount[maxLeader]-leaderCount[minLeader] <= 2 && peerCount[maxPeer]-peerCount[minPeer] <= 2
+		return false
 	}
 
 	return &simCase
