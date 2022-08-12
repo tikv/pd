@@ -118,7 +118,7 @@ func newHotWriteFromFile() *Case {
 	var simCase Case
 
 	// unmarshal file
-	path := "/Users/thomas/Downloads/8w.txt"
+	path := "/data2/lhy1024/hot_pdctl/8w.txt"
 	file, err := os.ReadFile(path)
 	if err != nil {
 		log.Error(err.Error())
@@ -139,7 +139,7 @@ func newHotWriteFromFile() *Case {
 			ID:        storeID,
 			Status:    metapb.StoreState_Up,
 			Capacity:  6 * units.TiB,
-			Available: 6 * units.GiB,
+			Available: 6 * units.TiB,
 			Version:   "2.1.0",
 		})
 		for _, region := range store.Stats {

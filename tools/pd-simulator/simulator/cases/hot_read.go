@@ -107,7 +107,7 @@ func newHotReadFromFile() *Case {
 	var simCase Case
 
 	// unmarshal file
-	path := "/Users/thomas/Downloads/2.txt"
+	path := "/data2/lhy1024/hot_pdctl/2.txt"
 	file, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal("open file error", zap.Error(err))
@@ -128,7 +128,7 @@ func newHotReadFromFile() *Case {
 			ID:        storeID,
 			Status:    metapb.StoreState_Up,
 			Capacity:  6 * units.TiB,
-			Available: 6 * units.GiB,
+			Available: 6 * units.TiB,
 			Version:   "2.1.0",
 		})
 		for _, region := range store.Stats {
