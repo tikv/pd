@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -49,7 +50,7 @@ type Node struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
-	ioRate                   int64
+	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
 }
 
@@ -77,6 +78,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		cancel()
 		return nil, err
 	}
+	speed := ioRate * units.MiB
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
@@ -85,7 +87,7 @@ func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 		cancel:                   cancel,
 		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
-		ioRate:                   ioRate * units.MiB,
+		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
@@ -142,7 +144,7 @@ func (n *Node) stepTask() {
 	for _, task := range n.tasks {
 		task.Step(n.raftEngine)
 		if task.IsFinished() {
-			simutil.Logger.Debug("task finished",
+			simutil.Logger.Debug("task status",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
 				zap.String("task", task.Desc()))
