@@ -176,8 +176,7 @@ func (a *BalanceSchedulerPlanAnalyzer) Summary(plans interface{}) (string, error
 		max := 0
 		curstat := plan.NewStatus(plan.StatusOK)
 		for stat, c := range store {
-			log.Info(fmt.Sprintf("%v %v %v %v %v %v %v %v", store, stat.Priority(), curstat.Priority(), c, max, stat.StatusCode, curstat.StatusCode, stat.StatusCode < curstat.StatusCode))
-			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c >= max) || (stat.Priority() == curstat.Priority() && c == max && stat.StatusCode < curstat.StatusCode) {
+			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c > max) || (stat.Priority() == curstat.Priority() && c == max && stat.StatusCode < curstat.StatusCode) {
 				max = c
 				curstat = stat
 			}

@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,6 +30,7 @@ type balanceSchedulerPlanAnalyzeTestSuite struct {
 
 	stores  []*core.StoreInfo
 	regions []*core.RegionInfo
+	check   func(string, map[string]struct{}) bool
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
@@ -39,6 +41,28 @@ func TestBalanceSchedulerPlanAnalyzerTestSuite(t *testing.T) {
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.check = func(output string, expects map[string]struct{}) bool {
+		strs := strings.Split(output, "; ")
+		strMap := make(map[string]struct{})
+		for _, str := range strs {
+			if len(str) == 0 {
+				continue
+			}
+			if _, ok := expects[str]; ok {
+				strMap[str] = struct{}{}
+			} else {
+				suite.T().Log("unexpect output is exisit: " + str)
+				return false
+			}
+		}
+		for str := range expects {
+			if _, ok := strMap[str]; !ok {
+				suite.T().Log("expect output is not exisit: " + str)
+				return false
+			}
+		}
+		return true
+	}
 	suite.stores = []*core.StoreInfo{
 		core.NewStoreInfo(
 			&metapb.Store{
@@ -132,7 +156,11 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	analyzer := &BalanceSchedulerPlanAnalyzer{}
 	str, err := analyzer.Summary(plans)
 	suite.NoError(err)
-	suite.Equal("4 stores are filtered by Store Score Almost Same; 1 stores are filtered by Store Not Match Rule; ", str)
+	suite.True(suite.check(str,
+		map[string]struct{}{
+			"4 stores are filtered by Store Score Almost Same": {},
+			"1 stores are filtered by Store Not Match Rule":    {},
+		}))
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
@@ -146,7 +174,10 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 	analyzer := &BalanceSchedulerPlanAnalyzer{}
 	str, err := analyzer.Summary(plans)
 	suite.NoError(err)
-	suite.Equal("5 stores are filtered by Store Down; ", str)
+	suite.True(suite.check(str,
+		map[string]struct{}{
+			"5 stores are filtered by Store Down": {},
+		}))
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
@@ -161,7 +192,10 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 	analyzer := &BalanceSchedulerPlanAnalyzer{}
 	str, err := analyzer.Summary(plans)
 	suite.NoError(err)
-	suite.Equal("4 stores are filtered by Region Not Match Rule; ", str)
+	suite.True(suite.check(str,
+		map[string]struct{}{
+			"4 stores are filtered by Region Not Match Rule": {},
+		}))
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
@@ -185,5 +219,10 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	analyzer := &BalanceSchedulerPlanAnalyzer{}
 	str, err := analyzer.Summary(plans)
 	suite.NoError(err)
-	suite.Equal("2 stores are filtered by Store Not Match Rule; 1 stores are filtered by Store Down; 2 stores are filtered by Store Already Has Peer; ", str)
+	suite.True(suite.check(str,
+		map[string]struct{}{
+			"2 stores are filtered by Store Score Almost Same": {},
+			"2 stores are filtered by Store Not Match Rule":    {},
+			"1 stores are filtered by Store Down":              {},
+		}))
 }
