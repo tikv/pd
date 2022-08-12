@@ -21,22 +21,6 @@ import (
 
 type balanceStep int
 
-func (b *balanceStep) Desc() string {
-	switch *b {
-	case 0:
-		return "select source store"
-	case 1:
-		return "select region"
-	case 2:
-		return "select target store"
-	case 3:
-		return "verify the plan"
-	case 4:
-		return "create operator"
-	}
-	return ""
-}
-
 func (b *balanceStep) Number() int {
 	return int(*b)
 }

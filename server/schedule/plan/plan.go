@@ -28,7 +28,6 @@ type Plan interface {
 // Step identifes plan step
 type Step interface {
 	Number() int
-	Desc() string
 }
 
 // Collector is a plan collector
