@@ -931,5 +931,5 @@ func (f *RegionScoreFilter) Target(opt *config.PersistOptions, store *core.Store
 	if score < f.score {
 		return statusOK
 	}
-	return statusScoreAlmostSame
+	return statusStoreScoreDisallowed
 }

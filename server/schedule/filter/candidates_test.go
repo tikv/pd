@@ -54,14 +54,15 @@ func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan
 	if f(store.GetID()) {
 		return statusOK
 	}
-	return statusScoreAlmostSame
+	// return any status as long as it's not statusOK
+	return statusStoreScoreDisallowed
 }
 
 func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
-	return statusScoreAlmostSame
+	return statusStoreScoreDisallowed
 }
 
 func TestCandidates(t *testing.T) {

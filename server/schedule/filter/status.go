@@ -19,8 +19,8 @@ import "github.com/tikv/pd/server/schedule/plan"
 var (
 	statusOK = plan.NewStatus(plan.StatusOK)
 
-	statusScoreAlmostSame     = plan.NewStatus(plan.StatusScoreAlmostSame)
-	statusStoreAlreadyHasPeer = plan.NewStatus(plan.StatusStoreAlreadyHasPeer)
+	statusStoreScoreDisallowed = plan.NewStatus(plan.StatusStoreScoreDisallowed)
+	statusStoreAlreadyHasPeer  = plan.NewStatus(plan.StatusStoreAlreadyHasPeer)
 
 	// store hard limitation
 	statusStoreDown         = plan.NewStatus(plan.StatusStoreDown)

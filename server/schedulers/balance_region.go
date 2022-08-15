@@ -248,7 +248,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 		if !solver.shouldBalance(s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusScoreAlmostSame)))
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 			continue
 		}
 
