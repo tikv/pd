@@ -471,10 +471,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		return false
 	}
-	oc.operators[regionID] = op
-	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
-	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
-	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
+
 	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
@@ -504,7 +501,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			}
 		}
 	}
-	oc.updateCounts(oc.operators)
+
+	oc.putRunningQueueLocked(op)
 
 	var step operator.OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
@@ -519,6 +517,15 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 		counter.Inc()
 	}
 	return true
+}
+
+func (oc *OperatorController) putRunningQueueLocked(op *operator.Operator) {
+	oc.operators[op.RegionID()] = op
+	oc.counts[op.SchedulerKind()]++
+
+	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
+	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
+	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 }
 
 // RemoveOperator removes a operator from the running operators.
@@ -548,7 +555,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
-		oc.updateCounts(oc.operators)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		return true
 	}
@@ -817,16 +824,6 @@ func (oc *OperatorController) GetHistory(start time.Time) []operator.OpHistory {
 	return history
 }
 
-// updateCounts updates resource counts using current pending operators.
-func (oc *OperatorController) updateCounts(operators map[uint64]*operator.Operator) {
-	for k := range oc.counts {
-		delete(oc.counts, k)
-	}
-	for _, op := range operators {
-		oc.counts[op.SchedulerKind()]++
-	}
-}
-
 // OperatorCount gets the count of operators filtered by kind.
 // kind only has one OpKind.
 func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
@@ -871,7 +868,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
 	region := cluster.GetRegion(op.RegionID())
-	if region != nil {
+	if region != nil || op.HasInfluence() {
 		op.TotalInfluence(influence, region)
 	}
 }
@@ -893,8 +890,7 @@ func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operat
 func (oc *OperatorController) SetOperator(op *operator.Operator) {
 	oc.Lock()
 	defer oc.Unlock()
-	oc.operators[op.RegionID()] = op
-	oc.updateCounts(oc.operators)
+	oc.putRunningQueueLocked(op)
 }
 
 // OperatorWithStatus records the operator and its status.
