@@ -14,6 +14,6 @@
 
 package plan
 
-// Plan is the basic unit for both scheduling and diagnostics.
+// Plan is the basic unit for both scheduling and diagnostic.
 // TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
 type Plan interface{}

@@ -61,19 +61,19 @@ const (
 type coordinator struct {
 	syncutil.RWMutex
 
-	wg                 sync.WaitGroup
-	ctx                context.Context
-	cancel             context.CancelFunc
-	cluster            *RaftCluster
-	prepareChecker     *prepareChecker
-	checkers           *checker.Controller
-	regionScatterer    *schedule.RegionScatterer
-	regionSplitter     *schedule.RegionSplitter
-	schedulers         map[string]*scheduleController
-	opController       *schedule.OperatorController
-	hbStreams          *hbstream.HeartbeatStreams
-	pluginInterface    *schedule.PluginInterface
-	diagnosticsManager *diagnosticsManager
+	wg                sync.WaitGroup
+	ctx               context.Context
+	cancel            context.CancelFunc
+	cluster           *RaftCluster
+	prepareChecker    *prepareChecker
+	checkers          *checker.Controller
+	regionScatterer   *schedule.RegionScatterer
+	regionSplitter    *schedule.RegionSplitter
+	schedulers        map[string]*scheduleController
+	opController      *schedule.OperatorController
+	hbStreams         *hbstream.HeartbeatStreams
+	pluginInterface   *schedule.PluginInterface
+	diagnosticManager *diagnosticManager
 }
 
 // newCoordinator creates a new coordinator.
@@ -82,18 +82,18 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
-		ctx:                ctx,
-		cancel:             cancel,
-		cluster:            cluster,
-		prepareChecker:     newPrepareChecker(),
-		checkers:           checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
-		regionScatterer:    schedule.NewRegionScatterer(ctx, cluster),
-		regionSplitter:     schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:         schedulers,
-		opController:       opController,
-		hbStreams:          hbStreams,
-		pluginInterface:    schedule.NewPluginInterface(),
-		diagnosticsManager: newDiagnosticsManager(cluster, schedulers),
+		ctx:               ctx,
+		cancel:            cancel,
+		cluster:           cluster,
+		prepareChecker:    newPrepareChecker(),
+		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster),
+		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
+		schedulers:        schedulers,
+		opController:      opController,
+		hbStreams:         hbStreams,
+		pluginInterface:   schedule.NewPluginInterface(),
+		diagnosticManager: newDiagnosticManager(cluster, schedulers),
 	}
 }
 
@@ -853,12 +853,9 @@ func (c *coordinator) isCheckerPaused(name string) (bool, error) {
 	return p.IsPaused(), nil
 }
 
-func (c *coordinator) GetDiagnosticsResult(name string) (*DiagnosticsResult, error) {
-	err := c.diagnosticsManager.dryRun(name)
-	if err != nil {
-		return nil, err
-	}
-	return c.diagnosticsManager.analyze(name)
+func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error) {
+	ts := uint64(time.Now().Unix())
+	return c.diagnosticManager.dryRun(name, ts)
 }
 
 // scheduleController is used to manage a scheduler to schedule.

@@ -15,77 +15,100 @@
 package cluster
 
 import (
-	"time"
-
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 )
 
-const maxDiagnosticsResultNum = 10
+const (
+	disabled   = "disabled"
+	paused     = "paused"
+	scheduling = "scheduling"
+	pending    = "pending"
+	// TODO: find a better name
+	normal = "normal"
+)
 
-// diagnosticsManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
-type diagnosticsManager struct {
-	cluster      *RaftCluster
-	schedulers   map[string]*scheduleController
-	dryRunResult map[string]*cache.FIFO
+const maxDiagnosticResultNum = 10
+
+// diagnosticManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
+type diagnosticManager struct {
+	cluster       *RaftCluster
+	schedulers    map[string]*scheduleController
+	dryRunResults map[string]*cache.FIFO
 }
 
-func newDiagnosticsManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosticsManager {
-	return &diagnosticsManager{
-		cluster:      cluster,
-		schedulers:   schedulerControllers,
-		dryRunResult: make(map[string]*cache.FIFO),
+func newDiagnosticManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosticManager {
+	return &diagnosticManager{
+		cluster:       cluster,
+		schedulers:    schedulerControllers,
+		dryRunResults: make(map[string]*cache.FIFO),
 	}
 }
 
-func (d *diagnosticsManager) dryRun(name string) error {
-	if _, ok := d.schedulers[name]; !ok {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
+func (d *diagnosticManager) dryRun(name string, ts uint64) (*DiagnosticResult, error) {
+	scheduler, ok := d.schedulers[name]
+	if !ok {
+		return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	// TODO: support running multiple times if there is no performance issue.
-	ops, plans := d.schedulers[name].DryRun()
-	result := newDryRunResult(ops, plans)
-	if _, ok := d.dryRunResult[name]; !ok {
-		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosticsResultNum)
+	ops, plans := scheduler.DryRun()
+	result := d.analyze(name, ops, plans, ts)
+	if _, ok := d.dryRunResults[name]; !ok {
+		d.dryRunResults[name] = cache.NewFIFO(maxDiagnosticResultNum)
 	}
-	queue := d.dryRunResult[name]
-	queue.Put(result.timestamp, result)
-	return nil
+	queue := d.dryRunResults[name]
+	queue.Put(result.Timestamp, result)
+	return result, nil
 }
 
 // TODO: implement this function for each scheduler maybe.
-func (d *diagnosticsManager) analyze(name string) (*DiagnosticsResult, error) {
-	return &DiagnosticsResult{}, nil
-}
+func (d *diagnosticManager) analyze(name string, ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
+	res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: normal}
+	if isPaused, _ := d.cluster.IsSchedulerPaused(name); isPaused {
+		res.Status = paused
+		return res
+	}
+	if isDisabled, _ := d.cluster.IsSchedulerDisabled(name); isDisabled {
+		res.Status = disabled
+		return res
+	}
 
-type dryRunResult struct {
-	timestamp          uint64
-	unschedulablePlans []plan.Plan
-	schedulablePlans   []plan.Plan
-}
-
-func newDryRunResult(ops []*operator.Operator, result []plan.Plan) *dryRunResult {
-	index := len(ops)
-	if len(ops) > 0 {
-		if ops[0].Kind()&operator.OpMerge != 0 {
-			index /= 2
+	// TODO: support more schedulers and checkers
+	switch name {
+	case schedulers.BalanceRegionName:
+		runningNum := d.cluster.GetOperatorController().OperatorCount(operator.OpRegion)
+		if runningNum != 0 || len(ops) != 0 {
+			res.Status = scheduling
 		}
+		// TODO: handle plans to get a summary
+	default:
 	}
-	if index > len(result) {
-		return nil
-	}
-	return &dryRunResult{
-		timestamp:          uint64(time.Now().Unix()),
-		unschedulablePlans: result[index:],
-		schedulablePlans:   result[:index],
-	}
+	index := len(ops)
+	res.UnschedulablePlans = plans[index:]
+	res.SchedulablePlans = plans[:index]
+	return res
 }
 
-type DiagnosticsResult struct {
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	Summary   string    `json:"summary"`
-	Timestamp time.Time `json:"timestamp"`
+// TODO: support get dry run result for a given ts.
+// func (d *diagnosticManager) getDryRunResult(name string, ts uint64) *DiagnosticResult {
+// 	queue := d.dryRunResults[name]
+// 	// find the first result equal or larger than the given ts
+// 	res := queue.FromElems(ts - 1)
+// 	if len(res) != 0 {
+// 		return res[0].Value.(*DiagnosticResult)
+// 	}
+// 	return nil
+// }
+
+type DiagnosticResult struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary"`
+	Timestamp uint64 `json:"timestamp"`
+
+	SchedulablePlans   []plan.Plan
+	UnschedulablePlans []plan.Plan
 }

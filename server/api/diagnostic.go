@@ -23,19 +23,19 @@ import (
 	"github.com/unrolled/render"
 )
 
-type diagnosticsHandler struct {
+type diagnosticHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newDiagnosticsHandler(svr *server.Server, rd *render.Render) *diagnosticsHandler {
-	return &diagnosticsHandler{
+func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHandler {
+	return &diagnosticHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
-func (h *diagnosticsHandler) GetDiagnosticsResult(w http.ResponseWriter, r *http.Request) {
+func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -54,7 +54,7 @@ func (h *diagnosticsHandler) GetDiagnosticsResult(w http.ResponseWriter, r *http
 		return
 	}
 	rc := getCluster(r)
-	result, err := rc.GetCoordinator().GetDiagnosticsResult(name)
+	result, err := rc.GetCoordinator().GetDiagnosticResult(name)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
