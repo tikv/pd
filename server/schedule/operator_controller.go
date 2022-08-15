@@ -557,6 +557,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 		delete(oc.operators, regionID)
 		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+		oc.Ack(op)
 		return true
 	}
 	return false
@@ -622,7 +623,6 @@ func (oc *OperatorController) buryOperator(op *operator.Operator, extraFields ..
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
-	oc.Ack(op)
 	oc.opRecords.Put(op)
 }
 
