@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -528,6 +529,133 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	for i, v := range regionIDs {
 		suite.Equal(regions.Regions[i].ID, v)
 	}
+}
+
+type regionRuleTestSuite struct {
+	suite.Suite
+	svr       *server.Server
+	grpcSvr   *server.GrpcServer
+	cleanup   cleanUpFunc
+	urlPrefix string
+	stores    []*metapb.Store
+	regions   []*core.RegionInfo
+}
+
+func TestRegionRuleTestSuite(t *testing.T) {
+	suite.Run(t, new(regionRuleTestSuite))
+}
+
+func (suite *regionRuleTestSuite) SetupSuite() {
+	suite.stores = []*metapb.Store{
+		{
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
+		},
+		{
+			Id:        2,
+			Address:   "tikv2",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
+		},
+	}
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
+		cfg.Replication.EnablePlacementRules = true
+		cfg.Replication.MaxReplicas = 1
+	})
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
+
+	for _, store := range suite.stores {
+		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, nil)
+	}
+	suite.regions = make([]*core.RegionInfo, 0)
+	peers1 := []*metapb.Peer{
+		{Id: 102, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 103, StoreId: 2, Role: metapb.PeerRole_Voter}}
+	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers1[0],
+		core.WithStartKey([]byte("abc")), core.WithEndKey([]byte("def"))))
+	peers2 := []*metapb.Peer{
+		{Id: 104, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 105, StoreId: 2, Role: metapb.PeerRole_Learner}}
+	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}, peers2[0],
+		core.WithStartKey([]byte("ghi")), core.WithEndKey([]byte("jkl"))))
+	peers3 := []*metapb.Peer{
+		{Id: 106, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 107, StoreId: 2, Role: metapb.PeerRole_Learner}}
+	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}}, peers3[0],
+		core.WithStartKey([]byte("mno")), core.WithEndKey([]byte("pqr"))))
+	for _, rg := range suite.regions {
+		suite.svr.GetBasicCluster().PutRegion(rg)
+	}
+}
+
+func (suite *regionRuleTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
+	ruleManager := suite.svr.GetRaftCluster().GetRuleManager()
+	ruleManager.SetRule(&placement.Rule{
+		GroupID:     "test",
+		ID:          "test2",
+		StartKeyHex: hex.EncodeToString([]byte("ghi")),
+		EndKeyHex:   hex.EncodeToString([]byte("jkl")),
+		Role:        placement.Learner,
+		Count:       1,
+	})
+	ruleManager.SetRule(&placement.Rule{
+		GroupID:     "test",
+		ID:          "test3",
+		StartKeyHex: hex.EncodeToString([]byte("ooo")),
+		EndKeyHex:   hex.EncodeToString([]byte("ppp")),
+		Role:        placement.Learner,
+		Count:       1,
+	})
+	re := suite.Require()
+	url := fmt.Sprintf("%s/region/rule/%d", suite.urlPrefix, 1)
+	fit := &placement.RegionFit{}
+	err := tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.Equal(len(fit.RuleFits), 1)
+	suite.Equal(len(fit.OrphanPeers), 1)
+	suite.NoError(err)
+	url = fmt.Sprintf("%s/region/rule/%d", suite.urlPrefix, 2)
+	fit = &placement.RegionFit{}
+	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.Equal(len(fit.RuleFits), 2)
+	suite.Equal(len(fit.OrphanPeers), 0)
+	suite.NoError(err)
+	url = fmt.Sprintf("%s/region/rule/%d", suite.urlPrefix, 3)
+	fit = &placement.RegionFit{}
+	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.Equal(len(fit.RuleFits), 0)
+	suite.Equal(len(fit.OrphanPeers), 2)
+	suite.NoError(err)
+
+	url = fmt.Sprintf("%s/region/rule/%d", suite.urlPrefix, 4)
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
+		re, "region not found."))
+	suite.NoError(err)
+
+	url = fmt.Sprintf("%s/region/rule/%s", suite.urlPrefix, "id")
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
+		re, "strconv.ParseUint: parsing \\\"id\\\": invalid syntax"))
+	suite.NoError(err)
+
+	suite.svr.GetRaftCluster().GetOpts().GetReplicationConfig().EnablePlacementRules = false
+	url = fmt.Sprintf("%s/region/rule/%d", suite.urlPrefix, 1)
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
+		re, "placement rules is disabled."))
+	suite.NoError(err)
 }
 
 // Start a new test suite to prevent from being interfered by other tests.

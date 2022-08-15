@@ -230,6 +230,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	regionHandler := newRegionHandler(svr, rd)
 	registerFunc(clusterRouter, "/region/id/{id}", regionHandler.GetRegionByID, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter.UseEncodedPath(), "/region/key/{key}", regionHandler.GetRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/region/rule/{id}", regionHandler.CheckRegionPlacementRule, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)

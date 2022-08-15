@@ -232,6 +232,38 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // @Tags     region
+// @Summary  Get placement rules for a region by region ID.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {object}  RegionFit
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /region/rule/{id} [get]
+func (h *regionHandler) CheckRegionPlacementRule(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+
+	if !rc.GetOpts().GetReplicationConfig().EnablePlacementRules {
+		h.rd.JSON(w, http.StatusBadRequest, "placement rules is disabled.")
+		return
+	}
+
+	vars := mux.Vars(r)
+	regionIDStr := vars["id"]
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	regionInfo := rc.GetRegion(regionID)
+	if regionInfo == nil {
+		h.rd.JSON(w, http.StatusBadRequest, "region not found.")
+		return
+	}
+	regionFit := rc.GetRuleManager().FitRegion(rc, regionInfo)
+	h.rd.JSON(w, http.StatusOK, regionFit)
+}
+
+// @Tags     region
 // @Summary  Search for a region by a key. GetRegion is named to be consistent with gRPC
 // @Param    key  path  string  true  "Region key"
 // @Produce  json
