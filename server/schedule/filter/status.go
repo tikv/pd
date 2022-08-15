@@ -42,6 +42,8 @@ var (
 	// region filter status
 	statusRegionPendingPeer   = plan.NewStatus(plan.StatusRegionUnhealthy, "region has pending peers")
 	statusRegionDownPeer      = plan.NewStatus(plan.StatusRegionUnhealthy, "region has down peers")
+	statusRegionHot           = plan.NewStatus(plan.StatusRegionHot)
+	statusRegionWithNoLeader  = plan.NewStatus(plan.StatusRegionWithNoLeader)
 	statusRegionEmpty         = plan.NewStatus(plan.StatusRegionEmpty)
 	statusRegionRule          = plan.NewStatus(plan.StatusRuleNotMatch)
 	statusRegionNotReplicated = plan.NewStatus(plan.StatusRegionNotReplicated)
