@@ -479,8 +479,8 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
 		if store == nil {
-			log.Error("invalid store ID", zap.Uint64("store-id", storeID))
-			return false
+			log.Info("missing store", zap.Uint64("store-id", storeID))
+			continue
 		}
 		for n, v := range storelimit.TypeNameValue {
 			storeLimit := store.GetStoreLimit(v)
@@ -844,7 +844,10 @@ func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluen
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
-			AddOpInfluence(op, influence, cluster)
+			region := cluster.GetRegion(op.RegionID())
+			if region != nil {
+				op.UnfinishedInfluence(influence, region)
+			}
 		}
 	}
 	return influence
@@ -861,11 +864,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 		if !ok {
 			continue
 		}
-		region := cluster.GetRegion(op.RegionID())
-		if region != nil {
-			log.Debug("op influence less than 10s", zap.Uint64("region-id", op.RegionID()))
-			op.TotalInfluence(influence, region)
-		}
+		AddOpInfluence(op, influence, cluster)
 	}
 }
 

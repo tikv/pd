@@ -110,6 +110,7 @@ type unsafeRecoveryController struct {
 	step         uint64
 	failedStores map[uint64]struct{}
 	timeout      time.Time
+	autoDetect   bool
 
 	// collected reports from store, if not reported yet, it would be nil
 	storeReports      map[uint64]*pdpb.StoreReport
@@ -164,30 +165,32 @@ func (u *unsafeRecoveryController) IsRunning() bool {
 }
 
 // RemoveFailedStores removes failed stores from the cluster.
-func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]struct{}, timeout uint64) error {
+func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]struct{}, timeout uint64, autoDetect bool) error {
 	if u.IsRunning() {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 	u.Lock()
 	defer u.Unlock()
 
-	if len(failedStores) == 0 {
-		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
-	}
-
-	// validate the stores and mark the store as tombstone forcibly
-	for failedStore := range failedStores {
-		store := u.cluster.GetStore(failedStore)
-		if store == nil {
-			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v doesn't exist", failedStore))
-		} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
-			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
+	if !autoDetect {
+		if len(failedStores) == 0 {
+			return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no store specified")
 		}
-	}
-	for failedStore := range failedStores {
-		err := u.cluster.BuryStore(failedStore, true)
-		if err != nil && !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
-			return err
+
+		// validate the stores and mark the store as tombstone forcibly
+		for failedStore := range failedStores {
+			store := u.cluster.GetStore(failedStore)
+			if store == nil {
+				return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v doesn't exist", failedStore))
+			} else if (store.IsPreparing() || store.IsServing()) && !store.IsDisconnected() {
+				return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs(fmt.Sprintf("store %v is up and connected", failedStore))
+			}
+		}
+		for failedStore := range failedStores {
+			err := u.cluster.BuryStore(failedStore, true)
+			if err != nil && !errors.ErrorEqual(err, errs.ErrStoreNotFound.FastGenByArgs(failedStore)) {
+				return err
+			}
 		}
 	}
 
@@ -204,6 +207,7 @@ func (u *unsafeRecoveryController) RemoveFailedStores(failedStores map[uint64]st
 
 	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
 	u.failedStores = failedStores
+	u.autoDetect = autoDetect
 	u.changeStage(collectReport)
 	return nil
 }
@@ -384,7 +388,7 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 	if reported, exist := u.storeReports[storeID]; reported != nil || !exist {
 		// the plan has been executed, no need to dispatch again
-		// or no need to displan plan to this store(e.g. Tiflash)
+		// or no need to dispatch plan to this store(e.g. Tiflash)
 		return
 	}
 
@@ -445,17 +449,23 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	switch u.stage {
 	case idle:
 	case collectReport:
-		stores := ""
-		count := 0
-		for store := range u.failedStores {
-			count += 1
-			stores += fmt.Sprintf("%d", store)
-			if count != len(u.failedStores) {
-				stores += ", "
-			}
-		}
 		// TODO: clean up existing operators
-		output.Info = fmt.Sprintf("Unsafe recovery enters collect report stage: failed stores %s", stores)
+		output.Info = "Unsafe recovery enters collect report stage"
+		if u.autoDetect {
+			output.Details = append(output.Details, "auto detect mode with no specified failed stores")
+		} else {
+			stores := ""
+			count := 0
+			for store := range u.failedStores {
+				count += 1
+				stores += fmt.Sprintf("%d", store)
+				if count != len(u.failedStores) {
+					stores += ", "
+				}
+			}
+			output.Details = append(output.Details, fmt.Sprintf("failed stores %s", stores))
+		}
+
 	case tombstoneTiFlashLearner:
 		output.Info = "Unsafe recovery enters tombstone TiFlash learner stage"
 		output.Actions = u.getTombstoneTiFlashLearnerDigest()
@@ -615,13 +625,22 @@ func (u *unsafeRecoveryController) recordAffectedRegion(region *metapb.Region) {
 	}
 }
 
+func (u *unsafeRecoveryController) isFailed(peer *metapb.Peer) bool {
+	_, isFailed := u.failedStores[peer.StoreId]
+	_, isLive := u.storeReports[peer.StoreId]
+	if isFailed || (u.autoDetect && !isLive) {
+		return true
+	}
+	return false
+}
+
 func (u *unsafeRecoveryController) canElectLeader(region *metapb.Region, onlyIncoming bool) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0
 		numLiveVoters := 0
 
 		for _, voter := range voters {
-			if _, ok := u.failedStores[voter.StoreId]; ok {
+			if u.isFailed(voter) {
 				numFailedVoters += 1
 			} else {
 				numLiveVoters += 1
@@ -657,7 +676,7 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
 			continue
 		}
-		if _, ok := u.failedStores[peer.StoreId]; ok {
+		if u.isFailed(peer) {
 			failedPeers = append(failedPeers, peer)
 		}
 	}

@@ -399,11 +399,9 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	switch dir {
 	case transferOut:
 		plan.source, plan.target = store, nil
-		l.counter.WithLabelValues("high-score", plan.SourceMetricLabel()).Inc()
 		creator = l.transferLeaderOut
 	case transferIn:
 		plan.source, plan.target = nil, store
-		l.counter.WithLabelValues("low-score", plan.TargetMetricLabel()).Inc()
 		creator = l.transferLeaderIn
 	}
 	var op *operator.Operator
@@ -418,7 +416,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	if op != nil {
 		l.retryQuota.ResetLimit(store)
-		op.Counters = append(op.Counters, l.counter.WithLabelValues(dir, plan.SourceMetricLabel()))
 	} else {
 		l.Attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", l.GetName()), zap.Uint64(dir, store.GetID()))
@@ -447,7 +444,7 @@ func makeInfluence(op *operator.Operator, plan *balancePlan, usedRegions map[uin
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandLeaderRegions(plan.SourceStoreID(), l.conf.Ranges),
-		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
+		filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -481,7 +478,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandFollowerRegions(plan.TargetStoreID(), l.conf.Ranges),
-		filter.NewRegionPengdingFilter(), filter.NewRegionDownFilter())
+		filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
