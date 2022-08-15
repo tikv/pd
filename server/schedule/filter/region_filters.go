@@ -84,6 +84,38 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
 	return statusOK
 }
 
+type regionCluster interface {
+	regionHealthCluster
+	IsRegionHot(region *core.RegionInfo) bool
+}
+type regionTransferPeerFilter struct {
+	cluster regionCluster
+	filters []RegionFilter
+}
+
+// NewRegionTransferPeerFilter creates a RegionFilter that filters all regions that shouldn't transfer any peer.
+func NewRegionTransferPeerFilter(cluster regionCluster) RegionFilter {
+	downFilter := NewRegionDownFilter()
+	replicaFilter := NewRegionReplicatedFilter(cluster)
+	filters := []RegionFilter{downFilter, replicaFilter}
+	return &regionTransferPeerFilter{cluster, filters}
+}
+
+func (f *regionTransferPeerFilter) Select(region *core.RegionInfo) plan.Status {
+	for _, filter := range f.filters {
+		if status := filter.Select(region); !status.IsOK() {
+			return status
+		}
+	}
+	if f.cluster.IsRegionHot(region) {
+		return statusRegionHot
+	}
+	if region.GetLeader() == nil {
+		return statusRegionWithNoLeader
+	}
+	return statusOK
+}
+
 type regionReplicatedFilter struct {
 	cluster regionHealthCluster
 }
