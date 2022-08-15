@@ -140,7 +140,7 @@ func newHotWriteFromFile() *Case {
 			Status:    metapb.StoreState_Up,
 			Capacity:  6 * units.TiB,
 			Available: 6 * units.TiB,
-			Version:   "2.1.0",
+			Version:   "6.1.0",
 		})
 		for _, region := range store.Stats {
 			if _, ok := regions[region.RegionID]; ok {
