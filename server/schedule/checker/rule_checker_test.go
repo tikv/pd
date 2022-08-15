@@ -16,6 +16,7 @@ package checker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/pingcap/failpoint"
@@ -64,7 +65,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeer() {
 	suite.cluster.AddLeaderStore(2, 1)
 	suite.cluster.AddLeaderStore(3, 1)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
 	suite.Equal(core.HighPriority, op.GetPriorityLevel())
@@ -87,7 +88,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "rack", "host"},
 		IsolationLevel: "zone",
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3)
 	suite.ruleManager.SetRule(&placement.Rule{
@@ -100,7 +101,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 		LocationLabels: []string{"zone", "rack", "host"},
 		IsolationLevel: "rack",
 	})
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
@@ -112,12 +113,16 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.cluster.AddLeaderStore(3, 1)
 	suite.cluster.AddLeaderStore(4, 1)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
+	op2 := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
+	suite.Nil(op2)
 	suite.cluster.SetStoreDown(2)
 	r := suite.cluster.GetRegion(1)
 	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
-	op = suite.rc.Check(r)
+	op = suite.CheckWithCachePlan(r)
+	op2 = suite.CheckWithCachePlan(r)
+	suite.Equal(op.Desc(), op2.Desc())
 	suite.NotNil(op)
 	suite.Equal("replace-rule-down-peer", op.Desc())
 	suite.Equal(core.HighPriority, op.GetPriorityLevel())
@@ -125,7 +130,8 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
 	suite.cluster.SetStoreOffline(2)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
+	suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
 	suite.Equal(core.HighPriority, op.GetPriorityLevel())
@@ -139,7 +145,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.cluster.PutRegion(nr1)
 	hasTransferLeader := false
 	for i := 0; i < 100; i++ {
-		op = suite.rc.Check(suite.cluster.GetRegion(1))
+		op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 		suite.NotNil(op)
 		if step, ok := op.Step(0).(operator.TransferLeader); ok {
 			suite.Equal(uint64(1), step.FromStore)
@@ -150,13 +156,32 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.True(hasTransferLeader)
 }
 
+func outPutPlans(plan *checkPlanNode) {
+	for id, plan := range plan.ToString() {
+		fmt.Println("plan:", id)
+		fmt.Println("checkpath:", plan)
+		fmt.Println()
+	}
+}
+
+func (suite *ruleCheckerTestSuite) CheckWithCachePlan(region *core.RegionInfo) *operator.Operator {
+	checkPlan := newCheckPlan("test", region, true)
+	fit := suite.rc.cluster.GetRuleManager().FitRegion(suite.rc.cluster, region)
+	ops := suite.rc.CheckWithFit(checkPlan, fit)
+	outPutPlans(checkPlan)
+	if len(ops) == 0 {
+		return nil
+	}
+	return ops[0]
+}
+
 func (suite *ruleCheckerTestSuite) TestFixOrphanPeers() {
 	suite.cluster.AddLeaderStore(1, 1)
 	suite.cluster.AddLeaderStore(2, 1)
 	suite.cluster.AddLeaderStore(3, 1)
 	suite.cluster.AddLeaderStore(4, 1)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("remove-orphan-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
@@ -180,7 +205,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers2() {
 		},
 	})
 	suite.cluster.SetStoreDown(2)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 }
 
@@ -193,7 +218,7 @@ func (suite *ruleCheckerTestSuite) TestFixRole() {
 	p := r.GetStorePeer(1)
 	p.Role = metapb.PeerRole_Learner
 	r = r.Clone(core.WithLearners([]*metapb.Peer{p}))
-	op := suite.rc.Check(r)
+	op := suite.CheckWithCachePlan(r)
 	suite.NotNil(op)
 	suite.Equal("fix-peer-role", op.Desc())
 	suite.Equal(uint64(1), op.Step(0).(operator.PromoteLearner).ToStore)
@@ -225,7 +250,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 			{Key: "role", Op: "in", Values: []string{"follower"}},
 		},
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("fix-follower-role", op.Desc())
 	suite.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
@@ -246,18 +271,18 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 			{Key: "role", Op: "in", Values: []string{"leader"}},
 		},
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("fix-leader-role", op.Desc())
 	suite.Equal(uint64(2), op.Step(0).(operator.TransferLeader).ToStore)
 
 	suite.cluster.SetStoreBusy(2, true)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 	suite.cluster.SetStoreBusy(2, false)
 
 	suite.cluster.AddLeaderRegion(1, 2, 1)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("remove-orphan-peer", op.Desc())
 	suite.Equal(uint64(1), op.Step(0).(operator.RemovePeer).FromStore)
@@ -278,12 +303,12 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 		Count:          3,
 		LocationLabels: []string{"host"},
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("move-to-better-location", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 4)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 }
 
@@ -302,12 +327,12 @@ func (suite *ruleCheckerTestSuite) TestBetterReplacement2() {
 		Count:          3,
 		LocationLabels: []string{"zone", "host"},
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("move-to-better-location", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 4)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 }
 
@@ -325,7 +350,7 @@ func (suite *ruleCheckerTestSuite) TestNoBetterReplacement() {
 		Count:          3,
 		LocationLabels: []string{"host"},
 	})
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 }
 
@@ -338,13 +363,13 @@ func (suite *ruleCheckerTestSuite) TestIssue2419() {
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
 	r := suite.cluster.GetRegion(1)
 	r = r.Clone(core.WithAddPeer(&metapb.Peer{Id: 5, StoreId: 4, Role: metapb.PeerRole_Learner}))
-	op := suite.rc.Check(r)
+	op := suite.CheckWithCachePlan(r)
 	suite.NotNil(op)
 	suite.Equal("remove-orphan-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 
 	r = r.Clone(core.WithRemoveStorePeer(4))
-	op = suite.rc.Check(r)
+	op = suite.CheckWithCachePlan(r)
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
@@ -362,12 +387,12 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
 	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 	var add operator.AddLearner
 	var remove operator.RemovePeer
 	suite.cluster.SetStoreOffline(2)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.IsType(add, op.Step(0))
 	suite.Equal("replace-rule-offline-peer", op.Desc())
@@ -378,7 +403,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 			Role:    metapb.PeerRole_Learner,
 		}))
 	suite.cluster.PutRegion(r)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
 }
@@ -416,7 +441,7 @@ func (suite *ruleCheckerTestSuite) TestIssue3293() {
 	suite.NoError(err)
 	err = suite.ruleManager.DeleteRule("pd", "default")
 	suite.NoError(err)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
 }
@@ -533,20 +558,20 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	suite.ruleManager.SetRule(rule)
 
 	region := suite.cluster.GetRegion(1)
-	suite.Nil(suite.rc.Check(region))
+	suite.Nil(suite.CheckWithCachePlan(region))
 
 	suite.cluster.SetStoreDown(4)
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), suite.CheckWithCachePlan(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreDown(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), suite.CheckWithCachePlan(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
-	suite.Nil(suite.rc.Check(region))
+	suite.Nil(suite.CheckWithCachePlan(region))
 }
 
 // See issue: https://github.com/tikv/pd/issues/3705
@@ -569,17 +594,17 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	suite.ruleManager.SetRule(rule)
 
 	region := suite.cluster.GetRegion(1)
-	suite.Nil(suite.rc.Check(region))
+	suite.Nil(suite.CheckWithCachePlan(region))
 
 	suite.cluster.SetStoreOffline(4)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), suite.CheckWithCachePlan(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreOffline(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), suite.CheckWithCachePlan(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
-	suite.Nil(suite.rc.Check(region))
+	suite.Nil(suite.CheckWithCachePlan(region))
 }
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {
@@ -603,7 +628,7 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	suite.ruleManager.SetRule(rule)
 	region := suite.cluster.GetRegion(1)
 	region = region.Clone(core.WithIncConfVer(), core.WithIncVersion())
-	suite.Nil(suite.rc.Check(region))
+	suite.Nil(suite.CheckWithCachePlan(region))
 
 	testCases := []struct {
 		name        string
@@ -647,11 +672,11 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 		suite.T().Log(testCase.name)
 		if testCase.stillCached {
 			suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldCache", "return(true)"))
-			suite.rc.Check(testCase.region)
+			suite.CheckWithCachePlan(testCase.region)
 			suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldCache"))
 		} else {
 			suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache", "return(true)"))
-			suite.rc.Check(testCase.region)
+			suite.CheckWithCachePlan(testCase.region)
 			suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/checker/assertShouldNotCache"))
 		}
 	}
@@ -671,7 +696,7 @@ func (suite *ruleCheckerTestSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingO
 	suite.cluster.PutRegion(r1)
 
 	// should not remove extra peer
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 
 	// set peer3 to down-peer
@@ -685,7 +710,7 @@ func (suite *ruleCheckerTestSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingO
 	suite.cluster.PutRegion(r1)
 
 	// should not remove extra peer
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 
 	// set peer3 to normal
@@ -694,7 +719,7 @@ func (suite *ruleCheckerTestSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingO
 
 	// should remove extra peer now
 	var remove operator.RemovePeer
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
 }
@@ -712,7 +737,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
 	suite.cluster.PutRegion(r1)
 
 	var remove operator.RemovePeer
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
 
@@ -726,7 +751,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
 	r1 = r1.Clone(core.WithPendingPeers(nil))
 	suite.cluster.PutRegion(r1)
 
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
 }
@@ -765,7 +790,7 @@ func (suite *ruleCheckerTestSuite) TestDemoteVoter() {
 	suite.ruleManager.SetRule(rule)
 	suite.ruleManager.SetRule(rule2)
 	suite.ruleManager.DeleteRule("pd", "default")
-	op := suite.rc.Check(region)
+	op := suite.CheckWithCachePlan(region)
 	suite.NotNil(op)
 	suite.Equal("fix-demote-voter", op.Desc())
 }
@@ -776,22 +801,22 @@ func (suite *ruleCheckerTestSuite) TestOfflineAndDownStore() {
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
 	region := suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-	op := suite.rc.Check(region)
+	op := suite.CheckWithCachePlan(region)
 	suite.Nil(op)
 	// assert rule checker should generate replace offline peer operator after cached
 	suite.cluster.SetStoreOffline(1)
-	op = suite.rc.Check(region)
+	op = suite.CheckWithCachePlan(region)
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
 	// re-cache the regionFit
 	suite.cluster.SetStoreUp(1)
-	op = suite.rc.Check(region)
+	op = suite.CheckWithCachePlan(region)
 	suite.Nil(op)
 
 	// assert rule checker should generate replace down peer operator after cached
 	suite.cluster.SetStoreDown(2)
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
-	op = suite.rc.Check(region)
+	op = suite.CheckWithCachePlan(region)
 	suite.NotNil(op)
 	suite.Equal("replace-rule-down-peer", op.Desc())
 }
@@ -800,7 +825,7 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	// no enough store
 	suite.cluster.AddLeaderStore(1, 1)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 	_, exist := suite.rc.pendingList.Get(1)
 	suite.True(exist)
@@ -808,7 +833,7 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	// add more stores
 	suite.cluster.AddLeaderStore(2, 1)
 	suite.cluster.AddLeaderStore(3, 1)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op = suite.CheckWithCachePlan(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
 	suite.Equal(core.HighPriority, op.GetPriorityLevel())

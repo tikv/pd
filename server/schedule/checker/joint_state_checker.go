@@ -35,27 +35,32 @@ func NewJointStateChecker(cluster schedule.Cluster) *JointStateChecker {
 	}
 }
 
-// Check verifies a region's role, creating an Operator if need.
-func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
+// Check verifies a region's role,returns true if it create an operator
+func (c *JointStateChecker) Check(p *checkPlanNode) []*operator.Operator {
+	node := p.newSubCheck("joint_state_checker")
+	region := node.region
 	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("joint_state_checker", "paused").Inc()
-		return nil
+		return node.stopByPaused()
 	}
 	if !core.IsInJointState(region.GetPeers()...) {
-		return nil
+		return node.stopAt("IsInJointState", statusNotInJointState)
 	}
+	// TODO return detail status get from operartor package.
 	op, err := operator.CreateLeaveJointStateOperator(operator.OpDescLeaveJointState, c.cluster, region)
+
 	if err != nil {
 		checkerCounter.WithLabelValues("joint_state_checker", "create-operator-fail").Inc()
 		log.Debug("fail to create leave joint state operator", errs.ZapError(err))
-		return nil
-	} else if op != nil {
+		return node.stopAtCreateOps(err, nil)
+	}
+	if op != nil {
 		checkerCounter.WithLabelValues("joint_state_checker", "new-operator").Inc()
 		if op.Len() > 1 {
 			checkerCounter.WithLabelValues("joint_state_checker", "transfer-leader").Inc()
 		}
 		op.SetPriorityLevel(core.HighPriority)
 	}
-	return op
+	return node.stopAtCreateOps(err, op)
 }

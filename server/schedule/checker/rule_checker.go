@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/schedule/plan"
 	"go.uber.org/zap"
 )
 
@@ -69,17 +70,24 @@ func (c *RuleChecker) GetType() string {
 	return "rule-checker"
 }
 
-// Check checks if the region matches placement rules and returns Operator to
-// fix it.
+// Check checks if the region matches placement rules and returns true if need to
+// fix. test only.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
+	checkPlan := newCheckPlan(c.GetType(), region, false)
 	fit := c.cluster.GetRuleManager().FitRegion(c.cluster, region)
-	return c.CheckWithFit(region, fit)
+	ops := c.CheckWithFit(checkPlan, fit)
+	if len(ops) == 0 {
+		return nil
+	}
+	return ops[0]
 }
 
 // CheckWithFit is similar with Checker with placement.RegionFit
-func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
+func (c *RuleChecker) CheckWithFit(p *checkPlanNode, fit *placement.RegionFit) []*operator.Operator {
+	curPlan := p.newSubCheck(c.GetType())
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
+		curPlan.stopAt("IsPaused", statusPaused)
 		return nil
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
@@ -88,7 +96,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			panic("cached shouldn't be used")
 		})
 		checkerCounter.WithLabelValues("rule_checker", "get-cache").Inc()
-		return nil
+		return curPlan.noNeed("IsPlacementRulesCacheEnabled", "get-cache")
 	}
 	failpoint.Inject("assertShouldCache", func() {
 		panic("cached should be used")
@@ -96,7 +104,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 
 	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
 	// invalid the cache if it exists
-	c.ruleManager.InvalidCache(region.GetID())
+	c.ruleManager.InvalidCache(curPlan.region.GetID())
 
 	checkerCounter.WithLabelValues("rule_checker", "check").Inc()
 	c.record.refresh(c.cluster)
@@ -105,24 +113,18 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		checkerCounter.WithLabelValues("rule_checker", "need-split").Inc()
 		// If the region matches no rules, the most possible reason is it spans across
 		// multiple rules.
-		return nil
+		return curPlan.noNeed("CheckRuleFitsLen", "no fit rule, need-split region")
 	}
-	op, err := c.fixOrphanPeers(region, fit)
-	if err != nil {
-		log.Debug("fail to fix orphan peer", errs.ZapError(err))
-	} else if op != nil {
+	region := curPlan.region
+	if ops := c.fixOrphanPeers(curPlan, fit); len(ops) != 0 {
 		c.pendingList.Remove(region.GetID())
-		return op
+		return ops
 	}
 	for _, rf := range fit.RuleFits {
-		op, err := c.fixRulePeer(region, fit, rf)
-		if err != nil {
-			log.Debug("fail to fix rule peer", zap.String("rule-group", rf.Rule.GroupID), zap.String("rule-id", rf.Rule.ID), errs.ZapError(err))
-			continue
-		}
-		if op != nil {
+		ops := c.fixRulePeer(curPlan, fit, rf)
+		if len(ops) > 0 {
 			c.pendingList.Remove(region.GetID())
-			return op
+			return ops
 		}
 	}
 	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
@@ -132,64 +134,68 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			checkerCounter.WithLabelValues("rule_checker", "set-cache").Inc()
 		}
 	}
-	return nil
+	return curPlan.noNeed("TheEnd", "no rule need to fix")
 }
 
-func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixRulePeer(p *checkPlanNode, fit *placement.RegionFit, rf *placement.RuleFit) []*operator.Operator {
+	curPlan := p.newSubCheck("fixRulePeer")
+	region := curPlan.region
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
-		return c.addRulePeer(region, rf)
+		return c.addRulePeer(curPlan, rf)
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			return c.replaceUnexpectRulePeer(curPlan, rf, fit, peer, downStatus)
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+			return c.replaceUnexpectRulePeer(curPlan, rf, fit, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
 	for _, peer := range rf.PeersWithDifferentRole {
-		op, err := c.fixLooseMatchPeer(region, fit, rf, peer)
-		if err != nil {
-			return nil, err
-		}
-		if op != nil {
-			return op, nil
+		ops := c.fixLooseMatchPeer(curPlan, fit, rf, peer)
+		if len(ops) > 0 {
+			return ops
 		}
 	}
-	return c.fixBetterLocation(region, rf)
+	return c.fixBetterLocation(curPlan, rf)
 }
 
-func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) addRulePeer(p *checkPlanNode, rf *placement.RuleFit) []*operator.Operator {
 	checkerCounter.WithLabelValues("rule_checker", "add-rule-peer").Inc()
+	curPlan := p.newSubCheck("add-rule-peer")
+	region := curPlan.region
 	ruleStores := c.getRuleFitStores(rf)
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-add").Inc()
 		c.handleFilterState(region, filterByTempState)
-		return nil, errNoStoreToAdd
+		return curPlan.stopAt("SelectStoreToAdd", plan.NewStatus(plan.StatusStoreNotEnough, errNoStoreToAdd.Error()))
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
-	if err != nil {
-		return nil, err
+	if op != nil {
+		op.SetPriorityLevel(core.HighPriority)
 	}
-	op.SetPriorityLevel(core.HighPriority)
-	return op, nil
+	return curPlan.stopAtCreateOps(err, op)
 }
 
 // The peer's store may in Offline or Down, need to be replace.
-func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+func (c *RuleChecker) replaceUnexpectRulePeer(p *checkPlanNode, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) []*operator.Operator {
+	curPlan := p.newSubCheck("replaceUnexpectRulePeer")
+	region := curPlan.region
 	ruleStores := c.getRuleFitStores(rf)
 	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	curPlan.srcStoreID = peer.GetStoreId()
+	curPlan.destStoreID = store
 	if store == 0 {
 		checkerCounter.WithLabelValues("rule_checker", "no-store-replace").Inc()
 		c.handleFilterState(region, filterByTempState)
-		return nil, errNoStoreToReplace
+		return curPlan.stopAt("SelectStoreToFix", plan.NewStatus(plan.StatusStoreNotEnough, errNoStoreToReplace.Error()))
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
@@ -221,44 +227,53 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
 	op, err := createOp()
+	if op != nil {
+		op.SetPriorityLevel(core.HighPriority)
+	}
+	ops := curPlan.stopAtCreateOps(err, op)
 	if err != nil {
-		return nil, err
+		return ops
 	}
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
-	op.SetPriorityLevel(core.HighPriority)
-	return op, nil
+	return ops
 }
 
-func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) (*operator.Operator, error) {
+func (c *RuleChecker) fixLooseMatchPeer(p *checkPlanNode, fit *placement.RegionFit, rf *placement.RuleFit, peer *metapb.Peer) []*operator.Operator {
+	curPlan := p.newSubCheck("fixLooseMatchPeer")
+	region := curPlan.region
 	if core.IsLearner(peer) && rf.Rule.Role != placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "fix-peer-role").Inc()
-		return operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
+		op, err := operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
+		return curPlan.stopAtCreateOps(err, op)
 	}
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
 		if c.allowLeader(fit, peer) {
-			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), []uint64{}, 0)
+			op, err := operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), []uint64{}, 0)
+			return curPlan.stopAtCreateOps(err, op)
 		}
 		checkerCounter.WithLabelValues("rule_checker", "not-allow-leader")
-		return nil, errPeerCannotBeLeader
+		return curPlan.stopAt("allowLeader", plan.NewStatus(plan.StatusRuleNotMatch, errPeerCannotBeLeader.Error()))
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		checkerCounter.WithLabelValues("rule_checker", "fix-follower-role").Inc()
 		for _, p := range region.GetPeers() {
 			if c.allowLeader(fit, p) {
-				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), []uint64{}, 0)
+				op, err := operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), []uint64{}, 0)
+				return curPlan.stopAtCreateOps(err, op)
 			}
 		}
 		checkerCounter.WithLabelValues("rule_checker", "no-new-leader").Inc()
-		return nil, errNoNewLeader
+		return curPlan.stopAt("allowLeader", plan.NewStatus(plan.StatusRuleNotMatch, errNoNewLeader.Error()))
 	}
 	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
-		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
+		op, err := operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
+		return curPlan.stopAtCreateOps(err, op)
 	}
-	return nil, nil
+	return curPlan.noNeed("TheEnd", "")
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
@@ -282,57 +297,65 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	return false
 }
 
-func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixBetterLocation(p *checkPlanNode, rf *placement.RuleFit) []*operator.Operator {
+	curPlan := p.newSubCheck("fixBetterLocation")
+	region := curPlan.region
 	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
-		return nil, nil
+		return curPlan.noNeed("checkRule", "no location labels or rule count <= 1")
 	}
 
 	strategy := c.strategy(region, rf.Rule)
 	ruleStores := c.getRuleFitStores(rf)
 	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
-		return nil, nil
+		return curPlan.stopAt("SelectStoreToRemove", plan.NewStatus(plan.StatusNoNeed))
 	}
 	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
-		return nil, nil
+		return curPlan.stopAt("SelectStoreToImprove", plan.NewStatus(plan.StatusNoNeed))
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
 	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole()}
-	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
+	op, err := operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
+	return curPlan.stopAtCreateOps(err, op)
 }
 
-func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixOrphanPeers(p *checkPlanNode, fit *placement.RegionFit) []*operator.Operator {
+	checkNode := p.newSubCheck("fixOrphanPeers")
 	if len(fit.OrphanPeers) == 0 {
-		return nil, nil
+		return checkNode.stopAt("checkOrphanPeersLen", plan.NewStatus(plan.StatusNoNeed, "no orphan peers"))
 	}
 	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
 	// by RuleFits is not pending or down.
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
 			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-			return nil, nil
+			return checkNode.noNeed("IsSatisfied", "exist un statisfied rule")
 		}
 		for _, p := range rf.Peers {
-			for _, pendingPeer := range region.GetPendingPeers() {
+			for _, pendingPeer := range checkNode.region.GetPendingPeers() {
 				if pendingPeer.Id == p.Id {
 					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-					return nil, nil
+					return checkNode.noNeed("GetPendingPeers", "pending peer exist in rule")
 				}
 			}
-			for _, downPeer := range region.GetDownPeers() {
+			for _, downPeer := range checkNode.region.GetDownPeers() {
 				if downPeer.Peer.Id == p.Id {
 					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-					return nil, nil
+					return checkNode.noNeed("GetDownPeers", "down peer exist in rule")
 				}
 			}
 		}
 	}
 	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 	peer := fit.OrphanPeers[0]
-	return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, peer.StoreId)
+	op, err := operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, checkNode.region, peer.StoreId)
+	if err != nil {
+		log.Debug("fail to fix orphan peer", errs.ZapError(err))
+	}
+	return checkNode.stopAtCreateOps(err, op)
 }
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
