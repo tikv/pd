@@ -50,28 +50,29 @@ type idFilter func(uint64) bool
 
 func (f idFilter) Scope() string { return "idFilter" }
 func (f idFilter) Type() string  { return "idFilter" }
-func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
+func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
-	return statusScoreAlmostSame
+	// return any status as long as it's not statusOK
+	return statusStoreScoreDisallowed
 }
 
-func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) plan.Status {
+func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
-	return statusScoreAlmostSame
+	return statusStoreScoreDisallowed
 }
 
 func TestCandidates(t *testing.T) {
 	re := require.New(t)
 	cs := newTestCandidates(1, 2, 3, 4, 5)
-	cs.FilterSource(nil, idFilter(func(id uint64) bool { return id > 2 }))
+	cs.FilterSource(nil, []Filter{idFilter(func(id uint64) bool { return id > 2 })})
 	check(re, cs, 3, 4, 5)
-	cs.FilterTarget(nil, idFilter(func(id uint64) bool { return id%2 == 1 }))
+	cs.FilterTarget(nil, []Filter{idFilter(func(id uint64) bool { return id%2 == 1 })})
 	check(re, cs, 3, 5)
-	cs.FilterTarget(nil, idFilter(func(id uint64) bool { return id > 100 }))
+	cs.FilterTarget(nil, []Filter{idFilter(func(id uint64) bool { return id > 100 })})
 	check(re, cs)
 	store := cs.PickFirst()
 	re.Nil(store)

@@ -17,23 +17,17 @@ package plan
 // Plan is the basic unit for both scheduling and diagnosis.
 // TODO: for each scheduler/checker, we can have an individual definition but need to implement the common interfaces.
 type Plan interface {
-	GetStep() Step
-	GetStatus() Status
-	GetCoreResource(step Step) uint64
+	GetStep() int
+	GetStatus() *Status
+	GetCoreResource(int) uint64
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	GenerateCoreResource(interface{})
-	SetStatus(Status)
+	SetStatus(*Status)
 }
 
 type Analyzer interface {
 	Summary(interface{}) (string, error)
-}
-
-// Step identifes plan step
-type Step interface {
-	Number() int
-	Desc() string
 }
 
 // Collector is a plan collector
@@ -75,7 +69,7 @@ func (c *Collector) GetPlans() []Plan {
 type Option func(plan Plan)
 
 // SetStatus is used to set status for plan
-func SetStatus(status Status) Option {
+func SetStatus(status *Status) Option {
 	return func(plan Plan) {
 		plan.SetStatus(status)
 	}

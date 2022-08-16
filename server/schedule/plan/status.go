@@ -25,8 +25,8 @@ const (
 
 // normal status in most of situations.
 const (
-	// StatusScoreAlmostSame represents the plan is no need to be scheduled due to the score is almost the same.
-	StatusScoreAlmostSame = iota + 100
+	// StatusStoreScoreDisallowed represents the plan is no need to be scheduled due to the score does meet the requirement.
+	StatusStoreScoreDisallowed = iota + 100
 	// StatusStoreAlreadyHasPeer represents the store is excluded due to the existed region peer.
 	StatusStoreAlreadyHasPeer
 	// StatusNotMatchRule represents the placement rule cannot satisfy the requirement.
@@ -101,9 +101,9 @@ var statusText = map[StatusCode]string{
 	StatusOK: "OK",
 
 	// store in normal state usually
-	StatusScoreAlmostSame:     "Store Score Almost Same",
-	StatusStoreAlreadyHasPeer: "Store Already Has Peer",
-	StatusStoreNotMatchRule:   "Store Not Match Rule",
+	StatusStoreScoreDisallowed: "Store Score Disallowed",
+	StatusStoreAlreadyHasPeer:  "Store Already Has Peer",
+	StatusStoreNotMatchRule:    "Store Not Match Rule",
 
 	// store is limited by soft constraint
 	StatusStoreSnapshotThrottled:    "Store Snapshot Throttled",
@@ -153,12 +153,12 @@ type Status struct {
 }
 
 // NewStatus create a new plan status.
-func NewStatus(statusCode StatusCode, reason ...string) Status {
+func NewStatus(statusCode StatusCode, reason ...string) *Status {
 	var detailedReason string
 	if len(reason) != 0 {
 		detailedReason = reason[0]
 	}
-	return Status{
+	return &Status{
 		StatusCode:     statusCode,
 		DetailedReason: detailedReason,
 	}

@@ -23,59 +23,28 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
-type balanceStep int
-
-func (b *balanceStep) Desc() string {
-	switch *b {
-	case 0:
-		return "select source store"
-	case 1:
-		return "select region"
-	case 2:
-		return "select target store"
-	case 3:
-		return "verify the plan"
-	case 4:
-		return "create operator"
-	}
-	return ""
-}
-
-func (b *balanceStep) Number() int {
-	return int(*b)
-}
-
-func (b *balanceStep) Add() {
-	*b++
-}
-
-func (b *balanceStep) Sub() {
-	*b--
-}
-
 type balanceSchedulerPlan struct {
 	source *core.StoreInfo
 	target *core.StoreInfo
 	region *core.RegionInfo
-	status plan.Status
-	step   *balanceStep
+	status *plan.Status
+	step   int
 }
 
 // NewBalanceSchedulerPlan returns a new balanceSchedulerBasePlan
 func NewBalanceSchedulerPlan() *balanceSchedulerPlan {
-	step := balanceStep(0)
 	basePlan := &balanceSchedulerPlan{
-		step: &step,
+		status: plan.NewStatus(plan.StatusOK),
 	}
 	return basePlan
 }
 
-func (p *balanceSchedulerPlan) GetStep() plan.Step {
+func (p *balanceSchedulerPlan) GetStep() int {
 	return p.step
 }
 
 func (p *balanceSchedulerPlan) GenerateCoreResource(resource interface{}) {
-	switch *p.step {
+	switch p.step {
 	case 0:
 		p.source = resource.(*core.StoreInfo)
 	case 1:
@@ -85,21 +54,20 @@ func (p *balanceSchedulerPlan) GenerateCoreResource(resource interface{}) {
 	}
 }
 
-func (p *balanceSchedulerPlan) GetCoreResource(step plan.Step) uint64 {
-	log.Info(fmt.Sprintf("%d", step.Number()))
-	switch step.Number() {
+func (p *balanceSchedulerPlan) GetCoreResource(step int) uint64 {
+	switch step {
 	case 0:
-		if *p.step < 0 {
+		if p.step < 0 {
 			return 0
 		}
 		return p.source.GetID()
 	case 1:
-		if *p.step < 1 {
+		if p.step < 1 {
 			return 0
 		}
 		return p.region.GetID()
 	case 2:
-		if *p.step < 2 {
+		if p.step < 2 {
 			return 0
 		}
 		return p.target.GetID()
@@ -107,11 +75,11 @@ func (p *balanceSchedulerPlan) GetCoreResource(step plan.Step) uint64 {
 	return 0
 }
 
-func (p *balanceSchedulerPlan) GetStatus() plan.Status {
+func (p *balanceSchedulerPlan) GetStatus() *plan.Status {
 	return p.status
 }
 
-func (p *balanceSchedulerPlan) SetStatus(status plan.Status) {
+func (p *balanceSchedulerPlan) SetStatus(status *plan.Status) {
 	p.status = status
 }
 
@@ -119,15 +87,14 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 	plan := &balanceSchedulerPlan{
 		status: p.status,
 	}
-	step := *p.step
-	plan.step = &step
-	if *p.step > 0 {
+	plan.step = p.step
+	if p.step > 0 {
 		plan.source = p.source
 	}
-	if *p.step > 1 {
+	if p.step > 1 {
 		plan.region = p.region
 	}
-	if *p.step > 2 {
+	if p.step > 2 {
 		plan.target = p.target
 	}
 	for _, opt := range opts {
@@ -136,26 +103,23 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 	return plan
 }
 
-type BalanceSchedulerPlanAnalyzer struct {
-}
-
-func (a *BalanceSchedulerPlanAnalyzer) Summary(plans interface{}) (string, error) {
-	ps, ok := plans.([]*balanceSchedulerPlan)
-	if !ok {
-		return "", errs.ErrDiagnoseLoadPlanError
-	}
-	secondGroup := make(map[plan.Status]uint64)
-	var firstGroup map[uint64]map[plan.Status]int
+func BalancePlanSummary(plans []plan.Plan) (string, error) {
+	secondGroup := make(map[*plan.Status]uint64)
+	var firstGroup map[uint64]map[*plan.Status]int
 	maxStep := -1
-	for _, p := range ps {
-		step := p.GetStep().Number()
+	for _, pi := range plans {
+		p, ok := pi.(*balanceSchedulerPlan)
+		if !ok {
+			return "", errs.ErrDiagnoseLoadPlanError
+		}
+		step := p.GetStep()
 		// we don't consider the situation for verification step
 		if step > 2 {
 			continue
 		}
 		if step > maxStep {
-			firstGroup = make(map[uint64]map[plan.Status]int)
-			maxStep = p.GetStep().Number()
+			firstGroup = make(map[uint64]map[*plan.Status]int)
+			maxStep = p.GetStep()
 		} else if step < maxStep {
 			continue
 		}
@@ -166,7 +130,7 @@ func (a *BalanceSchedulerPlanAnalyzer) Summary(plans interface{}) (string, error
 			store = p.GetCoreResource(p.GetStep())
 		}
 		if _, ok := firstGroup[store]; !ok {
-			firstGroup[store] = make(map[plan.Status]int)
+			firstGroup[store] = make(map[*plan.Status]int)
 		}
 		firstGroup[store][p.status]++
 		log.Info(fmt.Sprintf("%d %s", store, p.status.String()))

@@ -48,24 +48,29 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
-	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
-		return
-	}
+
 	stores := make(map[uint64]struct{})
-	for _, store := range storeSlice {
-		stores[store] = struct{}{}
+	autoDetect, exists := input["auto-detect"].(bool)
+	if !exists || !autoDetect {
+		storeSlice, ok := typeutil.JSONToUint64Slice(input["stores"])
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "Store ids are invalid")
+			return
+		}
+		for _, store := range storeSlice {
+			stores[store] = struct{}{}
+		}
 	}
+
 	timeout := uint64(600)
-	rawTimeout, exists := input["timeout"].(float64)
-	if exists {
+	if rawTimeout, exists := input["timeout"].(float64); exists {
 		timeout = uint64(rawTimeout)
 	}
 
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout); err != nil {
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout, autoDetect); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
