@@ -346,6 +346,16 @@ func TestPlacementRules(t *testing.T) {
 	re.Equal([2]string{"pd", "default"}, rules2[0].Key())
 	re.Equal([2]string{"pd", "test1"}, rules2[1].Key())
 
+	// test rule region detail
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	fit := &placement.RegionFit{}
+	// need clear up args, so create new comman. Otherwise gourp still exists.
+	output, err = pdctl.CreateCommandAndExecuteCommand("-u", pdAddr, "config", "placement-rules", "show", "--region=1", "--detail")
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, fit))
+	re.Len(fit.RuleFits, 3)
+	re.Equal([2]string{"pd", "default"}, fit.RuleFits[0].Rule.Key())
+
 	// test delete
 	rules[0].Count = 0
 	b, _ = json.Marshal(rules)
