@@ -748,12 +748,14 @@
       "decimals": null,
       "description": "It records the unusual Regions' count which may include pending peers, down peers, extra peers, offline peers, missing peers or learner peers",
       "fill": 1,
+      "fillGradient": 0,
       "gridPos": {
         "h": 7,
         "w": 11,
         "x": 5,
         "y": 6
       },
+      "hiddenSeries": false,
       "id": 72,
       "legend": {
         "alignAsTable": true,
@@ -864,6 +866,7 @@
       "editable": true,
       "error": false,
       "fill": 0,
+      "fillGradient": 0,
       "grid": {},
       "gridPos": {
         "h": 7,
@@ -871,6 +874,7 @@
         "x": 16,
         "y": 6
       },
+      "hiddenSeries": false,
       "id": 18,
       "legend": {
         "avg": false,
@@ -1067,7 +1071,7 @@
         "h": 6,
         "w": 4,
         "x": 8,
-        "y": 14
+        "y": 13
       },
       "id": 1111,
       "options": {
@@ -1125,10 +1129,10 @@
       "title": "Current scaling speed",
       "datasource": "${DS_TEST-CLUSTER}",
       "gridPos": {
-        "x": 12,
-        "y": 13,
+        "h": 6,
         "w": 4,
-        "h": 6
+        "x": 12,
+        "y": 13
       },
       "id": 1112,
       "targets": [
@@ -1192,7 +1196,7 @@
             "h": 7,
             "w": 4,
             "x": 0,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 116,
@@ -1251,7 +1255,7 @@
             "h": 7,
             "w": 5,
             "x": 4,
-            "y": 14
+            "y": 20
           },
           "id": 1433,
           "links": [],
@@ -1375,7 +1379,7 @@
             "h": 3,
             "w": 5,
             "x": 9,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 139,
@@ -1444,7 +1448,7 @@
             "h": 7,
             "w": 5,
             "x": 14,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 103,
@@ -1524,7 +1528,7 @@
             "h": 7,
             "w": 5,
             "x": 19,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 117,
@@ -1626,7 +1630,7 @@
             "h": 4,
             "w": 5,
             "x": 9,
-            "y": 17
+            "y": 23
           },
           "hideTimeOverride": true,
           "id": 115,
@@ -1706,7 +1710,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 21
+            "y": 27
           },
           "hiddenSeries": false,
           "id": 1427,
@@ -1805,7 +1809,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 21
+            "y": 27
           },
           "hiddenSeries": false,
           "id": 1429,
@@ -1948,7 +1952,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 28
+            "y": 34
           },
           "hiddenSeries": false,
           "id": 1430,
@@ -2047,7 +2051,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 28
+            "y": 34
           },
           "hiddenSeries": false,
           "id": 1431,
@@ -2157,7 +2161,7 @@
             "h": 4,
             "w": 5,
             "x": 0,
-            "y": 35
+            "y": 41
           },
           "hideTimeOverride": true,
           "id": 137,
@@ -2243,7 +2247,7 @@
             "h": 8,
             "w": 7,
             "x": 5,
-            "y": 35
+            "y": 41
           },
           "hiddenSeries": false,
           "id": 1443,
@@ -2356,7 +2360,7 @@
             "h": 4,
             "w": 5,
             "x": 0,
-            "y": 39
+            "y": 45
           },
           "hideTimeOverride": true,
           "id": 1444,
@@ -3290,7 +3294,8 @@
             "align": false,
             "alignLevel": null
           }
-        },{
+        },
+        {
           "aliasColors": {},
           "bars": false,
           "dashLength": 10,
@@ -6527,12 +6532,14 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The current running schedulers",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 19
+            "y": 25
           },
+          "hiddenSeries": false,
           "id": 46,
           "legend": {
             "alignAsTable": true,
@@ -6621,12 +6628,14 @@
           "decimals": null,
           "description": "The leader movement details among TiKV instances",
           "fill": 1,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 27
+            "y": 33
           },
+          "hiddenSeries": false,
           "id": 87,
           "legend": {
             "alignAsTable": true,
@@ -6722,12 +6731,14 @@
           "decimals": null,
           "description": "The Region movement details among TiKV instances",
           "fill": 1,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 27
+            "y": 33
           },
+          "hiddenSeries": false,
           "hideTimeOverride": false,
           "id": 86,
           "legend": {
@@ -6817,201 +6828,20 @@
         },
         {
           "aliasColors": {},
-          "bars": true,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The count of balance leader events",
-          "fill": 1,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 0,
-            "y": 35
-          },
-          "id": 89,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": false,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "total": true,
-            "values": true
-          },
-          "lines": false,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": true,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_scheduler_balance_leader{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type!=\"move-leader\"}[30s])) by (type, address, store)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}-store-{{store}}",
-              "refId": "A"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Balance leader event",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
-          "bars": true,
-          "dashLength": 10,
-          "dashes": false,
-          "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The count of balance Region events",
-          "fill": 1,
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 35
-          },
-          "id": 88,
-          "legend": {
-            "alignAsTable": true,
-            "avg": false,
-            "current": true,
-            "hideEmpty": true,
-            "hideZero": true,
-            "max": false,
-            "min": false,
-            "rightSide": true,
-            "show": true,
-            "sortDesc": false,
-            "total": true,
-            "values": true
-          },
-          "lines": false,
-          "linewidth": 1,
-          "links": [],
-          "nullPointMode": "null",
-          "paceLength": 10,
-          "percentage": false,
-          "pointradius": 5,
-          "points": false,
-          "renderer": "flot",
-          "seriesOverrides": [],
-          "spaceLength": 10,
-          "stack": true,
-          "steppedLine": false,
-          "targets": [
-            {
-              "expr": "sum(delta(pd_scheduler_balance_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\"}[30s])) by (type, address, store)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "{{type}}-store-{{store}}",
-              "refId": "A"
-            }
-          ],
-          "thresholds": [],
-          "timeFrom": null,
-          "timeRegions": [],
-          "timeShift": null,
-          "title": "Balance Region event",
-          "tooltip": {
-            "shared": true,
-            "sort": 0,
-            "value_type": "individual"
-          },
-          "type": "graph",
-          "xaxis": {
-            "buckets": null,
-            "mode": "time",
-            "name": null,
-            "show": true,
-            "values": []
-          },
-          "yaxes": [
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            },
-            {
-              "format": "short",
-              "label": null,
-              "logBase": 1,
-              "max": null,
-              "min": null,
-              "show": true
-            }
-          ],
-          "yaxis": {
-            "align": false,
-            "alignLevel": null
-          }
-        },
-        {
-          "aliasColors": {},
           "bars": false,
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The inner status of balance leader scheduler",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 43
+            "y": 41
           },
+          "hiddenSeries": false,
           "id": 52,
           "legend": {
             "alignAsTable": true,
@@ -7101,12 +6931,14 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The inner status of balance Region scheduler",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 43
+            "y": 41
           },
+          "hiddenSeries": false,
           "id": 53,
           "legend": {
             "alignAsTable": true,
@@ -7187,7 +7019,8 @@
             "align": false,
             "alignLevel": null
           }
-        }, {
+        },
+        {
           "aliasColors": {},
           "bars": false,
           "dashLength": 10,
@@ -7195,12 +7028,14 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The inner status of balance Hot Region scheduler",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 51
+            "y": 49
           },
+          "hiddenSeries": false,
           "id": 1458,
           "legend": {
             "alignAsTable": true,
@@ -7281,7 +7116,8 @@
             "align": false,
             "alignLevel": null
           }
-        },{
+        },
+        {
           "aliasColors": {},
           "bars": false,
           "dashLength": 10,
@@ -7289,12 +7125,14 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The inner status of split bucket scheduler",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 51
+            "y": 49
           },
+          "hiddenSeries": false,
           "id": 1459,
           "legend": {
             "alignAsTable": true,
@@ -7383,12 +7221,14 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 59
+            "y": 57
           },
+          "hiddenSeries": false,
           "id": 108,
           "legend": {
             "alignAsTable": true,
@@ -7492,7 +7332,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 67
+            "y": 65
           },
           "id": 1424,
           "interval": null,
@@ -7561,12 +7401,14 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The replica checker's status",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 67
+            "y": 65
           },
+          "hiddenSeries": false,
           "id": 141,
           "legend": {
             "alignAsTable": true,
@@ -7657,7 +7499,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 75
+            "y": 73
           },
           "id": 70,
           "legend": {
@@ -7749,8 +7591,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 75
+            "y": 73
           },
+          "hiddenSeries": false,
           "id": 71,
           "legend": {
             "alignAsTable": true,
@@ -7836,12 +7679,14 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 83
+            "y": 81
           },
+          "hiddenSeries": false,
           "id": 109,
           "legend": {
             "alignAsTable": true,
@@ -7930,12 +7775,14 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "fill": 0,
+          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 83
+            "y": 81
           },
+          "hiddenSeries": false,
           "id": 110,
           "legend": {
             "alignAsTable": true,
@@ -11006,7 +10853,8 @@
             "align": false,
             "alignLevel": null
           }
-        }, {
+        },
+        {
           "aliasColors": {},
           "bars": false,
           "dashLength": 10,
@@ -11102,7 +10950,8 @@
             "align": false,
             "alignLevel": null
           }
-        },{
+        },
+        {
           "aliasColors": {},
           "bars": false,
           "dashLength": 10,
@@ -11573,7 +11422,8 @@
           "title": "Region Heartbeat Interval",
           "transparent": true,
           "type": "bargauge"
-        },{
+        },
+        {
           "datasource": "${DS_TEST-CLUSTER}",
           "fieldConfig": {
             "defaults": {
@@ -11621,7 +11471,8 @@
           "title": "Bucket Report Interval",
           "transparent": true,
           "type": "bargauge"
-        },{
+        },
+        {
           "datasource": "${DS_TEST-CLUSTER}",
           "fieldConfig": {
             "defaults": {
@@ -11864,20 +11715,20 @@
     "list": [
       {
         "allValue": null,
-        "current": { },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
         "hide": 2,
         "includeAll": false,
         "label": "K8s-cluster",
         "multi": false,
         "name": "k8s_cluster",
-        "options": [ ],
+        "options": [],
         "query": "label_values(pd_cluster_status, k8s_cluster)",
         "refresh": 2,
         "regex": "",
         "sort": 1,
         "tagValuesQuery": "",
-        "tags": [ ],
+        "tags": [],
         "tagsQuery": "",
         "type": "query",
         "useTags": false
