@@ -122,6 +122,7 @@ func newHotReadFromFile() *Case {
 
 	// build case
 	regions := make(map[uint64]int)
+	stores := make(map[uint64]int)
 	readFlow := make(map[uint64]int64)
 	for storeID, store := range hotReadInfos.AsLeader {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -131,6 +132,7 @@ func newHotReadFromFile() *Case {
 			Available: 6 * units.TiB,
 			Version:   "6.1.0",
 		})
+		stores[storeID] = 1
 		for _, region := range store.Stats {
 			if _, ok := regions[region.RegionID]; ok {
 				continue
@@ -150,6 +152,16 @@ func newHotReadFromFile() *Case {
 					Id:      IDAllocator.nextID(),
 					StoreId: peerStoreId,
 				})
+				if _, ok := stores[peerStoreId]; !ok {
+					simCase.Stores = append(simCase.Stores, &Store{
+						ID:        peerStoreId,
+						Status:    metapb.StoreState_Up,
+						Capacity:  6 * units.TiB,
+						Available: 6 * units.TiB,
+						Version:   "6.1.0",
+					})
+					stores[peerStoreId] = 1
+				}
 			}
 			simCase.Regions = append(simCase.Regions, Region{
 				ID:     IDAllocator.nextID(),
