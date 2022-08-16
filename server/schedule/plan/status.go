@@ -148,12 +148,12 @@ type Status struct {
 }
 
 // NewStatus create a new plan status.
-func NewStatus(statusCode StatusCode, reason ...string) Status {
+func NewStatus(statusCode StatusCode, reason ...string) *Status {
 	var detailedReason string
 	if len(reason) != 0 {
 		detailedReason = reason[0]
 	}
-	return Status{
+	return &Status{
 		StatusCode:     statusCode,
 		DetailedReason: detailedReason,
 	}
