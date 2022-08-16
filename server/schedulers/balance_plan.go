@@ -104,8 +104,8 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 func BalancePlanSummary(plans []plan.Plan) (string, error) {
-	secondGroup := make(map[*plan.Status]uint64)
-	var firstGroup map[uint64]map[*plan.Status]int
+	secondGroup := make(map[plan.Status]uint64)
+	var firstGroup map[uint64]map[plan.Status]int
 	maxStep := -1
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
@@ -118,7 +118,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 			continue
 		}
 		if step > maxStep {
-			firstGroup = make(map[uint64]map[*plan.Status]int)
+			firstGroup = make(map[uint64]map[plan.Status]int)
 			maxStep = p.GetStep()
 		} else if step < maxStep {
 			continue
@@ -130,15 +130,15 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 			store = p.GetCoreResource(p.GetStep())
 		}
 		if _, ok := firstGroup[store]; !ok {
-			firstGroup[store] = make(map[*plan.Status]int)
+			firstGroup[store] = make(map[plan.Status]int)
 		}
-		firstGroup[store][p.status]++
+		firstGroup[store][*p.status]++
 		log.Info(fmt.Sprintf("%d %s", store, p.status.String()))
 	}
 
 	for _, store := range firstGroup {
 		max := 0
-		curstat := plan.NewStatus(plan.StatusOK)
+		curstat := *plan.NewStatus(plan.StatusOK)
 		for stat, c := range store {
 			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c > max) || (stat.Priority() == curstat.Priority() && c == max && stat.StatusCode < curstat.StatusCode) {
 				max = c

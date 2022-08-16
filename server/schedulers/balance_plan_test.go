@@ -156,8 +156,8 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"4 stores are filtered by Store Score Almost Same": {},
-			"1 stores are filtered by Store Not Match Rule":    {},
+			"4 stores are filtered by Store Score Disallowed": {},
+			"1 stores are filtered by Store Not Match Rule":   {},
 		}))
 }
 
@@ -210,8 +210,8 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"2 stores are filtered by Store Score Almost Same": {},
-			"2 stores are filtered by Store Not Match Rule":    {},
-			"1 stores are filtered by Store Down":              {},
+			"2 stores are filtered by Store Score Disallowed": {},
+			"2 stores are filtered by Store Not Match Rule":   {},
+			"1 stores are filtered by Store Down":             {},
 		}))
 }
