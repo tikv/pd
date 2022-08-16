@@ -107,22 +107,29 @@ type Status struct {
 }
 
 // NewStatus create a new plan status.
-func NewStatus(statusCode StatusCode, reason ...string) Status {
+func NewStatus(statusCode StatusCode, reason ...string) *Status {
 	var detailedReason string
 	if len(reason) != 0 {
 		detailedReason = reason[0]
 	}
-	return Status{
+	return &Status{
 		StatusCode:     statusCode,
 		DetailedReason: detailedReason,
 	}
 }
 
 // IsOK returns true if the status code is StatusOK.
-func (s Status) IsOK() bool {
+func (s *Status) IsOK() bool {
 	return s.StatusCode == StatusOK
 }
 
-func (s Status) String() string {
+func (s *Status) String() string {
 	return fmt.Sprintf("%s, %s", StatusText(s.StatusCode), s.DetailedReason)
+}
+
+func (s *Status) Priority() int {
+	if s == nil {
+		return 0
+	}
+	return int(s.StatusCode) / 100
 }

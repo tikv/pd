@@ -15,6 +15,8 @@
 package cluster
 
 import (
+	"fmt"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -82,8 +84,37 @@ func (d *diagnosticManager) analyze(name string, ops []*operator.Operator, plans
 		runningNum := d.cluster.GetOperatorController().OperatorCount(operator.OpRegion)
 		if runningNum != 0 || len(ops) != 0 {
 			res.Status = scheduling
+			return res
 		}
-		// TODO: handle plans to get a summary
+		counts := make(map[uint64]map[plan.Status]uint64)
+		for _, p := range plans {
+			if p.GetStep() != 3 {
+				continue
+			}
+			if _, ok := counts[p.GetResourceID()]; !ok {
+				counts[p.GetResourceID()] = make(map[plan.Status]uint64)
+			}
+			counts[p.GetResourceID()][p.GetStatus()] += 1
+		}
+		result := make(map[plan.Status]uint64)
+		for _, v := range counts {
+			maxCount := uint64(0)
+			var status plan.Status
+			for s, c := range v {
+				if s.Priority() > status.Priority() || (s.Priority() == status.Priority() && c > maxCount) {
+					maxCount = c
+					status = s
+				}
+			}
+			result[status] += 1
+		}
+		var resstr string
+		for k, v := range result {
+			resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
+		}
+		res.Status = pending
+		res.Summary = resstr
+		return res
 	default:
 	}
 	index := len(ops)
