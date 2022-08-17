@@ -256,7 +256,9 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 		if !solver.shouldBalance(s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+			if collector != nil {
+				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+			}
 			continue
 		}
 
@@ -266,10 +268,14 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+			if collector != nil {
+				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+			}
 			return nil
 		}
-		collector.Collect()
+		if collector != nil {
+			collector.Collect()
+		}
 		solver.step--
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
