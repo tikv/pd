@@ -1252,11 +1252,23 @@ func (c *Config) SetupLogger() error {
 	// Add hot dedicated logger.
 	hotLogConfig := c.Log
 	hotLogConfig.File.Filename = strings.ReplaceAll(c.Log.File.Filename, "pd.log", "pd-hot.log")
-	lg, _, err = log.InitLogger(&hotLogConfig, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
+	lg1, _, err1 := log.InitLogger(&hotLogConfig, zap.AddStacktrace(zapcore.FatalLevel))
+	if err1 != nil {
+		return errs.ErrInitLogger.Wrap(err1).FastGenWithCause()
 	}
-	logutil.GetPluggableLogger("hot", true).PlugLogger(lg)
+	logutil.GetPluggableLogger("hot", true).PlugLogger(lg1)
+	// Add statics dedicated logger.
+	hotStaticsConfig := c.Log
+	hotStaticsConfig.File.Filename = strings.ReplaceAll(c.Log.File.Filename, "pd.log", "pd-hot-stats.log")
+	lg.Info("initialize logger hotStaticsConfig.File.Filename", zap.String("name", hotStaticsConfig.File.Filename))
+	lg2, _, err2 := log.InitLogger(&hotStaticsConfig, zap.AddStacktrace(zapcore.FatalLevel))
+
+	if err2 != nil {
+		log.Error("cannot init log", zap.Error(err2))
+		return errs.ErrInitLogger.Wrap(err2).FastGenWithCause()
+	}
+	lg2.Info("inited")
+	logutil.GetPluggableLogger("hot-stats", true).PlugLogger(lg2)
 	return nil
 }
 
