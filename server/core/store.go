@@ -29,10 +29,9 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval   = 5 * time.Minute
-	initialMaxRegionCounts = 30            // exclude storage Threshold Filter when region less than 30
-	initialMinSpace        = 8 * units.GiB // 2^33=8GB
-	slowStoreThreshold     = 80
+	storePersistInterval = 5 * time.Minute
+	initialMinSpace      = 8 * units.GiB // 2^33=8GB
+	slowStoreThreshold   = 80
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -425,13 +424,14 @@ func (s *StoreInfo) AvailableRatio() float64 {
 }
 
 // IsLowSpace checks if the store is lack of space. Not check if region count less
-// than initialMaxRegionCounts and available space more than initialMinSpace
+// than InitClusterRegionThreshold and available space more than initialMinSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
 	}
-	// issue #3444
-	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
+	// See https://github.com/tikv/pd/issues/3444 and https://github.com/tikv/pd/issues/5391
+	// TODO: we need find a better way to get the init region number when starting a new cluster.
+	if s.regionCount < InitClusterRegionThreshold && s.GetAvailable() > initialMinSpace {
 		return false
 	}
 	return s.AvailableRatio() < 1-lowSpaceRatio
