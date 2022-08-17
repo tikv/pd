@@ -350,7 +350,8 @@ func TestPlacementRules(t *testing.T) {
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
 	fit := &placement.RegionFit{}
 	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
-	output, err = pdctl.CreateCommandAndExecuteCommand("-u", pdAddr, "config", "placement-rules", "show", "--region=1", "--detail")
+	cmd2 := pdctlCmd.GetRootCmd()
+	output, err = pdctl.ExecuteCommand(cmd2, "-u", pdAddr, "config", "placement-rules", "show", "--region=1", "--detail")
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, fit))
 	re.Len(fit.RuleFits, 3)

@@ -30,22 +30,11 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
-	root.SetOutput(buf)
-	root.SetArgs(args)
-	err = root.Execute()
-	return buf.Bytes(), err
-}
-
-// CreateCommandAndExecuteCommand is used for test purpose when should clean up args.
-func CreateCommandAndExecuteCommand(args ...string) (output []byte, err error) {
-	buf := new(bytes.Buffer)
-	root := pdctl.GetRootCmd()
 	root.SetOutput(buf)
 	root.SetArgs(args)
 	err = root.Execute()
