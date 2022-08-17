@@ -309,7 +309,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 		var filters []filter.Filter
 		pendingFilter := filter.NewRegionPendingFilter()
 		downFilter := filter.NewRegionDownFilter()
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), []filter.RegionFilter{pendingFilter, downFilter})
+		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			// try to pick unhealthy region
 			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil)
@@ -330,7 +330,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), filters)
+			FilterTarget(cluster.GetOpts(), nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
 		targets := candidates.PickAll()

@@ -39,7 +39,7 @@ func (p *balanceSchedulerPlan) GetStep() int {
 	return p.step
 }
 
-func (p *balanceSchedulerPlan) GenerateResource(resource interface{}) {
+func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	switch p.step {
 	case 0:
 		p.source = resource.(*core.StoreInfo)

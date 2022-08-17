@@ -359,8 +359,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.LeaderScore(solver.kind.Policy, solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts()), false, scoreFunc)
-	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts()), true, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts(), nil), false, scoreFunc)
+	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts(), nil), true, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -445,7 +445,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(plan *solver) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandLeaderRegions(plan.SourceStoreID(), l.conf.Ranges),
-		[]filter.RegionFilter{filter.NewRegionPendingFilter(), filter.NewRegionDownFilter()})
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.SourceStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
@@ -457,7 +457,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *solver) *operator.Opera
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts)
+	targets = filter.SelectTargetStores(targets, finalFilters, opts, nil)
 	leaderSchedulePolicy := opts.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := plan.GetOpInfluence(targets[i].GetID())
@@ -479,7 +479,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *solver) *operator.Opera
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(plan *solver) *operator.Operator {
 	plan.region = filter.SelectOneRegion(plan.RandFollowerRegions(plan.TargetStoreID(), l.conf.Ranges),
-		[]filter.RegionFilter{filter.NewRegionPendingFilter(), filter.NewRegionDownFilter()})
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if plan.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", plan.TargetStoreID()))
 		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
@@ -502,7 +502,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *solver) *operator.Operat
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{plan.target}).
-		FilterTarget(opts, finalFilters).
+		FilterTarget(opts, nil, finalFilters...).
 		PickFirst()
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", plan.region.GetID()))
