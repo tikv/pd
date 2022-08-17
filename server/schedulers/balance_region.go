@@ -140,8 +140,14 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerPlan()
 	var collector *plan.Collector
+	var planFunc func() []plan.Plan
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
+		planFunc = collector.GetPlans
+	} else {
+		planFunc = func() []plan.Plan {
+			return nil
+		}
 	}
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
@@ -215,14 +221,14 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			if op := s.transferPeer(solver, collector); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-				return []*operator.Operator{op}, collector.GetPlans()
+				return []*operator.Operator{op}, planFunc()
 			}
 			basePlan.step--
 		}
 		s.retryQuota.Attenuate(solver.source)
 	}
 	s.retryQuota.GC(stores)
-	return nil, collector.GetPlans()
+	return nil, planFunc()
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
