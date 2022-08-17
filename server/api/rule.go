@@ -127,8 +127,8 @@ func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 // @Failure  412  {string}  string  "Placement rules feature is disabled."
 // @Router   /config/rules/region/{region} [get]
 func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
-	cluster, region, ok := h.preCheckForRegionAndRule(w, r)
-	if !ok {
+	cluster, region := h.preCheckForRegionAndRule(w, r)
+	if cluster == nil || region == nil {
 		return
 	}
 	rules := cluster.GetRuleManager().GetRulesForApplyRegion(region)
@@ -145,32 +145,32 @@ func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
 // @Failure  412  {string}  string  "Placement rules feature is disabled."
 // @Router   /config/rules/region/{region}/detail [get]
 func (h *ruleHandler) CheckRegionPlacementRule(w http.ResponseWriter, r *http.Request) {
-	cluster, region, ok := h.preCheckForRegionAndRule(w, r)
-	if !ok {
+	cluster, region := h.preCheckForRegionAndRule(w, r)
+	if cluster == nil || region == nil {
 		return
 	}
 	regionFit := cluster.GetRuleManager().FitRegion(cluster, region)
 	h.rd.JSON(w, http.StatusOK, regionFit)
 }
 
-func (h *ruleHandler) preCheckForRegionAndRule(w http.ResponseWriter, r *http.Request) (*cluster.RaftCluster, *core.RegionInfo, bool) {
+func (h *ruleHandler) preCheckForRegionAndRule(w http.ResponseWriter, r *http.Request) (*cluster.RaftCluster, *core.RegionInfo) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
-		return cluster, nil, false
+		return cluster, nil
 	}
 	regionStr := mux.Vars(r)["region"]
 	regionID, err := strconv.ParseUint(regionStr, 10, 64)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, "invalid region id")
-		return cluster, nil, false
+		return cluster, nil
 	}
 	region := cluster.GetRegion(regionID)
 	if region == nil {
 		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(regionID).Error())
-		return cluster, nil, false
+		return cluster, nil
 	}
-	return cluster, region, true
+	return cluster, region
 }
 
 // @Tags     rule
