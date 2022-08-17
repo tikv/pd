@@ -96,7 +96,7 @@ func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		if !isRegionPlacementRuleSatisfied(f.cluster, region) {
-			return statusRegionRule
+			return statusRegionNotMatchRule
 		}
 		return statusOK
 	}
