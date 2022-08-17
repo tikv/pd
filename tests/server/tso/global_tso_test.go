@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
@@ -184,4 +186,47 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+}
+
+func TestLogicalOverflow(t *testing.T) {
+	re := require.New(t)
+
+	runCase := func(updateInterval time.Duration) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+		})
+		defer cluster.Destroy()
+		re.NoError(err)
+		re.NoError(cluster.RunInitialServers())
+		cluster.WaitLeader()
+
+		leaderServer := cluster.GetServer(cluster.GetLeader())
+		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+		clusterID := leaderServer.GetClusterID()
+
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+
+		begin := time.Now()
+		for i := 0; i < 3; i += 1 { // the 3rd request will overflow, as max logical interval is 262144
+			req := &pdpb.TsoRequest{
+				Header:     testutil.NewRequestHeader(clusterID),
+				Count:      100000,
+				DcLocation: tso.GlobalDCLocation,
+			}
+			re.NoError(tsoClient.Send(req))
+			_, err = tsoClient.Recv()
+			re.NoError(err)
+		}
+		elapse := time.Since(begin)
+		re.GreaterOrEqual(elapse, updateInterval)
+		re.Less(elapse, updateInterval+20*time.Millisecond) // 20ms as additional buffer to make test stable
+	}
+
+	for _, updateInterval := range []int{1, 5, 50} {
+		runCase(time.Duration(updateInterval) * time.Millisecond)
+	}
 }
