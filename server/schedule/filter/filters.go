@@ -30,16 +30,16 @@ import (
 	"go.uber.org/zap"
 )
 
-type StoreFilterResultOption func(*plan.Status, *core.StoreInfo)
+type SelectOption func(*plan.Status, interface{})
 
-func CollectPlan(collector *plan.Collector) func(*plan.Status, *core.StoreInfo) {
-	return func(status *plan.Status, s *core.StoreInfo) {
-		collector.Collect(plan.GenerateCoreResource(s), plan.SetStatus(status))
+func CollectPlan(collector *plan.Collector) func(*plan.Status, interface{}) {
+	return func(status *plan.Status, resource interface{}) {
+		collector.Collect(plan.GenerateResource(resource), plan.SetStatus(status))
 	}
 }
 
 // SelectSourceStores selects stores that be selected as source store from the list.
-func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...StoreFilterResultOption) []*core.StoreInfo {
+func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...SelectOption) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
@@ -59,7 +59,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.
-func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...StoreFilterResultOption) []*core.StoreInfo {
+func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...SelectOption) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]

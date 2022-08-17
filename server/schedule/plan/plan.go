@@ -21,7 +21,7 @@ type Plan interface {
 	GetStatus() *Status
 
 	Clone(ops ...Option) Plan // generate plan for clone option
-	GenerateCoreResource(interface{})
+	GenerateResource(interface{})
 	SetStatus(*Status)
 }
 
@@ -70,9 +70,9 @@ func SetStatus(status *Status) Option {
 	}
 }
 
-// GenerateCoreResource is used to generate Resource for plan
-func GenerateCoreResource(resource interface{}) Option {
+// GenerateResource is used to generate Resource for plan
+func GenerateResource(resource interface{}) Option {
 	return func(plan Plan) {
-		plan.GenerateCoreResource(resource)
+		plan.GenerateResource(resource)
 	}
 }
