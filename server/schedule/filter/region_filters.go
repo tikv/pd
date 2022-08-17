@@ -20,16 +20,8 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
-type RegionFilterResultOption func(*plan.Status, *core.RegionInfo)
-
-func CollectRegionPlan(collector *plan.Collector) func(*plan.Status, *core.RegionInfo) {
-	return func(status *plan.Status, r *core.RegionInfo) {
-		collector.Collect(plan.GenerateCoreResource(r), plan.SetStatus(status))
-	}
-}
-
 // SelectRegions selects regions that be selected from the list.
-func SelectRegions(regions []*core.RegionInfo, filters []RegionFilter) []*core.RegionInfo {
+func SelectRegions(regions []*core.RegionInfo, filters ...RegionFilter) []*core.RegionInfo {
 	return filterRegionsBy(regions, func(r *core.RegionInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			return filters[i].Select(r).IsOK()
@@ -47,14 +39,14 @@ func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo)
 }
 
 // SelectOneRegion selects one region that be selected from the list.
-func SelectOneRegion(regions []*core.RegionInfo, filters []RegionFilter, rops ...RegionFilterResultOption) *core.RegionInfo {
+func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
-		if filters == nil || slice.AllOf(filters,
+		if len(filters) == 0 || slice.AllOf(filters,
 			func(i int) bool {
 				status := filters[i].Select(r)
 				if !status.IsOK() {
-					for _, op := range rops {
-						op(status, r)
+					if collector != nil {
+						collector.Collect(plan.SetResource(r), plan.SetStatus(status))
 					}
 					return false
 				}
@@ -68,9 +60,8 @@ func SelectOneRegion(regions []*core.RegionInfo, filters []RegionFilter, rops ..
 
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
-	// Return true if the region can be used to schedule.
+	// Return plan.Status show whether be filtered
 	Select(region *core.RegionInfo) *plan.Status
-	Name() string
 }
 
 type regionPendingFilter struct {
@@ -79,10 +70,6 @@ type regionPendingFilter struct {
 // NewRegionPendingFilter creates a RegionFilter that filters all regions with pending peers.
 func NewRegionPendingFilter() RegionFilter {
 	return &regionPendingFilter{}
-}
-
-func (f *regionPendingFilter) Name() string {
-	return "regionPending"
 }
 
 func (f *regionPendingFilter) Select(region *core.RegionInfo) *plan.Status {
@@ -100,10 +87,6 @@ func NewRegionDownFilter() RegionFilter {
 	return &regionDownFilter{}
 }
 
-func (f *regionDownFilter) Name() string {
-	return "regionDown"
-}
-
 func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
@@ -118,10 +101,6 @@ type regionReplicatedFilter struct {
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
 func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionReplicatedFilter{cluster: cluster}
-}
-
-func (f *regionReplicatedFilter) Name() string {
-	return "regionReplicated"
 }
 
 func (f *regionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
@@ -144,10 +123,6 @@ type regionEmptyFilter struct {
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
 func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
-}
-
-func (f *regionEmptyFilter) Name() string {
-	return "regionEmptyFilter"
 }
 
 func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {

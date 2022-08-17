@@ -22,7 +22,7 @@ type Plan interface {
 	GetCoreResource(int) uint64
 
 	Clone(ops ...Option) Plan // generate plan for clone option
-	GenerateCoreResource(interface{})
+	SetResource(interface{})
 	SetStatus(*Status)
 }
 
@@ -35,28 +35,24 @@ type Collector struct {
 	basePlan           Plan
 	unschedulablePlans []Plan
 	schedulablePlans   []Plan
-	enable             bool
 }
 
 // NewCollector returns a new Collector
-func NewCollector(enable bool, plan Plan) *Collector {
+func NewCollector(plan Plan) *Collector {
 	return &Collector{
 		basePlan:           plan,
 		unschedulablePlans: make([]Plan, 0),
 		schedulablePlans:   make([]Plan, 0),
-		enable:             enable,
 	}
 }
 
 // Collect is used to collect a new Plan and save it into PlanCollector
 func (c *Collector) Collect(opts ...Option) {
-	if c.enable {
-		plan := c.basePlan.Clone(opts...)
-		if plan.GetStatus().IsOK() {
-			c.schedulablePlans = append(c.schedulablePlans, plan)
-		} else {
-			c.unschedulablePlans = append(c.unschedulablePlans, plan)
-		}
+	plan := c.basePlan.Clone(opts...)
+	if plan.GetStatus().IsOK() {
+		c.schedulablePlans = append(c.schedulablePlans, plan)
+	} else {
+		c.unschedulablePlans = append(c.unschedulablePlans, plan)
 	}
 }
 
@@ -75,9 +71,9 @@ func SetStatus(status *Status) Option {
 	}
 }
 
-// GenerateCoreResource is used to generate Resource for plan
-func GenerateCoreResource(resource interface{}) Option {
+// SetResource is used to generate Resource for plan
+func SetResource(resource interface{}) Option {
 	return func(plan Plan) {
-		plan.GenerateCoreResource(resource)
+		plan.SetResource(resource)
 	}
 }

@@ -30,16 +30,8 @@ import (
 	"go.uber.org/zap"
 )
 
-type StoreFilterResultOption func(*plan.Status, *core.StoreInfo)
-
-func CollectPlan(collector *plan.Collector) func(*plan.Status, *core.StoreInfo) {
-	return func(status *plan.Status, s *core.StoreInfo) {
-		collector.Collect(plan.GenerateCoreResource(s), plan.SetStatus(status))
-	}
-}
-
 // SelectSourceStores selects stores that be selected as source store from the list.
-func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...StoreFilterResultOption) []*core.StoreInfo {
+func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
@@ -48,8 +40,8 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				for _, op := range rops {
-					op(status, s)
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
 				return false
 			}
@@ -59,7 +51,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.
-func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, rops ...StoreFilterResultOption) []*core.StoreInfo {
+func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
@@ -73,8 +65,8 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				for _, op := range rops {
-					op(status, s)
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
 				return false
 			}
@@ -97,9 +89,9 @@ type Filter interface {
 	// Scope is used to indicate where the filter will act on.
 	Scope() string
 	Type() string
-	// Return true if the store can be used as a source store.
+	// Return plan.Status to show whether be filtered as source
 	Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status
-	// Return true if the store can be used as a target store.
+	// Return plan.Status to show whether be filtered as target
 	Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status
 }
 
