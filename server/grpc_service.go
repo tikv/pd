@@ -465,9 +465,11 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 // IsSnapshotRecovering implements gRPC PDServer.
 func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
 	// recovering mark is stored in etcd directly, there's no need to forward.
-	marked, err := s.Server.IsRecoveringMarked(ctx)
+	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &pdpb.IsSnapshotRecoveringResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 	return &pdpb.IsSnapshotRecoveringResponse{
 		Header: s.header(),

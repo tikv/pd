@@ -292,9 +292,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/reset-ts", adminHandler.ResetTS, setMethods(http.MethodPost), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.IsRecoveringMarked, setMethods(http.MethodGet), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.MarkRecovering, setMethods(http.MethodPost), setAuditBackend(localLog))
-	registerFunc(apiRouter, "/admin/recovering-mark", adminHandler.UnmarkRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/snapshot-recovering", adminHandler.IsSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/snapshot-recovering", adminHandler.MarkSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog))
+	registerFunc(apiRouter, "/admin/snapshot-recovering", adminHandler.UnmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.RecoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)

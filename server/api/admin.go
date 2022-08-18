@@ -149,16 +149,16 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) MarkRecovering(w http.ResponseWriter, r *http.Request) {
-	if err := h.svr.MarkRecovering(); err != nil {
+func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.MarkSnapshotRecovering(); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_ = h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) IsRecoveringMarked(w http.ResponseWriter, r *http.Request) {
-	marked, err := h.svr.IsRecoveringMarked(r.Context())
+func (h *adminHandler) IsSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+	marked, err := h.svr.IsSnapshotRecovering(r.Context())
 	if err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
@@ -169,8 +169,8 @@ func (h *adminHandler) IsRecoveringMarked(w http.ResponseWriter, r *http.Request
 	_ = h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
 }
 
-func (h *adminHandler) UnmarkRecovering(w http.ResponseWriter, r *http.Request) {
-	if err := h.svr.UnmarkRecovering(r.Context()); err != nil {
+func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+	if err := h.svr.UnmarkSnapshotRecovering(r.Context()); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -194,7 +194,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 		_ = h.rd.Text(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	marked, err := h.svr.IsRecoveringMarked(r.Context())
+	marked, err := h.svr.IsSnapshotRecovering(r.Context())
 	if err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return

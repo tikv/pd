@@ -180,7 +180,8 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	alloc.end = end
 	alloc.base = end - alloc.step
 	log.Info("rebase id allocator", zap.String("label", alloc.label),
-		zap.Uint64("new-base", alloc.base), zap.Uint64("new-end", alloc.end))
+		zap.Uint64("new-base", alloc.base), zap.Uint64("new-end", alloc.end),
+		zap.Bool("check-curr-end", checkCurrEnd))
 	return nil
 }
 
