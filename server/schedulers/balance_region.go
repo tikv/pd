@@ -170,7 +170,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
-	basePlan.step++
+	solver.step++
 	for _, solver.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
 		for i := 0; i < retryLimit; i++ {
@@ -211,13 +211,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
 				continue
 			}
-			basePlan.step++
+			solver.step++
 			if op := s.transferPeer(solver, collector); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
-			basePlan.step--
+			solver.step--
 		}
 		s.retryQuota.Attenuate(solver.source)
 	}
