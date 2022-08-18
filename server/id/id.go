@@ -175,6 +175,7 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 
+	log.Info("idAllocator allocates a new id", zap.String("label", alloc.label), zap.Uint64("alloc-id", end))
 	alloc.metrics.idGauge.Set(float64(end))
 	alloc.end = end
 	alloc.base = end - alloc.step
