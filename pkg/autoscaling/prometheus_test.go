@@ -340,7 +340,7 @@ func TestGetDurationExpression(t *testing.T) {
 			expectedExpression: "30s",
 		},
 		{
-			duration:           60 * time.Second,
+			duration:           time.Minute,
 			expectedExpression: "60s",
 		},
 		{
