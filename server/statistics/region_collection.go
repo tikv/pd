@@ -43,6 +43,7 @@ const (
 
 const nonIsolation = "none"
 
+// ClearThreshold indicates when to clean non-existent regions.
 const ClearThreshold = 10
 
 // RegionInfo is used to record the status of region.

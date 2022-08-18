@@ -1403,7 +1403,7 @@ func TestNoLeaderRegions(t *testing.T) {
 	observeAbnormalRegions(tc, rs, regions)
 	re.Len(rs.GetOfflineRegionStatsByType(statistics.NoLeaderRegion), 1)
 	for i := 0; i < statistics.ClearThreshold; i++ {
-
+		collectAndClean(rs, tc)
 	}
 	re.Len(rs.GetOfflineRegionStatsByType(statistics.NoLeaderRegion), 1)
 	tc.GetBasicCluster().RemoveRegion(regions[0])

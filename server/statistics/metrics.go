@@ -41,6 +41,7 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
+	// OfflineRegionStatusGauge will be used to record the abnormal regions.
 	OfflineRegionStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
