@@ -43,6 +43,9 @@ func NewCollector(plan Plan) *Collector {
 
 // Collect is used to collect a new Plan and save it into PlanCollector
 func (c *Collector) Collect(opts ...Option) {
+	if c == nil {
+		return
+	}
 	plan := c.basePlan.Clone(opts...)
 	if plan.GetStatus().IsOK() {
 		c.schedulablePlans = append(c.schedulablePlans, plan)
@@ -53,6 +56,9 @@ func (c *Collector) Collect(opts ...Option) {
 
 // GetPlans returns all plans and the first part plans are schedulable
 func (c *Collector) GetPlans() []Plan {
+	if c == nil {
+		return nil
+	}
 	return append(c.schedulablePlans, c.unschedulablePlans...)
 }
 

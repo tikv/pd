@@ -215,20 +215,14 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			if op := s.transferPeer(solver, collector); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-				if dryRun {
-					return []*operator.Operator{op}, collector.GetPlans()
-				}
-				return []*operator.Operator{op}, nil
+				return []*operator.Operator{op}, collector.GetPlans()
 			}
 			basePlan.step--
 		}
 		s.retryQuota.Attenuate(solver.source)
 	}
 	s.retryQuota.GC(stores)
-	if dryRun {
-		return nil, collector.GetPlans()
-	}
-	return nil, nil
+	return nil, collector.GetPlans()
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
@@ -256,9 +250,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 		if !solver.shouldBalance(s.GetName()) {
 			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
-			if collector != nil {
-				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
-			}
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 			continue
 		}
 
@@ -268,14 +260,10 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
-			if collector != nil {
-				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
-			}
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
 			return nil
 		}
-		if collector != nil {
-			collector.Collect()
-		}
+		collector.Collect()
 		solver.step--
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
