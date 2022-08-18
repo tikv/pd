@@ -294,7 +294,7 @@ func (c *coordinator) checkWaitingRegions() {
 	}
 }
 
-// ObserveAbnormalRegions verifies a region's state, recording it if needed.
+// observeAbnormalRegions verifies a region's state, recording it if needed.
 func observeAbnormalRegions(cluster schedule.Cluster, rs *statistics.RegionStatistics, regions []*core.RegionInfo) {
 	now := time.Now().UnixNano()
 	expireTime := cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds()
@@ -310,7 +310,7 @@ func observeAbnormalRegions(cluster schedule.Cluster, rs *statistics.RegionStati
 	}
 }
 
-// CollectAndClean collects the metrics of abnormal regions' states and clean non-existent regions.
+// collectAndClean collects the metrics of abnormal regions' states and clean non-existent regions.
 func collectAndClean(rs *statistics.RegionStatistics, cluster schedule.Cluster) {
 	statistics.OfflineRegionStatusGauge.WithLabelValues("no-leader-region-count").Set(float64(len(rs.OfflineStats[statistics.NoLeaderRegion])))
 	rs.Count++
