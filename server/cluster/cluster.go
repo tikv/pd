@@ -270,6 +270,8 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 
+	c.coordinator.cluster.regionStats = c.regionStats
+
 	c.wg.Add(8)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
