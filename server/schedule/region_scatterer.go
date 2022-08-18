@@ -156,7 +156,7 @@ func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineCont
 	}
 }
 
-const maxSleepDuration = 1 * time.Minute
+const maxSleepDuration = time.Minute
 const initialSleepDuration = 100 * time.Millisecond
 const maxRetryLimit = 30
 
