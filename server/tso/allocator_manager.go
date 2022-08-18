@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
