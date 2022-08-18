@@ -111,13 +111,12 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	if contains {
 		if forceUseLarger, ok = forceUseLargerVal.(bool); !ok {
 			h.rd.JSON(w, http.StatusBadRequest, "invalid force-use-larger value")
+			return
 		}
 	}
 	var ignoreSmaller, skipUpperBoundCheck bool
 	if forceUseLarger {
 		ignoreSmaller, skipUpperBoundCheck = true, true
-	} else {
-		ignoreSmaller, skipUpperBoundCheck = false, false
 	}
 
 	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck); err != nil {
@@ -126,6 +125,7 @@ func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}
+		return
 	}
 	h.rd.JSON(w, http.StatusOK, "Reset ts successfully.")
 }
