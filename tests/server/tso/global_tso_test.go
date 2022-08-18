@@ -64,7 +64,7 @@ func TestConcurrentlyReset(t *testing.T) {
 			for i := 0; i <= 100; i++ {
 				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
 				ts := uint64(physical << 18)
-				leader.GetServer().GetHandler().ResetTS(ts)
+				leader.GetServer().GetHandler().ResetTS(ts, false, false)
 			}
 		}()
 	}
