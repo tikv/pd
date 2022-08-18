@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -1318,7 +1317,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 	if op != nil {
-		op.AttachKind(operator.OpAdmin)
 		rc.GetOperatorController().AddOperator(op)
 	}
 
@@ -1680,19 +1678,13 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
 	if err != nil {
 		return 0, err
 	}
-	for _, op := range ops {
-		op.AttachKind(operator.OpAdmin)
-		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-		}
-	}
 	percentage := 100
 	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
 			r := make([]error, 0, len(failures))
 			for _, err := range failures {

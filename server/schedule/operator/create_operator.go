@@ -16,8 +16,9 @@ package operator
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/logutil"
 	"math/rand"
+
+	"github.com/tikv/pd/pkg/logutil"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -217,7 +218,7 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 		EnableLightWeight().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
-		Build(0)
+		Build(OpAdmin)
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.
