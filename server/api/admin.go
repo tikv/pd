@@ -21,10 +21,8 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -211,15 +209,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 		_ = h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 		return
 	}
-	ctx := grpcutil.BuildForwardContext(r.Context(), leader.ClientUrls[0])
-	req := &pdpb.RecoverAllocIDRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: h.svr.ClusterID(),
-		},
-		Id: newId,
-	}
-	grpcServer := &server.GrpcServer{Server: h.svr}
-	if _, err = grpcServer.RecoverAllocID(ctx, req); err != nil {
+	if err = h.svr.RecoverAllocID(r.Context(), newId); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 	}
 

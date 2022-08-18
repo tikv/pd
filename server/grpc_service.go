@@ -462,28 +462,6 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	}, nil
 }
 
-// RecoverAllocID implements gRPC PDServer.
-func (s *GrpcServer) RecoverAllocID(ctx context.Context, request *pdpb.RecoverAllocIDRequest) (*pdpb.RecoverAllocIDResponse, error) {
-	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).RecoverAllocID(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.RecoverAllocIDResponse), err
-	}
-
-	// We can use an allocator for all types ID allocation.
-	err := s.idAllocator.SetBase(request.Id)
-	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
-	}
-
-	return &pdpb.RecoverAllocIDResponse{
-		Header: s.header(),
-	}, nil
-}
-
 // IsSnapshotRecovering implements gRPC PDServer.
 func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
 	// recovering mark is stored in etcd directly, there's no need to forward.

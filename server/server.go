@@ -1640,3 +1640,7 @@ func (s *Server) UnmarkRecovering(ctx context.Context) error {
 	// if other client already unmarked, return success too
 	return nil
 }
+
+func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
+	return s.idAllocator.SetBase(id)
+}
