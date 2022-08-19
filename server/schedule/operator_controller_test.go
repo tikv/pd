@@ -95,7 +95,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 			}
 		}
 	}(suite.ctx)
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	suite.NotNil(oc.GetOperator(2))
 }
 

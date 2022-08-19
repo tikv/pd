@@ -589,7 +589,7 @@ type testMovingAverageCase struct {
 }
 
 func checkMovingAverage(re *require.Assertions, testCase *testMovingAverageCase) {
-	interval := 1 * time.Second
+	interval := time.Second
 	tm := movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 	var results []float64
 	for _, data := range testCase.report {
