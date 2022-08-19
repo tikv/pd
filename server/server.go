@@ -1638,6 +1638,7 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	return err
 }
 
+// RecoverAllocID recover alloc id. set current base id to input id
 func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 	return s.idAllocator.SetBase(id)
 }
