@@ -59,27 +59,6 @@ type CreateKeyspaceRequest struct {
 	Now int64
 }
 
-// NewCreateKeyspaceRequest returns a create keyspace request with necessary arguments.
-// name is the name of the keyspace to be created; config is its initial config; now is the current timestamp.
-func NewCreateKeyspaceRequest(name string, config map[string]string, now int64) *CreateKeyspaceRequest {
-	return &CreateKeyspaceRequest{Name: name, Config: config, Now: now}
-}
-
-// GetName returns the name of the create keyspace request.
-func (request *CreateKeyspaceRequest) GetName() string {
-	return request.Name
-}
-
-// GetConfig returns the initial config of the create keyspace request.
-func (request *CreateKeyspaceRequest) GetConfig() map[string]string {
-	return request.Config
-}
-
-// GetNow returns the timestamp of the create keyspace request.
-func (request *CreateKeyspaceRequest) GetNow() int64 {
-	return request.Now
-}
-
 // NewKeyspaceManager creates a Manager of keyspace related data.
 func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator) (*Manager, error) {
 	manager := &Manager{
@@ -114,7 +93,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	// Validate purposed name's legality.
-	if err := validateName(request.GetName()); err != nil {
+	if err := validateName(request.Name); err != nil {
 		return nil, err
 	}
 	// Allocate new keyspaceID.
@@ -125,11 +104,11 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	// Create and save keyspace metadata.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
-		Name:           request.GetName(),
+		Name:           request.Name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      request.GetNow(),
-		StateChangedAt: request.GetNow(),
-		Config:         request.GetConfig(),
+		CreatedAt:      request.Now,
+		StateChangedAt: request.Now,
+		Config:         request.Config,
 	}
 	return manager.saveNewKeyspace(keyspace)
 }
@@ -156,7 +135,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) (*key
 		return nil, ErrKeyspaceExists
 	}
 	// TODO: Enable Transaction at storage layer to save MetaData and NameToID in a single transaction.
-	// Save keyspace keyspace before saving id.
+	// Save keyspace meta before saving id.
 	if err = manager.store.SaveKeyspace(keyspace); err != nil {
 		return nil, err
 	}

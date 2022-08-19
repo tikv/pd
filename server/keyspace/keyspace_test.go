@@ -47,14 +47,14 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceRequest, count)
 	for i := 0; i < count; i++ {
-		requests[i] = NewCreateKeyspaceRequest(
-			fmt.Sprintf("test_keyspace%d", i),
-			map[string]string{
+		requests[i] = &CreateKeyspaceRequest{
+			Name: fmt.Sprintf("test_keyspace%d", i),
+			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
 			},
-			now,
-		)
+			Now: now,
+		}
 	}
 	return requests
 }
@@ -269,11 +269,11 @@ func TestUpdateMultipleKeyspace(t *testing.T) {
 
 // checkCreateRequest verifies a keyspace meta matches a create request.
 func checkCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
-	re.Equal(request.GetName(), meta.GetName())
-	re.Equal(request.GetNow(), meta.GetCreatedAt())
-	re.Equal(request.GetNow(), meta.GetStateChangedAt())
+	re.Equal(request.Name, meta.GetName())
+	re.Equal(request.Now, meta.GetCreatedAt())
+	re.Equal(request.Now, meta.GetStateChangedAt())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
-	re.Equal(request.GetConfig(), meta.GetConfig())
+	re.Equal(request.Config, meta.GetConfig())
 }
 
 // checkMutations verifies that performing mutations on old config would result in new config.
