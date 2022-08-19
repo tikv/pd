@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/golang/protobuf/proto" //nolint:staticcheck
+	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
