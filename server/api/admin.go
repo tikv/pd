@@ -189,7 +189,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 		_ = h.rd.Text(w, http.StatusBadRequest, "invalid id value")
 		return
 	}
-	newId, err := strconv.ParseUint(idValue, 10, 64)
+	newID, err := strconv.ParseUint(idValue, 10, 64)
 	if err != nil {
 		_ = h.rd.Text(w, http.StatusBadRequest, err.Error())
 		return
@@ -209,7 +209,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 		_ = h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 		return
 	}
-	if err = h.svr.RecoverAllocID(r.Context(), newId); err != nil {
+	if err = h.svr.RecoverAllocID(r.Context(), newID); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 	}
 
