@@ -218,7 +218,7 @@ func TestTwoLimiters(t *testing.T) {
 	wg.Wait()
 	re.Equal(100, failedCount)
 	re.Equal(100, successCount)
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 
 	wg.Add(100)
 	for i := 0; i < 100; i++ {

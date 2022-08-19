@@ -321,7 +321,7 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = 1 * time.Second
+	retryInterval          = time.Second
 	maxRetryTimes          = 5
 )
 

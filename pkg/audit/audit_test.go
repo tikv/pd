@@ -77,7 +77,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	req, _ = http.NewRequest(http.MethodGet, ts.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)

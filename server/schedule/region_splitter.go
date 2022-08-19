@@ -34,7 +34,7 @@ import (
 
 const (
 	watchInterval = 100 * time.Millisecond
-	timeout       = 1 * time.Minute
+	timeout       = time.Minute
 )
 
 // SplitRegionsHandler used to handle region splitting
