@@ -49,7 +49,7 @@ func TestTrend(t *testing.T) {
 	// Create 3 operators that transfers leader, moves follower, moves leader.
 	re.NoError(svr.GetHandler().AddTransferLeaderOperator(4, 2))
 	re.NoError(svr.GetHandler().AddTransferPeerOperator(5, 2, 3))
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	re.NoError(svr.GetHandler().AddTransferPeerOperator(6, 1, 3))
 	// Complete the operators.
 	mustRegionHeartbeat(re, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))

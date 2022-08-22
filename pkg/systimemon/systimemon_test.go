@@ -39,7 +39,7 @@ func TestSystimeMonitor(t *testing.T) {
 			atomic.StoreInt32(&jumpForward, 1)
 		})
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 
 	if atomic.LoadInt32(&jumpForward) != 1 {
 		t.Error("should detect time error")

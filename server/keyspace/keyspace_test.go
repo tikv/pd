@@ -44,7 +44,7 @@ func mustNewKeyspaceManager(re *require.Assertions) *Manager {
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
-	now := time.Now()
+	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceRequest, count)
 	for i := 0; i < count; i++ {
 		requests[i] = &CreateKeyspaceRequest{
@@ -116,9 +116,9 @@ func TestUpdateKeyspaceConfig(t *testing.T) {
 		re.NoError(err)
 		checkMutations(re, createRequest.Config, updated.Config, mutations)
 		// Changing config of a ARCHIVED keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, time.Now())
+		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, 0)
 		re.NoError(err)
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, time.Now())
+		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, 0)
 		re.NoError(err)
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
@@ -136,7 +136,7 @@ func TestUpdateKeyspaceState(t *testing.T) {
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
 		re.NoError(err)
-		oldTime := time.Now()
+		oldTime := time.Now().Unix()
 		// Archiving an ENABLED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, oldTime)
 		re.Error(err)
@@ -144,24 +144,24 @@ func TestUpdateKeyspaceState(t *testing.T) {
 		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
 		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime.Unix())
+		re.Equal(updated.StateChangedAt, oldTime)
 
-		newTime := time.Now()
+		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.NoError(err)
 		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime.Unix())
+		re.Equal(updated.StateChangedAt, oldTime)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
 		re.Equal(updated.State, keyspacepb.KeyspaceState_ARCHIVED)
-		re.Equal(updated.StateChangedAt, newTime.Unix())
+		re.Equal(updated.StateChangedAt, newTime)
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, time.Now())
+		_, err = manager.UpdateKeyspaceState(DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }
@@ -269,11 +269,11 @@ func TestUpdateMultipleKeyspace(t *testing.T) {
 
 // checkCreateRequest verifies a keyspace meta matches a create request.
 func checkCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
-	re.Equal(request.Name, meta.Name)
-	re.Equal(request.Now.Unix(), meta.CreatedAt)
-	re.Equal(request.Now.Unix(), meta.StateChangedAt)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	re.Equal(request.Name, meta.GetName())
+	re.Equal(request.Now, meta.GetCreatedAt())
+	re.Equal(request.Now, meta.GetStateChangedAt())
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+	re.Equal(request.Config, meta.GetConfig())
 }
 
 // checkMutations verifies that performing mutations on old config would result in new config.
@@ -308,7 +308,7 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 		}
 		updatedMeta, err := manager.UpdateKeyspaceConfig(name, mutations)
 		re.NoError(err)
-		checkMutations(re, oldMeta.Config, updatedMeta.Config, mutations)
+		checkMutations(re, oldMeta.GetConfig(), updatedMeta.GetConfig(), mutations)
 		oldMeta = updatedMeta
 	}
 }

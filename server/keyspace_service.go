@@ -24,8 +24,6 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
@@ -45,17 +43,6 @@ func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	}
 }
 
-// validateRequest checks that server is serving and cluster id matches the requested.
-func (s *KeyspaceServer) validateRequest(header *pdpb.RequestHeader) error {
-	if s.IsClosed() {
-		return ErrNotStarted
-	}
-	if header.GetClusterId() != s.clusterID {
-		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
-	}
-	return nil
-}
-
 // LoadKeyspace load and return target keyspace metadata.
 // Request must specify keyspace name.
 // On Error, keyspaceMeta in response will be nil,
@@ -72,7 +59,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.Name)
 	if err != nil {
-		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, err
+		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, nil
 	}
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   s.header(),
