@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/apiutil"
 	tu "github.com/tikv/pd/pkg/testutil"
@@ -263,6 +265,11 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 		tu.StatusOK(re)))
 	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "true")))
+	// test using grpc call
+	grpcServer := server.GrpcServer{Server: suite.svr}
+	resp, err2 := grpcServer.IsSnapshotRecovering(context.Background(), &pdpb.IsSnapshotRecoveringRequest{})
+	suite.NoError(err2)
+	suite.True(resp.Marked)
 	// unmark
 	code, err := apiutil.DoDelete(testDialClient, url)
 	suite.NoError(err)

@@ -31,11 +31,6 @@ func (alloc *IDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
 }
 
-// Base implements the IDAllocator interface.
-func (alloc *IDAllocator) Base() uint64 {
-	return atomic.LoadUint64(&alloc.base)
-}
-
 // SetBase implements the IDAllocator interface.
 func (alloc *IDAllocator) SetBase(newBase uint64) error {
 	atomic.StoreUint64(&alloc.base, newBase)

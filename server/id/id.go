@@ -30,9 +30,6 @@ import (
 
 // Allocator is the allocator to generate unique ID.
 type Allocator interface {
-	// Base get current base id
-	// only called during br ebs backup right now
-	Base() uint64
 	// SetBase set base id
 	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
@@ -106,12 +103,6 @@ func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	alloc.base++
 
 	return alloc.base, nil
-}
-
-func (alloc *allocatorImpl) Base() uint64 {
-	alloc.mu.RLock()
-	defer alloc.mu.RUnlock()
-	return alloc.base
 }
 
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
