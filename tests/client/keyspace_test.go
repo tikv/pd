@@ -16,11 +16,12 @@ package client_test
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/keyspace"
-	"time"
 )
 
 const (
@@ -29,7 +30,7 @@ const (
 )
 
 func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start, count int) []*keyspacepb.KeyspaceMeta {
-	now := time.Now()
+	now := time.Now().Unix()
 	var err error
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
 	manager := server.GetKeyspaceManager()
@@ -89,7 +90,7 @@ func (suite *clientTestSuite) TestWatchKeyspace() {
 		i += len(loadedKeyspaces)
 	}
 	// Updates to state should also be captured.
-	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now())
+	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 	re.NoError(err)
 	loaded := <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
