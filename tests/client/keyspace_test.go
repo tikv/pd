@@ -67,6 +67,9 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 }
 
 func (suite *clientTestSuite) TestWatchKeyspace() {
+	// Flush test storage before running TestWatchKeyspace.
+	suite.TearDownSuite()
+	suite.SetupSuite()
 	re := suite.Require()
 	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
