@@ -87,7 +87,7 @@ const (
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
 
-	pdRecoveringMarkPath = "/pd/snapshot-recovering"
+	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1635,10 +1635,11 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 // and is deleted after BR EBS restore is done.
 func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
-		If(clientv3.Compare(clientv3.CreateRevision(pdRecoveringMarkPath), "=", 0)).
-		Then(clientv3.OpPut(pdRecoveringMarkPath, "on")).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
 		Commit()
 	// if other client already marked, return success too
 	return err
@@ -1646,7 +1647,8 @@ func (s *Server) MarkSnapshotRecovering() error {
 
 // IsSnapshotRecovering check whether recovering-mark marked
 func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
-	resp, err := s.client.Get(ctx, pdRecoveringMarkPath)
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	resp, err := s.client.Get(ctx, markPath)
 	if err != nil {
 		return false, err
 	}
@@ -1656,7 +1658,8 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 // UnmarkSnapshotRecovering unmark recovering mark
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
-	_, err := s.client.Delete(ctx, pdRecoveringMarkPath)
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	_, err := s.client.Delete(ctx, markPath)
 	// if other client already unmarked, return success too
 	return err
 }
