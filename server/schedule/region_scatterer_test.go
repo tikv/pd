@@ -416,6 +416,32 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	}
 }
 
+func TestScatterForManyRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 60 stores.
+	for i := uint64(1); i <= 60; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	regions := make(map[uint64]*core.RegionInfo)
+	for i := 1; i <= 15000; i++ {
+		regions[uint64(i)] = tc.AddLightLeaderRegion(uint64(i), 1, 2, 3)
+	}
+	failures := map[uint64]error{}
+	group := "group"
+	scatterer.scatterRegions(regions, failures, group, 3)
+	re.Len(failures, 0)
+}
+
 func TestScattersGroup(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
