@@ -34,7 +34,12 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
+<<<<<<< HEAD
 	"github.com/tikv/pd/server/kv"
+=======
+	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/storage/kv"
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -1563,7 +1568,50 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
+<<<<<<< HEAD
 	panic("unimplemented")
+=======
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).SplitAndScatterRegions(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
+	}
+	rc := s.GetRaftCluster()
+	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
+	if err != nil {
+		return nil, err
+	}
+	return &pdpb.SplitAndScatterRegionsResponse{
+		Header:                    s.header(),
+		RegionsId:                 newRegionIDs,
+		SplitFinishedPercentage:   uint64(splitFinishedPercentage),
+		ScatterFinishedPercentage: uint64(scatterFinishedPercentage),
+	}, nil
+}
+
+// scatterRegions add operators to scatter regions and return the processed percentage and error
+func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	if err != nil {
+		return 0, err
+	}
+	percentage := 100
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
+		log.Debug("scatter regions", zap.Errors("failures", func() []error {
+			r := make([]error, 0, len(failures))
+			for _, err := range failures {
+				r = append(r, err)
+			}
+			return r
+		}()))
+	}
+	return percentage, nil
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.

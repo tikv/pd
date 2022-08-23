@@ -180,11 +180,15 @@ basic-test:
 test-with-cover: install-go-tools dashboard-ui
 	# testing all pkgs (expect TSO consistency test) with converage...
 	@$(FAILPOINT_ENABLE)
+<<<<<<< HEAD
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
 		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
+=======
+	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	@$(FAILPOINT_DISABLE)
 
 # The command should be used in daily CI，it will split some tasks to run parallel.
