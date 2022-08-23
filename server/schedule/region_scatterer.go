@@ -239,6 +239,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 				failures[region.GetID()] = err
 				continue
 			}
+			delete(regions, region.GetID())
 			if op != nil {
 				if ok := r.opController.AddOperator(op); !ok {
 					// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
@@ -248,9 +249,9 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 				opsCount++
 				failpoint.Inject("scatterHbStreamsDrain", func() {
 					r.opController.hbStreams.Drain(1)
+					r.opController.RemoveOperator(op)
 				})
 			}
-			delete(regions, region.GetID())
 			delete(failures, region.GetID())
 		}
 		// all regions have been relocated, break the loop.

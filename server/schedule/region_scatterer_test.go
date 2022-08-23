@@ -469,13 +469,14 @@ func TestScattersGroup(t *testing.T) {
 			failure: false,
 		},
 	}
-	group := "group"
-	for _, testCase := range testCases {
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain", `return(true)`))
+	for id, testCase := range testCases {
+		group := fmt.Sprintf("gourp-%d", id)
 		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc, oc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
-			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+			regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
 		}
 		failures := map[uint64]error{}
 		if testCase.failure {
@@ -508,6 +509,7 @@ func TestScattersGroup(t *testing.T) {
 			re.Empty(failures)
 		}
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain"))
 }
 
 func TestSelectedStoreGC(t *testing.T) {
