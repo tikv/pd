@@ -120,11 +120,17 @@ type RegionScatterer struct {
 	name           string
 	cluster        opt.Cluster
 	ordinaryEngine engineContext
+<<<<<<< HEAD
 	specialEngines map[string]engineContext
+=======
+	specialEngines sync.Map
+	opController   *OperatorController
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
+<<<<<<< HEAD
 func NewRegionScatterer(ctx context.Context, cluster opt.Cluster) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:            ctx,
@@ -132,6 +138,17 @@ func NewRegionScatterer(ctx context.Context, cluster opt.Cluster) *RegionScatter
 		cluster:        cluster,
 		ordinaryEngine: newEngineContext(ctx, filter.NewOrdinaryEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
+=======
+func NewRegionScatterer(ctx context.Context, cluster Cluster, opController *OperatorController) *RegionScatterer {
+	return &RegionScatterer{
+		ctx:          ctx,
+		name:         regionScatterName,
+		cluster:      cluster,
+		opController: opController,
+		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
+			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
+		}),
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	}
 }
 
@@ -155,11 +172,11 @@ const initialSleepDuration = 100 * time.Millisecond
 const maxRetryLimit = 30
 
 // ScatterRegionsByRange directly scatter regions by ScatterRegions
-func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) (int, map[uint64]error, error) {
 	regions := r.cluster.ScanRegions(startKey, endKey, -1)
 	if len(regions) < 1 {
 		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
-		return nil, nil, errors.New("empty region")
+		return 0, nil, errors.New("empty region")
 	}
 	failures := make(map[uint64]error, len(regions))
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
@@ -167,18 +184,22 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+<<<<<<< HEAD
 	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+=======
+	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if err != nil {
-		return nil, nil, err
+		return 0, nil, err
 	}
-	return ops, failures, nil
+	return opsCount, failures, nil
 }
 
 // ScatterRegionsByID directly scatter regions by ScatterRegions
-func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) ([]*operator.Operator, map[uint64]error, error) {
+func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
 		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
-		return nil, nil, errors.New("empty region")
+		return 0, nil, errors.New("empty region")
 	}
 	failures := make(map[uint64]error, len(regionsID))
 	regions := make([]*core.RegionInfo, 0, len(regionsID))
@@ -197,11 +218,15 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
+<<<<<<< HEAD
 	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
+=======
+	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if err != nil {
-		return nil, nil, err
+		return 0, nil, err
 	}
-	return ops, failures, nil
+	return opsCount, failures, nil
 }
 
 // ScatterRegions relocates the regions. If the group is defined, the regions' leader with the same group would be scattered
@@ -210,15 +235,19 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
+<<<<<<< HEAD
 func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
+=======
+func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) (int, error) {
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if len(regions) < 1 {
 		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
-		return nil, errors.New("empty region")
+		return 0, errors.New("empty region")
 	}
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit
 	}
-	ops := make([]*operator.Operator, 0, len(regions))
+	opsCount := 0
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
 			op, err := r.Scatter(region, group)
@@ -231,10 +260,19 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 				failures[region.GetID()] = err
 				continue
 			}
-			if op != nil {
-				ops = append(ops, op)
-			}
 			delete(regions, region.GetID())
+			opsCount++
+			if op != nil {
+				if ok := r.opController.AddOperator(op); !ok {
+					// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
+					failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
+					continue
+				}
+				failpoint.Inject("scatterHbStreamsDrain", func() {
+					r.opController.hbStreams.Drain(1)
+					r.opController.RemoveOperator(op)
+				})
+			}
 			delete(failures, region.GetID())
 		}
 		// all regions have been relocated, break the loop.
@@ -244,7 +282,7 @@ func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, fa
 		// Wait for a while if there are some regions failed to be relocated
 		time.Sleep(typeutil.MinDuration(maxSleepDuration, time.Duration(math.Pow(2, float64(currentRetry)))*initialSleepDuration))
 	}
-	return ops, nil
+	return opsCount, nil
 }
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered

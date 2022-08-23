@@ -32,8 +32,12 @@ import (
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
+<<<<<<< HEAD
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+=======
+	"github.com/tikv/pd/server/schedule/filter"
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -797,7 +801,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		retryLimit = 5
 	}
-	var ops []*operator.Operator
+	opsCount := 0
 	var failures map[uint64]error
 	var err error
 	if ok1 && ok2 {
@@ -811,28 +815,40 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	} else {
+<<<<<<< HEAD
 		regionsID := input["regions_id"].([]uint64)
 		ops, failures, err = rc.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+=======
+		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
+			return
+		}
+		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit)
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
+<<<<<<< HEAD
 	for _, op := range ops {
 		if ok := rc.GetOperatorController().AddOperator(op); !ok {
 			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 		}
 	}
+=======
+>>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	percentage := 100
 	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
 			r := make([]error, 0, len(failures))
 			for _, err := range failures {
