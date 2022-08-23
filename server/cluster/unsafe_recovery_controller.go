@@ -445,6 +445,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.stage = stage
 
 	var output StageOutput
+	exitForceLeaderDueToFailure := false
 	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	switch u.stage {
 	case idle:
@@ -485,6 +486,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output.Info = "Unsafe recovery enters exit force leader stage"
 		if u.err != nil {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
+			exitForceLeaderDueToFailure = true
 		}
 	case finished:
 		if u.step > 1 {
@@ -516,8 +518,10 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 
 	// reset store reports to nil instead of delete, because it relays on the item
 	// to decide which store it needs to collect the report from.
-	for k := range u.storeReports {
-		u.storeReports[k] = nil
+	if !exitForceLeaderDueToFailure {
+		for k := range u.storeReports {
+			u.storeReports[k] = nil
+		}
 	}
 	u.numStoresReported = 0
 	u.step += 1
@@ -713,7 +717,7 @@ func (r *regionItem) IsInitialized() bool {
 func (r *regionItem) IsEpochStale(other *regionItem) bool {
 	re := r.Region().GetRegionEpoch()
 	oe := other.Region().GetRegionEpoch()
-	return re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()
+	return re.GetVersion() < oe.GetVersion() || (re.GetVersion() == oe.GetVersion() && re.GetConfVer() < oe.GetConfVer())
 }
 
 func (r *regionItem) IsRaftStale(origin *regionItem, u *unsafeRecoveryController) bool {
