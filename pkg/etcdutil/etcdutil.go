@@ -45,7 +45,7 @@ const (
 
 	// DefaultSlowRequestTime 1s for the threshold for normal request, for those
 	// longer then 1s, they are considered as slow requests.
-	DefaultSlowRequestTime = 1 * time.Second
+	DefaultSlowRequestTime = time.Second
 )
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
