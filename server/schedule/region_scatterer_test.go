@@ -433,7 +433,7 @@ func TestScatterForManyRegion(t *testing.T) {
 
 	scatterer := NewRegionScatterer(ctx, tc, oc)
 	regions := make(map[uint64]*core.RegionInfo)
-	for i := 1; i <= 15000; i++ {
+	for i := 1; i <= 1200; i++ {
 		regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
 	}
 	failures := map[uint64]error{}
