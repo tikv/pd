@@ -295,7 +295,7 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
 		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
 	// mark and recover alloc id
-	markRecoveringURL := fmt.Sprintf("%s/admin/snapshot-recovering", suite.urlPrefix)
+	markRecoveringURL := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", suite.urlPrefix)
 	suite.NoError(tu.CheckPostJSON(testDialClient, markRecoveringURL, nil,
 		tu.StatusOK(re)))
 	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "1000000"}`),
