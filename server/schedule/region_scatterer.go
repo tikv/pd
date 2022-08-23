@@ -246,6 +246,9 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					continue
 				}
 				opsCount++
+				failpoint.Inject("scatterHbStreamsDrain", func() {
+					r.opController.hbStreams.Drain(1)
+				})
 			}
 			delete(regions, region.GetID())
 			delete(failures, region.GetID())

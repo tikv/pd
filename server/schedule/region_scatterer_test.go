@@ -422,7 +422,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, true)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
 	// Add 60 stores.
 	for i := uint64(1); i <= 60; i++ {
@@ -433,17 +433,15 @@ func TestScatterForManyRegion(t *testing.T) {
 
 	scatterer := NewRegionScatterer(ctx, tc, oc)
 	regions := make(map[uint64]*core.RegionInfo)
-	for i := 1; i <= 150; i++ {
+	for i := 1; i <= 15000; i++ {
 		regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
 	}
 	failures := map[uint64]error{}
 	group := "group"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain", `return(true)`))
 	scatterer.scatterRegions(regions, failures, group, 3)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain"))
 	re.Len(failures, 0)
-	for regionID := range regions {
-		op := oc.GetOperator(regionID)
-		oc.RemoveOperator(op)
-	}
 }
 
 func TestScattersGroup(t *testing.T) {
