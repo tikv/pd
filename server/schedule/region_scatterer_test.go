@@ -439,10 +439,9 @@ func TestScatterForManyRegion(t *testing.T) {
 	failures := map[uint64]error{}
 	group := "group"
 	scatterer.scatterRegions(regions, failures, group, 3)
-
 	re.Len(failures, 0)
-	for regionId := range regions {
-		op := oc.GetOperator(regionId)
+	for regionID := range regions {
+		op := oc.GetOperator(regionID)
 		oc.RemoveOperator(op)
 	}
 }

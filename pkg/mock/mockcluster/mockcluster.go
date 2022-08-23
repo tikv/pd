@@ -345,8 +345,8 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 	return region
 }
 
-// AddLightLeaderRegion adds region with specified leader and followers.
-func (mc *Cluster) AddLightLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+// AddLightWeightLeaderRegion adds a light-wight region with specified leader and followers.
+func (mc *Cluster) AddLightWeightLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	region := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	mc.PutRegion(region)
 	return region
