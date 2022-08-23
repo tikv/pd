@@ -255,7 +255,7 @@ func (suite *adminTestSuite) TestResetTS() {
 
 func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 	re := suite.Require()
-	url := fmt.Sprintf("%s/admin/snapshot-recovering", suite.urlPrefix)
+	url := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", suite.urlPrefix)
 	// default to false
 	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
