@@ -17,7 +17,6 @@ package server
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"path"
 	"strconv"
@@ -848,15 +847,6 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			return 0, err
 		}
 	}
-<<<<<<< HEAD
-	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
-	for _, op := range ops {
-		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-		}
-	}
-=======
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	percentage := 100
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(opsCount+len(failures))

@@ -120,35 +120,20 @@ type RegionScatterer struct {
 	name           string
 	cluster        opt.Cluster
 	ordinaryEngine engineContext
-<<<<<<< HEAD
 	specialEngines map[string]engineContext
-=======
-	specialEngines sync.Map
 	opController   *OperatorController
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-<<<<<<< HEAD
-func NewRegionScatterer(ctx context.Context, cluster opt.Cluster) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster opt.Cluster, opController *OperatorController) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:            ctx,
 		name:           regionScatterName,
 		cluster:        cluster,
+		opController:   opController,
 		ordinaryEngine: newEngineContext(ctx, filter.NewOrdinaryEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
-=======
-func NewRegionScatterer(ctx context.Context, cluster Cluster, opController *OperatorController) *RegionScatterer {
-	return &RegionScatterer{
-		ctx:          ctx,
-		name:         regionScatterName,
-		cluster:      cluster,
-		opController: opController,
-		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
-			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
-		}),
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	}
 }
 
@@ -184,11 +169,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-<<<<<<< HEAD
-	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
-=======
 	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -218,11 +199,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-<<<<<<< HEAD
-	ops, err := r.ScatterRegions(regionMap, failures, group, retryLimit)
-=======
 	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -235,11 +212,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
-<<<<<<< HEAD
-func (r *RegionScatterer) ScatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) ([]*operator.Operator, error) {
-=======
 func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) (int, error) {
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	if len(regions) < 1 {
 		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
 		return 0, errors.New("empty region")
