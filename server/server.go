@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -55,6 +56,7 @@ import (
 	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
@@ -84,6 +86,8 @@ const (
 	// idAllocPath for idAllocator to save persistent window's end.
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
+
+	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -133,6 +137,8 @@ type Server struct {
 	storage storage.Storage
 	// safepoint manager
 	gcSafePointManager *gc.SafePointManager
+	// keyspace manager
+	keyspaceManager *keyspace.Manager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -278,7 +284,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		etcdCfg.UserHandlers = userHandlers
 	}
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
-		pdpb.RegisterPDServer(gs, &GrpcServer{Server: s})
+		grpcServer := &GrpcServer{Server: s}
+		pdpb.RegisterPDServer(gs, grpcServer)
+		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 	}
 	s.etcdCfg = etcdCfg
@@ -412,6 +420,18 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: endpoint.KeyspaceIDAlloc(),
+		Label:     keyspace.AllocLabel,
+		Member:    s.member.MemberValue(),
+		Step:      keyspace.AllocStep,
+	})
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
+	if err != nil {
+		return err
+	}
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -787,6 +807,11 @@ func (s *Server) GetAllocator() id.Allocator {
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
+}
+
+// GetKeyspaceManager returns the keyspace manager of server.
+func (s *Server) GetKeyspaceManager() *keyspace.Manager {
+	return s.keyspaceManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -1601,4 +1626,45 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 		}
 	}
 	return false
+}
+
+// MarkSnapshotRecovering mark pd that we're recovering
+// tikv will get this state during BR EBS restore.
+// we write this info into etcd for simplicity, the key only stays inside etcd temporary
+// during BR EBS restore in which period the cluster is not able to serve request.
+// and is deleted after BR EBS restore is done.
+func (s *Server) MarkSnapshotRecovering() error {
+	log.Info("mark snapshot recovering")
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsSnapshotRecovering check whether recovering-mark marked
+func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	resp, err := s.client.Get(ctx, markPath)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkSnapshotRecovering unmark recovering mark
+func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
+	log.Info("unmark snapshot recovering")
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	_, err := s.client.Delete(ctx, markPath)
+	// if other client already unmarked, return success too
+	return err
+}
+
+// RecoverAllocID recover alloc id. set current base id to input id
+func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
+	return s.idAllocator.SetBase(id)
 }

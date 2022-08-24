@@ -45,10 +45,13 @@ func (p *balanceSchedulerPlan) GetStep() int {
 
 func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	switch p.step {
+	// for balance-region/leader scheduler, the first step is selecting stores as source candidates.
 	case 0:
 		p.source = resource.(*core.StoreInfo)
+	// the second step is selecting region from source store.
 	case 1:
 		p.region = resource.(*core.RegionInfo)
+	// the third step is selecting stores as target candidates.
 	case 2:
 		p.target = resource.(*core.StoreInfo)
 	}
