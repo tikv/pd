@@ -46,8 +46,9 @@ const (
 	MaxSuffixBits = 4
 	// jetLagWarningThreshold is the warning threshold of jetLag in `timestampOracle.UpdateTimestamp`.
 	// In case of small `updatePhysicalInterval`, the `3 * updatePhysicalInterval` would also is small,
-	// and trigger many un-necessary warnings about clock offset.
-	jetLagWarningThreshold = 30 * time.Millisecond
+	// and trigger unnecessary warnings about clock offset.
+	// It's an empirical value.
+	jetLagWarningThreshold = 150 * time.Millisecond
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
