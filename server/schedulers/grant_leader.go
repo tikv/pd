@@ -240,7 +240,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWithRanges {
-		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), pendingFilter, downFilter)
+		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 			continue

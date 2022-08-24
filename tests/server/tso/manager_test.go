@@ -147,7 +147,7 @@ func TestNextLeaderKey(t *testing.T) {
 	defer cancel()
 	tso.PriorityCheck = 5 * time.Second
 	defer func() {
-		tso.PriorityCheck = 1 * time.Minute
+		tso.PriorityCheck = time.Minute
 	}()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",

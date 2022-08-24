@@ -242,7 +242,12 @@ func (t *timestampOracle) isInitialized() bool {
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 // When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
 // It's used to write MaxTS during the Global TSO synchronization whitout failing the writing as much as possible.
+// cannot set timestamp to one which >= current + maxResetTSGap
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
+	return t.resetUserTimestampInner(leadership, tso, ignoreSmaller, false)
+}
+
+func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if !leadership.Check() {
@@ -271,7 +276,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 	}
 	// do not update if physical time is too greater than prev
-	if physicalDifference >= t.maxResetTSGap().Milliseconds() {
+	if !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap().Milliseconds() {
 		tsoCounter.WithLabelValues("err_reset_large_ts", t.dcLocation).Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}

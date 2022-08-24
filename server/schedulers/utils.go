@@ -38,50 +38,48 @@ const (
 	defaultRetryQuotaAttenuation         = 2
 )
 
-type balancePlan struct {
+type solver struct {
+	*balanceSchedulerPlan
 	schedule.Cluster
 	kind              core.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 
-	source *core.StoreInfo
-	target *core.StoreInfo
-	region *core.RegionInfo
-
 	sourceScore float64
 	targetScore float64
 }
 
-func newBalancePlan(kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *balancePlan {
-	return &balancePlan{
-		Cluster:           cluster,
-		kind:              kind,
-		opInfluence:       opInfluence,
-		tolerantSizeRatio: adjustTolerantRatio(cluster, kind),
+func newSolver(basePlan *balanceSchedulerPlan, kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+	return &solver{
+		balanceSchedulerPlan: basePlan,
+		Cluster:              cluster,
+		kind:                 kind,
+		opInfluence:          opInfluence,
+		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
 	}
 }
 
-func (p *balancePlan) GetOpInfluence(storeID uint64) int64 {
+func (p *solver) GetOpInfluence(storeID uint64) int64 {
 	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
 }
 
-func (p *balancePlan) SourceStoreID() uint64 {
+func (p *solver) SourceStoreID() uint64 {
 	return p.source.GetID()
 }
 
-func (p *balancePlan) SourceMetricLabel() string {
+func (p *solver) SourceMetricLabel() string {
 	return strconv.FormatUint(p.SourceStoreID(), 10)
 }
 
-func (p *balancePlan) TargetStoreID() uint64 {
+func (p *solver) TargetStoreID() uint64 {
 	return p.target.GetID()
 }
 
-func (p *balancePlan) TargetMetricLabel() string {
+func (p *solver) TargetMetricLabel() string {
 	return strconv.FormatUint(p.TargetStoreID(), 10)
 }
 
-func (p *balancePlan) shouldBalance(scheduleName string) bool {
+func (p *solver) shouldBalance(scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
@@ -135,7 +133,7 @@ func (p *balancePlan) shouldBalance(scheduleName string) bool {
 	return shouldBalance
 }
 
-func (p *balancePlan) getTolerantResource() int64 {
+func (p *solver) getTolerantResource() int64 {
 	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
 		return int64(p.tolerantSizeRatio)
 	}
