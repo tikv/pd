@@ -223,7 +223,7 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", bn.String()), zap.Uint64("obtain-non-witness", peer.GetId()))
 			return false
 		}
-		return peer.IsWitness
+		return region.GetPendingPeer(peer.GetId()) == nil && !peer.IsWitness
 	}
 	return false
 }

@@ -282,10 +282,8 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		if core.IsLearner(peer) {
 			lv = "set-learner-non-witness"
 		}
-		ruleStores := c.getRuleFitStores(rf)
-		targetStoreID, _ := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
 		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer, targetStoreID)
+		return operator.CreateNonWitnessPeerOperatorV2("fix-non-witness-peer", c.cluster, region, peer)
 	}
 	return nil, nil
 }
