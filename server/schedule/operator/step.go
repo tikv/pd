@@ -910,9 +910,10 @@ func addNode(id, storeID uint64) *pdpb.ChangePeer {
 	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddNode,
 		Peer: &metapb.Peer{
-			Id:      id,
-			StoreId: storeID,
-			Role:    metapb.PeerRole_Voter,
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Voter,
+			IsWitness: isWitness,
 		},
 	}
 }
@@ -921,9 +922,10 @@ func addLearnerNode(id, storeID uint64) *pdpb.ChangePeer {
 	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 		Peer: &metapb.Peer{
-			Id:      id,
-			StoreId: storeID,
-			Role:    metapb.PeerRole_Learner,
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Learner,
+			IsWitness: isWitness,
 		},
 	}
 }
