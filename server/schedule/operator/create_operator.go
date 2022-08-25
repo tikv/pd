@@ -16,7 +16,6 @@ package operator
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/logutil"
 	"math/rand"
 
 	"github.com/pingcap/errors"
@@ -24,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
@@ -217,7 +217,7 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 		EnableLightWeight().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
-		Build(0)
+		Build(OpAdmin)
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.

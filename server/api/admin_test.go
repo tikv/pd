@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,7 +23,9 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/apiutil"
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
@@ -222,4 +225,96 @@ func (suite *adminTestSuite) TestResetTS() {
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "\"invalid tso value\"\n"))
 	suite.NoError(err)
+
+	t4 := makeTS(32 * time.Hour)
+	args["tso"] = fmt.Sprintf("%d", t4)
+	args["force-use-larger"] = "xxx"
+	values, err = json.Marshal(args)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringContain(re, "invalid force-use-larger value"))
+	suite.NoError(err)
+
+	args["force-use-larger"] = false
+	values, err = json.Marshal(args)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.Status(re, http.StatusForbidden),
+		tu.StringContain(re, "too large"))
+	suite.NoError(err)
+
+	args["force-use-larger"] = true
+	values, err = json.Marshal(args)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, values,
+		tu.StatusOK(re),
+		tu.StringEqual(re, "\"Reset ts successfully.\"\n"))
+	suite.NoError(err)
+}
+
+func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
+	re := suite.Require()
+	url := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", suite.urlPrefix)
+	// default to false
+	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "false")))
+
+	// mark
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, nil,
+		tu.StatusOK(re)))
+	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "true")))
+	// test using grpc call
+	grpcServer := server.GrpcServer{Server: suite.svr}
+	resp, err2 := grpcServer.IsSnapshotRecovering(context.Background(), &pdpb.IsSnapshotRecoveringRequest{})
+	suite.NoError(err2)
+	suite.True(resp.Marked)
+	// unmark
+	code, err := apiutil.DoDelete(testDialClient, url)
+	suite.NoError(err)
+	suite.Equal(200, code)
+	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusOK(re), tu.StringContain(re, "false")))
+}
+
+func (suite *adminTestSuite) TestRecoverAllocID() {
+	re := suite.Require()
+	url := fmt.Sprintf("%s/admin/base-alloc-id", suite.urlPrefix)
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte("invalid json"), tu.Status(re, http.StatusBadRequest)))
+	// no id or invalid id
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{}`),
+		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": ""}`),
+		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": 11}`),
+		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "aa"}`),
+		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid syntax")))
+	// snapshot recovering=false
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
+		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
+	// mark and recover alloc id
+	markRecoveringURL := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", suite.urlPrefix)
+	suite.NoError(tu.CheckPostJSON(testDialClient, markRecoveringURL, nil,
+		tu.StatusOK(re)))
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "1000000"}`),
+		tu.StatusOK(re)))
+	id, err2 := suite.svr.GetAllocator().Alloc()
+	suite.NoError(err2)
+	suite.Equal(id, uint64(1000001))
+	// recover alloc id again
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "99000000"}`),
+		tu.StatusOK(re)))
+	id, err2 = suite.svr.GetAllocator().Alloc()
+	suite.NoError(err2)
+	suite.Equal(id, uint64(99000001))
+	// unmark
+	code, err := apiutil.DoDelete(testDialClient, markRecoveringURL)
+	suite.NoError(err)
+	suite.Equal(200, code)
+	suite.NoError(tu.CheckGetJSON(testDialClient, markRecoveringURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "false")))
+	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
+		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
 }

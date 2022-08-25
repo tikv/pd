@@ -220,12 +220,12 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWitRanges {
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, ranges), pendingFilter, downFilter)
+		region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			continue
 		}
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
+			FilterTarget(cluster.GetOpts(), nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
 			RandomPick()
 		if target == nil {
 			continue
