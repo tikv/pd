@@ -310,5 +310,17 @@ func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperatorV2(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpWitness, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	var steps []OpStep
+	if core.IsVoter(peer) {
+		op, err := CreateDemoteVoterOperator(desc, ci, region, peer)
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, op.steps...)
+	}
+	steps = append(steps, BecomeNonWitness{
+		StoreID: peer.GetStoreId(),
+		PeerID:  peer.Id,
+	})
+	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpWitness, region.GetApproximateSize(), steps...), nil
 }
