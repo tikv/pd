@@ -214,7 +214,7 @@ basic-test: install-tools
 
 ci-test-job: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
+	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
 	@$(FAILPOINT_DISABLE)
 
 ci-test-job-submod: install-tools dashboard-ui

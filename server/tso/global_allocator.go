@@ -44,9 +44,11 @@ type Allocator interface {
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
 	UpdateTSO() error
-	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore
-	// and can not forcibly set the TSO smaller than now.
-	SetTSO(tso uint64) error
+	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore.
+	// Cannot set the TSO smaller than now in any case.
+	// if ignoreSmaller=true, if input ts is smaller than current, ignore silently, else return error
+	// if skipUpperBoundCheck=true, skip tso upper bound check
+	SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
 	GenerateTSO(count uint32) (pdpb.Timestamp, error)
@@ -139,8 +141,8 @@ func (gta *GlobalTSOAllocator) UpdateTSO() error {
 }
 
 // SetTSO sets the physical part with given TSO.
-func (gta *GlobalTSOAllocator) SetTSO(tso uint64) error {
-	return gta.timestampOracle.resetUserTimestamp(gta.leadership, tso, false)
+func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+	return gta.timestampOracle.resetUserTimestampInner(gta.leadership, tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs.

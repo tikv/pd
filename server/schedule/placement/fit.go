@@ -32,8 +32,8 @@ type RegionFit struct {
 		syncutil.RWMutex
 		cached bool
 	}
-	RuleFits     []*RuleFit
-	OrphanPeers  []*metapb.Peer
+	RuleFits     []*RuleFit     `json:"rule-fits"`
+	OrphanPeers  []*metapb.Peer `json:"orphan-peers"`
 	regionStores []*core.StoreInfo
 	rules        []*Rule
 }
@@ -106,16 +106,16 @@ func CompareRegionFit(a, b *RegionFit) int {
 
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
-	Rule *Rule
+	Rule *Rule `json:"rule"`
 	// Peers of the Region that are divided to this Rule.
-	Peers []*metapb.Peer
+	Peers []*metapb.Peer `json:"peers"`
 	// PeersWithDifferentRole is subset of `Peers`. It contains all Peers that have
 	// different Role from configuration (the Role can be migrated to target role
 	// by scheduling).
-	PeersWithDifferentRole []*metapb.Peer
+	PeersWithDifferentRole []*metapb.Peer `json:"peers-different-role"`
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
-	IsolationScore float64
+	IsolationScore float64 `json:"isolation-score"`
 }
 
 // IsSatisfied returns if the rule is properly satisfied.

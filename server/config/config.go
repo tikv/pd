@@ -91,8 +91,9 @@ type Config struct {
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
-	// It's only useful for test purposes.
-	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
+	// more TSOs provided, and at the same time consuming more CPU time.
+	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
@@ -252,7 +253,7 @@ const (
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 
@@ -785,7 +786,7 @@ const (
 	defaultMaxSnapshotCount          = 64
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
-	defaultSplitMergeInterval        = 1 * time.Hour
+	defaultSplitMergeInterval        = time.Hour
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4

@@ -48,8 +48,8 @@ func TestDistinctScoreFilter(t *testing.T) {
 		improverRes  plan.StatusCode
 	}{
 		{[]uint64{1, 2, 3}, 1, 4, plan.StatusOK, plan.StatusOK},
-		{[]uint64{1, 3, 4}, 1, 2, plan.StatusOK, plan.StatusIsolationNotMatch},
-		{[]uint64{1, 4, 6}, 4, 2, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch},
+		{[]uint64{1, 3, 4}, 1, 2, plan.StatusOK, plan.StatusStoreNotMatchIsolation},
+		{[]uint64{1, 4, 6}, 4, 2, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation},
 	}
 	for _, testCase := range testCases {
 		var stores []*core.StoreInfo
@@ -79,13 +79,13 @@ func TestLabelConstraintsFilter(t *testing.T) {
 		res    plan.StatusCode
 	}{
 		{"id", "in", []string{"1"}, plan.StatusOK},
-		{"id", "in", []string{"2"}, plan.StatusLabelNotMatch},
+		{"id", "in", []string{"2"}, plan.StatusStoreNotMatchRule},
 		{"id", "in", []string{"1", "2"}, plan.StatusOK},
 		{"id", "notIn", []string{"2", "3"}, plan.StatusOK},
-		{"id", "notIn", []string{"1", "2"}, plan.StatusLabelNotMatch},
+		{"id", "notIn", []string{"1", "2"}, plan.StatusStoreNotMatchRule},
 		{"id", "exists", []string{}, plan.StatusOK},
-		{"_id", "exists", []string{}, plan.StatusLabelNotMatch},
-		{"id", "notExists", []string{}, plan.StatusLabelNotMatch},
+		{"_id", "exists", []string{}, plan.StatusStoreNotMatchRule},
+		{"id", "notExists", []string{}, plan.StatusStoreNotMatchRule},
 		{"_id", "notExists", []string{}, plan.StatusOK},
 	}
 	for _, testCase := range testCases {
@@ -119,9 +119,9 @@ func TestRuleFitFilter(t *testing.T) {
 	}{
 		{1, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
 		{2, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
-		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusRuleNotMatch},
-		{4, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusRuleNotMatch},
-		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusRuleNotMatch},
+		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		{4, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
 	}
 	// Init cluster
@@ -168,9 +168,9 @@ func TestStoreStateFilter(t *testing.T) {
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
-		{0, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
-		{1, plan.StatusOK, plan.StatusStoreUnavailable},
-		{2, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+		{0, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
+		{1, plan.StatusOK, plan.StatusStoreDisconnected},
+		{2, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
 		{3, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
@@ -179,9 +179,9 @@ func TestStoreStateFilter(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, plan.StatusOK, plan.StatusStoreUnavailable},
-		{1, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
-		{2, plan.StatusStoreUnavailable, plan.StatusStoreUnavailable},
+		{0, plan.StatusOK, plan.StatusStoreBusy},
+		{1, plan.StatusStoreBusy, plan.StatusStoreBusy},
+		{2, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{3, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
@@ -280,7 +280,7 @@ func TestIsolationFilter(t *testing.T) {
 			}}, &metapb.Peer{StoreId: 1, Id: 1}),
 			"zone",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
-			[]plan.StatusCode{plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusOK},
+			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK},
 		},
 		{
 			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
@@ -290,7 +290,7 @@ func TestIsolationFilter(t *testing.T) {
 			}}, &metapb.Peer{StoreId: 1, Id: 1}),
 			"rack",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
-			[]plan.StatusCode{plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusOK, plan.StatusOK, plan.StatusIsolationNotMatch},
+			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusOK, plan.StatusStoreNotMatchIsolation},
 		},
 		{
 			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
@@ -300,7 +300,7 @@ func TestIsolationFilter(t *testing.T) {
 			}}, &metapb.Peer{StoreId: 1, Id: 1}),
 			"host",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
-			[]plan.StatusCode{plan.StatusIsolationNotMatch, plan.StatusIsolationNotMatch, plan.StatusOK, plan.StatusIsolationNotMatch, plan.StatusOK, plan.StatusIsolationNotMatch, plan.StatusOK},
+			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusStoreNotMatchIsolation, plan.StatusOK},
 		},
 	}
 
@@ -356,8 +356,8 @@ func TestSpecialUseFilter(t *testing.T) {
 		targetRes plan.StatusCode
 	}{
 		{nil, []string{""}, plan.StatusOK, plan.StatusOK},
-		{map[string]string{SpecialUseKey: SpecialUseHotRegion}, []string{""}, plan.StatusLabelNotMatch, plan.StatusLabelNotMatch},
-		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{""}, plan.StatusLabelNotMatch, plan.StatusLabelNotMatch},
+		{map[string]string{SpecialUseKey: SpecialUseHotRegion}, []string{""}, plan.StatusStoreNotMatchRule, plan.StatusStoreNotMatchRule},
+		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{""}, plan.StatusStoreNotMatchRule, plan.StatusStoreNotMatchRule},
 		{map[string]string{SpecialUseKey: SpecialUseReserved}, []string{SpecialUseReserved}, plan.StatusOK, plan.StatusOK},
 		{map[string]string{core.EngineKey: core.EngineTiFlash}, []string{""}, plan.StatusOK, plan.StatusOK},
 		{map[string]string{core.EngineKey: core.EngineTiKV}, []string{""}, plan.StatusOK, plan.StatusOK},
