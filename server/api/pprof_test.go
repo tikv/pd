@@ -17,7 +17,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -54,7 +54,7 @@ func (suite *profTestSuite) TestGetZip() {
 	rsp, err := testDialClient.Get(suite.urlPrefix + "/pprof/zip?" + "seconds=5s")
 	suite.NoError(err)
 	defer rsp.Body.Close()
-	body, err := ioutil.ReadAll(rsp.Body)
+	body, err := io.ReadAll(rsp.Body)
 	suite.NoError(err)
 	suite.NotNil(body)
 	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
