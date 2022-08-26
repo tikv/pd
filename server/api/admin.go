@@ -83,9 +83,13 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
-//		reset ts to max(current ts, input ts).
+//
+//	reset ts to max(current ts, input ts).
+//
 // else:
-//		reset ts to input ts if it > current ts and < upper bound, error if not in that range
+//
+//	reset ts to input ts if it > current ts and < upper bound, error if not in that range
+//
 // during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
 func (h *adminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
