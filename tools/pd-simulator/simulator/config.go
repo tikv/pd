@@ -112,3 +112,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
+
+type PDConfig struct {
+	RemovedSchedulers []string
+}

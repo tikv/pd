@@ -16,6 +16,9 @@ package simulator
 
 import (
 	"context"
+	"fmt"
+	"io/ioutil"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -39,12 +42,14 @@ type Client interface {
 	PutStore(ctx context.Context, store *metapb.Store) error
 	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
 	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
+	PutPDConfig(*PDConfig) error
 	Close()
 }
 
 const (
 	pdTimeout             = time.Second
 	maxInitClusterRetries = 100
+	httpPrefix            = "pd/api/v1"
 )
 
 var (
@@ -57,6 +62,7 @@ type client struct {
 	tag        string
 	clusterID  uint64
 	clientConn *grpc.ClientConn
+	httpClient *http.Client
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -77,6 +83,7 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 		ctx:                      ctx,
 		cancel:                   cancel,
 		tag:                      tag,
+		httpClient:               &http.Client{},
 	}
 	cc, err := c.createConn()
 	if err != nil {
@@ -296,6 +303,31 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	if resp.Header.GetError() != nil {
 		simutil.Logger.Error("put store error", zap.Reflect("error", resp.Header.GetError()))
 		return nil
+	}
+	return nil
+}
+
+func (c *client) PutPDConfig(config *PDConfig) error {
+	if len(config.RemovedSchedulers) > 0 {
+		for _, schedulerName := range config.RemovedSchedulers {
+			path := fmt.Sprintf("%s/%s/schedulers/%s", c.url, httpPrefix, schedulerName)
+			req, err := http.NewRequest(http.MethodDelete, path, nil)
+			if err != nil {
+				return err
+			}
+			res, err := c.httpClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				reason, _ := ioutil.ReadAll(res.Body)
+				simutil.Logger.Error("remove scheduler failed",
+					zap.String("scheduler-name", schedulerName),
+					zap.ByteString("reason", reason))
+			}
+			simutil.Logger.Info("remove scheduler success", zap.String("scheduler-name", schedulerName))
+		}
 	}
 	return nil
 }

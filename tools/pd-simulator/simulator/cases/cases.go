@@ -54,7 +54,8 @@ type Case struct {
 	Events          []EventDescriptor
 	TableNumber     int
 
-	Checker CheckerFunc // To check the schedule is finished.
+	Checker           CheckerFunc // To check the schedule is finished.
+	RemovedSchedulers []string
 }
 
 // IDAllocator is used to alloc unique ID.
@@ -94,6 +95,7 @@ var CaseMap = map[string]func() *Case{
 	"hot-write":                newHotWrite,
 	"makeup-down-replicas":     newMakeupDownReplicas,
 	"import-data":              newImportData,
+	"region-scatter":           newRegionScatter,
 }
 
 // NewCase creates a new case.
