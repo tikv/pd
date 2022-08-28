@@ -19,7 +19,7 @@ package plan
 type Plan interface {
 	GetStep() int
 	GetStatus() *Status
-	GetCoreResource(int) uint64
+	GetResource(int) uint64
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	SetResource(interface{})

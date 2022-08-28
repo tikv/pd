@@ -17,7 +17,6 @@ package schedulers
 import (
 	"fmt"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -57,20 +56,20 @@ func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	}
 }
 
-func (p *balanceSchedulerPlan) GetCoreResource(step int) uint64 {
+func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	switch step {
 	case 0:
-		if p.step < 0 {
+		if p.step < step {
 			return 0
 		}
 		return p.source.GetID()
 	case 1:
-		if p.step < 1 {
+		if p.step < step {
 			return 0
 		}
 		return p.region.GetID()
 	case 2:
-		if p.step < 2 {
+		if p.step < step {
 			return 0
 		}
 		return p.target.GetID()
@@ -107,8 +106,9 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 func BalancePlanSummary(plans []plan.Plan) (string, error) {
-	secondGroup := make(map[plan.Status]uint64)
-	var firstGroup map[uint64]map[plan.Status]int
+	// storeStatusCounter is used to
+	var storeStatusCounter map[uint64]map[plan.Status]int
+	statusCounter := make(map[plan.Status]uint64)
 	maxStep := -1
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
@@ -121,7 +121,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 			continue
 		}
 		if step > maxStep {
-			firstGroup = make(map[uint64]map[plan.Status]int)
+			storeStatusCounter = make(map[uint64]map[plan.Status]int)
 			maxStep = p.GetStep()
 		} else if step < maxStep {
 			continue
@@ -130,29 +130,39 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 		if step == 1 {
 			store = p.source.GetID()
 		} else {
-			store = p.GetCoreResource(p.GetStep())
+			store = p.GetResource(p.GetStep())
 		}
-		if _, ok := firstGroup[store]; !ok {
-			firstGroup[store] = make(map[plan.Status]int)
+		if _, ok := storeStatusCounter[store]; !ok {
+			storeStatusCounter[store] = make(map[plan.Status]int)
 		}
-		firstGroup[store][*p.status]++
-		log.Info(fmt.Sprintf("%d %s", store, p.status.String()))
+		storeStatusCounter[store][*p.status]++
 	}
 
-	for _, store := range firstGroup {
+	for _, store := range storeStatusCounter {
 		max := 0
 		curstat := *plan.NewStatus(plan.StatusOK)
 		for stat, c := range store {
-			if stat.Priority() > curstat.Priority() || (stat.Priority() == curstat.Priority() && c > max) || (stat.Priority() == curstat.Priority() && c == max && stat.StatusCode < curstat.StatusCode) {
+			if balancePlanStatusComparer(max, curstat, c, stat) {
 				max = c
 				curstat = stat
 			}
 		}
-		secondGroup[curstat] += 1
+		statusCounter[curstat] += 1
 	}
 	var resstr string
-	for k, v := range secondGroup {
+	for k, v := range statusCounter {
 		resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
 	}
 	return resstr, nil
+}
+
+// balancePlanStatusComparer returns true if new status is better than old one.
+func balancePlanStatusComparer(oldStatusCount int, oldStatus plan.Status, newStatusCount int, newStatus plan.Status) bool {
+	if newStatus.Priority() != oldStatus.Priority() {
+		return newStatus.Priority() > oldStatus.Priority()
+	}
+	if newStatusCount != oldStatusCount {
+		return newStatusCount > oldStatusCount
+	}
+	return newStatus.StatusCode < oldStatus.StatusCode
 }
