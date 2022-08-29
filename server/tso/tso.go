@@ -70,9 +70,13 @@ type timestampOracle struct {
 	dcLocation    string
 }
 
-func (t *timestampOracle) setTSOPhysical(next time.Time) {
+func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
+	// Do not update the zero physical time if the `force` flag is false.
+	if t.tsoMux.physical == typeutil.ZeroTime && !force {
+		return
+	}
 	// make sure the ts won't fall back
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
@@ -217,7 +221,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	tsoCounter.WithLabelValues("sync_ok", t.dcLocation).Inc()
 	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	// save into memory
-	t.setTSOPhysical(next)
+	t.setTSOPhysical(next, true)
 	return nil
 }
 
@@ -294,6 +298,9 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 // 1. The saved time is monotonically increasing.
 // 2. The physical time is monotonically increasing.
 // 3. The physical time is always less than the saved timestamp.
+//
+// NOTICE: this function should be called after the TSO in memory has been initialized
+// and should not be called when the TSO in memory has been reset anymore.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
 	prevPhysical, prevLogical := t.getTSO()
 	tsoGauge.WithLabelValues("tso", t.dcLocation).Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
@@ -344,7 +351,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		}
 	}
 	// save into memory
-	t.setTSOPhysical(next)
+	t.setTSOPhysical(next, false)
 
 	return nil
 }
