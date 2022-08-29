@@ -57,21 +57,15 @@ func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 }
 
 func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
+	if p.step < step {
+		return 0
+	}
 	switch step {
 	case 0:
-		if p.step < step {
-			return 0
-		}
 		return p.source.GetID()
 	case 1:
-		if p.step < step {
-			return 0
-		}
 		return p.region.GetID()
 	case 2:
-		if p.step < step {
-			return 0
-		}
 		return p.target.GetID()
 	}
 	return 0
@@ -106,8 +100,9 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 func BalancePlanSummary(plans []plan.Plan) (string, error) {
-	// storeStatusCounter is used to
+	// storeStatusCounter is used to count the number of various statuses of each store
 	var storeStatusCounter map[uint64]map[plan.Status]int
+	// statusCounter is used to count the number of status which is regarded as best status of each store
 	statusCounter := make(map[plan.Status]uint64)
 	maxStep := -1
 	for _, pi := range plans {
