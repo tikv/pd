@@ -420,6 +420,29 @@ func (s *solution) isAvailable() bool {
 	return s.progressiveRank < -2 || s.progressiveRank == -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
 }
 
+type ratioSet struct {
+	preBalancedRatio      float64
+	balancedRatio         float64
+	preBalancedCheckRatio float64
+	balancedCheckRatio    float64
+	perceivedRatio        float64
+}
+
+func newRatioSet(balancedRatio float64) *ratioSet {
+	if balancedRatio < 0.7 {
+		balancedRatio = 0.7
+	}
+	if balancedRatio > 0.95 {
+		balancedRatio = 0.95
+	}
+	rs := &ratioSet{balancedRatio: balancedRatio}
+	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.15)
+	rs.balancedCheckRatio = balancedRatio - 0.02
+	rs.preBalancedCheckRatio = rs.preBalancedRatio - 0.03
+	rs.perceivedRatio = math.Min(2.0-rs.preBalancedRatio*2, 0.5)
+	return rs
+}
+
 type balanceSolver struct {
 	schedule.Cluster
 	sche         *hotScheduler
@@ -443,11 +466,8 @@ type balanceSolver struct {
 	firstPriority  int
 	secondPriority int
 
-	preBalancedRatio      float64
-	balancedRatio         float64
-	preBalancedCheckRatio float64
-	balancedCheckRatio    float64
-	perceivedRatio        float64
+	firstPriorityRatioSet  *ratioSet
+	secondPriorityRatioSet *ratioSet
 
 	maxPeerNum            int
 	minPerceivedLoadIndex int
@@ -491,11 +511,8 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.balancedRatio = bs.sche.conf.GetGreatDecRatio()
-	bs.preBalancedRatio = 2.0*bs.balancedRatio - 1.0 // 1.0 - (1.0-bs.balancedRatio)*2
-	bs.balancedCheckRatio = bs.balancedRatio - 0.02
-	bs.preBalancedCheckRatio = bs.preBalancedRatio - 0.03
-	bs.perceivedRatio = (1.0 - bs.preBalancedRatio) * 2
+	bs.firstPriorityRatioSet = newRatioSet(bs.sche.conf.GetGreatDecRatio())
+	bs.secondPriorityRatioSet = newRatioSet(bs.firstPriorityRatioSet.preBalancedRatio)
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minPerceivedLoadIndex = bs.maxPeerNum/100 - 1
 	if bs.minPerceivedLoadIndex < 0 {
@@ -978,13 +995,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		// For write leader, only compare the first priority.
 		// If the first priority is better, the progressiveRank is -3.
 		// Because it is not a solution that needs to be optimized.
-		if bs.getBalanceBoostByPriorities(bs.firstPriority) == 1 {
+		if bs.getBalanceBoostByPriorities(bs.firstPriority, bs.firstPriorityRatioSet) == 1 {
 			bs.cur.progressiveRank = -3
 		}
 		return
 	}
-	firstCmp := bs.getBalanceBoostByPriorities(bs.firstPriority)
-	secondCmp := bs.getBalanceBoostByPriorities(bs.secondPriority)
+	firstCmp := bs.getBalanceBoostByPriorities(bs.firstPriority, bs.firstPriorityRatioSet)
+	secondCmp := bs.getBalanceBoostByPriorities(bs.secondPriority, bs.secondPriorityRatioSet)
 	switch {
 	case firstCmp == 1 && secondCmp == 1:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
@@ -1045,7 +1062,7 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 	return
 }*/
 
-func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
+func (bs *balanceSolver) getBalanceBoostByPriorities(dim int, rs *ratioSet) (cmp int) {
 	// Four values minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate can be determined from src and dst.
 	// peersRate < minNotWorsenedRate                  ====> cmp == -2
 	// minNotWorsenedRate <= peersRate < minBetterRate ====> cmp == 0
@@ -1068,15 +1085,15 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("high-rate: %.0f, low-rate: %.0f, peersRate: %.0f, reverse: %t",
 		highRate, lowRate, peersRate, reverse))
 
-	if highRate*bs.balancedCheckRatio <= lowRate {
+	if highRate*rs.balancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in the balanced state, and cmp = 1 will not be judged.
 		// If the balanced state is not broken, cmp = 0.
 		// If the balanced state is broken, cmp = -1.
 
-		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)
-		minNotWorsenedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)*bs.balancedRatio
-		maxNotWorsenedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		// highRate - (highRate+lowRate)/(1.0+balancedRatio)
+		minNotWorsenedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		// highRate - (highRate+lowRate)/(1.0+balancedRatio)*balancedRatio
+		maxNotWorsenedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
@@ -1091,14 +1108,14 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 
 	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
 	var state string
-	if highRate*bs.preBalancedCheckRatio <= lowRate {
+	if highRate*rs.preBalancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in pre-balanced state.
 		// Only the schedules that reach the balanced state will be judged as 1,
 		// and the schedules that do not destroy the pre-balanced state will be judged as 0.
-		minNotWorsenedRate = (highRate*bs.preBalancedRatio - lowRate) / (1.0 + bs.preBalancedRatio)
-		minBetterRate = (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		maxBetterRate = (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
-		maxNotWorsenedRate = (highRate - lowRate*bs.preBalancedRatio) / (1.0 + bs.preBalancedRatio)
+		minNotWorsenedRate = (highRate*rs.preBalancedRatio - lowRate) / (1.0 + rs.preBalancedRatio)
+		minBetterRate = (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		maxBetterRate = (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
+		maxNotWorsenedRate = (highRate - lowRate*rs.preBalancedRatio) / (1.0 + rs.preBalancedRatio)
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
@@ -1108,13 +1125,13 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		// As long as the balance is significantly improved, it is judged as 1.
 		// If the balance is not reduced, it is judged as 0.
 		// If the rate relationship between src and dst is reversed, there will be a certain penalty.
-		minBalancedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		maxBalancedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		minBalancedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		maxBalancedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
 
 		minNotWorsenedRate = -bs.getMinRate(dim)
-		minBetterRate = math.Min(minBalancedRate*bs.perceivedRatio, bs.minPerceivedLoads[dim])
-		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*bs.perceivedRatio
-		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*bs.perceivedRatio
+		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, bs.minPerceivedLoads[dim])
+		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*rs.perceivedRatio
+		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*rs.perceivedRatio
 		if maxBetterRate < minBetterRate {
 			maxBetterRate = minBetterRate
 		}
