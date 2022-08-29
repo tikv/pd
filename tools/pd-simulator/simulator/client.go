@@ -17,7 +17,7 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -321,7 +321,7 @@ func (c *client) PutPDConfig(config *PDConfig) error {
 			}
 			defer res.Body.Close()
 			if res.StatusCode != http.StatusOK {
-				reason, _ := ioutil.ReadAll(res.Body)
+				reason, _ := io.ReadAll(res.Body)
 				simutil.Logger.Error("remove scheduler failed",
 					zap.String("scheduler-name", schedulerName),
 					zap.ByteString("reason", reason))
