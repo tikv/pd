@@ -415,9 +415,9 @@ func (s *solution) getPeersRateFromCache(dim int) float64 {
 
 // isAvailable returns the solution is available.
 // If the solution has no revertRegion, progressiveRank should < 0.
-// If the solution has some revertRegion, progressiveRank should < -1.
+// If the solution has some revertRegion, progressiveRank should == -4/-3/-1.
 func (s *solution) isAvailable() bool {
-	return s.progressiveRank < -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
+	return s.progressiveRank < -2 || s.progressiveRank == -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
 }
 
 type balanceSolver struct {
@@ -554,12 +554,12 @@ func (bs *balanceSolver) filterUniformStore() (string, bool) {
 		// If both dims are enough uniform, any schedule is unnecessary.
 		return "all-dim", true
 	}
-	if isUniformFirstPriority && (bs.cur.progressiveRank == -1 || bs.cur.progressiveRank == -3) {
-		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+	if isUniformFirstPriority && (bs.cur.progressiveRank == -2 || bs.cur.progressiveRank == -3) {
+		// If first priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for second priority dim
 		return dimToString(bs.firstPriority), true
 	}
-	if isUniformSecondPriority && bs.cur.progressiveRank == -2 {
-		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+	if isUniformSecondPriority && bs.cur.progressiveRank == -1 {
+		// If second priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for first priority dim
 		return dimToString(bs.secondPriority), true
 	}
 	return "", false
@@ -620,14 +620,14 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
 
-				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
-					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
+				if searchRevertRegions && (bs.cur.progressiveRank == -2 || bs.cur.progressiveRank == 0) &&
+					(bs.best == nil || bs.best.progressiveRank >= -2 || bs.best.revertRegion != nil) {
 					// The search-revert-regions is performed only when the following conditions are met to improve performance.
 					// * `searchRevertRegions` is true. It depends on the result of the last `solve`.
 					// * `IsStrictPickingStoreEnabled` is false.
-					// * The current solution is not good enough. -1 <= progressiveRank <= 0
+					// * The current solution is not good enough. progressiveRank == -2/0
 					// * The current best solution is not good enough.
-					//     * The current best solution has progressiveRank < -1 and does not contain revert regions.
+					//     * The current best solution has progressiveRank < -2 and does not contain revert regions.
 					//     * The current best solution contain revert regions.
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
@@ -662,9 +662,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 func (bs *balanceSolver) allowSearchRevertRegions() bool {
 	// The next solve is allowed to search-revert-regions only when the following conditions are met.
 	// * No best solution was found this time.
-	// * The progressiveRank of the best solution is -1.
+	// * The progressiveRank of the best solution is -2.
 	// * The best solution contain revert regions.
-	return bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil
+	return bs.best == nil || bs.best.progressiveRank >= -2 || bs.best.revertRegion != nil
 }
 
 func (bs *balanceSolver) tryAddPendingInfluence() bool {
@@ -962,8 +962,8 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
-// |   isBetter                         | -4       | -3            | -1 / 0   |
-// |   isNotWorsened                    | -2       | 1             | 1        |
+// |   isBetter                         | -4       | -3            | -2       |
+// |   isNotWorsened                    | -1       | 1             | 1        |
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = 1
@@ -992,11 +992,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	case firstCmp == 1 && secondCmp == 0:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
 		bs.cur.progressiveRank = -3
-	case firstCmp == 0 && secondCmp == 1:
-		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
-		bs.cur.progressiveRank = -2
 	case firstCmp == 1:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
+		bs.cur.progressiveRank = -2
+	case firstCmp == 0 && secondCmp == 1:
+		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
 		bs.cur.progressiveRank = -1
 	case secondCmp == 1:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
@@ -1047,11 +1047,11 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 
 func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	// Four values minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate can be determined from src and dst.
-	// peersRate < minNotWorsenedRate                  ====> cmp == -1
+	// peersRate < minNotWorsenedRate                  ====> cmp == -2
 	// minNotWorsenedRate <= peersRate < minBetterRate ====> cmp == 0
 	// minBetterRate <= peersRate <= maxBetterRate     ====> cmp == 1
-	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == 0
-	// peersRate > maxNotWorsenedRate                  ====> cmp == -1
+	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == -1
+	// peersRate > maxNotWorsenedRate                  ====> cmp == -2
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-dim, %s-type, %s-type",
 		dimToString(dim), bs.rwTy.String(), bs.opTy.String()))
 
@@ -1086,7 +1086,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 			return 0
 		}
 		bs.cur.debugMessage = append(bs.cur.debugMessage, "balanced-state, cmp: -1")
-		return -1
+		return -2
 	}
 
 	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
@@ -1138,9 +1138,9 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	case minNotWorsenedRate <= peersRate && peersRate < minBetterRate:
 		cmp = 0
 	case maxBetterRate < peersRate && peersRate <= maxNotWorsenedRate:
-		cmp = 0
-	default:
 		cmp = -1
+	default:
+		cmp = -2
 	}
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-state, cmp: %d%s", state, cmp, otherMessage))
 	return
@@ -1222,15 +1222,15 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 			}
 			// prefer smaller second priority rate, to reduce oscillation
 			return secondCmp < 0
-		case -2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+		case -2: // isBetter(firstPriority)
+			return firstCmp > 0
+			// TODO: The smaller the difference between the value and the expectation, the better.
+		case -1: // isNotWorsened(firstPriority) && isBetter(secondPriority)
 			if secondCmp != 0 {
 				return secondCmp > 0
 			}
 			// prefer smaller first priority rate, to reduce oscillation
 			return firstCmp < 0
-		case -1: // isBetter(firstPriority)
-			return firstCmp > 0
-			// TODO: The smaller the difference between the value and the expectation, the better.
 		}
 	}
 
@@ -1358,9 +1358,9 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	case -3:
 		dim = dimToString(bs.firstPriority)
 	case -2:
-		dim = dimToString(bs.secondPriority)
-	case -1:
 		dim = dimToString(bs.firstPriority) + "-only"
+	case -1:
+		dim = dimToString(bs.secondPriority)
 	}
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
