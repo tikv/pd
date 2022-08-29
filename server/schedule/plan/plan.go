@@ -26,6 +26,7 @@ type Plan interface {
 	SetStatus(*Status)
 }
 
+// Analyzer is used to analyse plan
 type Analyzer interface {
 	Summary(interface{}) (string, error)
 }

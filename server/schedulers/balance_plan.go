@@ -99,6 +99,7 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 	return plan
 }
 
+// BalancePlanSummary is used to summarize for BalancePlan
 func BalancePlanSummary(plans []plan.Plan) (string, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
 	var storeStatusCounter map[uint64]map[plan.Status]int
