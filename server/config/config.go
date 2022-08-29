@@ -756,6 +756,7 @@ type ScheduleConfig struct {
 	// overwrite the auto-tuned value by pd-ctl, when the value
 	// is overwritten, the value is fixed until it is deleted.
 	// Default: manual
+	// WARN: StoreLimitMode is deprecated.
 	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
 
 	// Controls the time interval between write hot regions info into leveldb.
@@ -770,6 +771,9 @@ type ScheduleConfig struct {
 
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// Mode is a state of scheduling. Different mode have different strategies in configuration.
+	Mode string `toml:"mode" json:"mode"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -820,6 +824,7 @@ const (
 	defaultHotRegionsReservedDays      = 7
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+	defaultMode                  = Normal
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -886,7 +891,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
 	}
-
+	if !meta.IsDefined("mode") {
+		adjustString(&c.Mode, defaultMode)
+	}
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
@@ -982,6 +989,9 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
 		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
+	}
+	if !isValidMode(c.Mode) {
+		return errors.Errorf("mode %v is invalid", c.Mode)
 	}
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {

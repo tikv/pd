@@ -464,6 +464,11 @@ func (o *PersistOptions) GetStoreLimitMode() string {
 	return o.GetScheduleConfig().StoreLimitMode
 }
 
+// GetMode returns the scheduling mode of PD.
+func (o *PersistOptions) GetMode() string {
+	return o.GetScheduleConfig().Mode
+}
+
 // GetTolerantSizeRatio gets the tolerant size ratio.
 func (o *PersistOptions) GetTolerantSizeRatio() float64 {
 	return o.GetScheduleConfig().TolerantSizeRatio
@@ -678,6 +683,15 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
+	}
+	if isValidMode(cfg.Schedule.Mode) {
+		exist, err := storage.LoadScheduleMode(cfg.Schedule.Mode, &cfg.Schedule)
+		if err != nil {
+			return err
+		}
+		if cfg.Schedule.Mode != Normal && !exist {
+			getDefaultModeConfig(&cfg.Schedule, cfg.Schedule.Mode)
+		}
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
 	cfg.PDServerCfg.MigrateDeprecatedFlags()

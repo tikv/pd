@@ -59,6 +59,10 @@ func scheduleConfigPath(scheduleName string) string {
 	return path.Join(customScheduleConfigPath, scheduleName)
 }
 
+func scheduleModePath(modeName string) string {
+	return path.Join(configPath, modeName)
+}
+
 // StorePath returns the store meta info key path with the given store ID.
 func StorePath(storeID uint64) string {
 	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))

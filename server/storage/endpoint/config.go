@@ -29,6 +29,8 @@ type ConfigStorage interface {
 	LoadAllScheduleConfig() ([]string, []string, error)
 	SaveScheduleConfig(scheduleName string, data []byte) error
 	RemoveScheduleConfig(scheduleName string) error
+	SaveScheduleMode(modeName string, cfg interface{}) error
+	LoadScheduleMode(modeName string, cfg interface{}) (bool, error)
 }
 
 var _ ConfigStorage = (*StorageEndpoint)(nil)
@@ -73,4 +75,26 @@ func (se *StorageEndpoint) SaveScheduleConfig(scheduleName string, data []byte) 
 // RemoveScheduleConfig removes the config of scheduler.
 func (se *StorageEndpoint) RemoveScheduleConfig(scheduleName string) error {
 	return se.Remove(scheduleConfigPath(scheduleName))
+}
+
+// SaveScheduleMode saves the config of mode.
+func (se *StorageEndpoint) SaveScheduleMode(modeName string, cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return se.Save(scheduleModePath(modeName), string(value))
+}
+
+// LoadScheduleMode loads the config of mode.
+func (se *StorageEndpoint) LoadScheduleMode(modeName string, cfg interface{}) (bool, error) {
+	value, err := se.Load(scheduleModePath(modeName))
+	if err != nil || value == "" {
+		return false, err
+	}
+	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
 }

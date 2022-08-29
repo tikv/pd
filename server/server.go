@@ -895,25 +895,34 @@ func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Server) SetScheduleConfig(newCfg config.ScheduleConfig) error {
+	if err := newCfg.Validate(); err != nil {
 		return err
 	}
-	if err := cfg.Deprecated(); err != nil {
+	if err := newCfg.Deprecated(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetScheduleConfig()
-	cfg.SchedulersPayload = nil
-	s.persistOptions.SetScheduleConfig(&cfg)
+	// check if the mode needs to be changed.
+	oldCfg := s.persistOptions.GetScheduleConfig()
+	if oldCfg.Mode != newCfg.Mode {
+		var err error
+		newCfg, err = s.persistOptions.SwitchMode(s.storage, oldCfg, newCfg.Mode)
+		if err != nil {
+			return err
+		}
+		log.Info("schedule mode is switched", zap.String("new-mode", newCfg.Mode))
+	}
+	newCfg.SchedulersPayload = nil
+	s.persistOptions.SetScheduleConfig(&newCfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
+		s.persistOptions.SetScheduleConfig(oldCfg)
 		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
