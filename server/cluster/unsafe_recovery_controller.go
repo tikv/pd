@@ -291,18 +291,32 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 
 	if allCollected {
 		newestRegionTree, peersMap, err := u.buildUpFromReports()
-		if err != nil {
-			u.err = err
-			if u.handleErr() {
-				return
-			}
-		}
 
 		// clean up previous plan
 		u.storePlanExpires = make(map[uint64]time.Time)
 		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
 
-		stage := u.stage
+		var stage unsafeRecoveryStage
+		if err == nil {
+			stage = u.stage
+		} else if u.stage == exitForceLeader {
+			u.changeStage(failed)
+			return
+		} else {
+			// Manually set stage to exit force leader so that we do not have to collect reports twice.
+			stage = exitForceLeader
+			var output StageOutput
+			output.Time = time.Now().Format("2006-01-02 15:04:05.000")
+			output.Info = "Unsafe recovery enters exit force leader stage"
+			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", err.Error()))
+			u.output = append(u.output, output)
+			data, marshalErr := json.Marshal(output)
+			if marshalErr != nil {
+				log.Error("Unsafe recovery fail to marshal json object", zap.String("err", marshalErr.Error()))
+			} else {
+				log.Error(string(data))
+			}
+		}
 		reCheck := false
 		for {
 			switch stage {
@@ -445,7 +459,6 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.stage = stage
 
 	var output StageOutput
-	exitForceLeaderDueToFailure := false
 	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	switch u.stage {
 	case idle:
@@ -486,7 +499,6 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output.Info = "Unsafe recovery enters exit force leader stage"
 		if u.err != nil {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
-			exitForceLeaderDueToFailure = true
 		}
 	case finished:
 		if u.step > 1 {
@@ -518,10 +530,8 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 
 	// reset store reports to nil instead of delete, because it relays on the item
 	// to decide which store it needs to collect the report from.
-	if !exitForceLeaderDueToFailure {
-		for k := range u.storeReports {
-			u.storeReports[k] = nil
-		}
+	for k := range u.storeReports {
+		u.storeReports[k] = nil
 	}
 	u.numStoresReported = 0
 	u.step += 1
