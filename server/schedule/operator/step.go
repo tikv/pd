@@ -672,10 +672,10 @@ func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 boo
 	}
 	changes := make([]*pdpb.ChangePeer, 0, len(cpe.PromoteLearners)+len(cpe.DemoteVoters))
 	for _, pl := range cpe.PromoteLearners {
-		changes = append(changes, pl.GetCmd(region, useConfChangeV2).ChangePeer)
+		changes = append(changes, pl.GetCmd(region, useConfChangeV2).ChangePeerV2.Changes...)
 	}
 	for _, dv := range cpe.DemoteVoters {
-		changes = append(changes, dv.GetCmd(region, useConfChangeV2).ChangePeer)
+		changes = append(changes, dv.GetCmd(region, useConfChangeV2).ChangePeerV2.Changes...)
 	}
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeerV2: &pdpb.ChangePeerV2{
