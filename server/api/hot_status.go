@@ -21,10 +21,15 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
+	"github.com/pingcap/errcode"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type hotStatusHandler struct {
@@ -96,6 +101,24 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 	}
 
 	h.rd.JSON(w, http.StatusOK, rc.GetHotWriteRegions(ids...))
+}
+
+// @Tags     hotspot
+// @Summary  List the hot write regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Router   /hotspot/observe/{region_id} [post]
+func (h *hotStatusHandler) ObserveRegionStats(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	regionID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	statistics.ObserveRegionStats(regionID)
+	log.Info("Start to observe statistics", zap.Uint64("region-id", regionID))
+	h.rd.JSON(w, http.StatusOK, "Successful")
 }
 
 // @Tags     hotspot

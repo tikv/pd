@@ -16,13 +16,16 @@ package statistics
 
 import (
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const (
@@ -50,6 +53,13 @@ var minHotThresholds = [RegionStatCount]float64{
 	RegionReadBytes:  8 * units.KiB,
 	RegionReadKeys:   128,
 	RegionReadQuery:  128,
+}
+
+var statLogger = logutil.GetPluggableLogger("hot-stats", true)
+var observerRegionID = uint64(0)
+
+func ObserveRegionStats(regionID uint64) {
+	atomic.StoreUint64(&observerRegionID, regionID)
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -99,6 +109,63 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 }
 
 func (f *hotPeerCache) updateStat(item *HotPeerStat) {
+	if item.RegionID == atomic.LoadUint64(&observerRegionID) || atomic.LoadUint64(&observerRegionID) == math.MaxUint64 {
+		if len(item.Loads) < 6 {
+			statLogger.Info("origin load stats - cold",
+				zap.Stringer("kind", f.kind),
+				zap.Stringer("action", item.actionType),
+				zap.Uint64("region-id", item.RegionID),
+				zap.Uint64("store-id", item.StoreID),
+				zap.Float64("read-bytes", item.Loads[0]),
+				zap.Float64("read-keys", item.Loads[1]),
+				zap.Float64("read-qps", item.Loads[2]),
+				zap.Float64("write-bytes", 0),
+				zap.Float64("write-keys", 0),
+				zap.Float64("write-query", 0),
+			)
+			statLogger.Info("updated load stats - cold",
+				zap.Stringer("kind", f.kind),
+				zap.Stringer("action", item.actionType),
+				zap.Uint64("region-id", item.RegionID),
+				zap.Uint64("store-id", item.StoreID),
+				zap.Float64("read-bytes", item.GetLoad(RegionReadBytes)),
+				zap.Float64("read-keys", item.GetLoad(RegionReadKeys)),
+				zap.Float64("read-qps", item.GetLoad(RegionReadQuery)),
+				zap.Float64("write-bytes", 0),
+				zap.Float64("write-keys", 0),
+				zap.Float64("write-query", 0),
+				zap.Uint64("hot-degree", uint64(item.HotDegree)),
+			)
+		} else {
+			statLogger.Info("origin load stats",
+				zap.Stringer("kind", f.kind),
+				zap.Stringer("action", item.actionType),
+				zap.Uint64("region-id", item.RegionID),
+				zap.Uint64("store-id", item.StoreID),
+				zap.Float64("read-bytes", item.Loads[0]),
+				zap.Float64("read-keys", item.Loads[1]),
+				zap.Float64("read-qps", item.Loads[2]),
+				zap.Float64("write-bytes", item.Loads[3]),
+				zap.Float64("write-keys", item.Loads[4]),
+				zap.Float64("write-query", item.Loads[5]),
+				zap.Uint64("hot-degree", uint64(item.HotDegree)),
+			)
+			statLogger.Info("updated load stats",
+				zap.Stringer("kind", f.kind),
+				zap.Stringer("action", item.actionType),
+				zap.Uint64("region-id", item.RegionID),
+				zap.Uint64("store-id", item.StoreID),
+				zap.Float64("read-bytes", item.GetLoad(RegionReadBytes)),
+				zap.Float64("read-keys", item.GetLoad(RegionReadKeys)),
+				zap.Float64("read-qps", item.GetLoad(RegionReadQuery)),
+				zap.Float64("write-bytes", item.GetLoad(RegionWriteBytes)),
+				zap.Float64("write-keys", item.GetLoad(RegionWriteKeys)),
+				zap.Float64("write-query", item.GetLoad(RegionWriteQuery)),
+				zap.Uint64("hot-degree", uint64(item.HotDegree)),
+			)
+		}
+	}
+
 	switch item.actionType {
 	case Remove:
 		f.removeItem(item)
@@ -240,9 +307,11 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				inCold:         true,
 			}
 			deltaLoads := make([]float64, RegionStatCount)
+			//Fix ME: Only for read
 			for i, loads := range oldItem.thresholds {
 				deltaLoads[i] = loads * float64(interval)
 			}
+			//newItem.Loads = deltaLoads
 			stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
 			if stat != nil {
 				ret = append(ret, stat)
