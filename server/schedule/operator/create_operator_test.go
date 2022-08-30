@@ -16,11 +16,13 @@ package operator
 
 import (
 	"context"
+	"encoding/hex"
 	"testing"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -1077,4 +1079,62 @@ func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 			}
 		}
 	}
+}
+
+// Ref https://github.com/tikv/pd/issues/5401
+func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	re.NoError(cluster.SetRules([]*placement.Rule{
+		{
+			GroupID:     "pd",
+			ID:          "default",
+			StartKeyHex: hex.EncodeToString([]byte("")),
+			EndKeyHex:   hex.EncodeToString([]byte("")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t1",
+			ID:          "t1",
+			StartKeyHex: hex.EncodeToString([]byte("a")),
+			EndKeyHex:   hex.EncodeToString([]byte("b")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t2",
+			ID:          "t2",
+			StartKeyHex: hex.EncodeToString([]byte("b")),
+			EndKeyHex:   hex.EncodeToString([]byte("c")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+	}))
+	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
+	cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z2"})
+	cluster.AddLabelsStore(3, 0, map[string]string{"zone": "z3"})
+	cluster.AddLabelsStore(4, 0, map[string]string{"zone": "z4"})
+	originPeers := []*metapb.Peer{
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+		{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+	}
+
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c")}, originPeers[0])
+	op, err := CreateLeaveJointStateOperator("test", cluster, region)
+	re.NoError(err)
+	re.Equal(OpLeader, op.Kind())
+	re.Len(op.steps, 2)
+	step0 := op.steps[0].(TransferLeader)
+	re.Equal(uint64(2), step0.FromStore)
+	re.Equal(uint64(3), step0.ToStore)
+	step1 := op.steps[1].(ChangePeerV2Leave)
+	re.Len(step1.PromoteLearners, 1)
+	re.Len(step1.DemoteVoters, 1)
+	re.Equal(uint64(3), step1.PromoteLearners[0].ToStore)
+	re.Equal(uint64(2), step1.DemoteVoters[0].ToStore)
 }
