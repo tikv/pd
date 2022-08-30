@@ -130,10 +130,11 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 // in etcd with the value of 1.
 // Once we get a normal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
-//   global: xxxxxxxxxx00000000
-//     dc-1: xxxxxxxxxx00000001
-//     dc-2: xxxxxxxxxx00000010
-//     dc-3: xxxxxxxxxx00000011
+//
+//	global: xxxxxxxxxx00000000
+//	  dc-1: xxxxxxxxxx00000001
+//	  dc-2: xxxxxxxxxx00000010
+//	  dc-3: xxxxxxxxxx00000011
 func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int) int64 {
 	return rawLogical<<suffixBits + int64(t.suffix)
 }
@@ -298,10 +299,10 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 
 // UpdateTimestamp is used to update the timestamp.
 // This function will do two things:
-// 1. When the logical time is going to be used up, increase the current physical time.
-// 2. When the time window is not big enough, which means the saved etcd time minus the next physical time
-//    will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
-//    we also need to save the next physical time plus `TSOSaveInterval` into etcd.
+//  1. When the logical time is going to be used up, increase the current physical time.
+//  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
+//     will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
+//     we also need to save the next physical time plus `TSOSaveInterval` into etcd.
 //
 // Here is some constraints that this function must satisfy:
 // 1. The saved time is monotonically increasing.
