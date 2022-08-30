@@ -232,13 +232,15 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage                 = true
-	defaultTraceRegionFlow                  = true
-	defaultFlowRoundByDigit                 = 3 // KB
-	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
-	defaultMaxResetTSGap                    = 24 * time.Hour
-	defaultMinResolvedTSPersistenceInterval = 0
-	defaultKeyType                          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
+
+	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
+	DefaultMinResolvedTSPersistenceInterval = time.Second
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -1157,7 +1159,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
+		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

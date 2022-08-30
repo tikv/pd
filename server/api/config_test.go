@@ -309,7 +309,7 @@ func (suite *configTestSuite) TestConfigPDServer() {
 	suite.Equal("", sc.MetricStorage)
 	suite.Equal("auto", sc.DashboardAddress)
 	suite.Equal(int(3), sc.FlowRoundByDigit)
-	suite.Equal(typeutil.NewDuration(0), sc.MinResolvedTSPersistenceInterval)
+	suite.Equal(typeutil.NewDuration(time.Second), sc.MinResolvedTSPersistenceInterval)
 	suite.Equal(24*time.Hour, sc.MaxResetTSGap.Duration)
 }
 
