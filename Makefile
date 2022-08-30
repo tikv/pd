@@ -182,7 +182,7 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -timeout=15m -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)
