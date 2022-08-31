@@ -492,7 +492,6 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output.Info = "Unsafe recovery enters exit force leader stage"
 		if u.err != nil {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
-			u.err = nil
 		}
 	case finished:
 		if u.step > 1 {
@@ -517,7 +516,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.output = append(u.output, output)
 	data, err := json.Marshal(output)
 	if err != nil {
-		log.Error("Unsafe recovery fail to marshal json object", zap.String("err", err.Error()))
+		log.Error("Unsafe recovery fail to marshal json object", zap.Error(err))
 	} else {
 		log.Info(string(data))
 	}
