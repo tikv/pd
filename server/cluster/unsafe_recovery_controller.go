@@ -303,19 +303,12 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 			u.changeStage(failed)
 			return
 		} else {
-			// Manually set stage to exit force leader so that we do not have to collect reports twice.
+			// Manually set stage to exit force leader instead of calling changeStage(). So that
+			// 1. TiKV reports are not cleaned up here.
+			// 2. Exit force leader plan can still be genereated from the reports.
+			// 3. Clean up the reports after the plan is genereated by calling changeStage() there.
 			stage = exitForceLeader
-			var output StageOutput
-			output.Time = time.Now().Format("2006-01-02 15:04:05.000")
-			output.Info = "Unsafe recovery enters exit force leader stage"
-			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", err.Error()))
-			u.output = append(u.output, output)
-			data, marshalErr := json.Marshal(output)
-			if marshalErr != nil {
-				log.Error("Unsafe recovery fail to marshal json object", zap.String("err", marshalErr.Error()))
-			} else {
-				log.Error(string(data))
-			}
+			u.err = err
 		}
 		reCheck := false
 		for {
