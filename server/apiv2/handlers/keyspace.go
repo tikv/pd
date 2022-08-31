@@ -68,7 +68,7 @@ func CreateKeyspace(c *gin.Context) {
 	req := &keyspace.CreateKeyspaceRequest{
 		Name:   createParams.Name,
 		Config: createParams.Config,
-		Now:    time.Now(),
+		Now:    time.Now().Unix(),
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {
@@ -289,7 +289,7 @@ func updateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
-	meta, err := manager.UpdateKeyspaceState(name, state, time.Now())
+	meta, err := manager.UpdateKeyspaceState(name, state, time.Now().Unix())
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
