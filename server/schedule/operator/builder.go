@@ -67,7 +67,7 @@ type Builder struct {
 	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
 	err                  error
 
-	// skip origin check flags
+	// skip check flags
 	skipOriginJointStateCheck bool
 	skipPlacementRulesCheck   bool
 
@@ -781,7 +781,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	}
 
 	// placement rules
-	if len(b.rules) == 0 {
+	if b.skipPlacementRulesCheck || len(b.rules) == 0 {
 		return true
 	}
 	for _, r := range b.rules {
