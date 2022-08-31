@@ -30,7 +30,7 @@ const (
 )
 
 func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start, count int) []*keyspacepb.KeyspaceMeta {
-	now := time.Now()
+	now := time.Now().Unix()
 	var err error
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
 	manager := server.GetKeyspaceManager()
@@ -50,7 +50,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 100, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.Name)
 		re.NoError(err)
@@ -66,8 +66,8 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.Name)
 }
 
-func (suite *clientTestSuite) TestWatchKeyspaces() {
-	// Use a new cluster test watch keyspace.
+func (suite *clientTestSuite) TestWatchKeyspace() {
+	// Flush test storage before running TestWatchKeyspace.
 	suite.TearDownSuite()
 	suite.SetupSuite()
 	re := suite.Require()
@@ -93,7 +93,7 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 		i += len(loadedKeyspaces)
 	}
 	// Updates to state should also be captured.
-	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now())
+	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 	re.NoError(err)
 	loaded := <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)

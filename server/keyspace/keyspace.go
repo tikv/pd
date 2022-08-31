@@ -55,7 +55,8 @@ type CreateKeyspaceRequest struct {
 	// Using an existing name will result in error.
 	Name   string
 	Config map[string]string
-	Now    time.Time
+	// Now is the timestamp used to record creation time.
+	Now int64
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -74,13 +75,13 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage, idAllocator id.Allocator
 		return manager, nil
 	}
 	// Initialize default keyspace.
-	now := time.Now()
+	now := time.Now().Unix()
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      now.Unix(),
-		StateChangedAt: now.Unix(),
+		CreatedAt:      now,
+		StateChangedAt: now,
 	}
 	_, err = manager.saveNewKeyspace(defaultKeyspace)
 	if err != nil && err != ErrKeyspaceExists {
@@ -105,8 +106,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		Id:             newID,
 		Name:           request.Name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      request.Now.Unix(),
-		StateChangedAt: request.Now.Unix(),
+		CreatedAt:      request.Now,
+		StateChangedAt: request.Now,
 		Config:         request.Config,
 	}
 	return manager.saveNewKeyspace(keyspace)
@@ -116,17 +117,17 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) (*key
 	manager.idLock.Lock()
 	defer manager.idLock.Unlock()
 	// Check if keyspace id with that name already exists.
-	nameExists, _, err := manager.store.LoadKeyspaceIDByName(keyspace.Name)
+	nameExists, _, err := manager.store.LoadKeyspaceIDByName(keyspace.GetName())
 	if err != nil {
 		return nil, err
 	}
 	if nameExists {
 		return nil, ErrKeyspaceExists
 	}
-	manager.metaLock.Lock(keyspace.Id)
-	defer manager.metaLock.Unlock(keyspace.Id)
+	manager.metaLock.Lock(keyspace.GetId())
+	defer manager.metaLock.Unlock(keyspace.GetId())
 	// Check if keyspace meta with that id already exists.
-	keyspaceExists, err := manager.store.LoadKeyspace(keyspace.Id, &keyspacepb.KeyspaceMeta{})
+	keyspaceExists, err := manager.store.LoadKeyspace(keyspace.GetId(), &keyspacepb.KeyspaceMeta{})
 	if err != nil {
 		return nil, err
 	}
@@ -134,14 +135,14 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) (*key
 		return nil, ErrKeyspaceExists
 	}
 	// TODO: Enable Transaction at storage layer to save MetaData and NameToID in a single transaction.
-	// Save keyspace keyspace before saving id.
+	// Save keyspace meta before saving id.
 	if err = manager.store.SaveKeyspace(keyspace); err != nil {
 		return nil, err
 	}
 	// Create name to ID entry,
 	// if this failed, previously stored keyspace meta should be removed.
-	if err = manager.createNameToID(keyspace.Id, keyspace.Name); err != nil {
-		if removeErr := manager.store.RemoveKeyspace(keyspace.Id); removeErr != nil {
+	if err = manager.createNameToID(keyspace.GetId(), keyspace.GetName()); err != nil {
+		if removeErr := manager.store.RemoveKeyspace(keyspace.GetId()); removeErr != nil {
 			return nil, errors.Wrap(removeErr, "failed to remove keyspace keyspace after save spaceID failure")
 		}
 		return nil, err
@@ -217,10 +218,10 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		return nil, err
 	}
 	// Changing ARCHIVED keyspace's config is not allowed.
-	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
+	if keyspace.GetState() == keyspacepb.KeyspaceState_ARCHIVED {
 		return nil, errKeyspaceArchived
 	}
-	if keyspace.Config == nil {
+	if keyspace.GetConfig() == nil {
 		keyspace.Config = map[string]string{}
 	}
 	// Update keyspace config according to mutations.
@@ -243,7 +244,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 
 // UpdateKeyspaceState updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
-func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now time.Time) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
 	if name == DefaultKeyspaceName {
 		return nil, errModifyDefault
@@ -264,19 +265,19 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil, err
 	}
 	// If keyspace is already in target state, then nothing needs to be change.
-	if keyspace.State == newState {
+	if keyspace.GetState() == newState {
 		return keyspace, nil
 	}
 	// ARCHIVED is the terminal state that cannot be changed from.
-	if keyspace.State == keyspacepb.KeyspaceState_ARCHIVED {
+	if keyspace.GetState() == keyspacepb.KeyspaceState_ARCHIVED {
 		return nil, errKeyspaceArchived
 	}
 	// Archiving an enabled keyspace directly is not allowed.
-	if keyspace.State == keyspacepb.KeyspaceState_ENABLED && newState == keyspacepb.KeyspaceState_ARCHIVED {
+	if keyspace.GetState() == keyspacepb.KeyspaceState_ENABLED && newState == keyspacepb.KeyspaceState_ARCHIVED {
 		return nil, errArchiveEnabled
 	}
 	// Change keyspace state and record change time.
-	keyspace.StateChangedAt = now.Unix()
+	keyspace.StateChangedAt = now
 	keyspace.State = newState
 	// Save the updated keyspace.
 	if err = manager.store.SaveKeyspace(keyspace); err != nil {

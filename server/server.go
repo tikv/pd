@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/golang/protobuf/proto" //nolint:staticcheck
+	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -86,6 +86,8 @@ const (
 	// idAllocPath for idAllocator to save persistent window's end.
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
+
+	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1624,4 +1626,45 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 		}
 	}
 	return false
+}
+
+// MarkSnapshotRecovering mark pd that we're recovering
+// tikv will get this state during BR EBS restore.
+// we write this info into etcd for simplicity, the key only stays inside etcd temporary
+// during BR EBS restore in which period the cluster is not able to serve request.
+// and is deleted after BR EBS restore is done.
+func (s *Server) MarkSnapshotRecovering() error {
+	log.Info("mark snapshot recovering")
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	// the value doesn't matter, set to a static string
+	_, err := kv.NewSlowLogTxn(s.client).
+		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
+		Then(clientv3.OpPut(markPath, "on")).
+		Commit()
+	// if other client already marked, return success too
+	return err
+}
+
+// IsSnapshotRecovering check whether recovering-mark marked
+func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	resp, err := s.client.Get(ctx, markPath)
+	if err != nil {
+		return false, err
+	}
+	return len(resp.Kvs) > 0, nil
+}
+
+// UnmarkSnapshotRecovering unmark recovering mark
+func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
+	log.Info("unmark snapshot recovering")
+	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	_, err := s.client.Delete(ctx, markPath)
+	// if other client already unmarked, return success too
+	return err
+}
+
+// RecoverAllocID recover alloc id. set current base id to input id
+func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
+	return s.idAllocator.SetBase(id)
 }

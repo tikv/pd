@@ -130,7 +130,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	candidates := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetOpts(), s.filters...).
+		FilterSource(cluster.GetOpts(), nil, s.filters...).
 		Shuffle()
 
 	pendingFilter := filter.NewRegionPendingFilter()
@@ -139,15 +139,15 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
-			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), s.conf.Ranges),
+			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), s.conf.Ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLeader) {
-			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), s.conf.Ranges),
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), s.conf.Ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLearner) {
-			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), s.conf.Ranges),
+			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), s.conf.Ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region != nil {
@@ -169,8 +169,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, regio
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
 	target := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster.GetOpts(), s.filters...).
-		FilterTarget(cluster.GetOpts(), scoreGuard, excludedFilter).
+		FilterTarget(cluster.GetOpts(), nil, append(s.filters, scoreGuard, excludedFilter)...).
 		RandomPick()
 	if target == nil {
 		return nil

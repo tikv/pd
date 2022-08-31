@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
@@ -459,6 +458,21 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	return &pdpb.AllocIDResponse{
 		Header: s.header(),
 		Id:     id,
+	}, nil
+}
+
+// IsSnapshotRecovering implements gRPC PDServer.
+func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
+	// recovering mark is stored in etcd directly, there's no need to forward.
+	marked, err := s.Server.IsSnapshotRecovering(ctx)
+	if err != nil {
+		return &pdpb.IsSnapshotRecoveringResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	return &pdpb.IsSnapshotRecoveringResponse{
+		Header: s.header(),
+		Marked: marked,
 	}, nil
 }
 
@@ -1318,7 +1332,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 	if op != nil {
-		op.AttachKind(operator.OpAdmin)
 		rc.GetOperatorController().AddOperator(op)
 	}
 
@@ -1500,6 +1513,9 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
@@ -1677,19 +1693,13 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
 	if err != nil {
 		return 0, err
 	}
-	for _, op := range ops {
-		op.AttachKind(operator.OpAdmin)
-		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-		}
-	}
 	percentage := 100
 	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
 			r := make([]error, 0, len(failures))
 			for _, err := range failures {
