@@ -67,7 +67,7 @@ func CreateTransferLeaderOperator(desc string, ci ClusterInformer, region *core.
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
 func CreateForceTransferLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
-	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
+	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
 		Build(kind)
@@ -225,7 +225,7 @@ const OpDescLeaveJointState = "leave-joint-state"
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
 func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core.RegionInfo) (*Operator, error) {
-	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck)
+	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck, SkipPlacementRulesCheck)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
 		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")
