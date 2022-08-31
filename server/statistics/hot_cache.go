@@ -23,7 +23,7 @@ import (
 )
 
 // Denoising is an option to calculate flow base on the real heartbeats. Should
-// only turned off by the simulator and the test.
+// only turn off by the simulator and the test.
 var Denoising = true
 
 const queueCap = 20000
@@ -48,7 +48,7 @@ func NewHotCache(ctx context.Context) *HotCache {
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(task flowItemTask) bool {
+func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
 	select {
 	case w.writeCache.taskQueue <- task:
 		return true
@@ -58,7 +58,7 @@ func (w *HotCache) CheckWriteAsync(task flowItemTask) bool {
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(task flowItemTask) bool {
+func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
 	select {
 	case w.readCache.taskQueue <- task:
 		return true
@@ -118,7 +118,7 @@ func incMetrics(name string, storeID uint64, kind RWType) {
 	}
 }
 
-func (w *HotCache) updateItems(queue <-chan flowItemTask, runTask func(task flowItemTask)) {
+func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -129,7 +129,7 @@ func (w *HotCache) updateItems(queue <-chan flowItemTask, runTask func(task flow
 	}
 }
 
-func (w *HotCache) runReadTask(task flowItemTask) {
+func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.readCache)
@@ -137,7 +137,7 @@ func (w *HotCache) runReadTask(task flowItemTask) {
 	}
 }
 
-func (w *HotCache) runWriteTask(task flowItemTask) {
+func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.writeCache)

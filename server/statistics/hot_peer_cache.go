@@ -70,7 +70,7 @@ type hotPeerCache struct {
 	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	topNTTL            time.Duration
 	reportIntervalSecs int
-	taskQueue          chan flowItemTask
+	taskQueue          chan FlowItemTask
 }
 
 // NewHotPeerCache creates a hotPeerCache
@@ -80,7 +80,7 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		peersOfStore:   make(map[uint64]*TopN),
 		storesOfRegion: make(map[uint64]map[uint64]struct{}),
 		regionsOfStore: make(map[uint64]map[uint64]struct{}),
-		taskQueue:      make(chan flowItemTask, queueCap),
+		taskQueue:      make(chan FlowItemTask, queueCap),
 	}
 	if kind == Write {
 		c.reportIntervalSecs = WriteReportInterval
