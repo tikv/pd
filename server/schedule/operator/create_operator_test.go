@@ -1115,10 +1115,10 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 			Count:       1,
 		},
 	}))
-	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
-	cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z2"})
-	cluster.AddLabelsStore(3, 0, map[string]string{"zone": "z3"})
-	cluster.AddLabelsStore(4, 0, map[string]string{"zone": "z4"})
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(2, 1)
+	cluster.AddRegionStore(3, 1)
+	cluster.AddRegionStore(4, 1)
 	originPeers := []*metapb.Peer{
 		{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
 		{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
@@ -1130,11 +1130,11 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re.Equal(OpLeader, op.Kind())
 	re.Len(op.steps, 2)
 	step0 := op.steps[0].(TransferLeader)
-	re.Equal(uint64(2), step0.FromStore)
-	re.Equal(uint64(3), step0.ToStore)
+	re.Equal(uint64(3), step0.FromStore)
+	re.Equal(uint64(4), step0.ToStore)
 	step1 := op.steps[1].(ChangePeerV2Leave)
 	re.Len(step1.PromoteLearners, 1)
 	re.Len(step1.DemoteVoters, 1)
-	re.Equal(uint64(3), step1.PromoteLearners[0].ToStore)
-	re.Equal(uint64(2), step1.DemoteVoters[0].ToStore)
+	re.Equal(uint64(4), step1.PromoteLearners[0].ToStore)
+	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
 }

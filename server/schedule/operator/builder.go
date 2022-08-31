@@ -69,6 +69,7 @@ type Builder struct {
 
 	// skip origin check flags
 	skipOriginJointStateCheck bool
+	skipPlacementRulesCheck   bool
 
 	// build flags
 	useJointConsensus bool
@@ -92,6 +93,11 @@ type BuilderOption func(*Builder)
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
+}
+
+// SkipPlacementRulesCheck lets the builder skip the placement rules check for origin and target peers.
+func SkipPlacementRulesCheck(b *Builder) {
+	b.skipPlacementRulesCheck = true
 }
 
 // NewBuilder creates a Builder.
@@ -138,7 +144,7 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 
 	// placement rules
 	var rules []*placement.Rule
-	if err == nil && b.GetOpts().IsPlacementRulesEnabled() {
+	if err == nil && !b.skipPlacementRulesCheck && b.GetOpts().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
