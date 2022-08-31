@@ -98,7 +98,7 @@ var (
 
 // diagnose errors
 var (
-	ErrDiagnoseLoadPlanError = errors.Normalize("load plan failed", errors.RFCCodeText("PD:diagnose:ErrDiagnoseLoadPlanError"))
+	ErrDiagnosticLoadPlanError = errors.Normalize("load plan failed", errors.RFCCodeText("PD:diagnostic:ErrDiagnosticLoadPlanError"))
 )
 
 // placement errors

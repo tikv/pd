@@ -101,43 +101,43 @@ var statusText = map[StatusCode]string{
 	StatusOK: "OK",
 
 	// store in normal state usually
-	StatusStoreScoreDisallowed: "Store Score Disallowed",
-	StatusStoreAlreadyHasPeer:  "Store Already Has Peer",
-	StatusStoreNotMatchRule:    "Store Not Match Rule",
+	StatusStoreScoreDisallowed: "StoreScoreDisallowed",
+	StatusStoreAlreadyHasPeer:  "StoreAlreadyHasPeer",
+	StatusStoreNotMatchRule:    "StoreNotMatchRule",
 
 	// store is limited by soft constraint
-	StatusStoreSnapshotThrottled:    "Store Snapshot Throttled",
-	StatusStorePendingPeerThrottled: "Store Pending Peer Throttled",
-	StatusStoreAddLimitThrottled:    "Store Add Peer Throttled",
-	StatusStoreRemoveLimitThrottled: "Store Remove Peer Throttled",
+	StatusStoreSnapshotThrottled:    "StoreSnapshotThrottled",
+	StatusStorePendingPeerThrottled: "StorePendingPeerThrottled",
+	StatusStoreAddLimitThrottled:    "StoreAddPeerThrottled",
+	StatusStoreRemoveLimitThrottled: "StoreRemovePeerThrottled",
 
 	// store is limited by specified configuration
-	StatusStoreRejectLeader:      "Store Reject Leader",
-	StatusStoreNotMatchIsolation: "Store Not Match Isolation",
+	StatusStoreRejectLeader:      "StoreRejectLeader",
+	StatusStoreNotMatchIsolation: "StoreNotMatchIsolation",
 
 	// store is limited by hard constraint
-	StatusStoreLowSpace:     "Store Low Space",
-	StatusStoreRemoving:     "Store Removing",
-	StatusStoreRemoved:      "Store Removed",
-	StatusStoreDisconnected: "Store Disconnected",
-	StatusStoreDown:         "Store Down",
-	StatusStoreBusy:         "Store Busy",
+	StatusStoreLowSpace:     "StoreLowSpace",
+	StatusStoreRemoving:     "StoreRemoving",
+	StatusStoreRemoved:      "StoreRemoved",
+	StatusStoreDisconnected: "StoreDisconnected",
+	StatusStoreDown:         "StoreDown",
+	StatusStoreBusy:         "StoreBusy",
 
-	StatusStoreNotExisted: "Store Not Existed",
+	StatusStoreNotExisted: "StoreNotExisted",
 
 	// region
-	StatusRegionHot:           "Region Hot",
-	StatusRegionUnhealthy:     "Region Unhealthy",
-	StatusRegionEmpty:         "Region Empty",
-	StatusRegionNotReplicated: "Region Not Replicated",
-	StatusRegionNotMatchRule:  "Region Not Match Rule",
+	StatusRegionHot:           "RegionHot",
+	StatusRegionUnhealthy:     "RegionUnhealthy",
+	StatusRegionEmpty:         "RegionEmpty",
+	StatusRegionNotReplicated: "RegionNotReplicated",
+	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 
 	// non-filter
-	StatusNoTargetRegion:    "No Target Region",
-	StatusRegionLabelReject: "Region Label Reject",
+	StatusNoTargetRegion:    "NoTargetRegion",
+	StatusRegionLabelReject: "RegionLabelReject",
 
 	// operator
-	StatusCreateOperatorFailed: "Create Operator Failed",
+	StatusCreateOperatorFailed: "CreateOperatorFailed",
 }
 
 // StatusText turns the status code into string.
@@ -165,15 +165,15 @@ func NewStatus(statusCode StatusCode, reason ...string) *Status {
 }
 
 // IsOK returns true if the status code is StatusOK.
-func (s Status) IsOK() bool {
+func (s *Status) IsOK() bool {
 	return s.StatusCode == StatusOK
 }
 
 // Priority returns the priority of status for diagnose
-func (s Status) Priority() int {
+func (s *Status) Priority() int {
 	return int(s.StatusCode) / 100
 }
 
-func (s Status) String() string {
+func (s *Status) String() string {
 	return StatusText(s.StatusCode)
 }

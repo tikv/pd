@@ -109,7 +109,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
 		if !ok {
-			return "", errs.ErrDiagnoseLoadPlanError
+			return "", errs.ErrDiagnosticLoadPlanError
 		}
 		step := p.GetStep()
 		// we don't consider the situation for verification step
@@ -123,6 +123,8 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 			continue
 		}
 		var store uint64
+		// `step == 1` is a special processing in summary, because we want to exclude the factor of region
+		// and consider the failure as the status of source store.
 		if step == 1 {
 			store = p.source.GetID()
 		} else {
@@ -136,20 +138,20 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 
 	for _, store := range storeStatusCounter {
 		max := 0
-		curstat := *plan.NewStatus(plan.StatusOK)
+		curStat := *plan.NewStatus(plan.StatusOK)
 		for stat, c := range store {
-			if balancePlanStatusComparer(max, curstat, c, stat) {
+			if balancePlanStatusComparer(max, curStat, c, stat) {
 				max = c
-				curstat = stat
+				curStat = stat
 			}
 		}
-		statusCounter[curstat] += 1
+		statusCounter[curStat] += 1
 	}
-	var resstr string
+	var resStr string
 	for k, v := range statusCounter {
-		resstr += fmt.Sprintf("%d stores are filtered by %s; ", v, k.String())
+		resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
 	}
-	return resstr, nil
+	return resStr, nil
 }
 
 // balancePlanStatusComparer returns true if new status is better than old one.

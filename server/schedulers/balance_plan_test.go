@@ -156,8 +156,8 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"4 stores are filtered by Store Score Disallowed": {},
-			"1 stores are filtered by Store Not Match Rule":   {},
+			"4 store(s) StoreScoreDisallowed": {},
+			"1 store(s) StoreNotMatchRule":    {},
 		}))
 }
 
@@ -172,7 +172,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"5 stores are filtered by Store Down": {},
+			"5 store(s) StoreDown": {},
 		}))
 }
 
@@ -187,7 +187,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"4 stores are filtered by Region Not Match Rule": {},
+			"4 store(s) RegionNotMatchRule": {},
 		}))
 }
 
@@ -210,8 +210,8 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
-			"2 stores are filtered by Store Score Disallowed": {},
-			"2 stores are filtered by Store Not Match Rule":   {},
-			"1 stores are filtered by Store Down":             {},
+			"2 store(s) StoreScoreDisallowed": {},
+			"2 store(s) StoreNotMatchRule":    {},
+			"1 store(s) StoreDown":            {},
 		}))
 }
