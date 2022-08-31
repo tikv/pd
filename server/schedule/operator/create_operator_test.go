@@ -14,13 +14,24 @@
 package operator
 
 import (
+<<<<<<< HEAD
 	"strings"
+=======
+	"context"
+	"encoding/hex"
+	"testing"
+>>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+<<<<<<< HEAD
 
+=======
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+>>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -1065,4 +1076,62 @@ func (s *testCreateOperatorSuite) TestMoveRegionWithoutJointConsensus(c *C) {
 			}
 		}
 	}
+}
+
+// Ref https://github.com/tikv/pd/issues/5401
+func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	re.NoError(cluster.SetRules([]*placement.Rule{
+		{
+			GroupID:     "pd",
+			ID:          "default",
+			StartKeyHex: hex.EncodeToString([]byte("")),
+			EndKeyHex:   hex.EncodeToString([]byte("")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t1",
+			ID:          "t1",
+			StartKeyHex: hex.EncodeToString([]byte("a")),
+			EndKeyHex:   hex.EncodeToString([]byte("b")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t2",
+			ID:          "t2",
+			StartKeyHex: hex.EncodeToString([]byte("b")),
+			EndKeyHex:   hex.EncodeToString([]byte("c")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+	}))
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(2, 1)
+	cluster.AddRegionStore(3, 1)
+	cluster.AddRegionStore(4, 1)
+	originPeers := []*metapb.Peer{
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+		{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+	}
+
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c")}, originPeers[0])
+	op, err := CreateLeaveJointStateOperator("test", cluster, region)
+	re.NoError(err)
+	re.Equal(OpLeader, op.Kind())
+	re.Len(op.steps, 2)
+	step0 := op.steps[0].(TransferLeader)
+	re.Equal(uint64(3), step0.FromStore)
+	re.Equal(uint64(4), step0.ToStore)
+	step1 := op.steps[1].(ChangePeerV2Leave)
+	re.Len(step1.PromoteLearners, 1)
+	re.Len(step1.DemoteVoters, 1)
+	re.Equal(uint64(4), step1.PromoteLearners[0].ToStore)
+	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
 }

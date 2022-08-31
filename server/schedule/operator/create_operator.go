@@ -58,8 +58,13 @@ func CreateTransferLeaderOperator(desc string, cluster opt.Cluster, region *core
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
+<<<<<<< HEAD
 func CreateForceTransferLeaderOperator(desc string, cluster opt.Cluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, cluster, region, SkipOriginJointStateCheck).
+=======
+func CreateForceTransferLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
+>>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
 		Build(kind)
@@ -201,8 +206,13 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 }
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
+<<<<<<< HEAD
 func CreateLeaveJointStateOperator(desc string, cluster opt.Cluster, origin *core.RegionInfo) (*Operator, error) {
 	b := NewBuilder(desc, cluster, origin, SkipOriginJointStateCheck)
+=======
+func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core.RegionInfo) (*Operator, error) {
+	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck, SkipPlacementRulesCheck)
+>>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
 		b.err = errors.Errorf("cannot build leave joint state operator for region which is not in joint state")
