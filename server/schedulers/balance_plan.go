@@ -118,7 +118,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 		}
 		if step > maxStep {
 			storeStatusCounter = make(map[uint64]map[plan.Status]int)
-			maxStep = p.GetStep()
+			maxStep = step
 		} else if step < maxStep {
 			continue
 		}
@@ -128,7 +128,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 		if step == 1 {
 			store = p.source.GetID()
 		} else {
-			store = p.GetResource(p.GetStep())
+			store = p.GetResource(step)
 		}
 		if _, ok := storeStatusCounter[store]; !ok {
 			storeStatusCounter[store] = make(map[plan.Status]int)
