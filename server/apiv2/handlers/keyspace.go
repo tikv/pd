@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
@@ -35,10 +36,8 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router.POST("", CreateKeyspace)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
-	router.POST("/:name/update-config", UpdateKeyspaceConfig)
-	router.POST("/:name/enable", EnableKeyspace)
-	router.POST("/:name/disable", DisableKeyspace)
-	router.POST("/:name/archive", ArchiveKeyspace)
+	router.PATCH("/:name/config", UpdateKeyspaceConfig)
+	router.PUT("/:name/state", UpdateKeyspaceState)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
@@ -54,6 +53,7 @@ type CreateKeyspaceParams struct {
 // @Param body body CreateKeyspaceParams true "Create keyspace parameters"
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /keyspaces [post]
 func CreateKeyspace(c *gin.Context) {
@@ -151,6 +151,7 @@ type LoadAllKeyspacesResponse struct {
 // @Param limit query string false "maximum number of results to return"
 // @Produce json
 // @Success 200 {object} LoadAllKeyspacesResponse
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /keyspaces [get]
 func LoadAllKeyspaces(c *gin.Context) {
@@ -201,7 +202,7 @@ type UpdateConfigParams struct {
 }
 
 // UpdateKeyspaceConfig updates target keyspace's config.
-// This is a custom action that supports PATCH semantics and uses the JSON merge patch
+// This api uses PATCH semantic and supports JSON Merge Patch.
 // format and processing rules.
 // @Tags keyspaces
 // @Summary Update keyspace config.
@@ -209,8 +210,9 @@ type UpdateConfigParams struct {
 // @Param body body UpdateConfigParams true "Update keyspace parameters"
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name}/update-config [post]
+// Router /keyspaces/{name}/update-config [patch]
 func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -250,46 +252,37 @@ func getMutations(patch map[string]*string) []*keyspace.Mutation {
 	return mutations
 }
 
-// EnableKeyspace enables target keyspace.
-// @Tags keyspaces
-// @Summary Enable keyspace.
-// @Param name path string true "Keyspace Name"
-// @Produce json
-// @Success 200 {object} KeyspaceMeta
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name}/enable [post]
-func EnableKeyspace(c *gin.Context) {
-	updateKeyspaceState(c, keyspacepb.KeyspaceState_ENABLED)
+// UpdateStateParam represents parameters needed to modify target keyspace's state.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type UpdateStateParam struct {
+	State string `json:"state"`
 }
 
-// DisableKeyspace disables target keyspace.
+// UpdateKeyspaceState update the target keyspace's state.
 // @Tags keyspaces
-// @Summary Disable keyspace.
+// @Summary Update keyspace state.
 // @Param name path string true "Keyspace Name"
+// @Param body body UpdateStateParam true "New state for the keyspace"
 // @Produce json
 // @Success 200 {object} KeyspaceMeta
+// @Failure 400 {string} string "The input is invalid."
 // @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name}/disable [post]
-func DisableKeyspace(c *gin.Context) {
-	updateKeyspaceState(c, keyspacepb.KeyspaceState_DISABLED)
-}
-
-// ArchiveKeyspace archives target keyspace.
-// @Tags keyspaces
-// @Summary Archive keyspace.
-// @Param name path string true "Keyspace Name"
-// @Produce json
-// @Success 200 {object} KeyspaceMeta
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// Router /keyspaces/{name}/archive [post]
-func ArchiveKeyspace(c *gin.Context) {
-	updateKeyspaceState(c, keyspacepb.KeyspaceState_ARCHIVED)
-}
-func updateKeyspaceState(c *gin.Context, state keyspacepb.KeyspaceState) {
+// Router /keyspaces/{name}/archive [put]
+func UpdateKeyspaceState(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
-	meta, err := manager.UpdateKeyspaceState(name, state, time.Now().Unix())
+	param := &UpdateStateParam{}
+	err := c.BindJSON(param)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	targetState, ok := keyspacepb.KeyspaceState_value[param.State]
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errors.Errorf("unknown target state: %s", param.State))
+	}
+	meta, err := manager.UpdateKeyspaceState(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -314,7 +307,7 @@ func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 		Config         map[string]string `json:"config,omitempty"`
 	}{
 		meta.Name,
-		keyspacepb.KeyspaceState_name[int32(meta.State)],
+		meta.State.String(),
 		meta.CreatedAt,
 		meta.StateChangedAt,
 		meta.Config,

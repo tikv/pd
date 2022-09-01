@@ -107,26 +107,26 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
 	for _, created := range keyspaces {
 		// Should NOT allow archiving ENABLED keyspace.
-		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
+		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "ARCHIVED")
 		re.False(success)
 		// Disabling an ENABLED keyspace is allowed.
-		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, disabled.State)
 		// Disabling an already DISABLED keyspace should not result in any change.
-		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
 		// Archiving a DISABLED keyspace should be allowed.
-		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, "archive")
+		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, "ARCHIVED")
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, archived.State)
 		// Modifying ARCHIVED keyspace is not allowed.
-		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "disable")
+		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
 		re.False(success)
 	}
 	// Changing default keyspace's state is NOT allowed.
-	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, "disable")
+	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, "DISABLED")
 	re.False(success)
 }
 
@@ -165,8 +165,11 @@ func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, toke
 	return resp
 }
 
-func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, action string) (bool, *keyspacepb.KeyspaceMeta) {
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/"+name+"/"+action, nil)
+func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, newState string) (bool, *keyspacepb.KeyspaceMeta) {
+	request := handlers.UpdateStateParam{State: newState}
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPut, server.GetAddr()+keyspacesPrefix+"/"+name+"/state", bytes.NewBuffer(data))
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -174,7 +177,7 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	if resp.StatusCode != http.StatusOK {
 		return false, nil
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
@@ -216,7 +219,7 @@ func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/"+name+"/update-config", bytes.NewBuffer(data))
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
