@@ -223,11 +223,21 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		}
 	}
 
+	var witness *metapb.Peer
+	for _, witness = range region.GetWitnesses() {
+		if witness.StoreId != peer.StoreId {
+			break
+		}
+	}
+
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
-		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+		if newPeer.IsWitness {
+			return operator.CreateMoveWitnessOperator("replace-rule-"+status+"-witness-peer", c.cluster, region, peer.StoreId, newPeer.StoreId, operator.OpWitness)
+		}
+		return operator.CreateMovePeerAndPromoteWitessToVoterOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica|operator.OpWitness, peer.StoreId, newPeer, witness.StoreId)
 	}
 	op, err := createOp()
 	if err != nil {
