@@ -21,7 +21,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
@@ -46,13 +45,13 @@ const (
 	hotRegionAntiCount = 2
 )
 
-var minHotThresholds = [RegionStatCount]float64{
-	RegionWriteBytes: 1 * units.KiB,
-	RegionWriteKeys:  32,
-	RegionWriteQuery: 32,
-	RegionReadBytes:  8 * units.KiB,
-	RegionReadKeys:   128,
-	RegionReadQuery:  128,
+var MinHotThresholds = [RegionStatCount]float64{
+	RegionReadBytes:    8 * units.KiB,
+	RegionReadKeys:     128,
+	RegionReadQueries:  128,
+	RegionWriteBytes:   1 * units.KiB,
+	RegionWriteKeys:    32,
+	RegionWriteQueries: 32,
 }
 
 var statLogger = logutil.GetPluggableLogger("hot-stats", true)
@@ -110,66 +109,32 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 
 func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	if item.RegionID == atomic.LoadUint64(&observerRegionID) || atomic.LoadUint64(&observerRegionID) == math.MaxUint64 {
-		if len(item.Loads) < 6 {
-			statLogger.Info("origin load stats - cold",
-				zap.Stringer("kind", f.kind),
-				zap.Stringer("action", item.actionType),
-				zap.Uint64("region-id", item.RegionID),
-				zap.Uint64("store-id", item.StoreID),
-				zap.Float64("read-bytes", item.Loads[0]),
-				zap.Float64("read-keys", item.Loads[1]),
-				zap.Float64("read-qps", item.Loads[2]),
-				zap.Float64("write-bytes", 0),
-				zap.Float64("write-keys", 0),
-				zap.Float64("write-query", 0),
-			)
-			statLogger.Info("updated load stats - cold",
-				zap.Stringer("kind", f.kind),
-				zap.Stringer("action", item.actionType),
-				zap.Uint64("region-id", item.RegionID),
-				zap.Uint64("store-id", item.StoreID),
-				zap.Float64("read-bytes", item.GetLoad(RegionReadBytes)),
-				zap.Float64("read-keys", item.GetLoad(RegionReadKeys)),
-				zap.Float64("read-qps", item.GetLoad(RegionReadQuery)),
-				zap.Float64("write-bytes", 0),
-				zap.Float64("write-keys", 0),
-				zap.Float64("write-query", 0),
-				zap.Uint64("hot-degree", uint64(item.HotDegree)),
-			)
-		} else {
-			statLogger.Info("origin load stats",
-				zap.Stringer("kind", f.kind),
-				zap.Stringer("action", item.actionType),
-				zap.Uint64("region-id", item.RegionID),
-				zap.Uint64("store-id", item.StoreID),
-				zap.Float64("read-bytes", item.Loads[0]),
-				zap.Float64("read-keys", item.Loads[1]),
-				zap.Float64("read-qps", item.Loads[2]),
-				zap.Float64("write-bytes", item.Loads[3]),
-				zap.Float64("write-keys", item.Loads[4]),
-				zap.Float64("write-query", item.Loads[5]),
-				zap.Uint64("hot-degree", uint64(item.HotDegree)),
-			)
-			statLogger.Info("updated load stats",
-				zap.Stringer("kind", f.kind),
-				zap.Stringer("action", item.actionType),
-				zap.Uint64("region-id", item.RegionID),
-				zap.Uint64("store-id", item.StoreID),
-				zap.Float64("read-bytes", item.GetLoad(RegionReadBytes)),
-				zap.Float64("read-keys", item.GetLoad(RegionReadKeys)),
-				zap.Float64("read-qps", item.GetLoad(RegionReadQuery)),
-				zap.Float64("write-bytes", item.GetLoad(RegionWriteBytes)),
-				zap.Float64("write-keys", item.GetLoad(RegionWriteKeys)),
-				zap.Float64("write-query", item.GetLoad(RegionWriteQuery)),
-				zap.Uint64("hot-degree", uint64(item.HotDegree)),
-			)
-		}
+		statLogger.Info("origin load stats",
+			zap.Stringer("kind", f.kind),
+			zap.Stringer("action", item.actionType),
+			zap.Uint64("region-id", item.RegionID),
+			zap.Uint64("store-id", item.StoreID),
+			zap.Float64("bytes", item.Loads[ByteDim]),
+			zap.Float64("keys", item.Loads[KeyDim]),
+			zap.Float64("qps", item.Loads[QueryDim]),
+			zap.Bool("in-cold", item.inCold),
+		)
+		statLogger.Info("updated load stats",
+			zap.Stringer("kind", f.kind),
+			zap.Stringer("action", item.actionType),
+			zap.Uint64("region-id", item.RegionID),
+			zap.Uint64("store-id", item.StoreID),
+			zap.Float64("bytes", item.GetLoad(ByteDim)),
+			zap.Float64("keys", item.GetLoad(KeyDim)),
+			zap.Float64("qps", item.GetLoad(QueryDim)),
+			zap.Uint64("hot-degree", uint64(item.HotDegree)),
+			zap.Bool("in-cold", item.inCold),
+		)
 	}
 
 	switch item.actionType {
 	case Remove:
 		f.removeItem(item)
-		item.Log("region heartbeat remove from cache", log.Debug)
 		incMetrics("remove_item", item.StoreID, item.Kind)
 		return
 	case Add:
@@ -179,7 +144,6 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	}
 	// for add and update
 	f.putItem(item)
-	item.Log("region heartbeat update", log.Debug)
 }
 
 func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
@@ -198,9 +162,9 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
-		case RegionWriteQuery:
+		case RegionWriteQueries:
 			writeQueryHist.Observe(loads[int(k)])
-		case RegionReadQuery:
+		case RegionReadQueries:
 			readQueryHist.Observe(loads[int(k)])
 		}
 	}
@@ -235,10 +199,6 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	deltaLoads := peer.GetLoads()
 	// update metrics
 	f.collectPeerMetrics(deltaLoads, interval)
-	loads := make([]float64, len(deltaLoads))
-	for i := range deltaLoads {
-		loads[i] = deltaLoads[i] / float64(interval)
-	}
 	regionID := region.GetID()
 	oldItem := f.getOldHotPeerStat(regionID, storeID)
 	thresholds := f.calcHotThresholds(storeID)
@@ -246,7 +206,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		StoreID:        storeID,
 		RegionID:       regionID,
 		Kind:           f.kind,
-		Loads:          loads,
+		Loads:          f.kind.GetLoadsFromPeer(peer),
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
 		isLearner:      core.IsLearner(region.GetPeer(storeID)),
@@ -344,17 +304,16 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	statKinds := f.kind.RegionStats()
-	mins := make([]float64, len(statKinds))
+	ret := make([]float64, DimLen)
 	for i, k := range statKinds {
-		mins[i] = minHotThresholds[k]
+		ret[i] = MinHotThresholds[k]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return mins
+		return ret
 	}
-	ret := make([]float64, len(statKinds))
 	for i := range ret {
-		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(statKinds[i])*HotThresholdRatio, mins[i])
+		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, ret[i])
 	}
 	return ret
 }

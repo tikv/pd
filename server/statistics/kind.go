@@ -14,6 +14,10 @@
 
 package statistics
 
+import (
+	"github.com/tikv/pd/server/core"
+)
+
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
 
@@ -21,10 +25,10 @@ type RegionStatKind int
 const (
 	RegionReadBytes RegionStatKind = iota
 	RegionReadKeys
-	RegionReadQuery
+	RegionReadQueries
 	RegionWriteBytes
 	RegionWriteKeys
-	RegionWriteQuery
+	RegionWriteQueries
 
 	RegionStatCount
 )
@@ -39,9 +43,9 @@ func (k RegionStatKind) String() string {
 		return "write_bytes"
 	case RegionWriteKeys:
 		return "write_keys"
-	case RegionReadQuery:
+	case RegionReadQueries:
 		return "read_query"
-	case RegionWriteQuery:
+	case RegionWriteQueries:
 		return "write_query"
 	}
 	return "unknown RegionStatKind"
@@ -124,8 +128,8 @@ const (
 	Read
 )
 
-func (k RWType) String() string {
-	switch k {
+func (rw RWType) String() string {
+	switch rw {
 	case Write:
 		return "write"
 	case Read:
@@ -134,15 +138,30 @@ func (k RWType) String() string {
 	return "unimplemented"
 }
 
+var (
+	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueries}
+	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueries}
+)
+
 // RegionStats returns hot items according to kind
-func (k RWType) RegionStats() []RegionStatKind {
-	switch k {
+func (rw RWType) RegionStats() []RegionStatKind {
+	switch rw {
 	case Write:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+		return writeRegionStats
 	case Read:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+		return readRegionStats
 	}
 	return nil
+}
+
+func (rw RWType) GetLoadsFromPeer(peer *core.PeerInfo) []float64 {
+	deltaLoads := peer.GetLoads()
+	interval := peer.GetInterval()
+	loads := make([]float64, DimLen)
+	for dim, k := range rw.RegionStats() {
+		loads[dim] = deltaLoads[k] / float64(interval)
+	}
+	return loads
 }
 
 // ActionType indicates the action type for the stat item.

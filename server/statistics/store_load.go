@@ -29,10 +29,11 @@ type StoreLoadDetail struct {
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
-	totalLoads := make([]float64, RegionStatCount)
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
-			TotalLoads:     totalLoads,
+			StoreByteRate:  0.0,
+			StoreKeyRate:   0.0,
+			StoreQueryRate: 0.0,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
@@ -40,28 +41,20 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			Stats:          make([]HotPeerStatShow, 0),
 		}
 	}
-	kind := Write
-	if li.HotPeers[0].Kind == Read {
-		kind = Read
-	}
-
+	var byteRate, keyRate, queryRate float64
 	peers := make([]HotPeerStatShow, 0, len(li.HotPeers))
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
-			peers = append(peers, toHotPeerStatShow(peer, kind))
-			for i := range totalLoads {
-				totalLoads[i] += peer.GetLoad(RegionStatKind(i))
-			}
+			peers = append(peers, toHotPeerStatShow(peer))
+			byteRate += peer.Loads[ByteDim]
+			keyRate += peer.Loads[KeyDim]
+			queryRate += peer.Loads[QueryDim]
 		}
 	}
-
-	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
-	byteRate, keyRate, queryRate := totalLoads[b], totalLoads[k], totalLoads[q]
 	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
 		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 
 	return &HotPeersStat{
-		TotalLoads:     totalLoads,
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
 		TotalQueryRate: queryRate,
@@ -78,11 +71,10 @@ func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
 	return li.LoadPred.Stddev.Loads[dim] < threshold
 }
 
-func toHotPeerStatShow(p *HotPeerStat, kind RWType) HotPeerStatShow {
-	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
-	byteRate := p.Loads[b]
-	keyRate := p.Loads[k]
-	queryRate := p.Loads[q]
+func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
+	byteRate := p.Loads[ByteDim]
+	keyRate := p.Loads[KeyDim]
+	queryRate := p.Loads[QueryDim]
 	return HotPeerStatShow{
 		StoreID:        p.StoreID,
 		Stores:         p.GetStores(),
@@ -96,25 +88,6 @@ func toHotPeerStatShow(p *HotPeerStat, kind RWType) HotPeerStatShow {
 		AntiCount:      p.AntiCount,
 		LastUpdateTime: p.LastUpdateTime,
 	}
-}
-
-// GetRegionStatKind gets region statistics kind.
-func GetRegionStatKind(rwTy RWType, dim int) RegionStatKind {
-	switch {
-	case rwTy == Read && dim == ByteDim:
-		return RegionReadBytes
-	case rwTy == Read && dim == KeyDim:
-		return RegionReadKeys
-	case rwTy == Write && dim == ByteDim:
-		return RegionWriteBytes
-	case rwTy == Write && dim == KeyDim:
-		return RegionWriteKeys
-	case rwTy == Write && dim == QueryDim:
-		return RegionWriteQuery
-	case rwTy == Read && dim == QueryDim:
-		return RegionReadQuery
-	}
-	return 0
 }
 
 // StoreSummaryInfo records the summary information of store.
@@ -195,11 +168,11 @@ func (load StoreLoad) ToLoadPred(rwTy RWType, infl *Influence) *StoreLoadPred {
 		case Read:
 			future.Loads[ByteDim] += infl.Loads[RegionReadBytes]
 			future.Loads[KeyDim] += infl.Loads[RegionReadKeys]
-			future.Loads[QueryDim] += infl.Loads[RegionReadQuery]
+			future.Loads[QueryDim] += infl.Loads[RegionReadQueries]
 		case Write:
 			future.Loads[ByteDim] += infl.Loads[RegionWriteBytes]
 			future.Loads[KeyDim] += infl.Loads[RegionWriteKeys]
-			future.Loads[QueryDim] += infl.Loads[RegionWriteQuery]
+			future.Loads[QueryDim] += infl.Loads[RegionWriteQueries]
 		}
 		future.Count += infl.Count
 	}

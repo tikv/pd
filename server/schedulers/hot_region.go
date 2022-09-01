@@ -394,10 +394,9 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
 	s.cachedPeersRate = make([]float64, statistics.DimLen)
 	for _, dim := range dims {
-		kind := statistics.GetRegionStatKind(rw, dim)
-		peersRate := s.mainPeerStat.GetLoad(kind)
+		peersRate := s.mainPeerStat.Loads[dim]
 		if s.revertPeerStat != nil {
-			peersRate -= s.revertPeerStat.GetLoad(kind)
+			peersRate -= s.revertPeerStat.Loads[dim]
 		}
 		s.cachedPeersRate[dim] = peersRate
 	}
@@ -780,16 +779,15 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, dim int) (m
 
 	sortedPeers = make([]*statistics.HotPeerStat, len(ret))
 	copy(sortedPeers, ret)
-	k := statistics.GetRegionStatKind(bs.rwTy, dim)
 	sort.Slice(sortedPeers, func(i, j int) bool {
-		return sortedPeers[i].GetLoad(k) > sortedPeers[j].GetLoad(k)
+		return sortedPeers[i].Loads[dim] > sortedPeers[j].Loads[dim]
 	})
 
 	minPerceivedLoadIndex := len(ret) - 1
 	if minPerceivedLoadIndex > bs.minPerceivedLoadIndex {
 		minPerceivedLoadIndex = bs.minPerceivedLoadIndex
 	}
-	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].GetLoad(k)
+	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].Loads[dim]
 	return
 }
 
@@ -1475,10 +1473,10 @@ func (bs *balanceSolver) logBestSolution() {
 	best.debugMessage = append(best.debugMessage, fmt.Sprintf("src-id: %d, dst-id: %d, region-id: %d",
 		best.srcStore.GetID(), best.dstStore.GetID(), best.region.GetID()))
 	if best.revertRegion != nil {
-		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		mainSecondRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
-		revertFirstRate := best.revertPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		revertSecondRate := best.revertPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
+		mainFirstRate := best.mainPeerStat.Loads[bs.firstPriority]
+		mainSecondRate := best.mainPeerStat.Loads[bs.secondPriority]
+		revertFirstRate := best.revertPeerStat.Loads[bs.firstPriority]
+		revertSecondRate := best.revertPeerStat.Loads[bs.secondPriority]
 		best.debugMessage = append(best.debugMessage, fmt.Sprintf("revert-region-id: %d, main-first-rate: %.0f, main-second-rate: %.0f, revert-first-rate: %.0f, revert-second-rate: %.0f",
 			best.revertRegion.GetID(), mainFirstRate, mainSecondRate, revertFirstRate, revertSecondRate))
 	}
