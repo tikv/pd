@@ -254,6 +254,11 @@ func (bn BecomeNonWitness) Timeout(start time.Time, regionSize int64) bool {
 	return time.Since(start) > slowStepWaitDuration(regionSize)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
+func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	return addLearnerNode(bn.PeerID, bn.StoreID, false, useConfChangeV2)
+}
+
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
@@ -569,10 +574,15 @@ func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdp
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
 	ToStore, PeerID uint64
+	IsWitness       bool
 }
 
 func (dv DemoteVoter) String() string {
-	return fmt.Sprintf("demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
+	info := "non-witness"
+	if dv.IsWitness {
+		info = "witness"
+	}
+	return fmt.Sprintf("demote voter peer %v on store %v to %v learner", dv.PeerID, dv.ToStore, info)
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -586,8 +596,12 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(dv.ToStore); peer != nil {
 		if peer.GetId() != dv.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
 		}
-		return peer.GetId() == dv.PeerID
+		if peer.IsWitness != dv.IsWitness {
+			return false
+		}
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
