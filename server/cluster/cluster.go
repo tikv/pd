@@ -62,7 +62,8 @@ import (
 
 var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
-	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
+	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
+	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -2172,6 +2173,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 					c.storage.SaveMinResolvedTS(current)
 				}
 			} else {
+				// If interval in config is zero, it means not to persist resolved ts and check config with this interval
 				interval = DefaultMinResolvedTSPersistenceInterval
 			}
 			ticker.Reset(interval)

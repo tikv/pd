@@ -71,7 +71,21 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
-	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
+	var (
+		client                   Client
+		receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
+		err                      error
+	)
+
+	// Client should wait if PD server is not ready.
+	for i := 0; i < maxInitClusterRetries; i++ {
+		client, receiveRegionHeartbeatCh, err = NewClient(pdAddr, tag)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
 	if err != nil {
 		cancel()
 		return nil, err

@@ -37,6 +37,7 @@ const (
 	keyspacePrefix             = "keyspaces"
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
+	keyspaceAllocID            = "alloc_id"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -157,6 +158,12 @@ func KeyspaceMetaPath(spaceID uint32) string {
 // Path: keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
 	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
+}
+
+// KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
+// Path: keyspaces/alloc_id
+func KeyspaceIDAlloc() string {
+	return path.Join(keyspacePrefix, keyspaceAllocID)
 }
 
 // encodeKeyspaceID from uint32 to string.
