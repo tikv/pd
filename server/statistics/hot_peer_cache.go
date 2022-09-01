@@ -580,7 +580,7 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	if newItem.AntiCount < newItem.defaultAntiCount() {
+	if oldItem.AntiCount < oldItem.defaultAntiCount() {
 		newItem.AntiCount = oldItem.AntiCount + 1
 	} else {
 		newItem.AntiCount = oldItem.AntiCount
