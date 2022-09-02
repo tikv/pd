@@ -177,3 +177,8 @@ func (s *Status) Priority() int {
 func (s *Status) String() string {
 	return StatusText(s.StatusCode)
 }
+
+// IsNormal returns true if the status is noraml.
+func (s *Status) IsNormal() bool {
+	return int(s.StatusCode)/10 == 10
+}

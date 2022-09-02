@@ -100,16 +100,17 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 // BalancePlanSummary is used to summarize for BalancePlan
-func BalancePlanSummary(plans []plan.Plan) (string, error) {
+func BalancePlanSummary(plans []plan.Plan) (string, bool, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
 	var storeStatusCounter map[uint64]map[plan.Status]int
 	// statusCounter is used to count the number of status which is regarded as best status of each store
 	statusCounter := make(map[plan.Status]uint64)
 	maxStep := -1
+	normal := true
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
 		if !ok {
-			return "", errs.ErrDiagnosticLoadPlanError
+			return "", false, errs.ErrDiagnosticLoadPlanError
 		}
 		step := p.GetStep()
 		// we don't consider the situation for verification step
@@ -121,6 +122,9 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 			maxStep = step
 		} else if step < maxStep {
 			continue
+		}
+		if !p.status.IsNormal() {
+			normal = false
 		}
 		var store uint64
 		// `step == 1` is a special processing in summary, because we want to exclude the factor of region
@@ -151,7 +155,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, error) {
 	for k, v := range statusCounter {
 		resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
 	}
-	return resStr, nil
+	return resStr, normal, nil
 }
 
 // balancePlanStatusComparer returns true if new status is better than old one.

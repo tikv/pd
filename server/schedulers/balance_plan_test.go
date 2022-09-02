@@ -152,7 +152,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], step: 2, target: suite.stores[2], status: plan.NewStatus(plan.StatusStoreScoreDisallowed)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], step: 2, target: suite.stores[3], status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], step: 2, target: suite.stores[4], status: plan.NewStatus(plan.StatusStoreScoreDisallowed)})
-	str, err := BalancePlanSummary(plans)
+	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
@@ -168,7 +168,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[2], step: 0, status: plan.NewStatus(plan.StatusStoreDown)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], step: 0, status: plan.NewStatus(plan.StatusStoreDown)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], step: 0, status: plan.NewStatus(plan.StatusStoreDown)})
-	str, err := BalancePlanSummary(plans)
+	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
@@ -183,7 +183,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[2], region: suite.regions[0], step: 1, status: plan.NewStatus(plan.StatusRegionNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], region: suite.regions[1], step: 1, status: plan.NewStatus(plan.StatusRegionNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], region: suite.regions[1], step: 1, status: plan.NewStatus(plan.StatusRegionNotMatchRule)})
-	str, err := BalancePlanSummary(plans)
+	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
@@ -206,7 +206,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[2], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[3], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[4], step: 2, status: plan.NewStatus(plan.StatusStoreDown)})
-	str, err := BalancePlanSummary(plans)
+	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
 		map[string]struct{}{
