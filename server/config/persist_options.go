@@ -269,6 +269,23 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// GetDiagnosticInterval returns the diagnostic interval.
+func (o *PersistOptions) GetDiagnosticInterval() time.Duration {
+	return o.GetScheduleConfig().DiagnosticInterval.Duration
+}
+
+// IsDiagnosisAlllowed returns whether is enable to process diagnosis.
+func (o *PersistOptions) IsDiagnosisAlllowed() bool {
+	return o.GetScheduleConfig().DiagnosticInterval.Duration == 0
+}
+
+// SetDiagnosticInterval to set the interval to diagnose. It's only used to test.
+func (o *PersistOptions) SetDiagnosticInterval(diagnosticInterval time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.DiagnosticInterval = typeutil.Duration{Duration: diagnosticInterval}
+	o.SetScheduleConfig(v)
+}
+
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
