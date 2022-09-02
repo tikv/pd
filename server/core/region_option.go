@@ -215,6 +215,15 @@ func SetWrittenQuery(v uint64) RegionCreateOption {
 	return SetQueryStats(q)
 }
 
+// SetQueryNum sets the read and write query with specific num.
+// This func is only used for test and simulator.
+func SetQueryNum(read, write uint64) RegionCreateOption {
+	r := RandomKindReadQuery(read)
+	w := RandomKindWriteQuery(write)
+	q := MergeQueryStat(r, w)
+	return SetQueryStats(q)
+}
+
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
 // This func is only used for unit test.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
