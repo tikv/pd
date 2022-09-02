@@ -15,11 +15,11 @@
 package cluster
 
 import (
-	"errors"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -67,11 +67,11 @@ func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult,
 	}
 	worker := d.getWorker(name)
 	if worker == nil {
-		return nil, errors.New("todo")
+		return nil, errs.ErrSchedulerUndiagnosableLoadPlanError.FastGenByArgs(name)
 	}
 	result := worker.getLastResult()
 	if result == nil {
-		return nil, errors.New("todo")
+		return nil, errs.ErrSchedulerDiagnosisNotRunning.FastGenByArgs(name)
 	}
 	return result, nil
 }
@@ -107,7 +107,7 @@ func (d *diagnosticWorker) run() {
 	if d == nil {
 		return
 	}
-	if d.result != nil {
+	if d.result == nil {
 		d.result = cache.NewFIFO(maxDiagnosticResultNum)
 	}
 }

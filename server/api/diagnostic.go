@@ -18,6 +18,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
@@ -38,7 +39,7 @@ func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHand
 func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	if _, ok := cluster.DiagnosableSchedulers[name]; !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "this scheduler hasn't supported diagnostic yet")
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerUndiagnosableLoadPlanError.FastGenByArgs(name))
 		return
 	}
 	rc := getCluster(r)

@@ -96,6 +96,12 @@ var (
 	ErrCheckerMergeAgain = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
 )
 
+// diagnose errors
+var (
+	ErrSchedulerUndiagnosableLoadPlanError = errors.Normalize("%v hasn't supported diagnostic", errors.RFCCodeText("PD:diagnose:ErrSchedulerUndiagnosableLoadPlanError"))
+	ErrSchedulerDiagnosisNotRunning        = errors.Normalize("%v is not running diagnosis", errors.RFCCodeText("PD:diagnose:ErrSchedulerDiagnosisNotRunning"))
+)
+
 // placement errors
 var (
 	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
