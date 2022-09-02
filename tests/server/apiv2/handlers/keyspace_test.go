@@ -60,7 +60,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	suite.cluster = cluster
 	suite.NoError(err)
 	suite.NoError(cluster.RunInitialServers())
@@ -123,6 +123,9 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, archived.State)
 		// Modifying ARCHIVED keyspace is not allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
+		re.False(success)
+		// Using illegal state is not allowed.
+		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "UNKNOWN")
 		re.False(success)
 	}
 	// Changing default keyspace's state is NOT allowed.

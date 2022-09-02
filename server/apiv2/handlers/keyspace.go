@@ -212,7 +212,7 @@ type UpdateConfigParams struct {
 // @Success  200  {object}  KeyspaceMeta
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// Router /keyspaces/{name}/update-config [patch]
+// Router /keyspaces/{name}/config [patch]
 func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -267,7 +267,7 @@ type UpdateStateParam struct {
 // @Success  200  {object}  KeyspaceMeta
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// Router /keyspaces/{name}/archive [put]
+// Router /keyspaces/{name}/state [put]
 func UpdateKeyspaceState(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceManager()
@@ -281,6 +281,7 @@ func UpdateKeyspaceState(c *gin.Context) {
 	targetState, ok := keyspacepb.KeyspaceState_value[param.State]
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errors.Errorf("unknown target state: %s", param.State))
+		return
 	}
 	meta, err := manager.UpdateKeyspaceState(name, keyspacepb.KeyspaceState(targetState), time.Now().Unix())
 	if err != nil {
