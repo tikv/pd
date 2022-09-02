@@ -276,7 +276,7 @@ func (o *PersistOptions) GetDiagnosticInterval() time.Duration {
 
 // IsDiagnosisAlllowed returns whether is enable to process diagnosis.
 func (o *PersistOptions) IsDiagnosisAlllowed() bool {
-	return o.GetScheduleConfig().DiagnosticInterval.Duration == 0
+	return o.GetScheduleConfig().DiagnosticInterval.Duration != 0
 }
 
 // SetDiagnosticInterval to set the interval to diagnose. It's only used to test.
