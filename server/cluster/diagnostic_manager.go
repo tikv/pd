@@ -67,7 +67,7 @@ func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult,
 	}
 	worker := d.getWorker(name)
 	if worker == nil {
-		return nil, errs.ErrSchedulerUndiagnosableLoadPlanError.FastGenByArgs(name)
+		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
 	}
 	result := worker.getLastResult()
 	if result == nil {
@@ -103,7 +103,7 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 	}
 }
 
-func (d *diagnosticWorker) run() {
+func (d *diagnosticWorker) init() {
 	if d == nil {
 		return
 	}
@@ -114,6 +114,9 @@ func (d *diagnosticWorker) run() {
 
 func (d *diagnosticWorker) isAllowed() bool {
 	if d == nil {
+		return false
+	}
+	if d.cluster.opt.GetDiagnosticInterval() == 0 {
 		return false
 	}
 	d.currentTime = time.Now()

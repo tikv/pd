@@ -809,7 +809,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			diagnosable := c.cluster.opt.IsDiagnosisAlllowed() && s.isDiagnosisAlllowed()
+			diagnosable := c.cluster.opt.IsDiagnosisAllowed() && s.IsDiagnosisAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
@@ -878,7 +878,7 @@ type scheduleController struct {
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	diagnosticWorker := c.diagnosticManager.getWorker(s.GetName())
-	diagnosticWorker.run()
+	diagnosticWorker.init()
 	return &scheduleController{
 		Scheduler:         s,
 		cluster:           c.cluster,
@@ -899,7 +899,7 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) isDiagnosisAlllowed() bool {
+func (s *scheduleController) IsDiagnosisAllowed() bool {
 	return s.diagnosticWorker.isAllowed()
 }
 
@@ -912,6 +912,7 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		default:
 		}
 		cacheCluster := newCacheCluster(s.cluster)
+		// we need only process diagnosis once in the retry loop
 		diagnosable = diagnosable && i == 0
 		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
 		if diagnosable {

@@ -274,8 +274,8 @@ func (o *PersistOptions) GetDiagnosticInterval() time.Duration {
 	return o.GetScheduleConfig().DiagnosticInterval.Duration
 }
 
-// IsDiagnosisAlllowed returns whether is enable to process diagnosis.
-func (o *PersistOptions) IsDiagnosisAlllowed() bool {
+// IsDiagnosisAllowed returns whether is enable to process diagnosis.
+func (o *PersistOptions) IsDiagnosisAllowed() bool {
 	return o.GetScheduleConfig().DiagnosticInterval.Duration != 0
 }
 
