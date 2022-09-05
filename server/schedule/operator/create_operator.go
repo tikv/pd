@@ -214,7 +214,7 @@ func CreateScatterRegionOperator(desc string, cluster opt.Cluster, origin *core.
 		EnableLightWeight().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
-		Build(0)
+		Build(OpAdmin)
 }
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.

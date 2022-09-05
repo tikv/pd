@@ -48,7 +48,7 @@ ifneq "$(PD_EDITION)" "Enterprise"
 endif
 endif
 
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	BUILD_TAGS += swagger_server
 endif
 
@@ -98,7 +98,7 @@ build: pd-server pd-ctl pd-recover
 tools: pd-tso-bench pd-analysis pd-heartbeat-bench
 
 PD_SERVER_DEP :=
-ifneq ($(SWAGGER), 0)
+ifeq ($(SWAGGER), 1)
 	PD_SERVER_DEP += swagger-spec
 endif
 ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
@@ -182,7 +182,7 @@ test-with-cover: install-go-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
 	for PKG in $(TEST_PKGS); do\
 		set -euo pipefail;\
-		CGO_ENABLED=1 GO111MODULE=on go test -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
+		CGO_ENABLED=1 GO111MODULE=on go test -timeout=15m -race -covermode=atomic -coverprofile=coverage.tmp -coverpkg=./... $$PKG 2>&1 | grep -v "no packages being tested" && tail -n +2 coverage.tmp >> covprofile || { $(FAILPOINT_DISABLE); rm coverage.tmp && exit 1;}; \
 		rm coverage.tmp;\
 	done
 	@$(FAILPOINT_DISABLE)

@@ -190,9 +190,8 @@ func (s *testCoordinatorSuite) TestBasic(c *C) {
 }
 
 func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.isPrepared = true }, nil, c)
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) { tc.prepareChecker.prepared = true }, nil, c)
 	defer cleanup()
-
 	// Transfer peer from store 4 to store 1.
 	c.Assert(tc.addRegionStore(4, 40), IsNil)
 	c.Assert(tc.addRegionStore(3, 30), IsNil)
@@ -285,7 +284,7 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 		setCfg(cfg)
 	}
 	tc := newTestCluster(ctx, opt)
-	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.getClusterID(), tc, true /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.meta.GetId(), tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}
@@ -602,7 +601,8 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 		{5, false},
 		{6, false},
 		{7, false},
-		{8, true},
+		{8, false},
+		{9, true},
 	}
 
 	for _, t := range tbl {
@@ -611,13 +611,12 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
 		c.Assert(co.shouldRun(), Equals, t.shouldRun)
 	}
-	nr := &metapb.Region{Id: 8, Peers: []*metapb.Peer{}}
+	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
 	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.cluster.prepareChecker.sum, Equals, 8)
+	c.Assert(co.cluster.prepareChecker.sum, Equals, 9)
 
 	// Now, after server is prepared, there exist some regions with no leader.
-	c.Assert(tc.GetRegion(9).GetLeader().GetStoreId(), Equals, uint64(0))
 	c.Assert(tc.GetRegion(10).GetLeader().GetStoreId(), Equals, uint64(0))
 }
 
