@@ -149,6 +149,8 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 		return h.updateSchedule(cfg, kp[len(kp)-1], value)
 	case "replication":
 		return h.updateReplication(cfg, kp[len(kp)-1], value)
+	case "schedule-mode":
+		return h.updateScheduleMode(cfg, kp[len(kp)-1], value)
 	case "replication-mode":
 		if len(kp) < 2 {
 			return errors.Errorf("cannot update config prefix %s", kp[0])
@@ -194,6 +196,23 @@ func (h *confHandler) updateReplication(config *config.Config, key string, value
 	if updated {
 		err = h.svr.SetReplicationConfig(config.Replication)
 	}
+	return err
+}
+
+func (h *confHandler) updateScheduleMode(config *config.Config, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(&config.ScheduleMode, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = h.svr.SetScheduleModeConfig(config.ScheduleMode)
+	}
+
 	return err
 }
 

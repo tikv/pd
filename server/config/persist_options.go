@@ -49,6 +49,7 @@ type PersistOptions struct {
 	pdServerConfig  atomic.Value
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
+	scheduleMode    atomic.Value
 	clusterVersion  unsafe.Pointer
 }
 
@@ -59,6 +60,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replication.Store(&cfg.Replication)
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.replicationMode.Store(&cfg.ReplicationMode)
+	o.scheduleMode.Store(&cfg.ScheduleMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
@@ -103,6 +105,16 @@ func (o *PersistOptions) GetReplicationModeConfig() *ReplicationModeConfig {
 // SetReplicationModeConfig sets the replication mode config.
 func (o *PersistOptions) SetReplicationModeConfig(cfg *ReplicationModeConfig) {
 	o.replicationMode.Store(cfg)
+}
+
+// GetScheduleModeConfig returns schedule mode configurations.
+func (o *PersistOptions) GetScheduleModeConfig() *ScheduleModeConfig {
+	return o.scheduleMode.Load().(*ScheduleModeConfig)
+}
+
+// SetScheduleModeConfig sets the PD schedule mode configuration.
+func (o *PersistOptions) SetScheduleModeConfig(cfg *ScheduleModeConfig) {
+	o.scheduleMode.Store(cfg)
 }
 
 // GetLabelPropertyConfig returns the label property.
@@ -466,7 +478,7 @@ func (o *PersistOptions) GetStoreLimitMode() string {
 
 // GetMode returns the scheduling mode of PD.
 func (o *PersistOptions) GetMode() string {
-	return o.GetScheduleConfig().Mode
+	return o.GetScheduleModeConfig().Mode
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.
@@ -664,6 +676,7 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		Replication:     *o.GetReplicationConfig(),
 		PDServerCfg:     *o.GetPDServerConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig(),
+		ScheduleMode:    *o.GetScheduleModeConfig(),
 		LabelProperty:   o.GetLabelPropertyConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
@@ -684,13 +697,15 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
-	if isValidMode(cfg.Schedule.Mode) {
-		exist, err := storage.LoadScheduleMode(cfg.Schedule.Mode, &cfg.Schedule)
+	// rewrite the schedule config according to the mode.
+	if isValidMode(cfg.ScheduleMode.Mode) {
+		exist, err := storage.LoadScheduleMode(cfg.ScheduleMode.Mode, &cfg.Schedule)
 		if err != nil {
 			return err
 		}
-		if cfg.Schedule.Mode != Normal && !exist {
-			getDefaultModeConfig(&cfg.Schedule, cfg.Schedule.Mode)
+		// If the mode is not normal and doesn't exist, we init a default one in this situation.
+		if cfg.ScheduleMode.Mode != Normal && !exist {
+			updateScheduleConfig(&cfg.Schedule, cfg.ScheduleMode.Mode)
 		}
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
@@ -699,6 +714,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
+		o.scheduleMode.Store(&cfg.ScheduleMode)
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.SetClusterVersion(&cfg.ClusterVersion)

@@ -863,6 +863,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
+	cfg.ScheduleMode = *s.persistOptions.GetScheduleModeConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	if s.storage == nil {
@@ -902,16 +903,7 @@ func (s *Server) SetScheduleConfig(newCfg config.ScheduleConfig) error {
 	if err := newCfg.Deprecated(); err != nil {
 		return err
 	}
-	// check if the mode needs to be changed.
 	oldCfg := s.persistOptions.GetScheduleConfig()
-	if oldCfg.Mode != newCfg.Mode {
-		var err error
-		newCfg, err = s.persistOptions.SwitchMode(s.storage, oldCfg, newCfg.Mode)
-		if err != nil {
-			return err
-		}
-		log.Info("schedule mode is switched", zap.String("new-mode", newCfg.Mode))
-	}
 	newCfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&newCfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
@@ -923,6 +915,39 @@ func (s *Server) SetScheduleConfig(newCfg config.ScheduleConfig) error {
 		return err
 	}
 	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
+	return nil
+}
+
+// GetScheduleModeConfig gets the schedule mode config information.
+func (s *Server) GetScheduleModeConfig() *config.ScheduleModeConfig {
+	return s.persistOptions.GetScheduleModeConfig().Clone()
+}
+
+// SetScheduleModeConfig sets the schedule mode config information.
+func (s *Server) SetScheduleModeConfig(newCfg config.ScheduleModeConfig) error {
+	if err := newCfg.Validate(); err != nil {
+		return err
+	}
+	oldCfg := s.persistOptions.GetScheduleModeConfig()
+
+	// check if the mode needs to be changed.
+	var err error
+	if oldCfg.Mode != newCfg.Mode {
+		err = s.persistOptions.SwitchMode(s.storage, oldCfg, &newCfg)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.persistOptions.SetScheduleModeConfig(&newCfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetScheduleModeConfig(oldCfg)
+		log.Error("failed to update schedule mode config",
+			zap.Reflect("new-mode", newCfg),
+			zap.Reflect("old-mode", oldCfg),
+			errs.ZapError(err))
+		return err
+	}
 	return nil
 }
 

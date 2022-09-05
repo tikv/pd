@@ -2,7 +2,10 @@ package config
 
 import (
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"go.uber.org/zap"
 )
 
 // Scheduling mode
@@ -22,27 +25,55 @@ func isValidMode(mode string) bool {
 }
 
 // SwitchMode switches the scheduling mode.
-func (o *PersistOptions) SwitchMode(storage endpoint.ConfigStorage, oldCfg *ScheduleConfig, mode string) (ScheduleConfig, error) {
+func (o *PersistOptions) SwitchMode(storage endpoint.ConfigStorage, oldMode, newMode *ScheduleModeConfig) error {
+	if !isValidMode(newMode.Mode) {
+		return errors.Errorf("mode %v is invalid", newMode)
+	}
 	// save the current mode setting
-	if err := storage.SaveScheduleMode(oldCfg.Mode, oldCfg); err != nil {
-		return ScheduleConfig{}, err
+	oldCfg := o.GetScheduleConfig()
+	if err := storage.SaveScheduleMode(oldMode.Mode, oldCfg); err != nil {
+		return err
 	}
-	if !isValidMode(mode) {
-		return ScheduleConfig{}, errors.Errorf("mode %v is invalid", mode)
-	}
+	// load the new mode setting
 	newCfg := &ScheduleConfig{}
-	existed, err := storage.LoadScheduleMode(mode, newCfg)
+	existed, err := storage.LoadScheduleMode(newMode.Mode, newCfg)
 	if err != nil {
-		return ScheduleConfig{}, err
+		return err
 	}
+	// if the new mode setting doesn't exist, init a new one.
 	if !existed {
-		newCfg = oldCfg.Clone()
-		getDefaultModeConfig(newCfg, mode)
+		// We must have the Normal config.
+		_, err := storage.LoadScheduleMode(Normal, newCfg)
+		if err != nil {
+			return err
+		}
+		updateScheduleConfig(newCfg, newMode.Mode)
 	}
-	return *newCfg, nil
+	if newMode.Mode == Scaling { // reset the store limit for all store to avoid new added store using default limit in scaling mode.
+		for storeID := range oldCfg.StoreLimit {
+			newCfg.StoreLimit[storeID] = StoreLimitConfig{AddPeer: 200, RemovePeer: 200}
+		}
+	}
+
+	newCfg.SchedulersPayload = nil
+	o.SetScheduleConfig(newCfg)
+	o.SetScheduleModeConfig(newMode)
+	if err := o.Persist(storage); err != nil {
+		o.SetScheduleConfig(oldCfg)
+		o.SetScheduleModeConfig(oldMode)
+		log.Error("failed to switch schedule mode",
+			zap.Reflect("new-mode", newCfg),
+			zap.Reflect("old-mode", oldMode),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("schedule mode is switched", zap.Reflect("old-mode", oldMode), zap.Reflect("new-mode", newMode))
+	return nil
 }
 
-func getDefaultModeConfig(newCfg *ScheduleConfig, mode string) {
+func updateScheduleConfig(newCfg *ScheduleConfig, mode string) {
 	switch mode {
 	case Suspend:
 		newCfg.MergeScheduleLimit = 0
@@ -55,5 +86,4 @@ func getDefaultModeConfig(newCfg *ScheduleConfig, mode string) {
 			newCfg.StoreLimit[storeID] = StoreLimitConfig{AddPeer: 200, RemovePeer: 200}
 		}
 	}
-	newCfg.Mode = mode
 }
