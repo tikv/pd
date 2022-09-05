@@ -33,7 +33,7 @@ func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *SimConfig) (
 	}
 
 	for _, store := range simCase.Stores {
-		node, err := NewNode(store, pdAddr, storeConfig.StoreIOMBPerSecond)
+		node, err := NewNode(store, pdAddr, storeConfig)
 		if err != nil {
 			return nil, err
 		}

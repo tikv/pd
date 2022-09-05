@@ -63,8 +63,8 @@
   "editable": true,
   "gnetId": null,
   "graphTooltip": 1,
-  "id": 26,
-  "iteration": 1659690075027,
+  "id": 25,
+  "iteration": 1618283470402,
   "links": [],
   "panels": [
     {
@@ -772,12 +772,8 @@
       "linewidth": 1,
       "links": [],
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
       "paceLength": 10,
       "percentage": false,
-      "pluginVersion": "7.5.11",
       "pointradius": 5,
       "points": false,
       "renderer": "flot",
@@ -816,7 +812,7 @@
           "line": true,
           "op": "gt",
           "value": 100,
-          "visible": true
+          "yaxis": "left"
         }
       ],
       "timeFrom": null,
@@ -893,12 +889,8 @@
       "linewidth": 3,
       "links": [],
       "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
       "paceLength": 10,
       "percentage": false,
-      "pluginVersion": "7.5.11",
       "pointradius": 5,
       "points": false,
       "renderer": "flot",
@@ -1075,39 +1067,6 @@
     },
     {
       "datasource": "${DS_TEST-CLUSTER}",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "left",
-            "filterable": false
-          },
-          "mappings": [
-            {
-              "from": "",
-              "id": 1,
-              "text": "N/A",
-              "to": "",
-              "type": 1,
-              "value": "1.7976931348623157e+308"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 6,
         "w": 4,
@@ -1121,18 +1080,37 @@
       "pluginVersion": "7.5.11",
       "targets": [
         {
-          "exemplar": true,
           "expr": "pd_cluster_eta{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
-          "instant": true,
-          "interval": "",
           "legendFormat": "{{action}}-{{store}}",
+          "interval": "",
+          "exemplar": true,
           "queryType": "randomWalk",
-          "refId": "A"
+          "refId": "A",
+          "instant": true
         }
       ],
-      "timeFrom": null,
-      "timeShift": null,
       "title": "Left time",
+      "type": "table",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "filterable": false
+          },
+          "mappings": [
+            {
+              "id": 1,
+              "type": 1,
+              "from": "",
+              "to": "",
+              "text": "N/A",
+              "value": "1.7976931348623157e+308"
+            }
+          ],
+          "unit": "s"
+        },
+        "overrides": []
+      },
       "transformations": [
         {
           "id": "reduce",
@@ -1143,34 +1121,13 @@
           }
         }
       ],
-      "type": "table"
+      "timeFrom": null,
+      "timeShift": null
     },
     {
+      "type": "table",
+      "title": "Current scaling speed",
       "datasource": "${DS_TEST-CLUSTER}",
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "left",
-            "filterable": false
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "MBs"
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 6,
         "w": 4,
@@ -1178,24 +1135,31 @@
         "y": 13
       },
       "id": 1112,
+      "targets": [
+        {
+          "expr": "pd_cluster_speed{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+          "legendFormat": "{{action}}-{{store}}",
+          "interval": "",
+          "exemplar": true,
+          "refId": "A",
+          "queryType": "randomWalk",
+          "instant": true
+        }
+      ],
       "options": {
         "showHeader": false
       },
-      "pluginVersion": "7.5.11",
-      "targets": [
-        {
-          "exemplar": true,
-          "expr": "pd_cluster_speed{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
-          "instant": true,
-          "interval": "",
-          "legendFormat": "{{action}}-{{store}}",
-          "queryType": "randomWalk",
-          "refId": "A"
-        }
-      ],
-      "timeFrom": null,
-      "timeShift": null,
-      "title": "Current scaling speed",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "left",
+            "filterable": false
+          },
+          "mappings": [],
+          "unit": "MBs"
+        },
+        "overrides": []
+      },
       "transformations": [
         {
           "id": "reduce",
@@ -1206,7 +1170,8 @@
           }
         }
       ],
-      "type": "table"
+      "timeFrom": null,
+      "timeShift": null
     },
     {
       "collapsed": true,
@@ -1231,7 +1196,7 @@
             "h": 7,
             "w": 4,
             "x": 0,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 116,
@@ -1290,7 +1255,7 @@
             "h": 7,
             "w": 5,
             "x": 4,
-            "y": 14
+            "y": 20
           },
           "id": 1433,
           "links": [],
@@ -1414,7 +1379,7 @@
             "h": 3,
             "w": 5,
             "x": 9,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 139,
@@ -1483,7 +1448,7 @@
             "h": 7,
             "w": 5,
             "x": 14,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 103,
@@ -1563,7 +1528,7 @@
             "h": 7,
             "w": 5,
             "x": 19,
-            "y": 14
+            "y": 20
           },
           "hideTimeOverride": true,
           "id": 117,
@@ -1665,7 +1630,7 @@
             "h": 4,
             "w": 5,
             "x": 9,
-            "y": 17
+            "y": 23
           },
           "hideTimeOverride": true,
           "id": 115,
@@ -1745,7 +1710,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 21
+            "y": 27
           },
           "hiddenSeries": false,
           "id": 1427,
@@ -1844,7 +1809,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 21
+            "y": 27
           },
           "hiddenSeries": false,
           "id": 1429,
@@ -1987,7 +1952,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 28
+            "y": 34
           },
           "hiddenSeries": false,
           "id": 1430,
@@ -2086,7 +2051,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 28
+            "y": 34
           },
           "hiddenSeries": false,
           "id": 1431,
@@ -2196,7 +2161,7 @@
             "h": 4,
             "w": 5,
             "x": 0,
-            "y": 35
+            "y": 41
           },
           "hideTimeOverride": true,
           "id": 137,
@@ -2282,7 +2247,7 @@
             "h": 8,
             "w": 7,
             "x": 5,
-            "y": 35
+            "y": 41
           },
           "hiddenSeries": false,
           "id": 1443,
@@ -2395,7 +2360,7 @@
             "h": 4,
             "w": 5,
             "x": 0,
-            "y": 39
+            "y": 45
           },
           "hideTimeOverride": true,
           "id": 1444,
@@ -6595,7 +6560,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 1,
           "points": false,
           "renderer": "flot",
@@ -6694,7 +6658,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -6799,7 +6762,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -6902,7 +6864,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7000,7 +6961,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7098,7 +7058,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7196,7 +7155,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7293,7 +7251,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7472,7 +7429,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7539,14 +7495,12 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The replica checker's status",
           "fill": 0,
-          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
             "x": 0,
             "y": 73
           },
-          "hiddenSeries": false,
           "id": 70,
           "legend": {
             "alignAsTable": true,
@@ -7567,7 +7521,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7634,7 +7587,6 @@
           "datasource": "${DS_TEST-CLUSTER}",
           "description": "The merge checker's status",
           "fill": 0,
-          "fillGradient": 0,
           "gridPos": {
             "h": 8,
             "w": 12,
@@ -7662,7 +7614,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7758,7 +7709,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -7855,7 +7805,6 @@
           "nullPointMode": "null",
           "paceLength": 10,
           "percentage": false,
-          "pluginVersion": "7.5.11",
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
@@ -10170,6 +10119,7 @@
           "renderer": "flot",
           "seriesOverrides": [
             {
+              "$$hashKey": "object:363",
               "alias": "/pending.*/",
               "yaxis": 2
             }
@@ -11758,26 +11708,24 @@
     }
   ],
   "refresh": "30s",
-  "schemaVersion": 27,
+  "schemaVersion": 18,
   "style": "dark",
   "tags": [],
   "templating": {
     "list": [
       {
         "allValue": null,
-        "current": { },
+        "current": {},
         "datasource": "${DS_TEST-CLUSTER}",
-        "definition": "",
         "hide": 2,
         "includeAll": false,
         "label": "K8s-cluster",
         "multi": false,
         "name": "k8s_cluster",
-        "options": [ ],
+        "options": [],
         "query": "label_values(pd_cluster_status, k8s_cluster)",
         "refresh": 2,
         "regex": "",
-        "skipUrlSync": false,
         "sort": 1,
         "tagValuesQuery": "",
         "tags": [],

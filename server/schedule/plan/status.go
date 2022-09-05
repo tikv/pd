@@ -14,85 +14,125 @@
 
 package plan
 
-import "fmt"
-
 // StatusCode is used to classify the plan result.
+// And the sequence of status code represents the priority, the status code number is higher, the priority is higher.
 type StatusCode int
 
 const (
 	// StatusOK represents the plan can be scheduled successfully.
 	StatusOK StatusCode = iota
-	// StatusNoNeed represents the plan is no need to be scheduled.
-	StatusNoNeed
-	// StatusPaused represents the scheduler or checker is paused.
-	StatusPaused
+)
 
-	// StatusStoreThrottled represents the store cannot be selected due to the limitation.
-	StatusStoreThrottled
-	// StatusStoreUnavailable represents the store cannot be selected due to it's state.
-	StatusStoreUnavailable
+// normal status in most of situations.
+const (
+	// StatusStoreScoreDisallowed represents the plan is no need to be scheduled due to the score does meet the requirement.
+	StatusStoreScoreDisallowed = iota + 100
+	// StatusStoreAlreadyHasPeer represents the store is excluded due to the existed region peer.
+	StatusStoreAlreadyHasPeer
+	// StatusNotMatchRule represents the placement rule cannot satisfy the requirement.
+	StatusStoreNotMatchRule
+)
+
+// soft limitation
+const (
+	// StatusStoreSnapshotThrottled represents the store cannot be selected due to the snapshot limitation.
+	StatusStoreSnapshotThrottled = iota + 200
+	// StatusStorePendingPeerThrottled represents the store cannot be selected due to the pending peer limitation.
+	StatusStorePendingPeerThrottled
+	// StatusStoreAddLimitThrottled represents the store cannot be selected due to the add peer limitation.
+	StatusStoreAddLimitThrottled
+	// StatusStoreRemoveLimitThrottled represents the store cannot be selected due to the remove peer limitation.
+	StatusStoreRemoveLimitThrottled
+)
+
+// config limitation
+const (
+	// StatusStoreRejectLeader represents the store is restricted by the special configuration. e.g. reject label setting, evict leader/slow store scheduler.
+	StatusStoreRejectLeader = iota + 300
+	// StatusNotMatchIsolation represents the isolation cannot satisfy the requirement.
+	StatusStoreNotMatchIsolation
+)
+
+// hard limitation
+const (
+	// StatusStoreBusy represents the store cannot be selected due to it is busy.
+	StatusStoreBusy = iota + 400
+	// StatusStoreRemoved represents the store cannot be selected due to it has been removed.
+	StatusStoreRemoved
+	// StatusStoreRemoving represents the data on the store is moving out.
+	StatusStoreRemoving
+	// StatusStoreDown represents the the store is in down state.
+	StatusStoreDown
+	// StatusStoreDisconnected represents the the store is in disconnected state.
+	StatusStoreDisconnected
+)
+
+const (
 	// StatusStoreLowSpace represents the store cannot be selected because it runs out of space.
-	StatusStoreLowSpace
-	// StatusStoreDraining represents the data on the store is moving out.
-	StatusStoreDraining
-	// StatusStoreBlocked represents the store is restricted by the special configuration.
-	StatusStoreBlocked
-	// StatusStoreExcluded represents the store is excluded due to the existed or unhealthy region peer.
-	StatusStoreExcluded
+	StatusStoreLowSpace = iota + 500
+	// StatusStoreNotExisted represents the store cannot be found in PD.
+	StatusStoreNotExisted
+)
 
+// TODO: define region status priority
+const (
 	// StatusRegionHot represents the region cannot be selected due to the heavy load.
-	StatusRegionHot
+	StatusRegionHot = iota + 1000
 	// StatusRegionUnhealthy represents the region cannot be selected due to the region health.
 	StatusRegionUnhealthy
 	// StatusRegionEmpty represents the region cannot be selected due to the region is empty.
 	StatusRegionEmpty
 	// StatusRegionNotReplicated represents the region does not have enough replicas.
 	StatusRegionNotReplicated
-
-	// StatusLabelNotMatch represents the location label of placement rule is not match the store's label.
-	StatusLabelNotMatch
-	// StatusRuleNotMatch represents the placement rule cannot satisfy the requirement.
-	StatusRuleNotMatch
-	// StatusIsolationNotMatch represents the isolation cannot satisfy the requirement.
-	StatusIsolationNotMatch
-
-	// TODO: The below status is not used for now. Once it is used, Please remove this comment.
-
-	// StatusStoreNotExisted represents the store cannot be found in PD.
-	StatusStoreNotExisted
-	// StatusNoTargetRegion represents the target region of merge operation cannot be found.
+	// StatusRegionNotMatchRule represents the region does not match rule constraint.
+	StatusRegionNotMatchRule
+	// StatusNoTargetRegion represents nts the target region of merge operation cannot be found.
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
 	StatusRegionLabelReject
 )
 
-var statusText = map[StatusCode]string{
-	StatusOK:     "OK",
-	StatusNoNeed: "No Need",
-	StatusPaused: "Paused",
+const (
+	// StatusCreateOperatorFailed represents the plan can not create operators.
+	StatusCreateOperatorFailed = iota + 2000
+)
 
-	// store
-	StatusStoreThrottled:   "Store Throttled",
-	StatusStoreUnavailable: "Store Unavailable",
-	StatusStoreLowSpace:    "Store Low Space",
-	StatusStoreDraining:    "Store Draining",
-	StatusStoreBlocked:     "Store Blocked",
-	StatusStoreExcluded:    "Region Excluded",
+var statusText = map[StatusCode]string{
+	StatusOK: "OK",
+
+	// store in normal state usually
+	StatusStoreScoreDisallowed: "Store Score Disallowed",
+	StatusStoreAlreadyHasPeer:  "Store Already Has Peer",
+	StatusStoreNotMatchRule:    "Store Not Match Rule",
+
+	// store is limited by soft constraint
+	StatusStoreSnapshotThrottled:    "Store Snapshot Throttled",
+	StatusStorePendingPeerThrottled: "Store Pending Peer Throttled",
+	StatusStoreAddLimitThrottled:    "Store Add Peer Throttled",
+	StatusStoreRemoveLimitThrottled: "Store Remove Peer Throttled",
+
+	// store is limited by specified configuration
+	StatusStoreRejectLeader:      "Store Reject Leader",
+	StatusStoreNotMatchIsolation: "Store Not Match Isolation",
+
+	// store is limited by hard constraint
+	StatusStoreLowSpace:     "Store Low Space",
+	StatusStoreRemoving:     "Store Removing",
+	StatusStoreRemoved:      "Store Removed",
+	StatusStoreDisconnected: "Store Disconnected",
+	StatusStoreDown:         "Store Down",
+	StatusStoreBusy:         "Store Busy",
+
+	StatusStoreNotExisted: "Store Not Existed",
 
 	// region
 	StatusRegionHot:           "Region Hot",
 	StatusRegionUnhealthy:     "Region Unhealthy",
 	StatusRegionEmpty:         "Region Empty",
 	StatusRegionNotReplicated: "Region Not Replicated",
-
-	StatusLabelNotMatch:     "Label Not Match",
-	StatusRuleNotMatch:      "Rule Not Match",
-	StatusIsolationNotMatch: "Isolation Not Match",
-
-	// non-filter
-	StatusStoreNotExisted:   "Store Not Existed",
-	StatusNoTargetRegion:    "No Target Region",
-	StatusRegionLabelReject: "Region Label Reject",
+	StatusRegionNotMatchRule:  "Region Not Match Rule",
+	StatusNoTargetRegion:      "No Target Region",
+	StatusRegionLabelReject:   "Region Label Reject",
 }
 
 // StatusText turns the status code into string.
@@ -102,17 +142,18 @@ func StatusText(code StatusCode) string {
 
 // Status describes a plan's result.
 type Status struct {
-	StatusCode     StatusCode
+	StatusCode StatusCode
+	// TODO: Try to indicate the user to do some actions through this field.
 	DetailedReason string
 }
 
 // NewStatus create a new plan status.
-func NewStatus(statusCode StatusCode, reason ...string) Status {
+func NewStatus(statusCode StatusCode, reason ...string) *Status {
 	var detailedReason string
 	if len(reason) != 0 {
 		detailedReason = reason[0]
 	}
-	return Status{
+	return &Status{
 		StatusCode:     statusCode,
 		DetailedReason: detailedReason,
 	}
@@ -124,5 +165,5 @@ func (s Status) IsOK() bool {
 }
 
 func (s Status) String() string {
-	return fmt.Sprintf("%s, %s", StatusText(s.StatusCode), s.DetailedReason)
+	return StatusText(s.StatusCode)
 }
