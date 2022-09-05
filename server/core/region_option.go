@@ -220,7 +220,7 @@ func SetWrittenQuery(v uint64) RegionCreateOption {
 func SetQueryNum(read, write uint64) RegionCreateOption {
 	r := RandomKindReadQuery(read)
 	w := RandomKindWriteQuery(write)
-	q := MergeQueryStat(r, w)
+	q := mergeQueryStat(r, w)
 	return SetQueryStats(q)
 }
 
@@ -236,7 +236,7 @@ func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 // This func is only used for test and simulator.
 func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		q := MergeQueryStat(region.queryStats, v)
+		q := mergeQueryStat(region.queryStats, v)
 		region.queryStats = q
 	}
 }
@@ -346,8 +346,7 @@ func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
 	}
 }
 
-// MergeQueryStat merges two query stats.
-func MergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
+func mergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
 	if q1 == nil && q2 == nil {
 		return &pdpb.QueryStats{}
 	}
