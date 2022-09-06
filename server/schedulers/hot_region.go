@@ -689,13 +689,15 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
-	infl := statistics.Influence{Loads: bs.cur.mainPeerStat.Loads, Count: 1}
+	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+	bs.rwTy.SetFullLoads(infl.Loads, bs.cur.mainPeerStat.Loads)
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
 	// revert peers
 	if bs.best.revertPeerStat != nil {
-		infl = statistics.Influence{Loads: bs.best.revertPeerStat.Loads, Count: 1}
+		infl = statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+		bs.rwTy.SetFullLoads(infl.Loads, bs.best.revertPeerStat.Loads)
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
