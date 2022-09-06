@@ -363,7 +363,7 @@ type solution struct {
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
-func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
+func (s *solution) getExtremeLoad(dim int) (srcLoad, dstLoad, maxPendingLoad float64) {
 	srcCurrentLoad := s.srcStore.LoadPred.Current.Loads[dim]
 	srcFutureLoad := s.srcStore.LoadPred.Future.Loads[dim]
 	dstCurrentLoad := s.dstStore.LoadPred.Current.Loads[dim]
@@ -374,10 +374,15 @@ func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
 		fmt.Sprintf("src-cur-load: %.0f, src-fut-load: %.0f, dst-cur-load: %.0f, dst-fut-load: %.0f, peersRate: %0.f",
 			srcCurrentLoad, srcFutureLoad, dstCurrentLoad, dstFutureLoad, peersRate))
 
-	if peersRate >= 0 {
-		return s.srcStore.LoadPred.Min().Loads[dim], s.dstStore.LoadPred.Max().Loads[dim]
+	maxPendingLoad = math.Abs(srcFutureLoad-srcCurrentLoad) + math.Abs(dstFutureLoad-dstCurrentLoad)
+	if srcCurrentLoad-peersRate >= dstCurrentLoad+peersRate {
+		srcLoad = math.Min(srcCurrentLoad, srcFutureLoad)
+		dstLoad = math.Max(dstCurrentLoad, dstFutureLoad)
+	} else {
+		srcLoad = math.Max(srcCurrentLoad, srcFutureLoad)
+		dstLoad = math.Min(dstCurrentLoad, dstFutureLoad)
 	}
-	return s.srcStore.LoadPred.Max().Loads[dim], s.dstStore.LoadPred.Min().Loads[dim]
+	return
 }
 
 // getCurrentLoad returns the current load of the src store and the dst store.
@@ -409,9 +414,32 @@ func (s *solution) getPeersRateFromCache(dim int) float64 {
 
 // isAvailable returns the solution is available.
 // If the solution has no revertRegion, progressiveRank should < 0.
-// If the solution has some revertRegion, progressiveRank should < -1.
+// If the solution has some revertRegion, progressiveRank should == -4/-3/-1.
 func (s *solution) isAvailable() bool {
-	return s.progressiveRank < -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
+	return s.progressiveRank < -2 || s.progressiveRank == -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
+}
+
+type ratioSet struct {
+	preBalancedRatio      float64
+	balancedRatio         float64
+	preBalancedCheckRatio float64
+	balancedCheckRatio    float64
+	perceivedRatio        float64
+}
+
+func newRatioSet(balancedRatio float64) *ratioSet {
+	if balancedRatio < 0.7 {
+		balancedRatio = 0.7
+	}
+	if balancedRatio > 0.95 {
+		balancedRatio = 0.95
+	}
+	rs := &ratioSet{balancedRatio: balancedRatio}
+	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.15)
+	rs.balancedCheckRatio = balancedRatio - 0.02
+	rs.preBalancedCheckRatio = rs.preBalancedRatio - 0.03
+	rs.perceivedRatio = math.Min(2.0-rs.preBalancedRatio*2, 0.5)
+	return rs
 }
 
 type balanceSolver struct {
@@ -437,11 +465,8 @@ type balanceSolver struct {
 	firstPriority  int
 	secondPriority int
 
-	preBalancedRatio      float64
-	balancedRatio         float64
-	preBalancedCheckRatio float64
-	balancedCheckRatio    float64
-	perceivedRatio        float64
+	firstPriorityRatioSet  *ratioSet
+	secondPriorityRatioSet *ratioSet
 
 	maxPeerNum            int
 	minPerceivedLoadIndex int
@@ -485,11 +510,8 @@ func (bs *balanceSolver) init() {
 	}
 
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.balancedRatio = bs.sche.conf.GetGreatDecRatio()
-	bs.preBalancedRatio = 2.0*bs.balancedRatio - 1.0 // 1.0 - (1.0-bs.balancedRatio)*2
-	bs.balancedCheckRatio = bs.balancedRatio - 0.02
-	bs.preBalancedCheckRatio = bs.preBalancedRatio - 0.03
-	bs.perceivedRatio = (1.0 - bs.preBalancedRatio) * 2
+	bs.firstPriorityRatioSet = newRatioSet(bs.sche.conf.GetGreatDecRatio())
+	bs.secondPriorityRatioSet = newRatioSet(bs.firstPriorityRatioSet.preBalancedRatio)
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minPerceivedLoadIndex = bs.maxPeerNum/100 - 1
 	if bs.minPerceivedLoadIndex < 0 {
@@ -548,12 +570,12 @@ func (bs *balanceSolver) filterUniformStore() (string, bool) {
 		// If both dims are enough uniform, any schedule is unnecessary.
 		return "all-dim", true
 	}
-	if isUniformFirstPriority && (bs.cur.progressiveRank == -1 || bs.cur.progressiveRank == -3) {
-		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+	if isUniformFirstPriority && (bs.cur.progressiveRank == -2 || bs.cur.progressiveRank == -3) {
+		// If first priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for second priority dim
 		return dimToString(bs.firstPriority), true
 	}
-	if isUniformSecondPriority && bs.cur.progressiveRank == -2 {
-		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+	if isUniformSecondPriority && bs.cur.progressiveRank == -1 {
+		// If second priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for first priority dim
 		return dimToString(bs.secondPriority), true
 	}
 	return "", false
@@ -614,14 +636,14 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
 
-				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
-					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
+				if searchRevertRegions && (bs.cur.progressiveRank == -2 || bs.cur.progressiveRank == 0) &&
+					(bs.best == nil || bs.best.progressiveRank >= -2 || bs.best.revertRegion != nil) {
 					// The search-revert-regions is performed only when the following conditions are met to improve performance.
 					// * `searchRevertRegions` is true. It depends on the result of the last `solve`.
 					// * `IsStrictPickingStoreEnabled` is false.
-					// * The current solution is not good enough. -1 <= progressiveRank <= 0
+					// * The current solution is not good enough. progressiveRank == -2/0
 					// * The current best solution is not good enough.
-					//     * The current best solution has progressiveRank < -1 and does not contain revert regions.
+					//     * The current best solution has progressiveRank < -2 and does not contain revert regions.
 					//     * The current best solution contain revert regions.
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
@@ -656,9 +678,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 func (bs *balanceSolver) allowSearchRevertRegions() bool {
 	// The next solve is allowed to search-revert-regions only when the following conditions are met.
 	// * No best solution was found this time.
-	// * The progressiveRank of the best solution is -1.
+	// * The progressiveRank of the best solution is -2.
 	// * The best solution contain revert regions.
-	return bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil
+	return bs.best == nil || bs.best.progressiveRank >= -2 || bs.best.revertRegion != nil
 }
 
 func (bs *balanceSolver) tryAddPendingInfluence() bool {
@@ -957,8 +979,8 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
-// |   isBetter                         | -4       | -3            | -1 / 0   |
-// |   isNotWorsened                    | -2       | 1             | 1        |
+// |   isBetter                         | -4       | -3            | -2       |
+// |   isNotWorsened                    | -1       | 1             | 1        |
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = 1
@@ -973,13 +995,13 @@ func (bs *balanceSolver) calcProgressiveRank() {
 		// For write leader, only compare the first priority.
 		// If the first priority is better, the progressiveRank is -3.
 		// Because it is not a solution that needs to be optimized.
-		if bs.getBalanceBoostByPriorities(bs.firstPriority) == 1 {
+		if bs.getBalanceBoostByPriorities(bs.firstPriority, bs.firstPriorityRatioSet) == 1 {
 			bs.cur.progressiveRank = -3
 		}
 		return
 	}
-	firstCmp := bs.getBalanceBoostByPriorities(bs.firstPriority)
-	secondCmp := bs.getBalanceBoostByPriorities(bs.secondPriority)
+	firstCmp := bs.getBalanceBoostByPriorities(bs.firstPriority, bs.firstPriorityRatioSet)
+	secondCmp := bs.getBalanceBoostByPriorities(bs.secondPriority, bs.secondPriorityRatioSet)
 	switch {
 	case firstCmp == 1 && secondCmp == 1:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
@@ -987,11 +1009,11 @@ func (bs *balanceSolver) calcProgressiveRank() {
 	case firstCmp == 1 && secondCmp == 0:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
 		bs.cur.progressiveRank = -3
-	case firstCmp == 0 && secondCmp == 1:
-		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
-		bs.cur.progressiveRank = -2
 	case firstCmp == 1:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
+		bs.cur.progressiveRank = -2
+	case firstCmp == 0 && secondCmp == 1:
+		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
 		bs.cur.progressiveRank = -1
 	case secondCmp == 1:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
@@ -1040,17 +1062,17 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 	return
 }*/
 
-func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
+func (bs *balanceSolver) getBalanceBoostByPriorities(dim int, rs *ratioSet) (cmp int) {
 	// Four values minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate can be determined from src and dst.
-	// peersRate < minNotWorsenedRate                  ====> cmp == -1
+	// peersRate < minNotWorsenedRate                  ====> cmp == -2
 	// minNotWorsenedRate <= peersRate < minBetterRate ====> cmp == 0
 	// minBetterRate <= peersRate <= maxBetterRate     ====> cmp == 1
-	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == 0
-	// peersRate > maxNotWorsenedRate                  ====> cmp == -1
+	// maxBetterRate < peersRate <= maxNotWorsenedRate ====> cmp == -1
+	// peersRate > maxNotWorsenedRate                  ====> cmp == -2
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-dim, %s-type, %s-type",
 		dimToString(dim), bs.rwTy.String(), bs.opTy.String()))
 
-	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
+	srcRate, dstRate, maxPendingRate := bs.cur.getExtremeLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
 	reverse := false
@@ -1063,15 +1085,15 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("high-rate: %.0f, low-rate: %.0f, peersRate: %.0f, reverse: %t",
 		highRate, lowRate, peersRate, reverse))
 
-	if highRate*bs.balancedCheckRatio <= lowRate {
+	if highRate*rs.balancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in the balanced state, and cmp = 1 will not be judged.
 		// If the balanced state is not broken, cmp = 0.
 		// If the balanced state is broken, cmp = -1.
 
-		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)
-		minNotWorsenedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		// highRate - (highRate+lowRate)/(1.0+bs.balancedRatio)*bs.balancedRatio
-		maxNotWorsenedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		// highRate - (highRate+lowRate)/(1.0+balancedRatio)
+		minNotWorsenedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		// highRate - (highRate+lowRate)/(1.0+balancedRatio)*balancedRatio
+		maxNotWorsenedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
@@ -1081,19 +1103,19 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 			return 0
 		}
 		bs.cur.debugMessage = append(bs.cur.debugMessage, "balanced-state, cmp: -1")
-		return -1
+		return -2
 	}
 
 	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
 	var state string
-	if highRate*bs.preBalancedCheckRatio <= lowRate {
+	if highRate*rs.preBalancedCheckRatio <= lowRate {
 		// At this time, it is considered to be in pre-balanced state.
 		// Only the schedules that reach the balanced state will be judged as 1,
 		// and the schedules that do not destroy the pre-balanced state will be judged as 0.
-		minNotWorsenedRate = (highRate*bs.preBalancedRatio - lowRate) / (1.0 + bs.preBalancedRatio)
-		minBetterRate = (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		maxBetterRate = (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
-		maxNotWorsenedRate = (highRate - lowRate*bs.preBalancedRatio) / (1.0 + bs.preBalancedRatio)
+		minNotWorsenedRate = (highRate*rs.preBalancedRatio - lowRate) / (1.0 + rs.preBalancedRatio)
+		minBetterRate = (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		maxBetterRate = (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
+		maxNotWorsenedRate = (highRate - lowRate*rs.preBalancedRatio) / (1.0 + rs.preBalancedRatio)
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
@@ -1103,13 +1125,13 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		// As long as the balance is significantly improved, it is judged as 1.
 		// If the balance is not reduced, it is judged as 0.
 		// If the rate relationship between src and dst is reversed, there will be a certain penalty.
-		minBalancedRate := (highRate*bs.balancedRatio - lowRate) / (1.0 + bs.balancedRatio)
-		maxBalancedRate := (highRate - lowRate*bs.balancedRatio) / (1.0 + bs.balancedRatio)
+		minBalancedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
+		maxBalancedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
 
 		minNotWorsenedRate = -bs.getMinRate(dim)
-		minBetterRate = math.Min(minBalancedRate*bs.perceivedRatio, bs.minPerceivedLoads[dim])
-		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*bs.perceivedRatio
-		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*bs.perceivedRatio
+		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, bs.minPerceivedLoads[dim])
+		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*rs.perceivedRatio
+		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*rs.perceivedRatio
 		if maxBetterRate < minBetterRate {
 			maxBetterRate = minBetterRate
 		}
@@ -1125,7 +1147,7 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 		greaterMinRate := peersRate >= bs.getMinRate(dim)
 		isTolerance := bs.isTolerance(dim, reverse)
 		otherMessage = fmt.Sprintf(", >=min-rate: %t, is-tolerance: %t", greaterMinRate, isTolerance)
-		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) {
+		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) && (state == "non-balanced" || maxPendingRate < 1) {
 			cmp = 1
 		} else {
 			cmp = 0
@@ -1133,9 +1155,9 @@ func (bs *balanceSolver) getBalanceBoostByPriorities(dim int) (cmp int) {
 	case minNotWorsenedRate <= peersRate && peersRate < minBetterRate:
 		cmp = 0
 	case maxBetterRate < peersRate && peersRate <= maxNotWorsenedRate:
-		cmp = 0
-	default:
 		cmp = -1
+	default:
+		cmp = -2
 	}
 	bs.cur.debugMessage = append(bs.cur.debugMessage, fmt.Sprintf("%s-state, cmp: %d%s", state, cmp, otherMessage))
 	return
@@ -1217,15 +1239,15 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 			}
 			// prefer smaller second priority rate, to reduce oscillation
 			return secondCmp < 0
-		case -2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+		case -2: // isBetter(firstPriority)
+			return firstCmp > 0
+			// TODO: The smaller the difference between the value and the expectation, the better.
+		case -1: // isNotWorsened(firstPriority) && isBetter(secondPriority)
 			if secondCmp != 0 {
 				return secondCmp > 0
 			}
 			// prefer smaller first priority rate, to reduce oscillation
 			return firstCmp < 0
-		case -1: // isBetter(firstPriority)
-			return firstCmp > 0
-			// TODO: The smaller the difference between the value and the expectation, the better.
 		}
 	}
 
@@ -1353,9 +1375,9 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	case -3:
 		dim = dimToString(bs.firstPriority)
 	case -2:
-		dim = dimToString(bs.secondPriority)
-	case -1:
 		dim = dimToString(bs.firstPriority) + "-only"
+	case -1:
+		dim = dimToString(bs.secondPriority)
 	}
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
