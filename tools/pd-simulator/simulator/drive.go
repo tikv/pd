@@ -38,6 +38,7 @@ type Driver struct {
 	raftEngine  *RaftEngine
 	conn        *Connection
 	simConfig   *SimConfig
+	pdConfig    *PDConfig
 }
 
 // NewDriver returns a driver.
@@ -46,10 +47,14 @@ func NewDriver(pdAddr string, caseName string, simConfig *SimConfig) (*Driver, e
 	if simCase == nil {
 		return nil, errors.Errorf("failed to create case %s", caseName)
 	}
+	pdConfig := &PDConfig{}
+	pdConfig.PlacementRules = simCase.Rules
+	pdConfig.LocationLabels = simCase.Labels
 	return &Driver{
 		pdAddr:    pdAddr,
 		simCase:   simCase,
 		simConfig: simConfig,
+		pdConfig:  pdConfig,
 	}, nil
 }
 
@@ -143,6 +148,11 @@ func (d *Driver) Start() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (d *Driver) ChangePDConfig() error {
+	d.client.PutPDConfig(d.pdConfig)
 	return nil
 }
 
