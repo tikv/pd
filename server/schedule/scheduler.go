@@ -38,6 +38,7 @@ type Scheduler interface {
 	GetType() string
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
+	GetMaxInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster Cluster) error
 	Cleanup(cluster Cluster)

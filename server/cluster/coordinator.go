@@ -809,7 +809,9 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			diagnosable := s.IsDiagnosisAllowed()
+			// when s.GetInterval() == s.GetMaxInterval(), we don't think the scheduler can
+			// produce a scheduling operator before this moment, so we can diagnose.
+			diagnosable := s.GetInterval() == s.GetMaxInterval() && s.IsDiagnosisAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}

@@ -141,6 +141,11 @@ func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *hotScheduler) GetMinInterval() time.Duration {
 	return minHotScheduleInterval
 }
+
+func (h *hotScheduler) GetMaxInterval() time.Duration {
+	return maxHotScheduleInterval
+}
+
 func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
