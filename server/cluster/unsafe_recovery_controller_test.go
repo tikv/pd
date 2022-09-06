@@ -306,6 +306,7 @@ func TestFailed(t *testing.T) {
 		re.NotNil(resp.RecoveryPlan)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
+	re.Equal(exitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
@@ -314,7 +315,7 @@ func TestFailed(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(failed, recoveryController.GetStage())
+	re.Equal(finished, recoveryController.GetStage())
 }
 
 func TestForceLeaderFail(t *testing.T) {

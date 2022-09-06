@@ -492,6 +492,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 		output.Info = "Unsafe recovery enters exit force leader stage"
 		if u.err != nil {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
+			u.err = nil
 		}
 	case finished:
 		if u.step > 1 {
