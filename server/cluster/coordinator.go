@@ -809,7 +809,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			diagnosable := c.cluster.opt.IsDiagnosisAllowed() && s.IsDiagnosisAllowed()
+			diagnosable := s.IsDiagnosisAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}

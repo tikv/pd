@@ -763,8 +763,8 @@ type ScheduleConfig struct {
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
-	// DiagnosticInterval is the minimum interval time to diagnose.
-	DiagnosticInterval typeutil.Duration `toml:"diagnostic-interval" json:"diagnostic-interval"`
+	// DiagnosticSamplingRate is the proportional sampling rate for diagnosis when scheduler works
+	DiagnosticSamplingRate uint64 `toml:"diagnostic-sampling-rate" json:"diagnostic-sampling-rate"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -790,7 +790,7 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
-	defaultDiagnosticInterval        = 0
+	defaultDiagnosticSamplingRate    = 0
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -827,7 +827,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
-	adjustDuration(&c.DiagnosticInterval, defaultDiagnosticInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
@@ -870,6 +869,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	adjustUint64(&c.DiagnosticSamplingRate, defaultDiagnosticSamplingRate)
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
