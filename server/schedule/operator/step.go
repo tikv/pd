@@ -195,7 +195,7 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 		// The newly added peer is pending.
 		return nil
 	}
-	return addNode(ap.PeerID, ap.ToStore, useConfChangeV2)
+	return createResponse(addNode(ap.PeerID, ap.ToStore), useConfChangeV2)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -268,7 +268,7 @@ func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb
 		// The newly added peer is pending.
 		return nil
 	}
-	return addLearnerNode(al.PeerID, al.ToStore, useConfChangeV2)
+	return createResponse(addLearnerNode(al.PeerID, al.ToStore), useConfChangeV2)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
@@ -320,7 +320,7 @@ func (pl PromoteLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *
 	if peer == nil {
 		return nil
 	}
-	return addNode(pl.PeerID, pl.ToStore, useConfChangeV2)
+	return createResponse(addNode(pl.PeerID, pl.ToStore), useConfChangeV2)
 }
 
 // RemovePeer is an OpStep that removes a region peer.
@@ -542,7 +542,7 @@ func (dv DemoteVoter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdp
 	if peer == nil {
 		return nil
 	}
-	return addLearnerNode(dv.PeerID, dv.ToStore, useConfChangeV2)
+	return createResponse(addLearnerNode(dv.PeerID, dv.ToStore), useConfChangeV2)
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -849,8 +849,8 @@ func fastStepWaitDuration(regionSize int64) time.Duration {
 	return wait
 }
 
-func addNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	change := &pdpb.ChangePeer{
+func addNode(id, storeID uint64) *pdpb.ChangePeer {
+	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddNode,
 		Peer: &metapb.Peer{
 			Id:      id,
@@ -858,11 +858,10 @@ func addNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartbeatResp
 			Role:    metapb.PeerRole_Voter,
 		},
 	}
-	return createResponse(change, useConfChangeV2)
 }
 
-func addLearnerNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	change := &pdpb.ChangePeer{
+func addLearnerNode(id, storeID uint64) *pdpb.ChangePeer {
+	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 		Peer: &metapb.Peer{
 			Id:      id,
@@ -870,7 +869,6 @@ func addLearnerNode(id, storeID uint64, useConfChangeV2 bool) *pdpb.RegionHeartb
 			Role:    metapb.PeerRole_Learner,
 		},
 	}
-	return createResponse(change, useConfChangeV2)
 }
 
 func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
