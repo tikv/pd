@@ -258,7 +258,7 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 	return better
 }
 
-// pickPeersFromBinaryInt picks the candidates with the related index at the position of binary for the `binaryNumber`` is `1`.
+// pickPeersFromBinaryInt picks the candidates with the related index at the position of binary for the `binaryNumber` is `1`.
 // binaryNumber = 5, which means the related binary is 101, it will returns {candidates[0],candidates[2]}
 // binaryNumber = 6, which means the related binary is 110, it will returns {candidates[1],candidates[2]}
 func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber uint) []*fitPeer {

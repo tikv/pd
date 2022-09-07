@@ -525,7 +525,7 @@ func TestCheckCache(t *testing.T) {
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
 	re.Len(oc.GetOperators(), 1)

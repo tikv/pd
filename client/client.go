@@ -129,6 +129,9 @@ type Client interface {
 	WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
+
+	// KeyspaceClient manages keyspace metadata.
+	KeyspaceClient
 	// Close closes the client.
 	Close()
 }
@@ -321,7 +324,7 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = 1 * time.Second
+	retryInterval          = time.Second
 	maxRetryTimes          = 5
 )
 

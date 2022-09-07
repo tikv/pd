@@ -261,7 +261,7 @@ address = "localhost:9090"
 
 	// Test clamping TSOUpdatePhysicalInterval value
 	cfgData = `
-tso-update-physical-interval = "10ms"
+tso-update-physical-interval = "500ns"
 `
 	cfg = NewConfig()
 	meta, err = toml.Decode(cfgData, &cfg)

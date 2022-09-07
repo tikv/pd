@@ -15,7 +15,6 @@
 package simulator
 
 import (
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/server/core"
@@ -148,11 +147,11 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	s := &cases.Store{
 		ID:        id,
 		Status:    metapb.StoreState_Up,
-		Capacity:  config.StoreCapacityGB * units.GiB,
-		Available: config.StoreAvailableGB * units.GiB,
+		Capacity:  uint64(config.RaftStore.Capacity),
+		Available: uint64(config.RaftStore.Available),
 		Version:   config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
+	n, err := NewNode(s, raft.conn.pdAddr, config)
 	if err != nil {
 		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
 		return false
