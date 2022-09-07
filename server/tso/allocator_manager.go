@@ -249,7 +249,7 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 func (am *AllocatorManager) CleanUpDCLocation() error {
 	serverID := am.member.ID()
 	dcLocationKey := am.member.GetDCLocationPath(serverID)
-	// remove etcd
+	// remove dcLocationKey from etcd
 	if resp, err := kv.
 		NewSlowLogTxn(am.member.Client()).
 		Then(clientv3.OpDelete(dcLocationKey)).
