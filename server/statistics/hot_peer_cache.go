@@ -98,7 +98,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 		values := peers.GetAll()
 		stat := make([]*HotPeerStat, 0, len(values))
 		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold {
+			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == peer.defaultAntiCount() {
 				stat = append(stat, peer)
 			}
 		}
@@ -256,7 +256,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				RegionID: regionID,
 				Kind:     f.kind,
 				// use oldItem.thresholds to make the newItem won't affect the threshold
-				Loads:          oldItem.thresholds,
+				Loads:          make([]float64, len(oldItem.Loads)),
 				LastUpdateTime: time.Now(),
 				isLeader:       oldItem.isLeader,
 				isLearner:      oldItem.isLearner,
@@ -539,23 +539,29 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	newItem.AntiCount = hotRegionAntiCount
-	newItem.allowInherited = true
-	if newItem.Kind == Read {
-		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	if oldItem.AntiCount < oldItem.defaultAntiCount() {
+		newItem.AntiCount = oldItem.AntiCount + 1
+	} else {
+		newItem.AntiCount = oldItem.AntiCount
 	}
+	newItem.allowInherited = true
+
 }
 
 func initItem(item *HotPeerStat) {
 	item.HotDegree = 1
-	item.AntiCount = hotRegionAntiCount
+	item.AntiCount = item.defaultAntiCount()
 	item.allowInherited = true
-	if item.Kind == Read {
-		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
 }
 
 func inheritItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree
 	newItem.AntiCount = oldItem.AntiCount
+}
+
+func (item *HotPeerStat) defaultAntiCount() int {
+	if item.Kind == Read {
+		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
+	return hotRegionAntiCount
 }
