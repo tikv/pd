@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,7 +29,7 @@ type balanceSchedulerPlanAnalyzeTestSuite struct {
 
 	stores  []*core.StoreInfo
 	regions []*core.RegionInfo
-	check   func(string, map[string]struct{}) bool
+	check   func(map[uint64]plan.Status, map[uint64]*plan.Status) bool
 	ctx     context.Context
 	cancel  context.CancelFunc
 }
@@ -41,23 +40,13 @@ func TestBalanceSchedulerPlanAnalyzerTestSuite(t *testing.T) {
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.check = func(output string, expects map[string]struct{}) bool {
-		strs := strings.Split(output, "; ")
-		strMap := make(map[string]struct{})
-		for _, str := range strs {
-			if len(str) == 0 {
-				continue
-			}
-			if _, ok := expects[str]; ok {
-				strMap[str] = struct{}{}
-			} else {
-				suite.T().Log("unexpect output is exisit: " + str)
+	suite.check = func(output map[uint64]plan.Status, expects map[uint64]*plan.Status) bool {
+		for id, status := range expects {
+			outputStatus, ok := output[id]
+			if !ok {
 				return false
 			}
-		}
-		for str := range expects {
-			if _, ok := strMap[str]; !ok {
-				suite.T().Log("expect output is not exisit: " + str)
+			if outputStatus != *status {
 				return false
 			}
 		}
@@ -155,9 +144,12 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
-		map[string]struct{}{
-			"4 store(s) StoreScoreDisallowed": {},
-			"1 store(s) StoreNotMatchRule":    {},
+		map[uint64]*plan.Status{
+			1: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			2: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			3: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			4: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			5: plan.NewStatus(plan.StatusStoreNotMatchRule),
 		}))
 }
 
@@ -171,8 +163,12 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
-		map[string]struct{}{
-			"5 store(s) StoreDown": {},
+		map[uint64]*plan.Status{
+			1: plan.NewStatus(plan.StatusStoreDown),
+			2: plan.NewStatus(plan.StatusStoreDown),
+			3: plan.NewStatus(plan.StatusStoreDown),
+			4: plan.NewStatus(plan.StatusStoreDown),
+			5: plan.NewStatus(plan.StatusStoreDown),
 		}))
 }
 
@@ -186,8 +182,11 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
-		map[string]struct{}{
-			"4 store(s) RegionNotMatchRule": {},
+		map[uint64]*plan.Status{
+			1: plan.NewStatus(plan.StatusRegionNotMatchRule),
+			2: plan.NewStatus(plan.StatusRegionNotMatchRule),
+			3: plan.NewStatus(plan.StatusRegionNotMatchRule),
+			4: plan.NewStatus(plan.StatusRegionNotMatchRule),
 		}))
 }
 
@@ -209,9 +208,11 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	str, _, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.True(suite.check(str,
-		map[string]struct{}{
-			"2 store(s) StoreScoreDisallowed": {},
-			"2 store(s) StoreNotMatchRule":    {},
-			"1 store(s) StoreDown":            {},
+		map[uint64]*plan.Status{
+			1: plan.NewStatus(plan.StatusStoreAlreadyHasPeer),
+			2: plan.NewStatus(plan.StatusStoreAlreadyHasPeer),
+			3: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			4: plan.NewStatus(plan.StatusStoreNotMatchRule),
+			5: plan.NewStatus(plan.StatusStoreDown),
 		}))
 }

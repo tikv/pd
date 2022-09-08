@@ -15,11 +15,17 @@
 package schedulers
 
 import (
-	"fmt"
-
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/plan"
+)
+
+const (
+	pickSource = iota
+	pickRegion
+	pickTarget
+	verify
+	createOperator
 )
 
 type balanceSchedulerPlan struct {
@@ -45,13 +51,13 @@ func (p *balanceSchedulerPlan) GetStep() int {
 func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	switch p.step {
 	// for balance-region/leader scheduler, the first step is selecting stores as source candidates.
-	case 0:
+	case pickSource:
 		p.source = resource.(*core.StoreInfo)
 	// the second step is selecting region from source store.
-	case 1:
+	case pickRegion:
 		p.region = resource.(*core.RegionInfo)
 	// the third step is selecting stores as target candidates.
-	case 2:
+	case pickTarget:
 		p.target = resource.(*core.StoreInfo)
 	}
 }
@@ -61,11 +67,11 @@ func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 		return 0
 	}
 	switch step {
-	case 0:
+	case pickSource:
 		return p.source.GetID()
-	case 1:
+	case pickRegion:
 		return p.region.GetID()
-	case 2:
+	case pickTarget:
 		return p.target.GetID()
 	}
 	return 0
@@ -84,13 +90,13 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 		status: p.status,
 	}
 	plan.step = p.step
-	if p.step > 0 {
+	if p.step > pickSource {
 		plan.source = p.source
 	}
-	if p.step > 1 {
+	if p.step > pickRegion {
 		plan.region = p.region
 	}
-	if p.step > 2 {
+	if p.step > pickTarget {
 		plan.target = p.target
 	}
 	for _, opt := range opts {
@@ -100,21 +106,21 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 // BalancePlanSummary is used to summarize for BalancePlan
-func BalancePlanSummary(plans []plan.Plan) (string, bool, error) {
+func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
 	var storeStatusCounter map[uint64]map[plan.Status]int
 	// statusCounter is used to count the number of status which is regarded as best status of each store
-	statusCounter := make(map[plan.Status]uint64)
+	statusCounter := make(map[uint64]plan.Status)
 	maxStep := -1
 	normal := true
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
 		if !ok {
-			return "", false, errs.ErrDiagnosticLoadPlanError
+			return nil, false, errs.ErrDiagnosticLoadPlanError
 		}
 		step := p.GetStep()
 		// we don't consider the situation for verification step
-		if step > 2 {
+		if step > pickTarget {
 			continue
 		}
 		if step > maxStep {
@@ -127,9 +133,9 @@ func BalancePlanSummary(plans []plan.Plan) (string, bool, error) {
 			normal = false
 		}
 		var store uint64
-		// `step == 1` is a special processing in summary, because we want to exclude the factor of region
+		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
 		// and consider the failure as the status of source store.
-		if step == 1 {
+		if step == pickRegion {
 			store = p.source.GetID()
 		} else {
 			store = p.GetResource(step)
@@ -140,7 +146,7 @@ func BalancePlanSummary(plans []plan.Plan) (string, bool, error) {
 		storeStatusCounter[store][*p.status]++
 	}
 
-	for _, store := range storeStatusCounter {
+	for id, store := range storeStatusCounter {
 		max := 0
 		curStat := *plan.NewStatus(plan.StatusOK)
 		for stat, c := range store {
@@ -149,13 +155,9 @@ func BalancePlanSummary(plans []plan.Plan) (string, bool, error) {
 				curStat = stat
 			}
 		}
-		statusCounter[curStat] += 1
+		statusCounter[id] = curStat
 	}
-	var resStr string
-	for k, v := range statusCounter {
-		resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
-	}
-	return resStr, normal, nil
+	return statusCounter, normal, nil
 }
 
 // balancePlanStatusComparer returns true if new status is better than old one.

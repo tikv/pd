@@ -26,8 +26,9 @@ type Plan interface {
 	SetStatus(*Status)
 }
 
-// Summary is used to analyse plan simply
-type Summary func([]Plan) (string, bool, error)
+// Summary is used to analyse plan simply.
+// It will return the status of store.
+type Summary func([]Plan) (map[uint64]Status, bool, error)
 
 // Collector is a plan collector
 type Collector struct {
