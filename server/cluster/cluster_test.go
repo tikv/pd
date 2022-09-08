@@ -592,7 +592,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 		EndKey:      []byte{byte(1 + 1)},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 	}
-	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: statistics.RegionHeartBeatReportInterval}),
 		core.SetWrittenBytes(30000*10),
 		core.SetWrittenKeys(300000*10))
 	err = cluster.processRegionHeartbeat(region)
