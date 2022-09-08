@@ -33,8 +33,7 @@ const (
 	paused     = "paused"
 	scheduling = "scheduling"
 	pending    = "pending"
-	// TODO: find a better name
-	normal = "normal"
+	normal     = "normal"
 )
 
 const (
@@ -83,11 +82,10 @@ func (d *diagnosticManager) getWorker(name string) *diagnosticWorker {
 
 // diagnosticWorker is used to manage diagnose mechanism
 type diagnosticWorker struct {
-	schedulerName string
-	cluster       *RaftCluster
-	summaryFunc   plan.Summary
-	result        *cache.FIFO
-	//diagnosticManager *diagnosticManager
+	schedulerName   string
+	cluster         *RaftCluster
+	summaryFunc     plan.Summary
+	result          *cache.FIFO
 	samplingCounter uint64
 }
 
@@ -100,15 +98,7 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 		cluster:       cluster,
 		schedulerName: name,
 		summaryFunc:   summaryFunc,
-	}
-}
-
-func (d *diagnosticWorker) init() {
-	if d == nil {
-		return
-	}
-	if d.result == nil {
-		d.result = cache.NewFIFO(maxDiagnosticResultNum)
+		result:        cache.NewFIFO(maxDiagnosticResultNum),
 	}
 }
 
@@ -116,7 +106,7 @@ func (d *diagnosticWorker) isAllowed() bool {
 	if d == nil {
 		return false
 	}
-	if d.cluster.opt.IsDiagnosisAllowed() {
+	if !d.cluster.opt.IsDiagnosisAllowed() {
 		return false
 	}
 	currentCount := atomic.LoadUint64(&d.samplingCounter) + 1
@@ -136,14 +126,14 @@ func (d *diagnosticWorker) getLastResult() *DiagnosticResult {
 	return nil
 }
 
-func (d *diagnosticWorker) generateStatus(status string) {
+func (d *diagnosticWorker) setResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
 	// TODO: implment
 }
 
-func (d *diagnosticWorker) generatePlans(ops []*operator.Operator, plans []plan.Plan) {
+func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
 	if d == nil {
 		return
 	}
@@ -158,14 +148,7 @@ func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, 
 	switch name {
 	default:
 	}
-	index := len(ops)
-	if len(ops) > 0 {
-		if ops[0].Kind()&operator.OpMerge != 0 {
-			index /= 2
-		}
-	}
-	res.UnschedulablePlans = plans[index:]
-	res.SchedulablePlans = plans[:index]
+	// TODO: save plan into result
 	return res
 }
 
@@ -175,6 +158,7 @@ type DiagnosticResult struct {
 	Summary   string `json:"summary"`
 	Timestamp uint64 `json:"timestamp"`
 
-	SchedulablePlans   []plan.Plan
-	UnschedulablePlans []plan.Plan
+	StoreStatus        map[uint64]plan.Status `json:"-"`
+	SchedulablePlans   []plan.Plan            `json:"-"`
+	UnschedulablePlans []plan.Plan            `json:"-"`
 }

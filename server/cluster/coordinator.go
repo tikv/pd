@@ -879,8 +879,6 @@ type scheduleController struct {
 // newScheduleController creates a new scheduleController.
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
-	diagnosticWorker := c.diagnosticManager.getWorker(s.GetName())
-	diagnosticWorker.init()
 	return &scheduleController{
 		Scheduler:         s,
 		cluster:           c.cluster,
@@ -889,7 +887,7 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		nextInterval:      s.GetMinInterval(),
 		ctx:               ctx,
 		cancel:            cancel,
-		diagnosticWorker:  diagnosticWorker,
+		diagnosticWorker:  c.diagnosticManager.getWorker(s.GetName()),
 	}
 }
 
@@ -918,7 +916,7 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		diagnosable = diagnosable && i == 0
 		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
 		if diagnosable {
-			s.diagnosticWorker.generatePlans(ops, plans)
+			s.diagnosticWorker.setResultFromPlans(ops, plans)
 		}
 		if len(ops) > 0 {
 			// If we have schedule, reset interval to the minimal interval.
@@ -944,13 +942,13 @@ func (s *scheduleController) GetInterval() time.Duration {
 func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
 		if diagnosable {
-			s.diagnosticWorker.generateStatus(scheduling)
+			s.diagnosticWorker.setResultFromStatus(scheduling)
 		}
 		return false
 	}
 	if s.IsPaused() || s.cluster.GetUnsafeRecoveryController().IsRunning() {
 		if diagnosable {
-			s.diagnosticWorker.generateStatus(paused)
+			s.diagnosticWorker.setResultFromStatus(paused)
 		}
 		return false
 	}
