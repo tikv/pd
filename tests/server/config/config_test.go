@@ -101,10 +101,10 @@ func TestSwitchMode(t *testing.T) {
 	re.Equal(config.Normal, cfg.ScheduleMode.Mode)
 	re.Equal(uint64(2048), cfg.Schedule.RegionScheduleLimit)
 
-	changeModeConfig(re, addr, "normal", true)
+	changeModeConfig(re, addr, "normal", "true")
 	cfg = getConfig(re, addr)
 	re.True(cfg.ScheduleMode.EnableAutoTune)
-	changeModeConfig(re, addr, "normal", false)
+	changeModeConfig(re, addr, "normal", "false")
 	cfg = getConfig(re, addr)
 	re.False(cfg.ScheduleMode.EnableAutoTune)
 
@@ -151,7 +151,7 @@ func TestSwitchMode(t *testing.T) {
 	re.Equal(200.0, cfg.Schedule.StoreLimit[2].RemovePeer)
 }
 
-func changeModeConfig(re *require.Assertions, addr, mode string, enableAutoTune ...bool) {
+func changeModeConfig(re *require.Assertions, addr, mode string, enableAutoTune ...string) {
 	input := map[string]interface{}{"mode": mode}
 	if len(enableAutoTune) != 0 {
 		input["enable-auto-tune"] = enableAutoTune[0]
