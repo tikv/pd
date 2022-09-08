@@ -235,3 +235,10 @@ func (stat *HotPeerStat) GetStores() []uint64 {
 func (stat *HotPeerStat) IsLearner() bool {
 	return stat.isLearner
 }
+
+func (stat *HotPeerStat) defaultAntiCount() int {
+	if stat.Kind == Read {
+		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
+	return hotRegionAntiCount
+}

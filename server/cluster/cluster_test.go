@@ -155,8 +155,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
-	re.Len(storeStats[1], 1)
-	re.Equal(uint64(1), storeStats[1][0].RegionID)
+	re.Len(storeStats[1], 0)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again

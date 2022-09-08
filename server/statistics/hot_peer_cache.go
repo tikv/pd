@@ -228,7 +228,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				StoreID:  storeID,
 				RegionID: regionID,
 				Kind:     f.kind,
-				// use oldItem.thresholds to make the newItem won't affect the threshold
+				// use 0 to make the cold newItem won't affect the loads.
 				Loads:          make([]float64, len(oldItem.Loads)),
 				LastUpdateTime: time.Now(),
 				isLeader:       oldItem.isLeader,
@@ -528,11 +528,4 @@ func initItem(item *HotPeerStat) {
 func inheritItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree
 	newItem.AntiCount = oldItem.AntiCount
-}
-
-func (item *HotPeerStat) defaultAntiCount() int {
-	if item.Kind == Read {
-		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
-	return hotRegionAntiCount
 }
