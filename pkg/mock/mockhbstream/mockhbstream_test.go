@@ -18,13 +18,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 )
@@ -50,13 +50,13 @@ func TestActivity(t *testing.T) {
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
+		hbs.SendMsg(region, typeutil.DeepClone(msg))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
 	testutil.Eventually(re, func() bool {
-		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
+		hbs.SendMsg(region, typeutil.DeepClone(msg))
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
 	// SendErr to stream2.
@@ -67,7 +67,7 @@ func TestActivity(t *testing.T) {
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		hbs.SendMsg(region, proto.Clone(msg).(*pdpb.RegionHeartbeatResponse))
+		hbs.SendMsg(region, typeutil.DeepClone(msg))
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 }

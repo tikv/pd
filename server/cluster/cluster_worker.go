@@ -17,13 +17,13 @@ package cluster
 import (
 	"bytes"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/statistics/buckets"
@@ -204,7 +204,7 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	}
 
 	// Build origin region by using left and right.
-	originRegion := proto.Clone(right).(*metapb.Region)
+	originRegion := typeutil.DeepClone(right)
 	originRegion.RegionEpoch = nil
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
@@ -226,7 +226,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		return nil, err
 	}
 	last := len(regions) - 1
-	originRegion := proto.Clone(regions[last]).(*metapb.Region)
+	originRegion := typeutil.DeepClone(regions[last])
 	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),

@@ -20,10 +20,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -271,8 +271,8 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	}
 	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
-		Store:  proto.Clone(store).(*metapb.Store),
-		Region: proto.Clone(region).(*metapb.Region),
+		Store:  typeutil.DeepClone(store),
+		Region: typeutil.DeepClone(region),
 	})
 	if err != nil {
 		return err
@@ -287,7 +287,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
-		Store:  proto.Clone(store).(*metapb.Store),
+		Store:  typeutil.DeepClone(store),
 	})
 	cancel()
 	if err != nil {
@@ -304,7 +304,7 @@ func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) err
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
-		Stats:  proto.Clone(stats).(*pdpb.StoreStats),
+		Stats:  typeutil.DeepClone(stats),
 	})
 	cancel()
 	if err != nil {

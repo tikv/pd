@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -736,7 +735,7 @@ func (s *Server) GetClientScheme() string {
 
 // GetMemberInfo returns the server member information.
 func (s *Server) GetMemberInfo() *pdpb.Member {
-	return proto.Clone(s.member.Member()).(*pdpb.Member)
+	return typeutil.DeepClone(s.member.Member())
 }
 
 // GetHandler returns the handler for API.
