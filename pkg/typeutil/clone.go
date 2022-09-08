@@ -16,21 +16,23 @@ package typeutil
 
 import (
 	"reflect"
-
-	"github.com/gogo/protobuf/proto"
 )
 
 // Codec is the interface representing objects that can marshal and unmarshal themselves.
 type Codec interface {
-	proto.Marshaler
-	proto.Unmarshaler
+	Marshal() (data []byte, err error)
+	Unmarshal(data []byte) error
 }
 
 // DeepClone returns the deep copy of the source
 func DeepClone[T Codec](src T) T {
+	t := reflect.ValueOf(&src).Elem()
+	// return src if src is nil
+	if t.IsZero() {
+		return src
+	}
+	dst := reflect.New(t.Type().Elem()).Interface().(T)
 	b, _ := src.Marshal()
-	t := reflect.ValueOf(&src).Elem().Type()
-	dst := reflect.New(t.Elem()).Interface().(T)
 	dst.Unmarshal(b)
 	return dst
 }
