@@ -185,7 +185,7 @@ func (stat *HotPeerStat) GetThresholds() []float64 {
 	return stat.thresholds
 }
 
-// Clone clones the HotPeerStat
+// Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, RegionStatCount)
