@@ -48,6 +48,7 @@ func NewSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewPauseSchedulerCommand())
 	c.AddCommand(NewResumeSchedulerCommand())
 	c.AddCommand(NewConfigSchedulerCommand())
+	c.AddCommand(NewDescribeSchedulerCommand())
 	return c
 }
 
@@ -764,4 +765,41 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 		return
 	}
 	cmd.Println("Success!")
+}
+
+// NewDescribeSchedulerCommand returns commands to config scheduler.
+func NewDescribeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "describe",
+		Short: "describe a scheduler",
+	}
+	c.AddCommand(
+		newDescribeBalanceRegionCommand(),
+	)
+	return c
+}
+
+func newDescribeBalanceRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-region-scheduler",
+		Short: "describe the balance-region-scheduler",
+		Run:   describeSchedulerCommandFunc,
+	}
+	return c
+}
+
+func describeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	schedulerName := cmd.Name()
+	url := "pd/api/v1/debug/diagnostic/" + schedulerName
+
+	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
 }
