@@ -404,7 +404,7 @@ func (suite *configTestSuite) TestConfigTTL() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(true, suite.svr.GetPersistOptions().IsTikvRegionSplitEnabled())
+	suite.True(suite.svr.GetPersistOptions().IsTikvRegionSplitEnabled())
 }
 
 func (suite *configTestSuite) TestTTLConflict() {
