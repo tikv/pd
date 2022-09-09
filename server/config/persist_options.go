@@ -744,13 +744,14 @@ func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 	return defaultValue
 }
 
-func (o *PersistOptions) getTTLBool(key string) (bool, bool, error) {
+func (o *PersistOptions) getTTLBool(key string) (result bool, contains bool, err error) {
 	stringForm, ok := o.GetTTLData(key)
 	if !ok {
-		return false, false, nil
+		return
 	}
-	r, err := strconv.ParseBool(stringForm)
-	return r, true, err
+	result, err = strconv.ParseBool(stringForm)
+	contains = true
+	return
 }
 
 func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
