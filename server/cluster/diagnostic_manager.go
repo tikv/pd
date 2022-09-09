@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -85,7 +86,7 @@ type diagnosticWorker struct {
 	schedulerName   string
 	cluster         *RaftCluster
 	summaryFunc     plan.Summary
-	result          *cache.FIFO
+	result          *ResultMemorizer
 	samplingCounter uint64
 }
 
@@ -98,7 +99,7 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 		cluster:       cluster,
 		schedulerName: name,
 		summaryFunc:   summaryFunc,
-		result:        cache.NewFIFO(maxDiagnosticResultNum),
+		result:        NewResultMemorizer(maxDiagnosticResultNum),
 	}
 }
 
@@ -122,23 +123,23 @@ func (d *diagnosticWorker) getLastResult() *DiagnosticResult {
 	if d.result.Len() == 0 {
 		return nil
 	}
-	// TODO: implment
-	return nil
+	return d.result.GenerateResult()
 }
 
 func (d *diagnosticWorker) setResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
-	// TODO: implment
+	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
+	d.result.Put(result)
 }
 
 func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
 	if d == nil {
 		return
 	}
-	// TODO: implment
-	d.analyze(ops, plans, uint64(time.Now().Unix()))
+	result := d.analyze(ops, plans, uint64(time.Now().Unix()))
+	d.result.Put(result)
 }
 
 func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
@@ -161,4 +162,96 @@ type DiagnosticResult struct {
 	StoreStatus        map[uint64]plan.Status `json:"-"`
 	SchedulablePlans   []plan.Plan            `json:"-"`
 	UnschedulablePlans []plan.Plan            `json:"-"`
+}
+
+type ResultMemorizer struct {
+	*cache.FIFO
+}
+
+func NewResultMemorizer(maxCount int) *ResultMemorizer {
+	return &ResultMemorizer{FIFO: cache.NewFIFO(maxCount)}
+}
+
+func (m *ResultMemorizer) Put(result *DiagnosticResult) {
+	m.FIFO.Put(result.Timestamp, result)
+}
+
+func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
+	items := m.FIFO.FromLastSameElems(func(i interface{}) bool {
+		_, ok := i.(*DiagnosticResult)
+		return ok
+	}, func(i interface{}) string {
+		result, _ := i.(*DiagnosticResult)
+		if result == nil {
+			return ""
+		}
+		return result.Status
+	})
+	length := len(items)
+	if length == 0 {
+		return nil
+	}
+	x1, x2, x3 := length/3, length/3, length/3
+	if (length % 3) > 0 {
+		x1++
+	}
+	if (length % 3) > 1 {
+		x2++
+	}
+	pi := 1.0 / float64(3*x1+2*x2+x3)
+	// If there are 10 results, the weight is [0.143,0.143,0.143,0.143,0.095,0.095,0.095,0.047,0.047,0.047]
+	// If there are 3 results, the weight is [0.5,0.33,0.17]
+	counter := make(map[uint64]map[plan.Status]float64)
+	for i := 0; i < x1; i++ {
+		item := items[i].Value.(*DiagnosticResult)
+		for storeID, status := range item.StoreStatus {
+			if _, ok := counter[storeID]; !ok {
+				counter[storeID] = make(map[plan.Status]float64)
+			}
+			statusCounter := counter[storeID]
+			statusCounter[status] += pi * 3
+		}
+	}
+	for i := x1; i < x1+x2; i++ {
+		item := items[i].Value.(*DiagnosticResult)
+		for storeID, status := range item.StoreStatus {
+			if _, ok := counter[storeID]; !ok {
+				counter[storeID] = make(map[plan.Status]float64)
+			}
+			statusCounter := counter[storeID]
+			statusCounter[status] += pi * 2
+		}
+	}
+	for i := x1 + x2; i < x1+x2+x3; i++ {
+		item := items[i].Value.(*DiagnosticResult)
+		for storeID, status := range item.StoreStatus {
+			if _, ok := counter[storeID]; !ok {
+				counter[storeID] = make(map[plan.Status]float64)
+			}
+			statusCounter := counter[storeID]
+			statusCounter[status] += pi * 1
+		}
+	}
+	statusCounter := make(map[plan.Status]uint64)
+	for _, store := range counter {
+		max := 0.
+		curStat := *plan.NewStatus(plan.StatusOK)
+		for stat, c := range store {
+			if c > max {
+				max = c
+				curStat = stat
+			}
+		}
+		statusCounter[curStat] += 1
+	}
+	var resStr string
+	for k, v := range statusCounter {
+		resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+	}
+	return &DiagnosticResult{
+		Name:      items[0].Value.(*DiagnosticResult).Name,
+		Status:    items[0].Value.(*DiagnosticResult).Status,
+		Summary:   resStr,
+		Timestamp: uint64(time.Now().Unix()),
+	}
 }
