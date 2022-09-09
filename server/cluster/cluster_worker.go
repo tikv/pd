@@ -46,7 +46,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
-	if c.opt.IsTikvRegionSplitDisabled() {
+	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTikvSplitDisabled
 	}
 	reqRegion := request.GetRegion()
@@ -108,7 +108,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
-	if c.opt.IsTikvRegionSplitDisabled() {
+	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTikvSplitDisabled
 	}
 	reqRegion := request.GetRegion()
