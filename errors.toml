@@ -606,7 +606,7 @@ error = '''
 scheduler not found
 '''
 
-["PD:scheduler:ErrSchedulerTikvSplitDisabled"]
+["PD:scheduler:ErrSchedulerTiKVSplitDisabled"]
 error = '''
 tikv split region disabled
 '''

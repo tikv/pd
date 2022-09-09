@@ -201,7 +201,7 @@ const (
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	enableLocationReplacement      = "schedule.enable-location-replacement"
 	// it's related to schedule, but it's not an explicit config
-	enableTikvSplitRegion = "schedule.enable-tikv-split-region"
+	enableTiKVSplitRegion = "schedule.enable-tikv-split-region"
 
 	// enable tikv region split on default
 	// on ebs-based BR we need to disable it with TTL
@@ -220,7 +220,7 @@ var supportedTTLConfigs = []string{
 	hotRegionScheduleLimitKey,
 	schedulerMaxWaitingOperatorKey,
 	enableLocationReplacement,
-	enableTikvSplitRegion,
+	enableTiKVSplitRegion,
 	"default-add-peer",
 	"default-remove-peer",
 }
@@ -528,7 +528,7 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
 func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
-	return o.getTTLUintOr(enableTikvSplitRegion, defaultEnableTikvSplitRegion) == 1
+	return o.getTTLUintOr(enableTiKVSplitRegion, defaultEnableTikvSplitRegion) == 1
 }
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
