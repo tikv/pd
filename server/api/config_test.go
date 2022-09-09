@@ -324,6 +324,7 @@ var ttlConfig = map[string]interface{}{
 	"schedule.hot-region-schedule-limit":      999,
 	"schedule.replica-schedule-limit":         999,
 	"schedule.merge-schedule-limit":           999,
+	"schedule.enable-tikv-split-region":       false,
 }
 
 var invalidTTLConfig = map[string]interface{}{
@@ -344,6 +345,7 @@ func assertTTLConfig(
 	equality(uint64(999), options.GetHotRegionScheduleLimit())
 	equality(uint64(999), options.GetReplicaScheduleLimit())
 	equality(uint64(999), options.GetMergeScheduleLimit())
+	equality(false, options.IsTikvRegionSplitEnabled())
 }
 
 func createTTLUrl(url string, ttl int) string {
@@ -393,6 +395,16 @@ func (suite *configTestSuite) TestConfigTTL() {
 	suite.Equal(uint64(999), suite.svr.GetPersistOptions().GetMaxMergeRegionSize())
 	// max-merge-region-keys should keep consistence with max-merge-region-size.
 	suite.Equal(uint64(999*10000), suite.svr.GetPersistOptions().GetMaxMergeRegionKeys())
+
+	// on invalid value, we use default config
+	mergeConfig = map[string]interface{}{
+		"schedule.enable-tikv-split-region": "invalid",
+	}
+	postData, err = json.Marshal(mergeConfig)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
+	suite.NoError(err)
+	suite.Equal(true, suite.svr.GetPersistOptions().IsTikvRegionSplitEnabled())
 }
 
 func (suite *configTestSuite) TestTTLConflict() {

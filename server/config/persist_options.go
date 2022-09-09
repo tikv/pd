@@ -202,10 +202,6 @@ const (
 	enableLocationReplacement      = "schedule.enable-location-replacement"
 	// it's related to schedule, but it's not an explicit config
 	enableTiKVSplitRegion = "schedule.enable-tikv-split-region"
-
-	// enable tikv region split on default
-	// on ebs-based BR we need to disable it with TTL
-	defaultEnableTikvSplitRegion = 1
 )
 
 var supportedTTLConfigs = []string{
@@ -528,7 +524,7 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 
 // IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
 func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
-	return o.getTTLUintOr(enableTiKVSplitRegion, defaultEnableTikvSplitRegion) == 1
+	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
 }
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
@@ -740,6 +736,25 @@ func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 
 func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLBool(key string) (bool, bool, error) {
+	stringForm, ok := o.GetTTLData(key)
+	if !ok {
+		return false, false, nil
+	}
+	r, err := strconv.ParseBool(stringForm)
+	return r, true, err
+}
+
+func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
+	if v, ok, err := o.getTTLBool(key); ok {
 		if err == nil {
 			return v
 		}
