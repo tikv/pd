@@ -527,6 +527,7 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
+// IsTikvRegionSplitDisabled returns whether tikv split region is disabled.
 func (o *PersistOptions) IsTikvRegionSplitDisabled() bool {
 	return o.getTTLUintOr(disableTikvSplitRegion, defaultDisableTikvSplitRegion) == 1
 }
