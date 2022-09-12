@@ -296,26 +296,15 @@ func TestFailed(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Nil(resp.RecoveryPlan)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		re.NotNil(resp.RecoveryPlan)
-		applyRecoveryPlan(re, storeID, reports, resp)
+		re.Nil(resp.RecoveryPlan)
 	}
-	re.Equal(exitForceLeader, recoveryController.GetStage())
-
-	for storeID, report := range reports {
-		req := newStoreHeartbeat(storeID, report)
-		req.StoreReport = report
-		resp := &pdpb.StoreHeartbeatResponse{}
-		recoveryController.HandleStoreHeartbeat(req, resp)
-		applyRecoveryPlan(re, storeID, reports, resp)
-	}
-	re.Equal(finished, recoveryController.GetStage())
+	re.Equal(failed, recoveryController.GetStage())
 }
 
 func TestForceLeaderFail(t *testing.T) {
