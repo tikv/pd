@@ -825,19 +825,24 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	)
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
-	case movePeer:
+	case movePeer: // only move peer
+		if bs.cur.mainPeerStat.IsLeader() {
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
-
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
 		}
 
-	case transferLeader:
+	case transferLeader: // move leader and transfer leader
+		if !bs.cur.mainPeerStat.IsLeader() {
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
@@ -845,11 +850,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
 			filters = append(filters, leaderFilter)
 		}
-
-		for _, peer := range bs.cur.region.GetFollowers() {
-			if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
-				candidates = append(candidates, detail)
-			}
+		for _, detail := range bs.stLoadDetail {
+			candidates = append(candidates, detail)
 		}
 
 	default:
