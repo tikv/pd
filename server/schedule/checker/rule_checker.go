@@ -37,6 +37,7 @@ var (
 	errNoStoreToReplace   = errors.New("no store to replace peer")
 	errPeerCannotBeLeader = errors.New("peer cannot be leader")
 	errNoNewLeader        = errors.New("no new leader")
+	errRegionNoLeader     = errors.New("region no leader")
 )
 
 const maxPendingListLen = 100000
@@ -238,7 +239,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	}
 	if region.GetLeader() == nil {
 		checkerCounter.WithLabelValues("rule_checker", "region-no-leader").Inc()
-		return nil, nil
+		return nil, errRegionNoLeader
 	}
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
