@@ -123,6 +123,8 @@ func (suite *configTestSuite) TestConfigAll() {
 	cfg.ClusterVersion = *v
 	suite.Equal(cfg, newCfg1)
 
+	// revert this to avoid it affects TestConfigTTL
+	l["schedule.enable-tikv-split-region"] = "true"
 	postData, err = json.Marshal(l)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
