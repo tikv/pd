@@ -171,7 +171,7 @@ func (rule *LabelRule) expireBefore(t time.Time) bool {
 	return rule.minExpire.Before(t)
 }
 
-// initKeyRangeRulesFromLabelRuleData init and adjust []KeyRangeRule from `LabelRule.Data``
+// initKeyRangeRulesFromLabelRuleData init and adjust []KeyRangeRule from `LabelRule.Data“
 func initKeyRangeRulesFromLabelRuleData(data interface{}) ([]*KeyRangeRule, error) {
 	rules, ok := data.([]interface{})
 	if !ok {

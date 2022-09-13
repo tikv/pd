@@ -17,11 +17,11 @@ package tso
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -148,12 +148,13 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 // GenerateTSO is used to generate the given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling this method.
 // Basically, there are two ways to generate a Global TSO:
-//   1. The old way to generate a normal TSO from memory directly, which makes the TSO service node become single point.
-//   2. The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
+//  1. The old way to generate a normal TSO from memory directly, which makes the TSO service node become single point.
+//  2. The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
+//
 // And for the new way, there are two different strategies:
-//   1. Collect the max Local TSO from all Local TSO Allocator leaders and write it back to them as MaxTS.
-//   2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
-//      During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
+//  1. Collect the max Local TSO from all Local TSO Allocator leaders and write it back to them as MaxTS.
+//  2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
+//     During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
 	if !gta.leadership.Check() {
 		tsoCounter.WithLabelValues("not_leader", gta.timestampOracle.dcLocation).Inc()

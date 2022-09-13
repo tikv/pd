@@ -344,9 +344,10 @@ func (m *KeyManager) loadKeys() error {
 }
 
 // rotateKeyIfNeeded rotate key if one of the following condition is meet.
-//   * Encryption method is changed.
-//   * Current key is exposed.
-//   * Current key expired.
+//   - Encryption method is changed.
+//   - Current key is exposed.
+//   - Current key expired.
+//
 // Otherwise re-save all keys to finish master key rotation if forceUpdate = true.
 // Require mu lock to be held.
 func (m *KeyManager) rotateKeyIfNeeded(forceUpdate bool) error {

@@ -245,6 +245,25 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 	return infoPtr.clone(), true
 }
 
+// CleanUpDCLocation cleans up certain server's DCLocationInfo
+func (am *AllocatorManager) CleanUpDCLocation() error {
+	serverID := am.member.ID()
+	dcLocationKey := am.member.GetDCLocationPath(serverID)
+	// remove dcLocationKey from etcd
+	if resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpDelete(dcLocationKey)).
+		Commit(); err != nil {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	} else if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	log.Info("delete the dc-location key previously written in etcd",
+		zap.Uint64("server-id", serverID))
+	go am.ClusterDCLocationChecker()
+	return nil
+}
+
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,
 // which satisfies dcLocation -> DCLocationInfo.
 func (am *AllocatorManager) GetClusterDCLocations() map[string]DCLocationInfo {

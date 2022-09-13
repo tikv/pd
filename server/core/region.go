@@ -59,7 +59,7 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
-	QueryStats        *pdpb.QueryStats
+	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets       unsafe.Pointer
@@ -150,7 +150,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
-		QueryStats:        heartbeat.GetQueryStats(),
+		queryStats:        heartbeat.GetQueryStats(),
 	}
 
 	for _, opt := range opts {
@@ -216,6 +216,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
+		queryStats:        proto.Clone(r.queryStats).(*pdpb.QueryStats),
 	}
 
 	for _, opt := range opts {
@@ -1083,12 +1084,12 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 
 // GetReadQueryNum returns read query num from this region
 func (r *RegionInfo) GetReadQueryNum() uint64 {
-	return GetReadQueryNum(r.QueryStats)
+	return GetReadQueryNum(r.queryStats)
 }
 
 // GetWriteQueryNum returns write query num from this region
 func (r *RegionInfo) GetWriteQueryNum() uint64 {
-	return GetWriteQueryNum(r.QueryStats)
+	return GetWriteQueryNum(r.queryStats)
 }
 
 // GetReadQueryNum returns read query num from this QueryStats
