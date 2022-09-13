@@ -649,7 +649,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
-	infl := statistics.Influence{Loads: bs.cur.mainPeerStat.Loads, Count: 1}
+	infl := statistics.Influence{Loads: bs.best.mainPeerStat.Loads, Count: 1}
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
