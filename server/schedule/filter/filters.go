@@ -605,11 +605,12 @@ type ruleLeaderFitFilter struct {
 	region           *core.RegionInfo
 	oldFit           *placement.RegionFit
 	srcLeaderStoreID uint64
+	allowMoveLeader  bool
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
+func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
 	return &ruleLeaderFitFilter{
 		scope:            scope,
 		cluster:          cluster,
@@ -617,6 +618,7 @@ func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManage
 		region:           region,
 		oldFit:           ruleManager.FitRegion(cluster, region),
 		srcLeaderStoreID: srcLeaderStoreID,
+		allowMoveLeader:  allowMoveLeader,
 	}
 }
 
@@ -634,13 +636,17 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	targetPeer := f.region.GetStorePeer(store.GetID())
+	newRegionOptions := []core.RegionCreateOption{core.WithLeader(targetPeer)}
 	if targetPeer == nil {
-		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-		return statusStoreNotMatchRule
+		if !f.allowMoveLeader {
+			log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
+			return statusStoreNotMatchRule
+		}
+		newRegionOptions = append(newRegionOptions, core.WithReplacePeerStore(f.srcLeaderStoreID, store.GetID()))
 	}
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithLeader(targetPeer))
+		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
+	)
 	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
 	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
 		return statusOK
@@ -664,9 +670,13 @@ func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *co
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeaders ...bool) Filter {
 	if opt.IsPlacementRulesEnabled() {
-		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
+		var allowMoveLeader bool
+		if len(allowMoveLeaders) != 0 {
+			allowMoveLeader = allowMoveLeaders[0]
+		}
+		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID(), allowMoveLeader)
 	}
 	return nil
 }

@@ -825,8 +825,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	)
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
-	case movePeer: // only move peer
-		if bs.cur.mainPeerStat.IsLeader() {
+	case movePeer:
+		if bs.rwTy == statistics.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
 			return nil
 		}
 		filters = []filter.Filter{
@@ -839,19 +839,32 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			candidates = append(candidates, detail)
 		}
 
-	case transferLeader: // move leader and transfer leader
-		if !bs.cur.mainPeerStat.IsLeader() {
+	case transferLeader:
+		if !bs.cur.mainPeerStat.IsLeader() { // move leader and transfer leader
 			return nil
 		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
-			filters = append(filters, leaderFilter)
-		}
-		for _, detail := range bs.stLoadDetail {
-			candidates = append(candidates, detail)
+		if bs.rwTy == statistics.Read {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for storeID, detail := range bs.stLoadDetail {
+				if storeID != bs.cur.mainPeerStat.StoreID {
+					candidates = append(candidates, detail)
+				}
+			}
+		} else {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for _, peer := range bs.cur.region.GetFollowers() {
+				if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
+					candidates = append(candidates, detail)
+				}
+			}
 		}
 
 	default:
