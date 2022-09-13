@@ -142,6 +142,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.DeleteScheduler, setMethods(http.MethodDelete))
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods(http.MethodPost))
 
+	diagnosticHandler := newDiagnosticHandler(svr, rd)
+	registerFunc(clusterRouter, "/schedulers/diagnosis/{name}", diagnosticHandler.GetDiagnosticResult, setMethods(http.MethodGet))
+
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
 	registerPrefix(apiRouter, "/scheduler-config", schedulerConfigHandler.GetSchedulerConfig)
 
@@ -278,9 +281,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/leader", leaderHandler.GetLeader, setMethods(http.MethodGet))
 	registerFunc(apiRouter, "/leader/resign", leaderHandler.ResignLeader, setMethods(http.MethodPost), setAuditBackend(localLog))
 	registerFunc(apiRouter, "/leader/transfer/{next_leader}", leaderHandler.TransferLeader, setMethods(http.MethodPost), setAuditBackend(localLog))
-
-	diagnosticHandler := newDiagnosticHandler(svr, rd)
-	registerFunc(clusterRouter, "/debug/diagnostic/{name}", diagnosticHandler.GetDiagnosticResult, setMethods(http.MethodGet))
 
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet))
