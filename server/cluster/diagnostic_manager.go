@@ -41,7 +41,9 @@ const (
 	maxDiagnosticResultNum = 10
 )
 
-var SummaryFuncs = map[string]plan.Summary{}
+var SummaryFuncs = map[string]plan.Summary{
+	schedulers.BalanceRegionName: schedulers.BalancePlanSummary,
+}
 
 type diagnosticManager struct {
 	syncutil.RWMutex

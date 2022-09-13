@@ -19,12 +19,15 @@ package plan
 type Plan interface {
 	GetStep() int
 	GetStatus() *Status
+	GetResource(int) uint64
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	SetResource(interface{})
 	SetStatus(*Status)
 }
 
+// Summary is used to analyse plan simply.
+// It will return the status of store.
 type Summary func([]Plan) (map[uint64]Status, bool, error)
 
 // Collector is a plan collector
