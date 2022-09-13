@@ -232,13 +232,15 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage                 = true
-	defaultTraceRegionFlow                  = true
-	defaultFlowRoundByDigit                 = 3 // KB
-	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
-	defaultMaxResetTSGap                    = 24 * time.Hour
-	defaultMinResolvedTSPersistenceInterval = 0
-	defaultKeyType                          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
+
+	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
+	DefaultMinResolvedTSPersistenceInterval = time.Second
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -738,6 +740,9 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// on ebs-based BR we need to disable it with TTL
+	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -809,6 +814,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
@@ -863,6 +869,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
+	}
+	if !meta.IsDefined("enable-tikv-split-region") {
+		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
@@ -1164,7 +1173,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
+		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
