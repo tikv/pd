@@ -32,6 +32,7 @@ import (
 var (
 	schedulersPrefix         = "pd/api/v1/schedulers"
 	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
+	schedulerDiagnosisPrefix = "pd/api/v1/schedulers/diagnosis"
 	evictLeaderSchedulerName = "evict-leader-scheduler"
 	grantLeaderSchedulerName = "grant-leader-scheduler"
 )
@@ -794,7 +795,7 @@ func describeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	schedulerName := cmd.Name()
-	url := "pd/api/v1/debug/diagnostic/" + schedulerName
+	url := path.Join(schedulerDiagnosisPrefix, schedulerName)
 
 	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
