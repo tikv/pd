@@ -848,11 +848,24 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 		if bs.rwTy == statistics.Read {
+			peers := bs.cur.region.GetPeers()
 			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for storeID, detail := range bs.stLoadDetail {
-				if storeID != bs.cur.mainPeerStat.StoreID {
+				if storeID == bs.cur.mainPeerStat.StoreID {
+					continue
+				}
+				// transfer leader
+				if slice.AnyOf(peers, func(i int) bool {
+					return peers[i].GetStoreId() == storeID
+				}) {
+					candidates = append(candidates, detail)
+					continue
+				}
+				// move leader
+				if filter.Target(bs.GetOpts(), detail.StoreInfo,
+					[]filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}) {
 					candidates = append(candidates, detail)
 				}
 			}

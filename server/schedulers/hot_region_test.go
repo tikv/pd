@@ -1370,6 +1370,45 @@ func TestSkipUniformStore(t *testing.T) {
 	clearPendingInfluence(hb.(*hotScheduler))
 }
 
+func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetStrictPickingStore(false)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.AddRegionStore(5, 20)
+	tc.AddRegionStore(6, 20)
+
+	// no uniform among four stores
+	tc.UpdateStorageReadStats(1, 10.05*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 10.05*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 10.05*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 0.0*units.MB*statistics.StoreHeartBeatReportInterval, 0.0*units.MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, statistics.Read, []testRegionInfo{
+		{1, []uint64{1, 5, 6}, 0.05 * units.MB, 0.05 * units.MB, 0},
+	})
+	ops, _ := hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	clearPendingInfluence(hb.(*hotScheduler))
+	// two dim are both enough uniform among three stores
+	tc.SetStoreEvictLeader(4,true)
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
+	clearPendingInfluence(hb.(*hotScheduler))
+}
+
 func TestHotCacheUpdateCache(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
