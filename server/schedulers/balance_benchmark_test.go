@@ -15,6 +15,7 @@ package schedulers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -52,7 +53,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 	if ruleEnable {
 		addTiflash(tc)
 	}
-	storeID, regionID := uint64(0), uint64(0)
+	storeID, regionID := uint64(1), uint64(1)
 	for _, host := range hosts {
 		for _, rack := range racks {
 			for _, az := range zones {
@@ -78,6 +79,40 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 		for i := uint64(0); i < uint64(storeCount*2/3); i++ {
 			s := tc.GetStore(i)
 			s.GetMeta().State = metapb.StoreState_Tombstone
+		}
+	}
+	return tc
+}
+
+func newBenchBigCluster(ctx context.Context, storeNumInOneRack, regionNum int) *mockcluster.Cluster {
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
+	opt.SetPlacementRuleEnabled(true)
+
+	config := opt.GetReplicationConfig()
+	config.LocationLabels = []string{"az", "rack", "host"}
+	config.IsolationLevel = "az"
+
+	storeID, regionID := uint64(0), uint64(0)
+	hosts := make([]string, 0)
+	for i := 0; i < storeNumInOneRack; i++ {
+		hosts = append(hosts, fmt.Sprintf("host%d", i+1))
+	}
+	for _, host := range hosts {
+		for _, rack := range racks {
+			for _, az := range zones {
+				label := make(map[string]string, 3)
+				label["az"] = az
+				label["rack"] = rack
+				label["host"] = host
+				storeID++
+				tc.AddLabelsStore(storeID, regionNum, label)
+			}
+			for j := 0; j < regionCount; j++ {
+				tc.AddRegionWithLearner(regionID, storeID, []uint64{storeID - 1, storeID - 2}, nil)
+				regionID++
+			}
 		}
 	}
 	return tc
@@ -133,6 +168,41 @@ func BenchmarkNoLabel(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, false)
+	}
+}
+
+func BenchmarkDiagnosisNoLabel1(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchCluster(ctx, false, false, false)
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sc.Schedule(tc, true)
+	}
+}
+
+func BenchmarkDiagnosisNoLabel2(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchBigCluster(ctx, 100, 100)
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops, plans := sc.Schedule(tc, true)
+		b.Log(len(ops), len(plans))
+	}
+}
+
+func BenchmarkNoLabel2(b *testing.B) {
+	ctx := context.Background()
+	tc := newBenchBigCluster(ctx, 100, 100)
+	oc := schedule.NewOperatorController(ctx, nil, nil)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops, plans := sc.Schedule(tc, false)
+		b.Log(len(ops), len(plans))
 	}
 }
 

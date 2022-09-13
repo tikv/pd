@@ -805,7 +805,6 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 
 	timer := time.NewTimer(s.GetInterval())
 	defer timer.Stop()
-
 	for {
 		select {
 		case <-timer.C:
@@ -859,6 +858,7 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 	return c.diagnosticManager.getDiagnosticResult(name)
 }
 
+// DiagnosableSchedulers includes all schedulers which pd support to diagnose.
 var DiagnosableSchedulers = map[string]struct{}{
 	schedulers.BalanceRegionName: {},
 }

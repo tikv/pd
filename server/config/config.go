@@ -763,8 +763,8 @@ type ScheduleConfig struct {
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
-	// DiagnosticSamplingRate is the proportional sampling rate for diagnosis when scheduler works
-	DiagnosticSamplingRate uint64 `toml:"diagnostic-sampling-rate" json:"diagnostic-sampling-rate"`
+	// EnableDiagnosis is the the option to enable using diagnosis
+	EnableDiagnosis bool `toml:"enable-diagnosis" json:"enable-diagnosis,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -790,7 +790,7 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
-	defaultDiagnosticSamplingRate    = 0
+	defaultEnableDiagnosis           = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -869,7 +869,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	adjustUint64(&c.DiagnosticSamplingRate, defaultDiagnosticSamplingRate)
+	if !meta.IsDefined("enable-cross-table-merge") {
+		c.EnableDiagnosis = defaultEnableDiagnosis
+	}
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {

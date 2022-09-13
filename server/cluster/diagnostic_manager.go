@@ -16,7 +16,6 @@ package cluster
 
 import (
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
@@ -41,6 +40,7 @@ const (
 	maxDiagnosticResultNum = 10
 )
 
+// SummaryFuncs includes all implementations of plan.Summary.
 var SummaryFuncs = map[string]plan.Summary{
 	schedulers.BalanceRegionName: schedulers.BalancePlanSummary,
 }
@@ -63,7 +63,9 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 }
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
-	if isDisabled, _ := d.cluster.IsSchedulerDisabled(name); isDisabled {
+	isSchedulerExisted, _ := d.cluster.IsSchedulerExisted(name)
+	isDisabled, _ := d.cluster.IsSchedulerDisabled(name)
+	if !isSchedulerExisted || isDisabled {
 		ts := uint64(time.Now().Unix())
 		res := &DiagnosticResult{Name: name, Timestamp: ts, Status: disabled}
 		return res, nil
@@ -85,11 +87,10 @@ func (d *diagnosticManager) getWorker(name string) *diagnosticWorker {
 
 // diagnosticWorker is used to manage diagnose mechanism
 type diagnosticWorker struct {
-	schedulerName   string
-	cluster         *RaftCluster
-	summaryFunc     plan.Summary
-	result          *ResultMemorizer
-	samplingCounter uint64
+	schedulerName string
+	cluster       *RaftCluster
+	summaryFunc   plan.Summary
+	results       *resultCache
 }
 
 func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
@@ -101,7 +102,7 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 		cluster:       cluster,
 		schedulerName: name,
 		summaryFunc:   summaryFunc,
-		result:        NewResultMemorizer(maxDiagnosticResultNum),
+		results:       newResultMemorizer(maxDiagnosticResultNum),
 	}
 }
 
@@ -109,23 +110,14 @@ func (d *diagnosticWorker) isAllowed() bool {
 	if d == nil {
 		return false
 	}
-	if !d.cluster.opt.IsDiagnosisAllowed() {
-		return false
-	}
-	currentCount := atomic.LoadUint64(&d.samplingCounter) + 1
-	if currentCount == d.cluster.opt.GetDiagnosticSamplingRate() {
-		atomic.StoreUint64(&d.samplingCounter, 0)
-		return true
-	}
-	atomic.StoreUint64(&d.samplingCounter, currentCount)
-	return false
+	return d.cluster.opt.IsDiagnosisAllowed()
 }
 
 func (d *diagnosticWorker) getLastResult() *DiagnosticResult {
-	if d.result.Len() == 0 {
+	if d.results.Len() == 0 {
 		return nil
 	}
-	return d.result.GenerateResult()
+	return d.results.generateResult()
 }
 
 func (d *diagnosticWorker) setResultFromStatus(status string) {
@@ -133,7 +125,7 @@ func (d *diagnosticWorker) setResultFromStatus(status string) {
 		return
 	}
 	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
-	d.result.Put(result)
+	d.results.put(result)
 }
 
 func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
@@ -141,7 +133,7 @@ func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []
 		return
 	}
 	result := d.analyze(ops, plans, uint64(time.Now().Unix()))
-	d.result.Put(result)
+	d.results.put(result)
 }
 
 func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
@@ -170,6 +162,7 @@ func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, 
 	return res
 }
 
+// DiagnosticResult is used to save diagnostic result and is also used to output.
 type DiagnosticResult struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
@@ -181,19 +174,22 @@ type DiagnosticResult struct {
 	UnschedulablePlans []plan.Plan            `json:"-"`
 }
 
-type ResultMemorizer struct {
+// resultCache is an encapsulation for cache.FIFO.
+type resultCache struct {
 	*cache.FIFO
 }
 
-func NewResultMemorizer(maxCount int) *ResultMemorizer {
-	return &ResultMemorizer{FIFO: cache.NewFIFO(maxCount)}
+func newResultMemorizer(maxCount int) *resultCache {
+	return &resultCache{FIFO: cache.NewFIFO(maxCount)}
 }
 
-func (m *ResultMemorizer) Put(result *DiagnosticResult) {
+func (m *resultCache) put(result *DiagnosticResult) {
 	m.FIFO.Put(result.Timestamp, result)
 }
 
-func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
+// generateResult firstly selects the continuous items which have the same Status with the the lastest one.
+// And then dynamically assign weights to these results. More recent results will be assigned more weight.
+func (m *resultCache) generateResult() *DiagnosticResult {
 	items := m.FIFO.FromLastSameElems(func(i interface{}) bool {
 		_, ok := i.(*DiagnosticResult)
 		return ok
@@ -215,7 +211,7 @@ func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
 	if (length % 3) > 1 {
 		x2++
 	}
-	pi := 1.0 / float64(3*x1+2*x2+x3)
+	unitWeight := 1.0 / float64(3*x1+2*x2+x3)
 	// If there are 10 results, the weight is [0.143,0.143,0.143,0.143,0.095,0.095,0.095,0.047,0.047,0.047]
 	// If there are 3 results, the weight is [0.5,0.33,0.17]
 	counter := make(map[uint64]map[plan.Status]float64)
@@ -226,7 +222,7 @@ func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
 				counter[storeID] = make(map[plan.Status]float64)
 			}
 			statusCounter := counter[storeID]
-			statusCounter[status] += pi * 3
+			statusCounter[status] += unitWeight * 3
 		}
 	}
 	for i := x1; i < x1+x2; i++ {
@@ -236,7 +232,7 @@ func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
 				counter[storeID] = make(map[plan.Status]float64)
 			}
 			statusCounter := counter[storeID]
-			statusCounter[status] += pi * 2
+			statusCounter[status] += unitWeight * 2
 		}
 	}
 	for i := x1 + x2; i < x1+x2+x3; i++ {
@@ -246,7 +242,7 @@ func (m *ResultMemorizer) GenerateResult() *DiagnosticResult {
 				counter[storeID] = make(map[plan.Status]float64)
 			}
 			statusCounter := counter[storeID]
-			statusCounter[status] += pi * 1
+			statusCounter[status] += unitWeight * 1
 		}
 	}
 	statusCounter := make(map[plan.Status]uint64)

@@ -269,20 +269,15 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
-// GetDiagnosticSamplingRate returns the diagnostic sampling rate.
-func (o *PersistOptions) GetDiagnosticSamplingRate() uint64 {
-	return o.GetScheduleConfig().DiagnosticSamplingRate
-}
-
-// IsDiagnosisAllowed returns whether is enable to process diagnosis.
+// IsDiagnosisAllowed returns whether is enable to use diagnosis.
 func (o *PersistOptions) IsDiagnosisAllowed() bool {
-	return o.GetScheduleConfig().DiagnosticSamplingRate != 0
+	return o.GetScheduleConfig().EnableDiagnosis
 }
 
-// SetDiagnosticSamplingRate to set the sampling rate to diagnose. It's only used to test.
-func (o *PersistOptions) SetDiagnosticSamplingRate(samplingRate uint64) {
+// SetEnableDiagnosis to set the option for diagnose. It's only used to test.
+func (o *PersistOptions) SetEnableDiagnosis(enable bool) {
 	v := o.GetScheduleConfig().Clone()
-	v.DiagnosticSamplingRate = samplingRate
+	v.EnableDiagnosis = enable
 	o.SetScheduleConfig(v)
 }
 

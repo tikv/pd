@@ -86,11 +86,6 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentialGrowth)
 }
 
-// GetMaxInterval return the max interval for the scheduler
-func (s *BaseScheduler) GetMaxInterval() time.Duration {
-	return MaxScheduleInterval
-}
-
 // Prepare does some prepare work
 func (s *BaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
 

@@ -86,6 +86,8 @@ const (
 	StatusRegionNotReplicated
 	// StatusRegionNotMatchRule represents the region does not match rule constraint.
 	StatusRegionNotMatchRule
+	// StatusRegionNoLeader represents the region has no leader.
+	StatusRegionNoLeader
 	// StatusNoTargetRegion represents nts the target region of merge operation cannot be found.
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
@@ -131,6 +133,7 @@ var statusText = map[StatusCode]string{
 	StatusRegionEmpty:         "RegionEmpty",
 	StatusRegionNotReplicated: "RegionNotReplicated",
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
+	StatusRegionNoLeader:      "RegionNoLeader",
 
 	// non-filter
 	StatusNoTargetRegion:    "NoTargetRegion",
