@@ -79,9 +79,16 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 // CheckWithFit is similar with Checker with placement.RegionFit
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
+	// checker is paused
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
 		return nil
+	}
+	// skip no leader region
+	if region.GetLeader() == nil {
+		checkerCounter.WithLabelValues("rule_checker", "region-no-leader").Inc()
+		log.Debug("fail to check region", zap.Uint64("region-id", region.GetID()), zap.Error(errRegionNoLeader))
+		return
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
@@ -236,10 +243,6 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if core.IsLearner(peer) && rf.Rule.Role != placement.Learner {
 		checkerCounter.WithLabelValues("rule_checker", "fix-peer-role").Inc()
 		return operator.CreatePromoteLearnerOperator("fix-peer-role", c.cluster, region, peer)
-	}
-	if region.GetLeader() == nil {
-		checkerCounter.WithLabelValues("rule_checker", "region-no-leader").Inc()
-		return nil, errRegionNoLeader
 	}
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
