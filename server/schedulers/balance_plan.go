@@ -24,8 +24,9 @@ const (
 	pickSource = iota
 	pickRegion
 	pickTarget
-	verify
-	createOperator
+	// The following two steps may appear in future implementations
+	// shouldBalance
+	// createOperator
 )
 
 type balanceSchedulerPlan struct {
@@ -119,6 +120,9 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 			return nil, false, errs.ErrDiagnosticLoadPlanError
 		}
 		step := p.GetStep()
+		if !p.status.IsNormal() {
+			normal = false
+		}
 		// we don't consider the situation for verification step
 		if step > pickTarget {
 			continue
@@ -128,9 +132,6 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 			maxStep = step
 		} else if step < maxStep {
 			continue
-		}
-		if !p.status.IsNormal() {
-			normal = false
 		}
 		var store uint64
 		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region

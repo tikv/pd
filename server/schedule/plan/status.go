@@ -172,7 +172,7 @@ func (s *Status) IsOK() bool {
 // Priority returns the priority of status for diagnose
 func (s *Status) Priority() float32 {
 	typePriority := int(s.StatusCode) / 100
-	// This status is normal, we shoubld set different priority.
+	// This status is normal, we should set different priority.
 	if typePriority == 1 {
 		return float32(s.StatusCode) / 100.
 	}
