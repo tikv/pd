@@ -849,6 +849,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		}
 		if bs.rwTy == statistics.Read {
 			peers := bs.cur.region.GetPeers()
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}
 			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
@@ -864,8 +865,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 					continue
 				}
 				// move leader
-				if filter.Target(bs.GetOpts(), detail.StoreInfo,
-					[]filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}) {
+				if filter.Target(bs.GetOpts(), detail.StoreInfo, moveLeaderFilters) {
 					candidates = append(candidates, detail)
 				}
 			}

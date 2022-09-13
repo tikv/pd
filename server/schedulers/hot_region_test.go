@@ -1403,7 +1403,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	re.Len(ops, 1)
 	clearPendingInfluence(hb.(*hotScheduler))
 	// two dim are both enough uniform among three stores
-	tc.SetStoreEvictLeader(4,true)
+	tc.SetStoreEvictLeader(4, true)
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 	clearPendingInfluence(hb.(*hotScheduler))
