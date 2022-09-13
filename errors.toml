@@ -606,6 +606,11 @@ error = '''
 scheduler not found
 '''
 
+["PD:scheduler:ErrSchedulerTiKVSplitDisabled"]
+error = '''
+tikv split region disabled
+'''
+
 ["PD:semver:ErrSemverNewVersion"]
 error = '''
 new version error

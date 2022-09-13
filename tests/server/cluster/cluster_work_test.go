@@ -16,6 +16,7 @@ package cluster_test
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -100,9 +102,6 @@ func TestAskSplit(t *testing.T) {
 		Region: regions[0].GetMeta(),
 	}
 
-	_, err = rc.HandleAskSplit(req)
-	re.NoError(err)
-
 	req1 := &pdpb.AskBatchSplitRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
@@ -110,6 +109,18 @@ func TestAskSplit(t *testing.T) {
 		Region:     regions[0].GetMeta(),
 		SplitCount: 10,
 	}
+
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, time.Minute))
+	_, err = rc.HandleAskSplit(req)
+	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
+	_, err = rc.HandleAskBatchSplit(req1)
+	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, 0))
+	// wait ttl config takes effect
+	time.Sleep(time.Second)
+
+	_, err = rc.HandleAskSplit(req)
+	re.NoError(err)
 
 	_, err = rc.HandleAskBatchSplit(req1)
 	re.NoError(err)
