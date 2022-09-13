@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -809,9 +810,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			// when s.GetInterval() == s.GetMaxInterval(), we don't think the scheduler can
-			// produce a scheduling operator before this moment, so we can diagnose.
-			diagnosable := s.GetInterval() == s.GetMaxInterval() && s.IsDiagnosisAllowed()
+			diagnosable := s.IsDiagnosisAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
@@ -860,7 +859,9 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 	return c.diagnosticManager.getDiagnosticResult(name)
 }
 
-var DiagnosableSchedulers = map[string]struct{}{}
+var DiagnosableSchedulers = map[string]struct{}{
+	schedulers.BalanceRegionName: {},
+}
 
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {

@@ -63,7 +63,7 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
 	if isDisabled, _ := d.cluster.IsSchedulerDisabled(name); isDisabled {
 		ts := uint64(time.Now().Unix())
-		res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: disabled}
+		res := &DiagnosticResult{Name: name, Timestamp: ts, Status: disabled}
 		return res, nil
 	}
 	worker := d.getWorker(name)
@@ -147,6 +147,21 @@ func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, 
 	name := d.schedulerName
 	// TODO: support more schedulers and checkers
 	switch name {
+	case schedulers.BalanceRegionName:
+		runningNum := d.cluster.GetOperatorController().OperatorCount(operator.OpRegion)
+		if runningNum != 0 || len(ops) != 0 {
+			res.Status = scheduling
+			return res
+		}
+		res.Status = pending
+		if d.summaryFunc != nil {
+			isAllNormal := false
+			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
+			if isAllNormal {
+				res.Status = normal
+			}
+		}
+		return res
 	default:
 	}
 	// TODO: save plan into result
