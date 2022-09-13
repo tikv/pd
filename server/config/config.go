@@ -810,6 +810,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
@@ -865,8 +866,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
-	// we don't want user to change it at any time, it's used by tools like BR
-	c.EnableTiKVSplitRegion = true
+	if !meta.IsDefined("enable-tikv-split-region") {
+		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
+	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}

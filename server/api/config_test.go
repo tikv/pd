@@ -96,6 +96,7 @@ func (suite *configTestSuite) TestConfigAll() {
 	// the new way
 	l = map[string]interface{}{
 		"schedule.tolerant-size-ratio":            2.5,
+		"schedule.enable-tikv-split-region":       "false",
 		"replication.location-labels":             "idc,host",
 		"pd-server.metric-storage":                "http://127.0.0.1:1234",
 		"log.level":                               "warn",
@@ -110,6 +111,7 @@ func (suite *configTestSuite) TestConfigAll() {
 	newCfg1 := &config.Config{}
 	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
 	suite.NoError(err)
+	cfg.Schedule.EnableTiKVSplitRegion = false
 	cfg.Schedule.TolerantSizeRatio = 2.5
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
