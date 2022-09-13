@@ -154,7 +154,7 @@ func (stat *HotPeerStat) GetThresholds() []float64 {
 	return stat.thresholds
 }
 
-// Clone clones the HotPeerStat
+// Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, DimLen)
@@ -203,4 +203,11 @@ func (stat *HotPeerStat) GetStores() []uint64 {
 // IsLearner indicates whether the item is learner.
 func (stat *HotPeerStat) IsLearner() bool {
 	return stat.isLearner
+}
+
+func (stat *HotPeerStat) defaultAntiCount() int {
+	if stat.Kind == Read {
+		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
+	return hotRegionAntiCount
 }
