@@ -100,6 +100,7 @@ type HotPeerStat struct {
 
 	actionType             ActionType
 	isLeader               bool
+	isLearner              bool
 	interval               uint64
 	thresholds             []float64
 	peers                  []*metapb.Peer
@@ -131,6 +132,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Uint64("store", stat.StoreID),
 		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("is-learner", stat.isLearner),
 		zap.String("type", stat.Kind.String()),
 		zap.Float64s("loads", stat.GetLoads()),
 		zap.Float64s("loads-instant", stat.Loads),
@@ -183,7 +185,7 @@ func (stat *HotPeerStat) GetThresholds() []float64 {
 	return stat.thresholds
 }
 
-// Clone clones the HotPeerStat
+// Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, RegionStatCount)
@@ -218,4 +220,25 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 		return 0
 	}
 	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
+}
+
+// GetStores returns stores of the item.
+func (stat *HotPeerStat) GetStores() []uint64 {
+	stores := []uint64{}
+	for _, peer := range stat.peers {
+		stores = append(stores, peer.StoreId)
+	}
+	return stores
+}
+
+// IsLearner indicates whether the item is learner.
+func (stat *HotPeerStat) IsLearner() bool {
+	return stat.isLearner
+}
+
+func (stat *HotPeerStat) defaultAntiCount() int {
+	if stat.Kind == Read {
+		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
+	return hotRegionAntiCount
 }

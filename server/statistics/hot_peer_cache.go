@@ -18,6 +18,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
@@ -43,10 +44,10 @@ const (
 )
 
 var minHotThresholds = [RegionStatCount]float64{
-	RegionWriteBytes: 1 * 1024,
+	RegionWriteBytes: 1 * units.KiB,
 	RegionWriteKeys:  32,
 	RegionWriteQuery: 32,
-	RegionReadBytes:  8 * 1024,
+	RegionReadBytes:  8 * units.KiB,
 	RegionReadKeys:   128,
 	RegionReadQuery:  128,
 }
@@ -88,7 +89,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 		values := peers.GetAll()
 		stat := make([]*HotPeerStat, 0, len(values))
 		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold {
+			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == peer.defaultAntiCount() {
 				stat = append(stat, peer)
 			}
 		}
@@ -181,6 +182,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		Loads:          loads,
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
+		isLearner:      core.IsLearner(region.GetPeer(storeID)),
 		interval:       interval,
 		peers:          region.GetPeers(),
 		actionType:     Update,
@@ -226,10 +228,11 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				StoreID:  storeID,
 				RegionID: regionID,
 				Kind:     f.kind,
-				// use oldItem.thresholds to make the newItem won't affect the threshold
-				Loads:          oldItem.thresholds,
+				// use 0 to make the cold newItem won't affect the loads.
+				Loads:          make([]float64, len(oldItem.Loads)),
 				LastUpdateTime: time.Now(),
 				isLeader:       oldItem.isLeader,
+				isLearner:      oldItem.isLearner,
 				interval:       interval,
 				peers:          oldItem.peers,
 				actionType:     Update,
@@ -508,20 +511,18 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 
 func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	newItem.AntiCount = hotRegionAntiCount
-	newItem.allowInherited = true
-	if newItem.Kind == Read {
-		newItem.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	if oldItem.AntiCount < oldItem.defaultAntiCount() {
+		newItem.AntiCount = oldItem.AntiCount + 1
+	} else {
+		newItem.AntiCount = oldItem.AntiCount
 	}
+	newItem.allowInherited = true
 }
 
 func initItem(item *HotPeerStat) {
 	item.HotDegree = 1
-	item.AntiCount = hotRegionAntiCount
+	item.AntiCount = item.defaultAntiCount()
 	item.allowInherited = true
-	if item.Kind == Read {
-		item.AntiCount = hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
 }
 
 func inheritItem(newItem, oldItem *HotPeerStat) {

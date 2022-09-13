@@ -263,6 +263,45 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 	suite.Equal(uint64(1), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "follower"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "follower"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "leader"})
+	suite.ruleManager.SetRuleGroup(&placement.RuleGroup{
+		ID:       "cluster",
+		Index:    2,
+		Override: true,
+	})
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: "cluster",
+			ID:      "r1",
+			Index:   100,
+			Role:    placement.Follower,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "rule", Op: "in", Values: []string{"follower"}},
+			},
+		},
+		{
+			GroupID: "cluster",
+			ID:      "r2",
+			Index:   100,
+			Role:    placement.Leader,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "rule", Op: "in", Values: []string{"leader"}},
+			},
+		},
+	})
+	suite.NoError(err)
+	// no Leader
+	suite.cluster.AddNoLeaderRegion(1, 1, 2, 3)
+	r := suite.cluster.GetRegion(1)
+	op := suite.rc.Check(r)
+	suite.Nil(op)
+}
+
 func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
@@ -539,10 +578,10 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeerWithTestify(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreDown(5)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
@@ -572,10 +611,10 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	suite.Nil(suite.rc.Check(region))
 
 	suite.cluster.SetStoreOffline(4)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreOffline(5)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)

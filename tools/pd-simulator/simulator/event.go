@@ -147,11 +147,11 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 	s := &cases.Store{
 		ID:        id,
 		Status:    metapb.StoreState_Up,
-		Capacity:  config.StoreCapacityGB * cases.GB,
-		Available: config.StoreAvailableGB * cases.GB,
+		Capacity:  uint64(config.RaftStore.Capacity),
+		Available: uint64(config.RaftStore.Available),
 		Version:   config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
+	n, err := NewNode(s, raft.conn.pdAddr, config)
 	if err != nil {
 		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
 		return false

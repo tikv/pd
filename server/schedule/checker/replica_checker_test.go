@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
@@ -29,11 +30,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/versioninfo"
-)
-
-const (
-	KB = 1024
-	MB = 1024 * KB
 )
 
 type replicaCheckerTestSuite struct {
@@ -271,13 +267,13 @@ func (suite *replicaCheckerTestSuite) TestBasic() {
 	}
 
 	region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 1)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2, 1)
 	region = region.Clone(core.WithDownPeers(nil))
 	suite.Nil(rc.Check(region))
 
 	// Peer in store 3 is offline, transfer peer to store 1.
 	tc.SetStoreOffline(3)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 1)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3, 1)
 }
 
 func (suite *replicaCheckerTestSuite) TestLostStore() {
@@ -339,14 +335,14 @@ func (suite *replicaCheckerTestSuite) TestOffline() {
 	region = region.Clone(core.WithRemoveStorePeer(4))
 	// the number of region peers equals the maxReplicas
 	// Transfer peer to store 4.
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
 
 	// Store 5 has a same label score with store 4, but the region score smaller than store 4, we will choose store 5.
 	tc.AddLabelsStore(5, 3, map[string]string{"zone": "z4", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 5)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3, 5)
 	// Store 5 has too many snapshots, choose store 4
 	tc.UpdateSnapshotCount(5, 100)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 3, 4)
 	tc.UpdatePendingPeerCount(4, 100)
 	suite.Nil(rc.Check(region))
 }
@@ -401,7 +397,7 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	region = region.Clone(core.WithAddPeer(peer7))
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 6)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 1, 6)
 	// Disable locationReplacement feature.
 	tc.SetEnableLocationReplacement(false)
 	suite.Nil(rc.Check(region))
@@ -422,7 +418,7 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	// Store 2 and 6 have the same distinct score, but store 2 has larger region score.
 	// So replace peer in store 2 with store 10.
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 10)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2, 10)
 	peer10, _ := tc.AllocPeer(10)
 	region = region.Clone(core.WithAddPeer(peer10))
 	testutil.CheckRemovePeer(suite.Require(), rc.Check(region), 2)
@@ -469,19 +465,19 @@ func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
-	tc.UpdateStoreRegionSize(1, 500*MB)
+	tc.UpdateStoreRegionSize(1, 500*units.MiB)
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(2, 0.1, 0.9)
-	tc.UpdateStoreRegionSize(2, 100*MB)
+	tc.UpdateStoreRegionSize(2, 100*units.MiB)
 	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(4, 31, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(4, 51, map[string]string{"zone": "z3"})
 
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	region := tc.GetRegion(1)
 
 	// Move peer to better location.
 	tc.UpdateStorageRatio(4, 0, 1)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
 	// If store4 is almost full, do not add peer on it.
 	tc.UpdateStorageRatio(4, 0.9, 0.1)
 	suite.Nil(rc.Check(region))
@@ -519,9 +515,9 @@ func (suite *replicaCheckerTestSuite) TestOpts() {
 	}))
 	tc.SetStoreOffline(2)
 	// RemoveDownReplica has higher priority than replaceOfflineReplica.
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 1, 4)
 	tc.SetEnableRemoveDownReplica(false)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpReplica, 2, 4)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpReplica, 2, 4)
 	tc.SetEnableReplaceOfflineReplica(false)
 	suite.Nil(rc.Check(region))
 }
@@ -548,10 +544,10 @@ func (suite *replicaCheckerTestSuite) TestFixDownPeer() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
 
 	tc.SetStoreDown(5)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
 
 	tc.SetIsolationLevel("zone")
 	suite.Nil(rc.Check(region))
@@ -576,10 +572,10 @@ func (suite *replicaCheckerTestSuite) TestFixOfflinePeer() {
 	suite.Nil(rc.Check(region))
 
 	tc.SetStoreOffline(4)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpRegion, 4, 5)
 
 	tc.SetStoreOffline(5)
-	testutil.CheckTransferPeerWithTestify(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
+	testutil.CheckTransferPeer(suite.Require(), rc.Check(region), operator.OpRegion, 4, 2)
 
 	tc.SetIsolationLevel("zone")
 	suite.Nil(rc.Check(region))

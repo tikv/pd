@@ -6,11 +6,11 @@ concurrency:
 jobs:
   statics:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-go@v2
         with:
-          go-version: 1.18
+          go-version: 1.19
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Restore cache

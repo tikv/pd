@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -29,12 +29,9 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval   = 5 * time.Minute
-	mb                     = 1 << 20 // megabyte
-	gb                     = 1 << 30 // 1GB size
-	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
-	initialMinSpace        = 1 << 33 // 2^33=8GB
-	slowStoreThreshold     = 80
+	storePersistInterval = 5 * time.Minute
+	initialMinSpace      = 8 * units.GiB // 2^33=8GB
+	slowStoreThreshold   = 80
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -79,11 +76,17 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	return storeInfo
 }
 
+func (s *StoreInfo) cloneMetaStore() *metapb.Store {
+	b, _ := s.meta.Marshal()
+	store := &metapb.Store{}
+	store.Unmarshal(b)
+	return store
+}
+
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	meta := proto.Clone(s.meta).(*metapb.Store)
 	store := &StoreInfo{
-		meta:                meta,
+		meta:                s.cloneMetaStore(),
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		slowStoreEvicted:    s.slowStoreEvicted,
@@ -330,9 +333,9 @@ func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio fl
 func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
-	available := float64(s.GetAvailable()) / mb
-	used := float64(s.GetUsedSize()) / mb
-	capacity := float64(s.GetCapacity()) / mb
+	available := float64(s.GetAvailable()) / units.MiB
+	used := float64(s.GetUsedSize()) / units.MiB
+	capacity := float64(s.GetCapacity()) / units.MiB
 
 	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
@@ -373,8 +376,8 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 }
 
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
-	A := float64(s.GetAvgAvailable()) / gb
-	C := float64(s.GetCapacity()) / gb
+	A := float64(s.GetAvgAvailable()) / units.GiB
+	C := float64(s.GetCapacity()) / units.GiB
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())
@@ -421,13 +424,14 @@ func (s *StoreInfo) AvailableRatio() float64 {
 }
 
 // IsLowSpace checks if the store is lack of space. Not check if region count less
-// than initialMaxRegionCounts and available space more than initialMinSpace
+// than InitClusterRegionThreshold and available space more than initialMinSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
 	}
-	// issue #3444
-	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
+	// See https://github.com/tikv/pd/issues/3444 and https://github.com/tikv/pd/issues/5391
+	// TODO: we need find a better way to get the init region number when starting a new cluster.
+	if s.regionCount < InitClusterRegionThreshold && s.GetAvailable() > initialMinSpace {
 		return false
 	}
 	return s.AvailableRatio() < 1-lowSpaceRatio

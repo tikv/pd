@@ -104,13 +104,15 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
+		FilterSource(cluster.GetOpts(), nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
 		RandomPick()
 	if store == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil, nil
 	}
-	region := cluster.RandLeaderRegion(store.GetID(), s.conf.Ranges, schedule.IsRegionHealthy)
+	pendingFilter := filter.NewRegionPendingFilter()
+	downFilter := filter.NewRegionDownFilter()
+	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil, nil
@@ -140,10 +142,10 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 }
 
 func (s *randomMergeScheduler) allowMerge(cluster schedule.Cluster, region, target *core.RegionInfo) bool {
-	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionHealthy(target) {
+	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}
-	if !schedule.IsRegionReplicated(cluster, region) || !schedule.IsRegionReplicated(cluster, target) {
+	if !filter.IsRegionReplicated(cluster, region) || !filter.IsRegionReplicated(cluster, target) {
 		return false
 	}
 	if cluster.IsRegionHot(region) || cluster.IsRegionHot(target) {

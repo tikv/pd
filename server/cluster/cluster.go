@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -61,7 +62,8 @@ import (
 
 var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
-	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
+	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
+	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -357,7 +359,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := c.storage.LoadRegionsOnce(c.ctx, c.core.CheckAndPutRegion); err != nil {
+	if err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -949,24 +951,24 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
 }
 
-// RandLeaderRegion returns a random region that has leader on the store.
-func (c *RaftCluster) RandLeaderRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandLeaderRegion(storeID, ranges, opts...)
+// RandLeaderRegions returns some random regions that has leader on the store.
+func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandLeaderRegions(storeID, ranges)
 }
 
-// RandFollowerRegion returns a random region that has a follower on the store.
-func (c *RaftCluster) RandFollowerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandFollowerRegion(storeID, ranges, opts...)
+// RandFollowerRegions returns some random regions that has a follower on the store.
+func (c *RaftCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandFollowerRegions(storeID, ranges)
 }
 
-// RandPendingRegion returns a random region that has a pending peer on the store.
-func (c *RaftCluster) RandPendingRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandPendingRegion(storeID, ranges, opts...)
+// RandPendingRegions returns some random regions that has a pending peer on the store.
+func (c *RaftCluster) RandPendingRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandPendingRegions(storeID, ranges)
 }
 
-// RandLearnerRegion returns a random region that has a learner peer on the store.
-func (c *RaftCluster) RandLearnerRegion(storeID uint64, ranges []core.KeyRange, opts ...core.RegionOption) *core.RegionInfo {
-	return c.core.RandLearnerRegion(storeID, ranges, opts...)
+// RandLearnerRegions returns some random regions that has a learner peer on the store.
+func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandLearnerRegions(storeID, ranges)
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
@@ -1522,7 +1524,7 @@ func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreIn
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
 		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
-		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels())
+		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
 
@@ -1562,7 +1564,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 			}
 		}
 		regionSize := c.core.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
-		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels)
+		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
 		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
@@ -1577,14 +1579,20 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 	return storeSize
 }
 
-func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) float64 {
-	topology, sameLocationStoreNum := buildTopology(store, stores, locationLabels)
+func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) float64 {
+	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
 	weight := 1.0
 	topo := topology
+	if isMatch {
+		return weight / float64(count) / sameLocationStoreNum
+	}
+
 	storeLabels := getSortedLabels(store.GetLabels(), locationLabels)
 	for _, label := range storeLabels {
 		if _, ok := topo[label.Value]; ok {
-			weight /= float64(len(topo))
+			if slice.Contains(validLabels, label.Key) {
+				weight /= float64(len(topo))
+			}
 			topo = topo[label.Value].(map[string]interface{})
 		} else {
 			break
@@ -1594,24 +1602,42 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 	return weight / sameLocationStoreNum
 }
 
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string) (map[string]interface{}, float64) {
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]interface{}, []string, float64, bool) {
 	topology := make(map[string]interface{})
 	sameLocationStoreNum := 1.0
+	totalLabelCount := make([]int, len(locationLabels))
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
-			updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+			labelCount := updateTopology(topology, getSortedLabels(store.GetLabels(), locationLabels))
+			for i, c := range labelCount {
+				totalLabelCount[i] += c
+			}
 		}
+	}
 
+	validLabels := locationLabels
+	var isMatch bool
+	for i, c := range totalLabelCount {
+		if count/c == 0 {
+			validLabels = validLabels[:i]
+			break
+		}
+		if count/c == 1 && count%c == 0 {
+			validLabels = validLabels[:i+1]
+			isMatch = true
+			break
+		}
+	}
+	for _, store := range stores {
 		if store.GetID() == s.GetID() {
 			continue
 		}
-
-		if s.CompareLocation(store, locationLabels) == -1 {
+		if s.CompareLocation(store, validLabels) == -1 {
 			sameLocationStoreNum++
 		}
 	}
 
-	return topology, sameLocationStoreNum
+	return topology, validLabels, sameLocationStoreNum, isMatch
 }
 
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) []*metapb.StoreLabel {
@@ -1634,17 +1660,20 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 }
 
 // updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) {
+func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) []int {
+	labelCount := make([]int, len(sortedLabels))
 	if len(sortedLabels) == 0 {
-		return
+		return labelCount
 	}
 	topo := topology
-	for _, l := range sortedLabels {
+	for i, l := range sortedLabels {
 		if _, exist := topo[l.Value]; !exist {
 			topo[l.Value] = make(map[string]interface{})
+			labelCount[i] += 1
 		}
 		topo = topo[l.Value].(map[string]interface{})
 	}
+	return labelCount
 }
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
@@ -2144,6 +2173,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 					c.storage.SaveMinResolvedTS(current)
 				}
 			} else {
+				// If interval in config is zero, it means not to persist resolved ts and check config with this interval
 				interval = DefaultMinResolvedTSPersistenceInterval
 			}
 			ticker.Reset(interval)
