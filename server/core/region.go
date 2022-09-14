@@ -195,49 +195,37 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))
 	for _, peer := range r.downPeers {
-		newPeer := &pdpb.PeerStats{}
-		typeutil.DeepClone(peer, newPeer)
-		downPeers = append(downPeers, newPeer)
+		downPeers = append(downPeers, typeutil.DeepClone(peer, typeutil.PeerStatsFactory))
 	}
 	pendingPeers := make([]*metapb.Peer, 0, len(r.pendingPeers))
 	for _, peer := range r.pendingPeers {
-		newPeer := &metapb.Peer{}
-		typeutil.DeepClone(peer, newPeer)
-		pendingPeers = append(pendingPeers, newPeer)
+		pendingPeers = append(pendingPeers, typeutil.DeepClone(peer, func() *metapb.Peer {
+			return &metapb.Peer{}
+		}))
 	}
 
-	newMeta := &metapb.Region{}
-	if r.meta != nil {
-		typeutil.DeepClone(r.meta, newMeta)
-	}
-	newLeader := &metapb.Peer{}
-	if r.leader != nil {
-		typeutil.DeepClone(r.leader, newLeader)
-	}
-	newInterval := &pdpb.TimeInterval{}
-	if r.interval != nil {
-		typeutil.DeepClone(r.interval, newInterval)
-	}
-	queryStats := &pdpb.QueryStats{}
-	if r.queryStats != nil {
-		typeutil.DeepClone(r.queryStats, queryStats)
-	}
 	region := &RegionInfo{
-		term:              r.term,
-		meta:              newMeta,
-		leader:            newLeader,
-		downPeers:         downPeers,
-		pendingPeers:      pendingPeers,
-		writtenBytes:      r.writtenBytes,
-		writtenKeys:       r.writtenKeys,
-		readBytes:         r.readBytes,
-		readKeys:          r.readKeys,
-		approximateSize:   r.approximateSize,
-		approximateKeys:   r.approximateKeys,
-		interval:          newInterval,
+		term: r.term,
+		meta: typeutil.DeepClone(r.meta, typeutil.RegionFactory),
+		leader: typeutil.DeepClone(r.leader, func() *metapb.Peer {
+			return &metapb.Peer{}
+		}),
+		downPeers:       downPeers,
+		pendingPeers:    pendingPeers,
+		writtenBytes:    r.writtenBytes,
+		writtenKeys:     r.writtenKeys,
+		readBytes:       r.readBytes,
+		readKeys:        r.readKeys,
+		approximateSize: r.approximateSize,
+		approximateKeys: r.approximateKeys,
+		interval: typeutil.DeepClone(r.interval, func() *pdpb.TimeInterval {
+			return &pdpb.TimeInterval{}
+		}),
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
-		queryStats:        queryStats,
+		queryStats: typeutil.DeepClone(r.queryStats, func() *pdpb.QueryStats {
+			return &pdpb.QueryStats{}
+		}),
 	}
 
 	for _, opt := range opts {
@@ -1012,11 +1000,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		newMeta := &metapb.Region{}
-		if meta := item.region.meta; meta != nil {
-			typeutil.DeepClone(meta, newMeta)
-		}
-		regions = append(regions, newMeta)
+		regions = append(regions, typeutil.DeepClone(item.region.meta, typeutil.RegionFactory))
 	}
 	return regions
 }
@@ -1359,10 +1343,7 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	meta := &metapb.Region{}
-	if h.Region != nil {
-		typeutil.DeepClone(h.Region, meta)
-	}
+	meta := typeutil.DeepClone(h.Region, typeutil.RegionFactory)
 	meta.StartKey = HexRegionKey(meta.StartKey)
 	meta.EndKey = HexRegionKey(meta.EndKey)
 	return strings.TrimSpace(proto.CompactTextString(meta))
@@ -1383,11 +1364,9 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		meta := &metapb.Region{}
-		typeutil.DeepClone(r, meta)
+		meta := typeutil.DeepClone(r, typeutil.RegionFactory)
 		meta.StartKey = HexRegionKey(meta.StartKey)
 		meta.EndKey = HexRegionKey(meta.EndKey)
-
 		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())

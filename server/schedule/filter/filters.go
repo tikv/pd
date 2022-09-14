@@ -835,10 +835,9 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
 	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
-	copyLeader := &metapb.Peer{}
-	if leader != nil {
-		typeutil.DeepClone(leader, copyLeader)
-	}
+	copyLeader := typeutil.DeepClone(leader, func() *metapb.Peer {
+		return &metapb.Peer{}
+	})
 	copyPeers := make([]*metapb.Peer, 0, len(peers))
 	for _, p := range peers {
 		peer := &metapb.Peer{

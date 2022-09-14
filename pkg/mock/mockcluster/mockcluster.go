@@ -242,10 +242,7 @@ func (mc *Cluster) SetStoreOffline(storeID uint64) {
 // SetStoreBusy sets store busy.
 func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 	store := mc.GetStore(storeID)
-	newStats := &pdpb.StoreStats{}
-	if store.GetStoreStats() != nil {
-		typeutil.DeepClone(store.GetStoreStats(), newStats)
-	}
+	newStats := typeutil.DeepClone(store.GetStoreStats(), typeutil.StoreStatsFactory)
 	newStats.IsBusy = busy
 	newStore := store.Clone(
 		core.SetStoreStats(newStats),
@@ -504,10 +501,7 @@ func (mc *Cluster) UpdateStoreRegionWeight(storeID uint64, weight float64) {
 // UpdateStoreLeaderSize updates store leader size.
 func (mc *Cluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
 	store := mc.GetStore(storeID)
-	newStats := &pdpb.StoreStats{}
-	if stats := store.GetStoreStats(); stats != nil {
-		typeutil.DeepClone(store.GetStoreStats(), newStats)
-	}
+	newStats := typeutil.DeepClone(store.GetStoreStats(), typeutil.StoreStatsFactory)
 	newStats.Available = newStats.Capacity - uint64(store.GetLeaderSize())
 	newStore := store.Clone(
 		core.SetStoreStats(newStats),
@@ -519,10 +513,7 @@ func (mc *Cluster) UpdateStoreLeaderSize(storeID uint64, size int64) {
 // UpdateStoreRegionSize updates store region size.
 func (mc *Cluster) UpdateStoreRegionSize(storeID uint64, size int64) {
 	store := mc.GetStore(storeID)
-	newStats := &pdpb.StoreStats{}
-	if stats := store.GetStoreStats(); stats != nil {
-		typeutil.DeepClone(store.GetStoreStats(), newStats)
-	}
+	newStats := typeutil.DeepClone(store.GetStoreStats(), typeutil.StoreStatsFactory)
 	newStats.Available = newStats.Capacity - uint64(store.GetRegionSize())
 	newStore := store.Clone(
 		core.SetStoreStats(newStats),
@@ -643,10 +634,7 @@ func (mc *Cluster) UpdateStorageWriteQuery(storeID uint64, queryWrite uint64) {
 
 func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.StoreStats)) {
 	store := mc.GetStore(storeID)
-	newStats := &pdpb.StoreStats{}
-	if stats := store.GetStoreStats(); stats != nil {
-		typeutil.DeepClone(stats, newStats)
-	}
+	newStats := typeutil.DeepClone(store.GetStoreStats(), typeutil.StoreStatsFactory)
 	update(newStats)
 	now := time.Now().Second()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}

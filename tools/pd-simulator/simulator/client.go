@@ -269,14 +269,9 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	if err != nil {
 		return err
 	}
-	newStore := &metapb.Store{}
-	newRegion := &metapb.Region{}
-	if store != nil {
-		typeutil.DeepClone(store, newStore)
-	}
-	if region != nil {
-		typeutil.DeepClone(region, newRegion)
-	}
+	newStore := typeutil.DeepClone(store, typeutil.StoreFactory)
+	newRegion := typeutil.DeepClone(region, typeutil.RegionFactory)
+
 	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
 		Store:  newStore,
@@ -293,10 +288,7 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	newStore := &metapb.Store{}
-	if store != nil {
-		typeutil.DeepClone(store, newStore)
-	}
+	newStore := typeutil.DeepClone(store, typeutil.StoreFactory)
 	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
 		Store:  newStore,
@@ -314,10 +306,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 
 func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	newStats := &pdpb.StoreStats{}
-	if stats != nil {
-		typeutil.DeepClone(stats, newStats)
-	}
+	newStats := typeutil.DeepClone(stats, typeutil.StoreStatsFactory)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
 		Stats:  newStats,

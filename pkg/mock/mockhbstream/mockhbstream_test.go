@@ -50,20 +50,18 @@ func TestActivity(t *testing.T) {
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := &pdpb.RegionHeartbeatResponse{}
-		if msg != nil {
-			typeutil.DeepClone(msg, newMsg)
-		}
+		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
+			return &pdpb.RegionHeartbeatResponse{}
+		})
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
 	testutil.Eventually(re, func() bool {
-		newMsg := &pdpb.RegionHeartbeatResponse{}
-		if msg != nil {
-			typeutil.DeepClone(msg, newMsg)
-		}
+		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
+			return &pdpb.RegionHeartbeatResponse{}
+		})
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
@@ -75,10 +73,9 @@ func TestActivity(t *testing.T) {
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := &pdpb.RegionHeartbeatResponse{}
-		if msg != nil {
-			typeutil.DeepClone(msg, newMsg)
-		}
+		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
+			return &pdpb.RegionHeartbeatResponse{}
+		})
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})

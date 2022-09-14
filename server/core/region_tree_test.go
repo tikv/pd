@@ -48,7 +48,8 @@ func TestRegionInfo(t *testing.T) {
 		WithPendingPeers([]*metapb.Peer{pendingPeer}))
 
 	r := info.Clone()
-	re.Equal(info, r)
+	re.EqualValues(info, r)
+	//re.Equal(info, r)
 
 	for i := uint64(0); i < n; i++ {
 		re.Equal(r.meta.Peers[i], r.GetPeer(i))

@@ -71,10 +71,7 @@ func TestHot(t *testing.T) {
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
 
-	newStats := &pdpb.StoreStats{}
-	if ss.GetStoreStats() != nil {
-		typeutil.DeepClone(ss.GetStoreStats(), newStats)
-	}
+	newStats := typeutil.DeepClone(ss.GetStoreStats(), typeutil.StoreStatsFactory)
 	bytesWritten := uint64(8 * units.MiB)
 	bytesRead := uint64(16 * units.MiB)
 	keysWritten := uint64(2000)

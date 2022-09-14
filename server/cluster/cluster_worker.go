@@ -204,10 +204,7 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	}
 
 	// Build origin region by using left and right.
-	originRegion := &metapb.Region{}
-	if right != nil {
-		typeutil.DeepClone(right, originRegion)
-	}
+	originRegion := typeutil.DeepClone(right, typeutil.RegionFactory)
 	originRegion.RegionEpoch = nil
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
@@ -229,10 +226,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 		return nil, err
 	}
 	last := len(regions) - 1
-	originRegion := &metapb.Region{}
-	if regions[last] != nil {
-		typeutil.DeepClone(regions[last], originRegion)
-	}
+	originRegion := typeutil.DeepClone(regions[last], typeutil.RegionFactory)
 	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),

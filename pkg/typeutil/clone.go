@@ -14,6 +14,20 @@
 
 package typeutil
 
+import (
+	"reflect"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+)
+
+var (
+	RegionFactory     = func() *metapb.Region { return &metapb.Region{} }
+	StoreFactory      = func() *metapb.Store { return &metapb.Store{} }
+	StoreStatsFactory = func() *pdpb.StoreStats { return &pdpb.StoreStats{} }
+	PeerStatsFactory  = func() *pdpb.PeerStats { return &pdpb.PeerStats{} }
+)
+
 // Codec is the interface representing objects that can marshal and unmarshal themselves.
 type Codec interface {
 	Marshal() (data []byte, err error)
@@ -21,10 +35,17 @@ type Codec interface {
 }
 
 // DeepClone returns the deep copy of the source
-// notice: src and dst should be not nil.
-func DeepClone[T Codec](src, dst T) {
-	b, err := src.Marshal()
-	if err == nil {
-		dst.Unmarshal(b)
+func DeepClone[T Codec](src T, factory func() T) T {
+	if reflect.ValueOf(src).IsNil() {
+		var dst T
+		return dst
 	}
+	b, err := src.Marshal()
+	if err != nil {
+		var dst T
+		return dst
+	}
+	dst := factory()
+	dst.Unmarshal(b)
+	return dst
 }
