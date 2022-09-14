@@ -559,18 +559,17 @@ func (c *coordinator) collectHotSpotMetrics() {
 
 func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
 	var (
-		kind                      string
-		byteTyp, keyTyp, queryTyp statistics.RegionStatKind
-		regionStats               map[uint64][]*statistics.HotPeerStat
+		kind        string
+		regionStats map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
 	case statistics.Read:
 		regionStats = cluster.RegionReadStats()
-		kind, byteTyp, keyTyp, queryTyp = statistics.Read.String(), statistics.RegionReadBytes, statistics.RegionReadKeys, statistics.RegionReadQuery
+		kind = statistics.Read.String()
 	case statistics.Write:
 		regionStats = cluster.RegionWriteStats()
-		kind, byteTyp, keyTyp, queryTyp = statistics.Write.String(), statistics.RegionWriteBytes, statistics.RegionWriteKeys, statistics.RegionWriteQuery
+		kind = statistics.Write.String()
 	}
 	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
 
@@ -580,9 +579,9 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		storeLabel := strconv.FormatUint(storeID, 10)
 		stat, ok := status.AsLeader[storeID]
 		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalLoads[byteTyp])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalLoads[keyTyp])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalLoads[queryTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
@@ -593,9 +592,9 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 
 		stat, ok = status.AsPeer[storeID]
 		if ok {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalLoads[byteTyp])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalLoads[keyTyp])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalLoads[queryTyp])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")

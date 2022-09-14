@@ -373,10 +373,9 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
 	s.cachedPeersRate = make([]float64, statistics.DimLen)
 	for _, dim := range dims {
-		kind := statistics.GetRegionStatKind(rw, dim)
-		peersRate := s.mainPeerStat.GetLoad(kind)
+		peersRate := s.mainPeerStat.Loads[dim]
 		if s.revertPeerStat != nil {
-			peersRate -= s.revertPeerStat.GetLoad(kind)
+			peersRate -= s.revertPeerStat.Loads[dim]
 		}
 		s.cachedPeersRate[dim] = peersRate
 	}
@@ -744,14 +743,12 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statis
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
 	sort.Slice(firstSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
-		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
+		return firstSort[i].Loads[bs.firstPriority] > firstSort[j].Loads[bs.firstPriority]
 	})
 	secondSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondSort, ret)
 	sort.Slice(secondSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
-		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
+		return secondSort[i].Loads[bs.secondPriority] > secondSort[j].Loads[bs.secondPriority]
 	})
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {
@@ -1352,8 +1349,8 @@ func (bs *balanceSolver) logBestSolution() {
 		// Log more information on solutions containing revertRegion
 		srcFirstRate, dstFirstRate := best.getExtremeLoad(bs.firstPriority)
 		srcSecondRate, dstSecondRate := best.getExtremeLoad(bs.secondPriority)
-		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		mainSecondRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
+		mainFirstRate := best.mainPeerStat.Loads[bs.firstPriority]
+		mainSecondRate := best.mainPeerStat.Loads[bs.secondPriority]
 		log.Info("use solution with revert regions",
 			zap.Uint64("src-store", best.srcStore.GetID()),
 			zap.Float64("src-first-rate", srcFirstRate),

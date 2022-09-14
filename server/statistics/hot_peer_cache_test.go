@@ -363,7 +363,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
-	byteRate := minHotThresholds[RegionReadBytes] * 2
+	byteRate := MinHotThresholds[RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
 	testMetrics(re, 120., byteRate, expectThreshold)
 	testMetrics(re, 60., byteRate, expectThreshold)
@@ -375,7 +375,7 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
-	re.GreaterOrEqual(byteRate, minHotThresholds[RegionReadBytes])
+	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		for {
@@ -388,10 +388,10 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 				thresholds: thresholds,
 				Loads:      make([]float64, DimLen),
 			}
-			newItem.Loads[RegionReadBytes] = byteRate
-			newItem.Loads[RegionReadKeys] = 0
+			newItem.Loads[ByteDim] = byteRate
+			newItem.Loads[KeyDim] = 0
 			oldItem = cache.getOldHotPeerStat(i, storeID)
-			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
+			if oldItem != nil && oldItem.rollingLoads[ByteDim].isHot(thresholds[ByteDim]) == true {
 				break
 			}
 			item := cache.updateHotPeerStat(nil, newItem, oldItem, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
@@ -399,9 +399,9 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			re.Equal(minHotThresholds[RegionReadBytes], thresholds[RegionReadBytes])
+			re.Equal(MinHotThresholds[RegionReadBytes], thresholds[ByteDim])
 		} else {
-			re.Equal(expectThreshold, thresholds[RegionReadBytes])
+			re.Equal(expectThreshold, thresholds[ByteDim])
 		}
 	}
 }
@@ -561,7 +561,7 @@ func TestCacheInherit(t *testing.T) {
 	rets := checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
-			flow := ret.GetLoads()[RegionReadBytes]
+			flow := ret.Loads[ByteDim]
 			re.Equal(float64(region.GetBytesRead()/ReadReportInterval), flow)
 		}
 	}
@@ -578,7 +578,7 @@ func TestCacheInherit(t *testing.T) {
 	rets = checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
-			flow := ret.GetLoads()[RegionReadBytes]
+			flow := ret.Loads[ByteDim]
 			re.Equal(float64(newFlow/ReadReportInterval), flow)
 		}
 	}

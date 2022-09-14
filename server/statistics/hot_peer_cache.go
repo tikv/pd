@@ -20,7 +20,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
@@ -43,13 +42,13 @@ const (
 	hotRegionAntiCount = 2
 )
 
-var minHotThresholds = [RegionStatCount]float64{
-	RegionWriteBytes: 1 * units.KiB,
-	RegionWriteKeys:  32,
-	RegionWriteQuery: 32,
-	RegionReadBytes:  8 * units.KiB,
-	RegionReadKeys:   128,
-	RegionReadQuery:  128,
+var MinHotThresholds = [RegionStatCount]float64{
+	RegionReadBytes:    8 * units.KiB,
+	RegionReadKeys:     128,
+	RegionReadQueries:  128,
+	RegionWriteBytes:   1 * units.KiB,
+	RegionWriteKeys:    32,
+	RegionWriteQueries: 32,
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -102,7 +101,6 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	switch item.actionType {
 	case Remove:
 		f.removeItem(item)
-		item.Log("region heartbeat remove from cache", log.Debug)
 		incMetrics("remove_item", item.StoreID, item.Kind)
 		return
 	case Add:
@@ -112,7 +110,6 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	}
 	// for add and update
 	f.putItem(item)
-	item.Log("region heartbeat update", log.Debug)
 }
 
 func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
@@ -131,9 +128,9 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
-		case RegionWriteQuery:
+		case RegionWriteQueries:
 			writeQueryHist.Observe(loads[int(k)])
-		case RegionReadQuery:
+		case RegionReadQueries:
 			readQueryHist.Observe(loads[int(k)])
 		}
 	}
@@ -168,10 +165,6 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	deltaLoads := peer.GetLoads()
 	// update metrics
 	f.collectPeerMetrics(deltaLoads, interval)
-	loads := make([]float64, len(deltaLoads))
-	for i := range deltaLoads {
-		loads[i] = deltaLoads[i] / float64(interval)
-	}
 	regionID := region.GetID()
 	oldItem := f.getOldHotPeerStat(regionID, storeID)
 	thresholds := f.calcHotThresholds(storeID)
@@ -179,7 +172,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		StoreID:        storeID,
 		RegionID:       regionID,
 		Kind:           f.kind,
-		Loads:          loads,
+		Loads:          f.kind.GetLoadsFromPeer(peer),
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
 		isLearner:      core.IsLearner(region.GetPeer(storeID)),
@@ -275,17 +268,16 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	statKinds := f.kind.RegionStats()
-	mins := make([]float64, len(statKinds))
+	ret := make([]float64, DimLen)
 	for i, k := range statKinds {
-		mins[i] = minHotThresholds[k]
+		ret[i] = MinHotThresholds[k]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return mins
+		return ret
 	}
-	ret := make([]float64, len(statKinds))
 	for i := range ret {
-		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(statKinds[i])*HotThresholdRatio, mins[i])
+		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, ret[i])
 	}
 	return ret
 }
