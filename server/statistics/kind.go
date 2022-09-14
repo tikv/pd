@@ -164,6 +164,12 @@ func (rw RWType) GetLoadsFromPeer(peer *core.PeerInfo) []float64 {
 	return loads
 }
 
+func (rw RWType) SetFullLoads(full []float64, loads []float64) {
+	for dim, k := range rw.RegionStats() {
+		full[k] = loads[dim]
+	}
+}
+
 // ActionType indicates the action type for the stat item.
 type ActionType int
 
