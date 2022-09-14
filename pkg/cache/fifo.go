@@ -89,6 +89,25 @@ func (c *FIFO) FromElems(key uint64) []*Item {
 	return elems
 }
 
+// FromLastSameElems returns continuous items that have the same comparable attribute with the the lastest one.
+func (c *FIFO) FromLastSameElems(checkFunc func(interface{}) bool, comparableFunc func(interface{}) string) []*Item {
+	c.RLock()
+	defer c.RUnlock()
+
+	elems := make([]*Item, 0, c.ll.Len())
+	var lastItem interface{}
+	for ele := c.ll.Front(); ele != nil; ele = ele.Next() {
+		kv := ele.Value.(*Item)
+		if lastItem == nil || (checkFunc(kv.Value) && comparableFunc(kv.Value) == comparableFunc(lastItem)) {
+			elems = append(elems, kv)
+			lastItem = kv.Value
+		} else {
+			break
+		}
+	}
+	return elems
+}
+
 // Len returns current cache size.
 func (c *FIFO) Len() int {
 	c.RLock()
