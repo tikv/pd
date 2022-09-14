@@ -261,7 +261,17 @@ func (u *unsafeRecoveryController) checkTimeout() bool {
 	}
 
 	if time.Now().After(u.timeout) {
-		u.err = errors.Errorf("Exceeds timeout %v", u.timeout)
+		return u.HandleErr(errors.Errorf("Exceeds timeout %v", u.timeout))
+	}
+	return false
+}
+
+func (u *unsafeRecoveryController) HandleErr(err error) bool {
+	// Keep the earliest error.
+	if u.err == nil {
+		u.err = err
+	}
+	if u.stage == exitForceLeader {
 		u.changeStage(failed)
 		return true
 	}
@@ -282,19 +292,12 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 		return
 	}
 
-	storeID := heartbeat.Stats.StoreId
-	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
-		u.err = errors.Errorf("Receive heartbeat from failed store %d", storeID)
-		return
-	}
-
 	allCollected := u.collectReport(heartbeat)
 
 	if allCollected {
 		newestRegionTree, peersMap, buildErr := u.buildUpFromReports()
-		// Keep the earliest error.
-		if buildErr != nil && u.err == nil {
-			u.err = buildErr
+		if u.HandleErr(buildErr) {
+			return
 		}
 
 		// clean up previous plan
@@ -304,14 +307,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 		var stage unsafeRecoveryStage
 		if u.err == nil {
 			stage = u.stage
-		} else if u.stage == exitForceLeader {
-			u.changeStage(failed)
-			return
 		} else {
-			// Manually set stage to exit force leader instead of calling changeStage(). So that
-			// 1. TiKV reports are not cleaned up here.
-			// 2. Exit force leader plan can still be genereated from the reports.
-			// 3. Clean up the reports after the plan is genereated by calling changeStage() there.
 			stage = exitForceLeader
 		}
 		reCheck := false
@@ -383,18 +379,13 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 			}
 
 			if err != nil {
-				// Keep the earliest error.
-				if u.err != nil {
-					u.err = err
+				if u.HandleErr(err) {
+					return
 				}
-				if stage == exitForceLeader {
-					u.changeStage(failed)
-				} else {
-					u.storePlanExpires = make(map[uint64]time.Time)
-					u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-					u.timeout = time.Now().Add(storeRequestInterval)
-					u.changeStage(exitForceLeader)
-				}
+				u.storePlanExpires = make(map[uint64]time.Time)
+				u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
+				// Clear the reports etc.
+				u.changeStage(exitForceLeader)
 				return
 			} else if !hasPlan {
 				if u.err != nil {
@@ -436,6 +427,10 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 // It collects and checks if store reports have been fully collected.
 func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatRequest) bool {
 	storeID := heartbeat.Stats.StoreId
+	if _, isFailedStore := u.failedStores[storeID]; isFailedStore {
+		u.HandleErr(errors.Errorf("Receive heartbeat from failed store %d", storeID))
+		return false
+	}
 
 	if heartbeat.StoreReport == nil {
 		return false
