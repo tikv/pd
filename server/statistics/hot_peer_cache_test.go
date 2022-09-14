@@ -22,8 +22,10 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -631,6 +633,37 @@ func TestUnstableData(t *testing.T) {
 	for _, testCase := range testCases {
 		checkMovingAverage(re, testCase)
 	}
+}
+
+func TestHotPeerCacheTopN(t *testing.T) {
+	re := require.New(t)
+
+	cache := NewHotPeerCache(Write)
+	now := time.Now()
+	for id := uint64(99); id > 0; id-- {
+		meta := &metapb.Region{
+			Id:    id,
+			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
+		}
+		region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
+		for i := 0; i < 10; i++ {
+			start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
+			end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
+			newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
+				StartTimestamp: start,
+				EndTimestamp:   end,
+			}))
+			newPeer := core.NewPeerInfo(meta.Peers[0], region.GetLoads(), end-start)
+			stat := cache.checkPeerFlow(newPeer, newRegion)
+			if stat != nil {
+				cache.updateStat(stat)
+			}
+		}
+	}
+
+	re.Contains(cache.peersOfStore, uint64(1))
+	println(cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim))
+	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
