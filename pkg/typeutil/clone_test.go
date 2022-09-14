@@ -1,6 +1,7 @@
 package typeutil
 
 import (
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
@@ -10,12 +11,15 @@ import (
 
 func TestDeepClone(t *testing.T) {
 	re := assert.New(t)
-	src := &metapb.Region{Id: 1}
-	dst := DeepClone(src, RegionFactory)
-	dst.Id = 2
-	re.Equal(src.Id, uint64(1))
-	re.Equal(dst.Id, uint64(2))
+	src := &pdpb.StoreHeartbeatRequest{Stats: &pdpb.StoreStats{StoreId: 1}}
+	dst := DeepClone(src, func() *pdpb.StoreHeartbeatRequest {
+		return &pdpb.StoreHeartbeatRequest{}
+	})
+	dst.Stats.StoreId = 2
+	re.EqualValues(src.Stats.StoreId, 1)
+	re.EqualValues(dst.Stats.StoreId, 2)
 
+	// case2: the source is nil
 	var src2 *metapb.Region
 	re.Nil(DeepClone(src2, RegionFactory))
 }
