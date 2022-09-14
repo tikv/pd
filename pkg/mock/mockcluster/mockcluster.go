@@ -352,6 +352,14 @@ func (mc *Cluster) AddLightWeightLeaderRegion(regionID uint64, leaderStoreID uin
 	return region
 }
 
+// AddNoLeaderRegion adds region with specified replicas, no leader.
+func (mc *Cluster) AddNoLeaderRegion(regionID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
+	origin := mc.newMockRegionInfo(regionID, 0, otherPeerStoreIDs...)
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
+	mc.PutRegion(region)
+	return region
+}
+
 // AddRegionWithLearner adds region with specified leader, followers and learners.
 func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, followerStoreIDs, learnerStoreIDs []uint64) *core.RegionInfo {
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)

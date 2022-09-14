@@ -41,8 +41,8 @@ const (
 	Version3_0
 	Version4_0
 	Version5_0
-	// JointConsensus can support safe conf change across data center.
-	JointConsensus
+	// JointConsensus is supported in ConfChangeV2, which supports safe conf change across data center.
+	ConfChangeV2
 	// HotScheduleWithQuery supports schedule hot region with query info.
 	HotScheduleWithQuery
 )
@@ -55,7 +55,7 @@ var featuresDict = map[Feature]string{
 	Version3_0:           "3.0.0",
 	Version4_0:           "4.0.0",
 	Version5_0:           "5.0.0",
-	JointConsensus:       "5.0.0",
+	ConfChangeV2:         "5.0.0",
 	HotScheduleWithQuery: "5.2.0",
 }
 

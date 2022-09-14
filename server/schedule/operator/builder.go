@@ -160,14 +160,14 @@ func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts .
 	}
 
 	// build flags
-	supportJointConsensus := versioninfo.IsFeatureSupported(b.GetOpts().GetClusterVersion(), versioninfo.JointConsensus)
+	supportConfChangeV2 := versioninfo.IsFeatureSupported(b.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
 
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.useJointConsensus = supportJointConsensus && b.GetOpts().IsUseJointConsensus()
+	b.useJointConsensus = supportConfChangeV2 && b.GetOpts().IsUseJointConsensus()
 	b.err = err
 	return b
 }
