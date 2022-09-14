@@ -291,7 +291,7 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	v := o.GetScheduleConfig().Clone()
 	var sc StoreLimitConfig
 	var rate float64
-	storeIDStr := fmt.Sprintf("%d", storeID)
+	storeIDStr := strconv.FormatUint(storeID, 10)
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeIDStr]; !ok {
@@ -389,7 +389,7 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
 	}()
-	storeIDStr := fmt.Sprintf("%d", storeID)
+	storeIDStr := strconv.FormatUint(storeID, 10)
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeIDStr]; ok {
 		return limit
 	}
@@ -445,8 +445,8 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 }
 
 // GetAllStoresLimit returns the limit of all stores.
-func (o *PersistOptions) GetAllStoresLimit() map[string]StoreLimitConfig {
-	return o.GetScheduleConfig().StoreLimit
+func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
+	return o.GetStoresLimit()
 }
 
 // GetStoreLimitMode returns the limit mode of store.
@@ -572,8 +572,16 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 }
 
 // GetStoresLimit gets the stores' limit.
-func (o *PersistOptions) GetStoresLimit() map[string]StoreLimitConfig {
-	return o.GetScheduleConfig().StoreLimit
+func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
+	config := make(map[uint64]StoreLimitConfig)
+	for storeID, cfg := range o.GetScheduleConfig().StoreLimit {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			continue
+		}
+		config[id] = cfg
+	}
+	return config
 }
 
 // GetSchedulers gets the scheduler configurations.
