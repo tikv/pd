@@ -370,7 +370,7 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 }
 
 // calcPeersRate precomputes the peer rate and stores it in cachedPeersRate.
-func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
+func (s *solution) calcPeersRate(dims ...int) {
 	s.cachedPeersRate = make([]float64, statistics.DimLen)
 	for _, dim := range dims {
 		peersRate := s.mainPeerStat.Loads[dim]
@@ -948,7 +948,7 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = 1
-	bs.cur.calcPeersRate(bs.rwTy, bs.firstPriority, bs.secondPriority)
+	bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
 	if bs.cur.getPeersRateFromCache(bs.firstPriority) < bs.getMinRate(bs.firstPriority) &&
 		bs.cur.getPeersRateFromCache(bs.secondPriority) < bs.getMinRate(bs.secondPriority) {
 		return
