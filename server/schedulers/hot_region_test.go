@@ -1384,6 +1384,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -1402,6 +1403,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	clearPendingInfluence(hb.(*hotScheduler))
+	testutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion|operator.OpLeader, 1, 4)
 	// two dim are both enough uniform among three stores
 	tc.SetStoreEvictLeader(4, true)
 	ops, _ = hb.Schedule(tc, false)
