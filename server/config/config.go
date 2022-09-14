@@ -982,7 +982,7 @@ func (c *ScheduleConfig) Validate() error {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
 	}
-	for storeID, _ := range c.StoreLimit {
+	for storeID := range c.StoreLimit {
 		if _, err := strconv.ParseUint(storeID, 10, 64); err != nil {
 			return errors.WithStack(err)
 		}
