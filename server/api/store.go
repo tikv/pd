@@ -557,7 +557,7 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
 		rc := getCluster(r)
 		for storeID, v := range limits {
-			id, err := parseStoreID(storeID)
+			id, err := strconv.ParseUint(storeID, 10, 64)
 			if err != nil {
 				continue
 			}
@@ -781,8 +781,4 @@ func parseStoreLimitType(typeName string) (storelimit.Type, error) {
 		}
 	}
 	return typeValue, err
-}
-
-func parseStoreID(storeID string) (uint64, error) {
-	return strconv.ParseUint(storeID, 10, 64)
 }
