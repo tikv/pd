@@ -42,6 +42,7 @@ const (
 	hotRegionAntiCount = 2
 )
 
+// MinHotThresholds is the threshold at which this dimension is recorded as a hot spot.
 var MinHotThresholds = [RegionStatCount]float64{
 	RegionReadBytes:     8 * units.KiB,
 	RegionReadKeys:      128,
