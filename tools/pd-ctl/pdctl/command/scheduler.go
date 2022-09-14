@@ -768,7 +768,7 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 	cmd.Println("Success!")
 }
 
-// NewDescribeSchedulerCommand returns commands to config scheduler.
+// NewDescribeSchedulerCommand returns command to describe the scheduler.
 func NewDescribeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "describe",
