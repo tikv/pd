@@ -24,8 +24,8 @@ const (
 	pickSource = iota
 	pickRegion
 	pickTarget
-	// The following two steps may appear in future implementations
-	// shouldBalance
+	shouldBalance
+	// The following one step may appear in future implementations
 	// createOperator
 )
 
@@ -123,9 +123,13 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		if !p.status.IsNormal() {
 			normal = false
 		}
-		// we don't consider the situation for verification step
-		if step > pickTarget {
+		// we don't consider the situation for createOperator step
+		if step > shouldBalance {
 			continue
+		}
+		// We can think of shouldBalance as a filtering step for target, except that the current implementation is separate.
+		if step == shouldBalance {
+			step = pickTarget
 		}
 		if step > maxStep {
 			storeStatusCounter = make(map[uint64]map[plan.Status]int)
