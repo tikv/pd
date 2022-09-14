@@ -663,3 +663,23 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestStoreLimit(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
+
+	cfgData := `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+
+	re.Equal(30.0, cfg.Schedule.StoreLimit[100].AddPeer)
+	re.Equal(40.0, cfg.Schedule.StoreLimit[100].RemovePeer)
+}
