@@ -221,34 +221,32 @@ func TestFifoCache(t *testing.T) {
 	re.Equal(0, cache.Len())
 }
 
-type testStruct struct {
-	value string
-}
-
 func TestFifoFromLastSameElems(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
+	type testStruct struct {
+		value string
+	}
 	cache := NewFIFO(4)
 	cache.Put(1, &testStruct{value: "1"})
 	cache.Put(1, &testStruct{value: "2"})
 	cache.Put(1, &testStruct{value: "3"})
 	fun := func() []*Item {
-		return cache.FromLastSameElems(func(i interface{}) bool {
-			_, ok := i.(*testStruct)
-			return ok
-		}, func(i interface{}) string {
-			result, _ := i.(*testStruct)
-			if result == nil {
-				return ""
-			}
-			return result.value
-		})
+		return cache.FromLastSameElems(
+			func(i interface{}) (bool, string) {
+				result, ok := i.(*testStruct)
+				if result == nil {
+					return ok, ""
+				}
+				return ok, result.value
+			})
 	}
 	items := fun()
 	re.Equal(1, len(items))
 	cache.Put(1, &testStruct{value: "3"})
+	cache.Put(2, &testStruct{value: "3"})
 	items = fun()
-	re.Equal(2, len(items))
+	re.Equal(3, len(items))
 	re.Equal("3", items[0].Value.(*testStruct).value)
 	cache.Put(1, &testStruct{value: "2"})
 	items = fun()
