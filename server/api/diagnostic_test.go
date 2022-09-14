@@ -70,18 +70,18 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
-	suite.False(cfg.Schedule.EnableDiagnosis)
+	suite.False(cfg.Schedule.EnableDiagnostic)
 
 	ms := map[string]interface{}{
-		"enable-diagnosis": "true",
-		"max-replicas":     1,
+		"enable-diagnostic": "true",
+		"max-replicas":      1,
 	}
 	postData, err := json.Marshal(ms)
 	suite.NoError(err)
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	cfg = &config.Config{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
-	suite.True(cfg.Schedule.EnableDiagnosis)
+	suite.True(cfg.Schedule.EnableDiagnostic)
 
 	balanceRegionURL := suite.urlPrefix + "/" + schedulers.BalanceRegionName
 	result := &cluster.DiagnosticResult{}

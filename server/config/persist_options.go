@@ -274,13 +274,13 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 
 // IsDiagnosisAllowed returns whether is enable to use diagnosis.
 func (o *PersistOptions) IsDiagnosisAllowed() bool {
-	return o.GetScheduleConfig().EnableDiagnosis
+	return o.GetScheduleConfig().EnableDiagnostic
 }
 
 // SetEnableDiagnosis to set the option for diagnose. It's only used to test.
 func (o *PersistOptions) SetEnableDiagnosis(enable bool) {
 	v := o.GetScheduleConfig().Clone()
-	v.EnableDiagnosis = enable
+	v.EnableDiagnostic = enable
 	o.SetScheduleConfig(v)
 }
 

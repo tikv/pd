@@ -29,11 +29,16 @@ import (
 )
 
 const (
-	disabled   = "disabled"
-	paused     = "paused"
+	// disabled means the current scheduler is unavailable or removed
+	disabled = "disabled"
+	// paused means the current scheduler is paused
+	paused = "paused"
+	// scheduling means the current scheduler is generating or executing scheduling operator
 	scheduling = "scheduling"
-	pending    = "pending"
-	normal     = "normal"
+	// pending means the current scheduler cannot generate scheduling operator
+	pending = "pending"
+	// normal means that there is no need to create operators since everything is fine.
+	normal = "normal"
 )
 
 const (
