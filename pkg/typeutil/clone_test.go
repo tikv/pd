@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_DeepClone(t *testing.T) {
+func TestDeepClone(t *testing.T) {
 	re := assert.New(t)
 	src := &metapb.Region{Id: 1}
 	dst := DeepClone(src, RegionFactory)
