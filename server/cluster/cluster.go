@@ -1047,7 +1047,10 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	if store == nil {
 		return errors.Errorf("invalid store ID %d, not found", storeID)
 	}
-	newStore := typeutil.DeepClone(store.GetMeta())
+	newStore := &metapb.Store{}
+	if meta := store.GetMeta(); meta != nil {
+		typeutil.DeepClone(meta, newStore)
+	}
 	newStore.Labels = labels
 	// PutStore will perform label merge.
 	return c.putStoreImpl(newStore, force)
@@ -1936,7 +1939,12 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
-	return typeutil.DeepClone(c.meta)
+	if c.meta == nil {
+		return nil
+	}
+	rst := &metapb.Cluster{}
+	typeutil.DeepClone(c.meta, rst)
+	return rst
 }
 
 // PutMetaCluster puts meta cluster.
@@ -1946,7 +1954,11 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
-	return c.putMetaLocked(typeutil.DeepClone(meta))
+	newMeta := &metapb.Cluster{}
+	if meta != nil {
+		typeutil.DeepClone(meta, newMeta)
+	}
+	return c.putMetaLocked(newMeta)
 }
 
 // GetRegionStats returns region statistics from cluster.

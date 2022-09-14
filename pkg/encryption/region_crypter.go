@@ -70,8 +70,9 @@ func EncryptRegion(region *metapb.Region, keyManager KeyManager) (*metapb.Region
 	if err != nil {
 		return nil, err
 	}
+	outRegion := &metapb.Region{}
 	// Deep copy region before altering it.
-	outRegion := typeutil.DeepClone(region)
+	typeutil.DeepClone(region, outRegion)
 	// Encrypt and update in-place.
 	err = processRegionKeys(outRegion, key, iv)
 	if err != nil {

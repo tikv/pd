@@ -52,8 +52,10 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 		}
 	}
 	for _, s := range stores {
-		obtained := typeutil.DeepClone(s.Store.Store)
-		expected := typeutil.DeepClone(mapWant[obtained.Id].Store.Store)
+		obtained := &metapb.Store{}
+		expected := &metapb.Store{}
+		typeutil.DeepClone(s.Store.Store, obtained)
+		typeutil.DeepClone(mapWant[obtained.Id].Store.Store, expected)
 		// Ignore state
 		obtained.State, expected.State = 0, 0
 		obtained.NodeState, expected.NodeState = 0, 0

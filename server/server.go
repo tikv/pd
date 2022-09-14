@@ -735,7 +735,11 @@ func (s *Server) GetClientScheme() string {
 
 // GetMemberInfo returns the server member information.
 func (s *Server) GetMemberInfo() *pdpb.Member {
-	return typeutil.DeepClone(s.member.Member())
+	newMember := &pdpb.Member{}
+	if member := s.member.Member(); member != nil {
+		typeutil.DeepClone(member, newMember)
+	}
+	return newMember
 }
 
 // GetHandler returns the handler for API.

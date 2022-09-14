@@ -195,17 +195,37 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))
 	for _, peer := range r.downPeers {
-		downPeers = append(downPeers, typeutil.DeepClone(peer))
+		newPeer := &pdpb.PeerStats{}
+		typeutil.DeepClone(peer, newPeer)
+		downPeers = append(downPeers, newPeer)
 	}
 	pendingPeers := make([]*metapb.Peer, 0, len(r.pendingPeers))
 	for _, peer := range r.pendingPeers {
-		pendingPeers = append(pendingPeers, typeutil.DeepClone(peer))
+		newPeer := &metapb.Peer{}
+		typeutil.DeepClone(peer, newPeer)
+		pendingPeers = append(pendingPeers, newPeer)
 	}
 
+	newMeta := &metapb.Region{}
+	if r.meta != nil {
+		typeutil.DeepClone(r.meta, newMeta)
+	}
+	newLeader := &metapb.Peer{}
+	if r.leader != nil {
+		typeutil.DeepClone(r.leader, newLeader)
+	}
+	newInterval := &pdpb.TimeInterval{}
+	if r.interval != nil {
+		typeutil.DeepClone(r.interval, newInterval)
+	}
+	queryStats := &pdpb.QueryStats{}
+	if r.queryStats != nil {
+		typeutil.DeepClone(r.queryStats, queryStats)
+	}
 	region := &RegionInfo{
 		term:              r.term,
-		meta:              typeutil.DeepClone(r.meta),
-		leader:            typeutil.DeepClone(r.leader),
+		meta:              newMeta,
+		leader:            newLeader,
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
 		writtenBytes:      r.writtenBytes,
@@ -214,10 +234,10 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:          r.readKeys,
 		approximateSize:   r.approximateSize,
 		approximateKeys:   r.approximateKeys,
-		interval:          typeutil.DeepClone(r.interval),
+		interval:          newInterval,
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
-		queryStats:        typeutil.DeepClone(r.queryStats),
+		queryStats:        queryStats,
 	}
 
 	for _, opt := range opts {
@@ -992,7 +1012,11 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, typeutil.DeepClone(item.region.meta))
+		newMeta := &metapb.Region{}
+		if meta := item.region.meta; meta != nil {
+			typeutil.DeepClone(meta, newMeta)
+		}
+		regions = append(regions, newMeta)
 	}
 	return regions
 }
@@ -1335,7 +1359,10 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	var meta = typeutil.DeepClone(h.Region)
+	meta := &metapb.Region{}
+	if h.Region != nil {
+		typeutil.DeepClone(h.Region, meta)
+	}
 	meta.StartKey = HexRegionKey(meta.StartKey)
 	meta.EndKey = HexRegionKey(meta.EndKey)
 	return strings.TrimSpace(proto.CompactTextString(meta))
@@ -1356,7 +1383,8 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		meta := typeutil.DeepClone(r)
+		meta := &metapb.Region{}
+		typeutil.DeepClone(r, meta)
 		meta.StartKey = HexRegionKey(meta.StartKey)
 		meta.EndKey = HexRegionKey(meta.EndKey)
 

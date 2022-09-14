@@ -295,9 +295,12 @@ func TestGetKey(t *testing.T) {
 	// Get key that require a reload.
 	// Deliberately cancel watcher, delete a key and check if it has reloaded.
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
-	loadedKeys = typeutil.DeepClone(loadedKeys)
-	delete(loadedKeys.Keys, 456)
-	m.keys.Store(loadedKeys)
+	newLoadedKeys := &encryptionpb.KeyDictionary{}
+	if loadedKeys != nil {
+		typeutil.DeepClone(loadedKeys, newLoadedKeys)
+	}
+	delete(newLoadedKeys.Keys, 456)
+	m.keys.Store(newLoadedKeys)
 	m.mu.keysRevision = 0
 	key, err = m.GetKey(uint64(456))
 	re.NoError(err)
@@ -906,7 +909,8 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	re.NoError(err)
 	// Check encryption is disabled
 	<-reloadEvent
-	expectedKeys := typeutil.DeepClone(keys)
+	expectedKeys := &encryptionpb.KeyDictionary{}
+	typeutil.DeepClone(keys, expectedKeys)
 	expectedKeys.CurrentKeyId = disableEncryptionKeyID
 	expectedKeys.Keys[123].WasExposed = true
 	re.True(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), expectedKeys))

@@ -14,10 +14,6 @@
 
 package typeutil
 
-import (
-	"reflect"
-)
-
 // Codec is the interface representing objects that can marshal and unmarshal themselves.
 type Codec interface {
 	Marshal() (data []byte, err error)
@@ -25,14 +21,10 @@ type Codec interface {
 }
 
 // DeepClone returns the deep copy of the source
-func DeepClone[T Codec](src T) T {
-	t := reflect.ValueOf(&src).Elem()
-	// return src if src is nil
-	if t.IsZero() {
-		return src
+// notice: src and dst should be not nil.
+func DeepClone[T Codec](src, dst T) {
+	b, err := src.Marshal()
+	if err == nil {
+		dst.Unmarshal(b)
 	}
-	dst := reflect.New(t.Type().Elem()).Interface().(T)
-	b, _ := src.Marshal()
-	dst.Unmarshal(b)
-	return dst
 }
