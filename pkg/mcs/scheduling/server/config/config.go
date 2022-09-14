@@ -476,7 +476,15 @@ func (o *PersistConfig) IsSchedulingHalted() bool {
 
 // GetStoresLimit gets the stores' limit.
 func (o *PersistConfig) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
-	return o.GetScheduleConfig().StoreLimit
+	config := make(map[uint64]sc.StoreLimitConfig, len(o.GetScheduleConfig().StoreLimit))
+	for storeID, cfg := range o.GetScheduleConfig().StoreLimit {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			continue
+		}
+		config[id] = cfg
+	}
+	return config
 }
 
 // TTL related methods.
@@ -513,7 +521,8 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+	storeIDStr := strconv.FormatUint(storeID, 10)
+	if limit, ok := o.GetScheduleConfig().StoreLimit[storeIDStr]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
@@ -521,9 +530,9 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	cfg.StoreLimit[storeID] = limitCfg
+	cfg.StoreLimit[storeIDStr] = limitCfg
 	o.SetScheduleConfig(cfg)
-	return o.GetScheduleConfig().StoreLimit[storeID]
+	return o.GetScheduleConfig().StoreLimit[storeIDStr]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.

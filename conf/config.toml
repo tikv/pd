@@ -145,6 +145,14 @@
 ## PD avoids migrating data to this store as much as possible.
 # low-space-ratio = 0.8
 
+## Configure a specific store limit. This is mostly useful for GitOps because
+## store IDs must be known before the first PD start and these values only take effect then.
+# [schedule.store-limit.100]
+## AddPeer indicates the type of store limit that limits the adding peer rate.
+# add-peer = 30.0
+## RemovePeer indicates the type of store limit that limits the removing peer rate.
+# remove-peer = 30.0
+
 ## The default version of balance Region score calculation.
 # region-score-formula-version = "v2"
 

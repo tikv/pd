@@ -146,6 +146,13 @@ func TestValidation(t *testing.T) {
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.TolerantSizeRatio = 0.6
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimit["foo"] = sc.StoreLimitConfig{}
+	re.Error(cfg.Schedule.Validate())
+	delete(cfg.Schedule.StoreLimit, "foo")
+	cfg.Schedule.StoreLimit["100"] = sc.StoreLimitConfig{}
+	re.NoError(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes
@@ -666,7 +673,6 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
-	registerDefaultSchedulers()
 
 	cfgData := `
 	[schedule.store-limit.100]
@@ -680,6 +686,23 @@ func TestStoreLimit(t *testing.T) {
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(30.0, cfg.Schedule.StoreLimit[100].AddPeer)
-	re.Equal(40.0, cfg.Schedule.StoreLimit[100].RemovePeer)
+	re.Equal(30.0, cfg.Schedule.StoreLimit["100"].AddPeer)
+	re.Equal(40.0, cfg.Schedule.StoreLimit["100"].RemovePeer)
+}
+
+func TestStoreLimitRejectsNonNumericKey(t *testing.T) {
+	re := require.New(t)
+
+	cfgData := `
+	[schedule.store-limit.foo]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+
+	err = cfg.Adjust(&meta, false)
+	re.Error(err)
+	re.Contains(err.Error(), `invalid schedule.store-limit key "foo"`)
 }
