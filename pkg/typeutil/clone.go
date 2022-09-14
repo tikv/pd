@@ -22,10 +22,14 @@ import (
 )
 
 var (
-	RegionFactory     = func() *metapb.Region { return &metapb.Region{} }
-	StoreFactory      = func() *metapb.Store { return &metapb.Store{} }
+	// Region factory returns new region.
+	RegionFactory = func() *metapb.Region { return &metapb.Region{} }
+	// Store factory returns new store.
+	StoreFactory = func() *metapb.Store { return &metapb.Store{} }
+	// StoreStats factory returns new store stats.
 	StoreStatsFactory = func() *pdpb.StoreStats { return &pdpb.StoreStats{} }
-	PeerStatsFactory  = func() *pdpb.PeerStats { return &pdpb.PeerStats{} }
+	// PeerStats factory returns new peer stats.
+	PeerStatsFactory = func() *pdpb.PeerStats { return &pdpb.PeerStats{} }
 )
 
 // Codec is the interface representing objects that can marshal and unmarshal themselves.
