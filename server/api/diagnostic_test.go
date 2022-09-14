@@ -50,7 +50,7 @@ func (suite *diagnosticTestSuite) SetupSuite() {
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnosis", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnostic", addr, apiPrefix)
 	suite.schedulerPrifex = fmt.Sprintf("%s%s/api/v1/schedulers", addr, apiPrefix)
 	suite.configPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
 

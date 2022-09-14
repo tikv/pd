@@ -33,7 +33,7 @@ const (
 	disabled = "disabled"
 	// paused means the current scheduler is paused
 	paused = "paused"
-	// scheduling means the current scheduler is generating or executing scheduling operator
+	// scheduling means the current scheduler is generating.
 	scheduling = "scheduling"
 	// pending means the current scheduler cannot generate scheduling operator
 	pending = "pending"
@@ -52,18 +52,18 @@ var SummaryFuncs = map[string]plan.Summary{
 
 type diagnosticManager struct {
 	syncutil.RWMutex
-	cluster *RaftCluster
-	workers map[string]*diagnosticWorker
+	cluster   *RaftCluster
+	recorders map[string]*diagnosticRecorder
 }
 
 func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
-	workers := make(map[string]*diagnosticWorker)
+	recorders := make(map[string]*diagnosticRecorder)
 	for name := range DiagnosableSchedulers {
-		workers[name] = newDiagnosticWorker(name, cluster)
+		recorders[name] = newDiagnosticRecorder(name, cluster)
 	}
 	return &diagnosticManager{
-		cluster: cluster,
-		workers: workers,
+		cluster:   cluster,
+		recorders: recorders,
 	}
 }
 
@@ -75,36 +75,37 @@ func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult,
 		res := &DiagnosticResult{Name: name, Timestamp: ts, Status: disabled}
 		return res, nil
 	}
-	worker := d.getWorker(name)
-	if worker == nil {
+
+	recorder := d.getRecorder(name)
+	if recorder == nil {
 		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
 	}
-	result := worker.getLastResult()
+	result := recorder.getLastResult()
 	if result == nil {
-		return nil, errs.ErrSchedulerDiagnosisNotRunning.FastGenByArgs(name)
+		return nil, errs.ErrNoDiagnosticResult.FastGenByArgs(name)
 	}
 	return result, nil
 }
 
-func (d *diagnosticManager) getWorker(name string) *diagnosticWorker {
-	return d.workers[name]
+func (d *diagnosticManager) getRecorder(name string) *diagnosticRecorder {
+	return d.recorders[name]
 }
 
-// diagnosticWorker is used to manage diagnose mechanism
-type diagnosticWorker struct {
+// diagnosticRecorder is used to manage diagnose mechanism
+type diagnosticRecorder struct {
 	schedulerName string
 	cluster       *RaftCluster
 	summaryFunc   plan.Summary
 	results       *resultCache
 }
 
-func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
+func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorder {
 	summaryFunc, ok := SummaryFuncs[name]
 	if !ok {
 		log.Error("can't find summary function", zap.String("scheduler-name", name))
 		return nil
 	}
-	return &diagnosticWorker{
+	return &diagnosticRecorder{
 		cluster:       cluster,
 		schedulerName: name,
 		summaryFunc:   summaryFunc,
@@ -112,21 +113,21 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 	}
 }
 
-func (d *diagnosticWorker) isAllowed() bool {
+func (d *diagnosticRecorder) isAllowed() bool {
 	if d == nil {
 		return false
 	}
-	return d.cluster.opt.IsDiagnosisAllowed()
+	return d.cluster.opt.IsDiagnosticAllowed()
 }
 
-func (d *diagnosticWorker) getLastResult() *DiagnosticResult {
+func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	if d.results.Len() == 0 {
 		return nil
 	}
 	return d.results.generateResult()
 }
 
-func (d *diagnosticWorker) setResultFromStatus(status string) {
+func (d *diagnosticRecorder) setResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
@@ -134,7 +135,7 @@ func (d *diagnosticWorker) setResultFromStatus(status string) {
 	d.results.put(result)
 }
 
-func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
+func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
 	if d == nil {
 		return
 	}
@@ -142,7 +143,7 @@ func (d *diagnosticWorker) setResultFromPlans(ops []*operator.Operator, plans []
 	d.results.put(result)
 }
 
-func (d *diagnosticWorker) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
+func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
 	res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: normal}
 	name := d.schedulerName
 	// TODO: support more schedulers and checkers
@@ -208,7 +209,7 @@ func (m *resultCache) generateResult() *DiagnosticResult {
 		return nil
 	}
 
-	wa := newWeightAllocator(length, 3)
+	wa := cache.NewWeightAllocator(length, 3)
 
 	counter := make(map[uint64]map[plan.Status]float64)
 	for i := 0; i < length; i++ {
@@ -218,7 +219,7 @@ func (m *resultCache) generateResult() *DiagnosticResult {
 				counter[storeID] = make(map[plan.Status]float64)
 			}
 			statusCounter := counter[storeID]
-			statusCounter[status] += wa.getWeight(i)
+			statusCounter[status] += wa.Get(i)
 		}
 	}
 	statusCounter := make(map[plan.Status]uint64)
@@ -243,48 +244,4 @@ func (m *resultCache) generateResult() *DiagnosticResult {
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
 	}
-}
-
-type weightAllocator struct {
-	segIndexs []int
-	wights    []float64
-}
-
-func newWeightAllocator(length, segNum int) *weightAllocator {
-	segLength := length / segNum
-	segIndexs := make([]int, 0, segNum)
-	wights := make([]float64, 0, length)
-
-	unitCount := 0
-	segIndexs = append(segIndexs, 0)
-	for i := 0; i < segNum-1; i++ {
-		next := segLength
-		if (length % segNum) > i {
-			next++
-		}
-		unitCount += (segNum - i) * next
-		segIndexs = append(segIndexs, next)
-	}
-	unitCount += segLength
-
-	// If there are 10 results, the weight is [0.143,0.143,0.143,0.143,0.095,0.095,0.095,0.047,0.047,0.047],
-	// and segIndexs is
-	// If there are 3 results, the weight is [0.5,0.33,0.17]
-	unitWeight := 1.0 / float64(unitCount)
-	for i := 0; i < segNum; i++ {
-		for j := 0; j < segIndexs[i]; j++ {
-			wights = append(wights, unitWeight*float64(segNum-i))
-		}
-	}
-	return &weightAllocator{
-		segIndexs: segIndexs,
-		wights:    wights,
-	}
-}
-
-func (a *weightAllocator) getWeight(i int) float64 {
-	if i >= len(a.wights) {
-		return 0
-	}
-	return a.wights[i]
 }

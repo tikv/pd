@@ -768,7 +768,7 @@ type ScheduleConfig struct {
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
-	// EnableDiagnostic is the the option to enable using diagnosis
+	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 }
 
@@ -878,7 +878,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	if !meta.IsDefined("enable-diagnosis") {
+	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
 	}
 

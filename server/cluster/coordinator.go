@@ -809,7 +809,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			diagnosable := s.IsDiagnosisAllowed()
+			diagnosable := s.IsDiagnosticAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
@@ -866,29 +866,29 @@ var DiagnosableSchedulers = map[string]struct{}{
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
-	cluster           *RaftCluster
-	opController      *schedule.OperatorController
-	diagnosticManager *diagnosticManager
-	nextInterval      time.Duration
-	ctx               context.Context
-	cancel            context.CancelFunc
-	delayAt           int64
-	delayUntil        int64
-	diagnosticWorker  *diagnosticWorker
+	cluster            *RaftCluster
+	opController       *schedule.OperatorController
+	diagnosticManager  *diagnosticManager
+	nextInterval       time.Duration
+	ctx                context.Context
+	cancel             context.CancelFunc
+	delayAt            int64
+	delayUntil         int64
+	diagnosticRecorder *diagnosticRecorder
 }
 
 // newScheduleController creates a new scheduleController.
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
-		Scheduler:         s,
-		cluster:           c.cluster,
-		opController:      c.opController,
-		diagnosticManager: c.diagnosticManager,
-		nextInterval:      s.GetMinInterval(),
-		ctx:               ctx,
-		cancel:            cancel,
-		diagnosticWorker:  c.diagnosticManager.getWorker(s.GetName()),
+		Scheduler:          s,
+		cluster:            c.cluster,
+		opController:       c.opController,
+		diagnosticManager:  c.diagnosticManager,
+		nextInterval:       s.GetMinInterval(),
+		ctx:                ctx,
+		cancel:             cancel,
+		diagnosticRecorder: c.diagnosticManager.getRecorder(s.GetName()),
 	}
 }
 
@@ -900,8 +900,8 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) IsDiagnosisAllowed() bool {
-	return s.diagnosticWorker.isAllowed()
+func (s *scheduleController) IsDiagnosticAllowed() bool {
+	return s.diagnosticRecorder.isAllowed()
 }
 
 func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
@@ -913,11 +913,11 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		default:
 		}
 		cacheCluster := newCacheCluster(s.cluster)
-		// we need only process diagnosis once in the retry loop
+		// we need only process diagnostic once in the retry loop
 		diagnosable = diagnosable && i == 0
 		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
 		if diagnosable {
-			s.diagnosticWorker.setResultFromPlans(ops, plans)
+			s.diagnosticRecorder.setResultFromPlans(ops, plans)
 		}
 		if len(ops) > 0 {
 			// If we have schedule, reset interval to the minimal interval.
@@ -943,13 +943,13 @@ func (s *scheduleController) GetInterval() time.Duration {
 func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
 		if diagnosable {
-			s.diagnosticWorker.setResultFromStatus(scheduling)
+			s.diagnosticRecorder.setResultFromStatus(pending)
 		}
 		return false
 	}
 	if s.IsPaused() || s.cluster.GetUnsafeRecoveryController().IsRunning() {
 		if diagnosable {
-			s.diagnosticWorker.setResultFromStatus(paused)
+			s.diagnosticRecorder.setResultFromStatus(paused)
 		}
 		return false
 	}

@@ -171,19 +171,19 @@ error = '''
 stop dashboard failed
 '''
 
-["PD:diagnose:ErrSchedulerDiagnosisNotRunning"]
-error = '''
-%v is not running diagnosis
-'''
-
-["PD:diagnose:ErrSchedulerUndiagnosable"]
-error = '''
-%v hasn't supported diagnostic
-'''
-
 ["PD:diagnostic:ErrDiagnosticLoadPlanError"]
 error = '''
 load plan failed
+'''
+
+["PD:diagnostic:ErrNoDiagnosticResult"]
+error = '''
+%v has no diagnostic result
+'''
+
+["PD:diagnostic:ErrSchedulerUndiagnosable"]
+error = '''
+%v hasn't supported diagnostic
 '''
 
 ["PD:dir:ErrReadDirName"]

@@ -171,7 +171,7 @@ func BenchmarkNoLabel(b *testing.B) {
 	}
 }
 
-func BenchmarkDiagnosisNoLabel1(b *testing.B) {
+func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 	ctx := context.Background()
 	tc := newBenchCluster(ctx, false, false, false)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
@@ -182,7 +182,7 @@ func BenchmarkDiagnosisNoLabel1(b *testing.B) {
 	}
 }
 
-func BenchmarkDiagnosisNoLabel2(b *testing.B) {
+func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	ctx := context.Background()
 	tc := newBenchBigCluster(ctx, 100, 100)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
