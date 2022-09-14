@@ -173,11 +173,11 @@ func (load StoreLoad) ToLoadPred(rwTy RWType, infl *Influence) *StoreLoadPred {
 		case Read:
 			future.Loads[ByteDim] += infl.Loads[RegionReadBytes]
 			future.Loads[KeyDim] += infl.Loads[RegionReadKeys]
-			future.Loads[QueryDim] += infl.Loads[RegionReadQueries]
+			future.Loads[QueryDim] += infl.Loads[RegionReadQueryNum]
 		case Write:
 			future.Loads[ByteDim] += infl.Loads[RegionWriteBytes]
 			future.Loads[KeyDim] += infl.Loads[RegionWriteKeys]
-			future.Loads[QueryDim] += infl.Loads[RegionWriteQueries]
+			future.Loads[QueryDim] += infl.Loads[RegionWriteQueryNum]
 		}
 		future.Count += infl.Count
 	}

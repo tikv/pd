@@ -25,10 +25,10 @@ type RegionStatKind int
 const (
 	RegionReadBytes RegionStatKind = iota
 	RegionReadKeys
-	RegionReadQueries
+	RegionReadQueryNum
 	RegionWriteBytes
 	RegionWriteKeys
-	RegionWriteQueries
+	RegionWriteQueryNum
 
 	RegionStatCount
 )
@@ -43,9 +43,9 @@ func (k RegionStatKind) String() string {
 		return "write_bytes"
 	case RegionWriteKeys:
 		return "write_keys"
-	case RegionReadQueries:
+	case RegionReadQueryNum:
 		return "read_query"
-	case RegionWriteQueries:
+	case RegionWriteQueryNum:
 		return "write_query"
 	}
 	return "unknown RegionStatKind"
@@ -139,8 +139,8 @@ func (rw RWType) String() string {
 }
 
 var (
-	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueries}
-	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueries}
+	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
+	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum}
 )
 
 // RegionStats returns hot items according to kind

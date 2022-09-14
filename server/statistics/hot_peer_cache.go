@@ -43,12 +43,12 @@ const (
 )
 
 var MinHotThresholds = [RegionStatCount]float64{
-	RegionReadBytes:    8 * units.KiB,
-	RegionReadKeys:     128,
-	RegionReadQueries:  128,
-	RegionWriteBytes:   1 * units.KiB,
-	RegionWriteKeys:    32,
-	RegionWriteQueries: 32,
+	RegionReadBytes:     8 * units.KiB,
+	RegionReadKeys:      128,
+	RegionReadQueryNum:  128,
+	RegionWriteBytes:    1 * units.KiB,
+	RegionWriteKeys:     32,
+	RegionWriteQueryNum: 32,
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -128,9 +128,9 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 			writeByteHist.Observe(loads[int(k)])
 		case RegionWriteKeys:
 			writeKeyHist.Observe(loads[int(k)])
-		case RegionWriteQueries:
+		case RegionWriteQueryNum:
 			writeQueryHist.Observe(loads[int(k)])
-		case RegionReadQueries:
+		case RegionReadQueryNum:
 			readQueryHist.Observe(loads[int(k)])
 		}
 	}

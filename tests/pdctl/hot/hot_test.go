@@ -131,12 +131,12 @@ func TestHot(t *testing.T) {
 			switch hotType {
 			case "read":
 				loads := []float64{
-					statistics.RegionReadBytes:    float64(1000000000 * reportInterval),
-					statistics.RegionReadKeys:     float64(1000000000 * reportInterval),
-					statistics.RegionReadQueries:  float64(1000000000 * reportInterval),
-					statistics.RegionWriteBytes:   0,
-					statistics.RegionWriteKeys:    0,
-					statistics.RegionWriteQueries: 0,
+					statistics.RegionReadBytes:     float64(1000000000 * reportInterval),
+					statistics.RegionReadKeys:      float64(1000000000 * reportInterval),
+					statistics.RegionReadQueryNum:  float64(1000000000 * reportInterval),
+					statistics.RegionWriteBytes:    0,
+					statistics.RegionWriteKeys:     0,
+					statistics.RegionWriteQueryNum: 0,
 				}
 				leader := &metapb.Peer{
 					Id:      100 + regionIDCounter,
