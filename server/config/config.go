@@ -683,7 +683,7 @@ type ScheduleConfig struct {
 	// WARN: StoreBalanceRate is deprecated.
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// StoreLimit is the limit of scheduling for stores.
-	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	StoreLimit map[string]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -772,9 +772,9 @@ type ScheduleConfig struct {
 // Clone returns a cloned scheduling configuration.
 func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
-	var storeLimit map[uint64]StoreLimitConfig
+	var storeLimit map[string]StoreLimitConfig
 	if c.StoreLimit != nil {
-		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
+		storeLimit = make(map[string]StoreLimitConfig, len(c.StoreLimit))
 		for k, v := range c.StoreLimit {
 			storeLimit[k] = v
 		}
@@ -896,7 +896,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 
 	if c.StoreLimit == nil {
-		c.StoreLimit = make(map[uint64]StoreLimitConfig)
+		c.StoreLimit = make(map[string]StoreLimitConfig)
 	}
 
 	if !meta.IsDefined("hot-regions-reserved-days") {

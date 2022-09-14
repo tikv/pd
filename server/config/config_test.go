@@ -544,6 +544,6 @@ func TestStoreLimit(t *testing.T) {
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(30.0, cfg.Schedule.StoreLimit[100].AddPeer)
-	re.Equal(40.0, cfg.Schedule.StoreLimit[100].RemovePeer)
+	re.Equal(30.0, cfg.Schedule.StoreLimit["100"].AddPeer)
+	re.Equal(40.0, cfg.Schedule.StoreLimit["100"].RemovePeer)
 }
