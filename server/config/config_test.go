@@ -151,6 +151,13 @@ func TestValidation(t *testing.T) {
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.TolerantSizeRatio = 0.6
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimit["foo"] = StoreLimitConfig{}
+	re.Error(cfg.Schedule.Validate())
+	delete(cfg.Schedule.StoreLimit, "foo")
+	cfg.Schedule.StoreLimit["100"] = StoreLimitConfig{}
+	re.NoError(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes

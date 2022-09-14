@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -979,6 +980,11 @@ func (c *ScheduleConfig) Validate() error {
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
+		}
+	}
+	for storeID, _ := range c.StoreLimit {
+		if _, err := strconv.ParseUint(storeID, 10, 64); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 	return nil
