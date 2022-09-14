@@ -102,6 +102,7 @@ func newDiagnosticWorker(name string, cluster *RaftCluster) *diagnosticWorker {
 	summaryFunc, ok := SummaryFuncs[name]
 	if !ok {
 		log.Error("can't find summary function", zap.String("scheduler-name", name))
+		return nil
 	}
 	return &diagnosticWorker{
 		cluster:       cluster,
@@ -189,65 +190,35 @@ func newResultMemorizer(maxCount int) *resultCache {
 }
 
 func (m *resultCache) put(result *DiagnosticResult) {
-	m.FIFO.Put(result.Timestamp, result)
+	m.Put(result.Timestamp, result)
 }
 
 // generateResult firstly selects the continuous items which have the same Status with the the lastest one.
 // And then dynamically assign weights to these results. More recent results will be assigned more weight.
 func (m *resultCache) generateResult() *DiagnosticResult {
-	items := m.FIFO.FromLastSameElems(func(i interface{}) bool {
-		_, ok := i.(*DiagnosticResult)
-		return ok
-	}, func(i interface{}) string {
-		result, _ := i.(*DiagnosticResult)
+	items := m.FIFO.FromLastSameElems(func(i interface{}) (bool, string) {
+		result, ok := i.(*DiagnosticResult)
 		if result == nil {
-			return ""
+			return ok, ""
 		}
-		return result.Status
+		return ok, result.Status
 	})
 	length := len(items)
 	if length == 0 {
 		return nil
 	}
-	x1, x2, x3 := length/3, length/3, length/3
-	if (length % 3) > 0 {
-		x1++
-	}
-	if (length % 3) > 1 {
-		x2++
-	}
-	unitWeight := 1.0 / float64(3*x1+2*x2+x3)
-	// If there are 10 results, the weight is [0.143,0.143,0.143,0.143,0.095,0.095,0.095,0.047,0.047,0.047]
-	// If there are 3 results, the weight is [0.5,0.33,0.17]
+
+	wa := newWeightAllocator(length, 3)
+
 	counter := make(map[uint64]map[plan.Status]float64)
-	for i := 0; i < x1; i++ {
+	for i := 0; i < length; i++ {
 		item := items[i].Value.(*DiagnosticResult)
 		for storeID, status := range item.StoreStatus {
 			if _, ok := counter[storeID]; !ok {
 				counter[storeID] = make(map[plan.Status]float64)
 			}
 			statusCounter := counter[storeID]
-			statusCounter[status] += unitWeight * 3
-		}
-	}
-	for i := x1; i < x1+x2; i++ {
-		item := items[i].Value.(*DiagnosticResult)
-		for storeID, status := range item.StoreStatus {
-			if _, ok := counter[storeID]; !ok {
-				counter[storeID] = make(map[plan.Status]float64)
-			}
-			statusCounter := counter[storeID]
-			statusCounter[status] += unitWeight * 2
-		}
-	}
-	for i := x1 + x2; i < x1+x2+x3; i++ {
-		item := items[i].Value.(*DiagnosticResult)
-		for storeID, status := range item.StoreStatus {
-			if _, ok := counter[storeID]; !ok {
-				counter[storeID] = make(map[plan.Status]float64)
-			}
-			statusCounter := counter[storeID]
-			statusCounter[status] += unitWeight * 1
+			statusCounter[status] += wa.getWeight(i)
 		}
 	}
 	statusCounter := make(map[plan.Status]uint64)
@@ -272,4 +243,48 @@ func (m *resultCache) generateResult() *DiagnosticResult {
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
 	}
+}
+
+type weightAllocator struct {
+	segIndexs []int
+	wights    []float64
+}
+
+func newWeightAllocator(length, segNum int) *weightAllocator {
+	segLength := length / segNum
+	segIndexs := make([]int, 0, segNum)
+	wights := make([]float64, 0, length)
+
+	unitCount := 0
+	segIndexs = append(segIndexs, 0)
+	for i := 0; i < segNum-1; i++ {
+		next := segLength
+		if (length % segNum) > i {
+			next++
+		}
+		unitCount += (segNum - i) * next
+		segIndexs = append(segIndexs, next)
+	}
+	unitCount += segLength
+
+	// If there are 10 results, the weight is [0.143,0.143,0.143,0.143,0.095,0.095,0.095,0.047,0.047,0.047],
+	// and segIndexs is
+	// If there are 3 results, the weight is [0.5,0.33,0.17]
+	unitWeight := 1.0 / float64(unitCount)
+	for i := 0; i < segNum; i++ {
+		for j := 0; j < segIndexs[i]; j++ {
+			wights = append(wights, unitWeight*float64(segNum-i))
+		}
+	}
+	return &weightAllocator{
+		segIndexs: segIndexs,
+		wights:    wights,
+	}
+}
+
+func (a *weightAllocator) getWeight(i int) float64 {
+	if i >= len(a.wights) {
+		return 0
+	}
+	return a.wights[i]
 }

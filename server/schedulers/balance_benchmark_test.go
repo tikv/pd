@@ -189,8 +189,7 @@ func BenchmarkDiagnosisNoLabel2(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ops, plans := sc.Schedule(tc, true)
-		b.Log(len(ops), len(plans))
+		sc.Schedule(tc, true)
 	}
 }
 
@@ -201,8 +200,7 @@ func BenchmarkNoLabel2(b *testing.B) {
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ops, plans := sc.Schedule(tc, false)
-		b.Log(len(ops), len(plans))
+		sc.Schedule(tc, false)
 	}
 }
 
