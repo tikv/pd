@@ -97,6 +97,11 @@ var (
 	ErrCheckerMergeAgain = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
 )
 
+// diagnose errors
+var (
+	ErrDiagnosticLoadPlanError = errors.Normalize("load plan failed", errors.RFCCodeText("PD:diagnostic:ErrDiagnosticLoadPlanError"))
+)
+
 // placement errors
 var (
 	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))

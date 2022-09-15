@@ -171,6 +171,11 @@ error = '''
 stop dashboard failed
 '''
 
+["PD:diagnostic:ErrDiagnosticLoadPlanError"]
+error = '''
+load plan failed
+'''
+
 ["PD:dir:ErrReadDirName"]
 error = '''
 read dir name error

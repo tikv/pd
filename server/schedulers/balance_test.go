@@ -259,6 +259,11 @@ func (suite *balanceLeaderSchedulerTestSuite) schedule() []*operator.Operator {
 	return ops
 }
 
+func (suite *balanceLeaderSchedulerTestSuite) dryRun() []plan.Plan {
+	_, plans := suite.lb.Schedule(suite.tc, true)
+	return plans
+}
+
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	suite.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
@@ -286,6 +291,10 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	suite.tc.UpdateLeaderCount(4, 10)
 	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
 	suite.Empty(suite.schedule())
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(3, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   16
@@ -306,6 +315,11 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() 
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.Empty(suite.schedule())
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(3, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
+
 	suite.tc.SetLeaderSchedulePolicy(core.BySize.String())
 	suite.NotEmpty(suite.schedule())
 }
@@ -422,6 +436,11 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceFilter() {
 	// store 2 becomes the store with least leaders.
 	suite.tc.SetStoreDown(1)
 	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(0, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreDown, int(plans[0].GetStatus().StatusCode))
+	suite.Equal(uint64(1), plans[0].GetResource(0))
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
