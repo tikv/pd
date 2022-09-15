@@ -148,6 +148,7 @@ func (d *Driver) Start() error {
 			return err
 		}
 	}
+	d.ChangePDConfig()
 	return nil
 }
 
