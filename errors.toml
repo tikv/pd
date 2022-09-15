@@ -171,6 +171,11 @@ error = '''
 stop dashboard failed
 '''
 
+["PD:diagnostic:ErrDiagnosticDisabled"]
+error = '''
+diagnostic is disabled
+'''
+
 ["PD:diagnostic:ErrDiagnosticLoadPlanError"]
 error = '''
 load plan failed
