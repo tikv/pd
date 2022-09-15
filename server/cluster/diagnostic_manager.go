@@ -167,16 +167,19 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 		statusCounter[curStat] += 1
 	}
 	var resStr string
-	if len(statusCounter) > 0 {
-		for k, v := range statusCounter {
-			resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+	firstStatus := items[0].Value.(*DiagnosticResult).Status
+	if firstStatus == pending {
+		if len(statusCounter) > 0 {
+			for k, v := range statusCounter {
+				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+			}
+		} else {
+			// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
+			resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
 		}
-	} else {
-		// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
-		resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
 	}
 	return &DiagnosticResult{
-		Name:      items[0].Value.(*DiagnosticResult).Name,
+		Name:      d.schedulerName,
 		Status:    items[0].Value.(*DiagnosticResult).Status,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
