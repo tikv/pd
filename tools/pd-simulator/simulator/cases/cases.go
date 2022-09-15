@@ -99,6 +99,7 @@ var CaseMap = map[string]func() *Case{
 	"makeup-down-replicas":      newMakeupDownReplicas,
 	"import-data":               newImportData,
 	"diagnose-rule1":            newRule1,
+	"diagnose-rule2":            newRule2,
 	"diagnose-label-not-match1": newLabelNotMatch1,
 	"diagnose-label-isolation1": newLabelIsolation1,
 	"diagnose-label-isolation2": newLabelIsolation2,

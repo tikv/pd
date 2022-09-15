@@ -75,7 +75,7 @@ func newLabelNotMatch1() *Case {
 		for i := 1; i <= storeNum; i++ {
 			available := stats[i].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 60 {
+			if curTime-storesLastUpdateTime[i] > 360 {
 				if storeLastAvailable[i] != available {
 					res = false
 				}
@@ -147,7 +147,7 @@ func newLabelIsolation1() *Case {
 		for i := 1; i <= storeNum; i++ {
 			available := stats[i].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 60 {
+			if curTime-storesLastUpdateTime[i] > 360 {
 				if storeLastAvailable[i] != available {
 					res = false
 				}
@@ -211,7 +211,7 @@ func newLabelIsolation2() *Case {
 		for i := 1; i <= storeNum; i++ {
 			available := stats[i].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 60 {
+			if curTime-storesLastUpdateTime[i] > 360 {
 				if storeLastAvailable[i] != available {
 					res = false
 				}

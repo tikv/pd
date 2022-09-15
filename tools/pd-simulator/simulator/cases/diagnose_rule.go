@@ -29,7 +29,7 @@ import (
 func newRule1() *Case {
 	var simCase Case
 
-	simCase.Rules = make([]*placement.Rule, 0, 2)
+	simCase.Rules = make([]*placement.Rule, 0)
 	simCase.Rules = append(simCase.Rules, &placement.Rule{
 		GroupID:     "test1",
 		ID:          "test1",
@@ -110,7 +110,89 @@ func newRule1() *Case {
 		for i := 1; i <= storeNum; i++ {
 			available := stats[i].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 180 {
+			if curTime-storesLastUpdateTime[i] > 360 {
+				if storeLastAvailable[i] != available {
+					res = false
+				}
+				if stats[i].ToCompactionSize != 0 {
+					res = false
+				}
+				storesLastUpdateTime[i] = curTime
+				storeLastAvailable[i] = available
+			} else {
+				res = false
+			}
+		}
+		simutil.Logger.Info("current counts", zap.Uint64s("storesAvailable", storesAvailable))
+		return res
+	}
+	return &simCase
+}
+
+func newRule2() *Case {
+	var simCase Case
+
+	simCase.Rules = make([]*placement.Rule, 0)
+	simCase.Rules = append(simCase.Rules,
+		&placement.Rule{
+			GroupID:     "test1",
+			ID:          "test1",
+			StartKeyHex: "",
+			EndKeyHex:   "",
+			Role:        placement.Leader,
+			Count:       1,
+			LabelConstraints: []placement.LabelConstraint{
+				{
+					Key:    "region",
+					Op:     "in",
+					Values: []string{"region1"},
+				},
+			},
+		})
+
+	storeNum, regionNum := 6, 300
+	for i := 0; i < storeNum; i++ {
+		id := IDAllocator.nextID()
+		simCase.Stores = append(simCase.Stores, &Store{
+			ID:        id,
+			Status:    metapb.StoreState_Up,
+			Capacity:  1000 * units.GiB,
+			Available: 500 * units.GiB,
+			Version:   "2.1.0",
+		})
+	}
+	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
+	simCase.Stores[1].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
+	simCase.Stores[2].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
+	simCase.Stores[3].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}}
+	simCase.Stores[4].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}}
+	simCase.Stores[5].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}}
+
+	for i := 0; i < regionNum; i++ {
+		peers := []*metapb.Peer{
+			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+		}
+		simCase.Regions = append(simCase.Regions, Region{
+			ID:     IDAllocator.nextID(),
+			Peers:  peers,
+			Leader: peers[0],
+			Size:   96 * units.MiB,
+			Keys:   960000,
+		})
+	}
+
+	storesLastUpdateTime := make([]int64, storeNum+1)
+	storeLastAvailable := make([]uint64, storeNum+1)
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+		res := true
+		curTime := time.Now().Unix()
+		storesAvailable := make([]uint64, 0, storeNum+1)
+		for i := 1; i <= storeNum; i++ {
+			available := stats[i].GetAvailable()
+			storesAvailable = append(storesAvailable, available)
+			if curTime-storesLastUpdateTime[i] > 360 {
 				if storeLastAvailable[i] != available {
 					res = false
 				}

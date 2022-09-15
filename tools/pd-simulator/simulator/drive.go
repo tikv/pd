@@ -151,6 +151,7 @@ func (d *Driver) Start() error {
 	return nil
 }
 
+// ChangePDConfig changes pd config
 func (d *Driver) ChangePDConfig() error {
 	d.client.PutPDConfig(d.pdConfig)
 	return nil

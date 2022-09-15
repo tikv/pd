@@ -141,6 +141,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	return sc.ServerConfig.Adjust(meta, false)
 }
 
+// PDConfig saves some config which may be changed in PD.
 type PDConfig struct {
 	PlacementRules []*placement.Rule
 	LocationLabels typeutil.StringSlice
