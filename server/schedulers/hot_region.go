@@ -629,25 +629,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch bs.resourceTy {
-	case writeLeader:
-		if bs.firstPriority == statistics.QueryDim {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		}
-	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		}
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
+	maxZombieDur := bs.calcMaxZombieDur()
 
 	// TODO: Process operators atomically.
 	// main peer
@@ -666,6 +648,27 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	}
 	bs.logBestSolution()
 	return true
+}
+
+// Depending on the source of the statistics used, a different ZombieDuration will be used.
+// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
+	switch bs.resourceTy {
+	case writeLeader:
+		if bs.firstPriority == statistics.QueryDim {
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		} else {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		}
+	case writePeer:
+		if bs.best.srcStore.IsTiFlash() {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		} else {
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		}
+	default:
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than

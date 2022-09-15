@@ -2536,3 +2536,65 @@ func checkPriority(re *require.Assertions, hb *hotScheduler, tc *mockcluster.Clu
 	re.Equal(dims[2][0], writePeerSolver.firstPriority)
 	re.Equal(dims[2][1], writePeerSolver.secondPriority)
 }
+
+type maxZombieDurTestCase struct {
+	typ           resourceType
+	isTiFlash     bool
+	firstPriority int
+	maxZombieDur  int
+}
+
+func TestMaxZombieDuration(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
+	re.NoError(err)
+	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
+	testCases := []maxZombieDurTestCase{
+		{
+			typ:          readPeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          readLeader,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			isTiFlash:    true,
+			maxZombieDur: maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.KeyDim,
+			maxZombieDur:  maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.QueryDim,
+			maxZombieDur:  maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+	}
+	for _, testCase := range testCases {
+		src := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
+		}
+		if testCase.isTiFlash {
+			src.SetEngineAsTiFlash()
+		}
+		bs := &balanceSolver{
+			sche:          hb.(*hotScheduler),
+			resourceTy:    testCase.typ,
+			firstPriority: testCase.firstPriority,
+			best:          &solution{srcStore: src},
+		}
+		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
+	}
+}
