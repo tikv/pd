@@ -204,21 +204,7 @@ func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan
 	name := d.schedulerName
 	// TODO: support more schedulers and checkers
 	switch name {
-	case schedulers.BalanceRegionName:
-		if len(ops) != 0 {
-			res.Status = scheduling
-			return res
-		}
-		res.Status = pending
-		if d.summaryFunc != nil {
-			isAllNormal := false
-			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
-			if isAllNormal {
-				res.Status = normal
-			}
-		}
-		return res
-	case schedulers.BalanceLeaderName:
+	case schedulers.BalanceRegionName, schedulers.BalanceLeaderName:
 		if len(ops) != 0 {
 			res.Status = scheduling
 			return res
@@ -245,7 +231,5 @@ type DiagnosticResult struct {
 	Summary   string `json:"summary"`
 	Timestamp uint64 `json:"timestamp"`
 
-	StoreStatus        map[uint64]plan.Status `json:"-"`
-	SchedulablePlans   []plan.Plan            `json:"-"`
-	UnschedulablePlans []plan.Plan            `json:"-"`
+	StoreStatus map[uint64]plan.Status `json:"-"`
 }
