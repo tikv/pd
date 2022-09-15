@@ -827,29 +827,57 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
 	case movePeer:
+		if bs.rwTy == statistics.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
-
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
 		}
 
 	case transferLeader:
+		if !bs.cur.mainPeerStat.IsLeader() { // source peer must be leader whether it is move leader or transfer leader
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
-			filters = append(filters, leaderFilter)
-		}
-
-		for _, peer := range bs.cur.region.GetFollowers() {
-			if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
-				candidates = append(candidates, detail)
+		if bs.rwTy == statistics.Read {
+			peers := bs.cur.region.GetPeers()
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for storeID, detail := range bs.stLoadDetail {
+				if storeID == bs.cur.mainPeerStat.StoreID {
+					continue
+				}
+				// transfer leader
+				if slice.AnyOf(peers, func(i int) bool {
+					return peers[i].GetStoreId() == storeID
+				}) {
+					candidates = append(candidates, detail)
+					continue
+				}
+				// move leader
+				if filter.Target(bs.GetOpts(), detail.StoreInfo, moveLeaderFilters) {
+					candidates = append(candidates, detail)
+				}
+			}
+		} else {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for _, peer := range bs.cur.region.GetFollowers() {
+				if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
+					candidates = append(candidates, detail)
+				}
 			}
 		}
 
