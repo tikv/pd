@@ -840,7 +840,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		}
 
 	case transferLeader:
-		if !bs.cur.mainPeerStat.IsLeader() { // move leader and transfer leader
+		if !bs.cur.mainPeerStat.IsLeader() { // source peer must be leader whether it is move leader or transfer leader
 			return nil
 		}
 		filters = []filter.Filter{
@@ -870,7 +870,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				}
 			}
 		} else {
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for _, peer := range bs.cur.region.GetFollowers() {

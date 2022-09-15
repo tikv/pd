@@ -670,12 +670,8 @@ func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *co
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeaders ...bool) Filter {
+func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
 	if opt.IsPlacementRulesEnabled() {
-		var allowMoveLeader bool
-		if len(allowMoveLeaders) != 0 {
-			allowMoveLeader = allowMoveLeaders[0]
-		}
 		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID(), allowMoveLeader)
 	}
 	return nil
