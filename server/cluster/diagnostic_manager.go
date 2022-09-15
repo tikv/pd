@@ -168,7 +168,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	}
 	var resStr string
 	firstStatus := items[0].Value.(*DiagnosticResult).Status
-	if firstStatus == pending {
+	if firstStatus == pending || firstStatus == normal {
 		if len(statusCounter) > 0 {
 			for k, v := range statusCounter {
 				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
