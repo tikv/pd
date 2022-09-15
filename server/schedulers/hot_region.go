@@ -657,15 +657,13 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 	case writeLeader:
 		if bs.firstPriority == statistics.QueryDim {
 			return bs.sche.conf.GetStoreStatZombieDuration()
-		} else {
-			return bs.sche.conf.GetRegionsStatZombieDuration()
 		}
+		return bs.sche.conf.GetRegionsStatZombieDuration()
 	case writePeer:
 		if bs.best.srcStore.IsTiFlash() {
 			return bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			return bs.sche.conf.GetStoreStatZombieDuration()
 		}
+		return bs.sche.conf.GetStoreStatZombieDuration()
 	default:
 		return bs.sche.conf.GetStoreStatZombieDuration()
 	}
