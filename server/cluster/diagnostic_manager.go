@@ -179,7 +179,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	}
 	return &DiagnosticResult{
 		Name:      d.schedulerName,
-		Status:    items[0].Value.(*DiagnosticResult).Status,
+		Status:    firstStatus,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
 	}
