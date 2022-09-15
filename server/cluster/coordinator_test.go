@@ -302,17 +302,6 @@ func checkRegionAndOperator(re *require.Assertions, tc *testCluster, co *coordin
 	}
 }
 
-func TestDiagnosisDryRun(t *testing.T) {
-	re := require.New(t)
-
-	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
-	defer cleanup()
-	err := co.diagnosis.diagnosisDryRun(schedulers.EvictLeaderName)
-	re.Error(err)
-	err = co.diagnosis.diagnosisDryRun(schedulers.BalanceRegionName)
-	re.NoError(err)
-}
-
 func TestCheckRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1198,24 +1187,24 @@ func TestController(t *testing.T) {
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		re.Equal(i, sc.GetInterval())
-		re.Empty(sc.Schedule())
+		re.Empty(sc.Schedule(false))
 	}
 	// limit = 2
 	lb.limit = 2
 	// count = 0
 	{
-		re.True(sc.AllowSchedule())
+		re.True(sc.AllowSchedule(false))
 		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op1))
 		// count = 1
-		re.True(sc.AllowSchedule())
+		re.True(sc.AllowSchedule(false))
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		// count = 2
-		re.False(sc.AllowSchedule())
+		re.False(sc.AllowSchedule(false))
 		re.True(oc.RemoveOperator(op1))
 		// count = 1
-		re.True(sc.AllowSchedule())
+		re.True(sc.AllowSchedule(false))
 	}
 
 	op11 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
@@ -1224,9 +1213,9 @@ func TestController(t *testing.T) {
 		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
 		op3.SetPriorityLevel(core.HighPriority)
 		re.Equal(1, oc.AddWaitingOperator(op11))
-		re.False(sc.AllowSchedule())
+		re.False(sc.AllowSchedule(false))
 		re.Equal(1, oc.AddWaitingOperator(op3))
-		re.True(sc.AllowSchedule())
+		re.True(sc.AllowSchedule(false))
 		re.True(oc.RemoveOperator(op3))
 	}
 
@@ -1234,11 +1223,11 @@ func TestController(t *testing.T) {
 	{
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
-		re.False(sc.AllowSchedule())
+		re.False(sc.AllowSchedule(false))
 		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
 		op4.SetPriorityLevel(core.HighPriority)
 		re.Equal(1, oc.AddWaitingOperator(op4))
-		re.True(sc.AllowSchedule())
+		re.True(sc.AllowSchedule(false))
 		re.True(oc.RemoveOperator(op4))
 	}
 
@@ -1281,7 +1270,7 @@ func TestInterval(t *testing.T) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			re.Empty(sc.Schedule())
+			re.Empty(sc.Schedule(false))
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
 	}

@@ -67,19 +67,17 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 }
 
 func (suite *clientTestSuite) TestWatchKeyspace() {
-	// Flush test storage before running TestWatchKeyspace.
-	suite.TearDownSuite()
-	suite.SetupSuite()
 	re := suite.Require()
-	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
 	re.NoError(err)
 	// First batch of watchChan message should contain all existing keyspaces, including the default.
 	initialLoaded := <-watchChan
-	re.Equal(len(initialKeyspaces)+1, len(initialLoaded))
 	for i := range initialKeyspaces {
-		re.Equal(initialKeyspaces[i], initialLoaded[i+1])
+		re.Contains(initialLoaded, initialKeyspaces[i])
 	}
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
+	re.Contains(initialLoaded, keyspaceDefault)
 	// Each additional message contains extra put events.
 	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
 	re.NoError(err)

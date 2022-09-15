@@ -740,6 +740,9 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// on ebs-based BR we need to disable it with TTL
+	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -764,6 +767,9 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	// EnableDiagnostic is the the option to enable using diagnostic
+	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -789,6 +795,7 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
+	defaultEnableDiagnostic          = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -807,6 +814,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
@@ -862,11 +870,17 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
+	if !meta.IsDefined("enable-tikv-split-region") {
+		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
+	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	if !meta.IsDefined("enable-diagnostic") {
+		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {

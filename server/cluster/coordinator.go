@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -61,19 +62,19 @@ const (
 type coordinator struct {
 	syncutil.RWMutex
 
-	wg              sync.WaitGroup
-	ctx             context.Context
-	cancel          context.CancelFunc
-	cluster         *RaftCluster
-	prepareChecker  *prepareChecker
-	checkers        *checker.Controller
-	regionScatterer *schedule.RegionScatterer
-	regionSplitter  *schedule.RegionSplitter
-	schedulers      map[string]*scheduleController
-	opController    *schedule.OperatorController
-	hbStreams       *hbstream.HeartbeatStreams
-	pluginInterface *schedule.PluginInterface
-	diagnosis       *diagnosisManager
+	wg                sync.WaitGroup
+	ctx               context.Context
+	cancel            context.CancelFunc
+	cluster           *RaftCluster
+	prepareChecker    *prepareChecker
+	checkers          *checker.Controller
+	regionScatterer   *schedule.RegionScatterer
+	regionSplitter    *schedule.RegionSplitter
+	schedulers        map[string]*scheduleController
+	opController      *schedule.OperatorController
+	hbStreams         *hbstream.HeartbeatStreams
+	pluginInterface   *schedule.PluginInterface
+	diagnosticManager *diagnosticManager
 }
 
 // newCoordinator creates a new coordinator.
@@ -82,18 +83,18 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
 	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
-		ctx:             ctx,
-		cancel:          cancel,
-		cluster:         cluster,
-		prepareChecker:  newPrepareChecker(),
-		checkers:        checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
-		regionScatterer: schedule.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:  schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      schedulers,
-		opController:    opController,
-		hbStreams:       hbStreams,
-		pluginInterface: schedule.NewPluginInterface(),
-		diagnosis:       newDiagnosisManager(cluster, schedulers),
+		ctx:               ctx,
+		cancel:            cancel,
+		cluster:           cluster,
+		prepareChecker:    newPrepareChecker(),
+		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster, opController),
+		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
+		schedulers:        schedulers,
+		opController:      opController,
+		hbStreams:         hbStreams,
+		pluginInterface:   schedule.NewPluginInterface(),
+		diagnosticManager: newDiagnosticManager(cluster),
 	}
 }
 
@@ -748,7 +749,7 @@ func (c *coordinator) isSchedulerAllowed(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return s.AllowSchedule(), nil
+	return s.AllowSchedule(false), nil
 }
 
 func (c *coordinator) isSchedulerPaused(name string) (bool, error) {
@@ -804,15 +805,15 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 
 	timer := time.NewTimer(s.GetInterval())
 	defer timer.Stop()
-
 	for {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			if !s.AllowSchedule() {
+			diagnosable := s.IsDiagnosticAllowed()
+			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
-			if op := s.Schedule(); len(op) > 0 {
+			if op := s.Schedule(diagnosable); len(op) > 0 {
 				added := c.opController.AddWaitingOperator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
@@ -853,28 +854,42 @@ func (c *coordinator) isCheckerPaused(name string) (bool, error) {
 	return p.IsPaused(), nil
 }
 
+func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error) {
+	return c.diagnosticManager.getDiagnosticResult(name)
+}
+
+// DiagnosableSchedulers includes all schedulers which pd support to diagnose.
+var DiagnosableSchedulers = map[string]struct{}{
+	schedulers.BalanceRegionName: {},
+	schedulers.BalanceLeaderName: {},
+}
+
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
-	cluster      *RaftCluster
-	opController *schedule.OperatorController
-	nextInterval time.Duration
-	ctx          context.Context
-	cancel       context.CancelFunc
-	delayAt      int64
-	delayUntil   int64
+	cluster            *RaftCluster
+	opController       *schedule.OperatorController
+	diagnosticManager  *diagnosticManager
+	nextInterval       time.Duration
+	ctx                context.Context
+	cancel             context.CancelFunc
+	delayAt            int64
+	delayUntil         int64
+	diagnosticRecorder *diagnosticRecorder
 }
 
 // newScheduleController creates a new scheduleController.
 func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
-		Scheduler:    s,
-		cluster:      c.cluster,
-		opController: c.opController,
-		nextInterval: s.GetMinInterval(),
-		ctx:          ctx,
-		cancel:       cancel,
+		Scheduler:          s,
+		cluster:            c.cluster,
+		opController:       c.opController,
+		diagnosticManager:  c.diagnosticManager,
+		nextInterval:       s.GetMinInterval(),
+		ctx:                ctx,
+		cancel:             cancel,
+		diagnosticRecorder: c.diagnosticManager.getRecorder(s.GetName()),
 	}
 }
 
@@ -886,7 +901,11 @@ func (s *scheduleController) Stop() {
 	s.cancel()
 }
 
-func (s *scheduleController) Schedule() []*operator.Operator {
+func (s *scheduleController) IsDiagnosticAllowed() bool {
+	return s.diagnosticRecorder.isAllowed()
+}
+
+func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -895,8 +914,14 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		default:
 		}
 		cacheCluster := newCacheCluster(s.cluster)
-		// If we have schedule, reset interval to the minimal interval.
-		if ops, _ := s.Scheduler.Schedule(cacheCluster, false); len(ops) > 0 {
+		// we need only process diagnostic once in the retry loop
+		diagnosable = diagnosable && i == 0
+		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromPlans(ops, plans)
+		}
+		if len(ops) > 0 {
+			// If we have schedule, reset interval to the minimal interval.
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return ops
 		}
@@ -916,8 +941,20 @@ func (s *scheduleController) GetInterval() time.Duration {
 }
 
 // AllowSchedule returns if a scheduler is allowed to schedule.
-func (s *scheduleController) AllowSchedule() bool {
-	return s.Scheduler.IsScheduleAllowed(s.cluster) && !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning()
+func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
+	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromStatus(pending)
+		}
+		return false
+	}
+	if s.IsPaused() || s.cluster.GetUnsafeRecoveryController().IsRunning() {
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromStatus(paused)
+		}
+		return false
+	}
+	return true
 }
 
 // isPaused returns if a scheduler is paused.
@@ -940,60 +977,6 @@ func (s *scheduleController) GetDelayUntil() int64 {
 		return atomic.LoadInt64(&s.delayUntil)
 	}
 	return 0
-}
-
-const maxDiagnosisResultNum = 6
-
-// diagnosisManager is used to manage diagnose mechanism which shares the actual scheduler with coordinator
-type diagnosisManager struct {
-	cluster      *RaftCluster
-	schedulers   map[string]*scheduleController
-	dryRunResult map[string]*cache.FIFO
-}
-
-func newDiagnosisManager(cluster *RaftCluster, schedulerControllers map[string]*scheduleController) *diagnosisManager {
-	return &diagnosisManager{
-		cluster:      cluster,
-		schedulers:   schedulerControllers,
-		dryRunResult: make(map[string]*cache.FIFO),
-	}
-}
-
-func (d *diagnosisManager) diagnosisDryRun(name string) error {
-	if _, ok := d.schedulers[name]; !ok {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	ops, plans := d.schedulers[name].DiagnoseDryRun()
-	result := newDiagnosisResult(ops, plans)
-	if _, ok := d.dryRunResult[name]; !ok {
-		d.dryRunResult[name] = cache.NewFIFO(maxDiagnosisResultNum)
-	}
-	queue := d.dryRunResult[name]
-	queue.Put(result.timestamp, result)
-	return nil
-}
-
-type diagnosisResult struct {
-	timestamp          uint64
-	unschedulablePlans []plan.Plan
-	schedulablePlans   []plan.Plan
-}
-
-func newDiagnosisResult(ops []*operator.Operator, result []plan.Plan) *diagnosisResult {
-	index := len(ops)
-	if len(ops) > 0 {
-		if ops[0].Kind()&operator.OpMerge != 0 {
-			index /= 2
-		}
-	}
-	if index > len(result) {
-		return nil
-	}
-	return &diagnosisResult{
-		timestamp:          uint64(time.Now().Unix()),
-		unschedulablePlans: result[index:],
-		schedulablePlans:   result[:index],
-	}
 }
 
 func (c *coordinator) getPausedSchedulerDelayAt(name string) (int64, error) {
