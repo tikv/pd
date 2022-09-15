@@ -635,14 +635,18 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 }
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	targetPeer := f.region.GetStorePeer(store.GetID())
+	targetStoreID := store.GetID()
+	sourcePeer := f.region.GetStorePeer(f.srcLeaderStoreID)
+	targetPeer := f.region.GetStorePeer(targetStoreID)
 	newRegionOptions := []core.RegionCreateOption{core.WithLeader(targetPeer)}
 	if targetPeer == nil {
 		if !f.allowMoveLeader {
 			log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 			return statusStoreNotMatchRule
 		}
-		newRegionOptions = append(newRegionOptions, core.WithReplacePeerStore(f.srcLeaderStoreID, store.GetID()))
+		newRegionOptions = []core.RegionCreateOption{
+			core.WithLeader(&metapb.Peer{Id: sourcePeer.GetId(), StoreId: targetStoreID}),
+			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID)}
 	}
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
