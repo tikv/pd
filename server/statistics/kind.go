@@ -154,8 +154,8 @@ func (rw RWType) RegionStats() []RegionStatKind {
 	return nil
 }
 
-// GetLoadsFromPeer gets the loads of the read or write type from PeerInfo.
-func (rw RWType) GetLoadsFromPeer(peer *core.PeerInfo) []float64 {
+// GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
+func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
 	deltaLoads := peer.GetLoads()
 	interval := peer.GetInterval()
 	loads := make([]float64, DimLen)
@@ -165,8 +165,8 @@ func (rw RWType) GetLoadsFromPeer(peer *core.PeerInfo) []float64 {
 	return loads
 }
 
-// SetFullLoads set loads to full as read or write type.
-func (rw RWType) SetFullLoads(full []float64, loads []float64) {
+// SetFullLoadRates set load rates to full as read or write type.
+func (rw RWType) SetFullLoadRates(full []float64, loads []float64) {
 	for dim, k := range rw.RegionStats() {
 		full[k] = loads[dim]
 	}

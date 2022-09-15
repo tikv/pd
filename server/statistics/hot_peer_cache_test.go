@@ -635,6 +635,7 @@ func TestUnstableData(t *testing.T) {
 	}
 }
 
+// Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
 func TestHotPeerCacheTopN(t *testing.T) {
 	re := require.New(t)
 

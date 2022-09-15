@@ -20,6 +20,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
@@ -102,6 +103,7 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	switch item.actionType {
 	case Remove:
 		f.removeItem(item)
+		item.Log("region heartbeat remove from cache", log.Debug)
 		incMetrics("remove_item", item.StoreID, item.Kind)
 		return
 	case Add:
@@ -111,6 +113,7 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	}
 	// for add and update
 	f.putItem(item)
+	item.Log("region heartbeat update", log.Debug)
 }
 
 func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
@@ -173,7 +176,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		StoreID:        storeID,
 		RegionID:       regionID,
 		Kind:           f.kind,
-		Loads:          f.kind.GetLoadsFromPeer(peer),
+		Loads:          f.kind.GetLoadRatesFromPeer(peer),
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
 		isLearner:      core.IsLearner(region.GetPeer(storeID)),
@@ -270,8 +273,8 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	statKinds := f.kind.RegionStats()
 	ret := make([]float64, DimLen)
-	for i, k := range statKinds {
-		ret[i] = MinHotThresholds[k]
+	for dim, kind := range statKinds {
+		ret[dim] = MinHotThresholds[kind]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {

@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
+	"go.uber.org/zap"
 )
 
 // Indicator dims.
@@ -125,6 +126,27 @@ func (stat *HotPeerStat) Less(dim int, than TopNItem) bool {
 	return stat.GetLoad(dim) < than.(*HotPeerStat).GetLoad(dim)
 }
 
+// Log is used to output some info
+func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
+	level(str,
+		zap.Uint64("interval", stat.interval),
+		zap.Uint64("region-id", stat.RegionID),
+		zap.Uint64("store", stat.StoreID),
+		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("is-learner", stat.isLearner),
+		zap.String("type", stat.Kind.String()),
+		zap.Float64s("loads", stat.GetLoads()),
+		zap.Float64s("loads-instant", stat.Loads),
+		zap.Float64s("thresholds", stat.thresholds),
+		zap.Int("hot-degree", stat.HotDegree),
+		zap.Int("hot-anti-count", stat.AntiCount),
+		zap.Duration("sum-interval", stat.getIntervalSum()),
+		zap.String("source", stat.source.String()),
+		zap.Bool("allow-inherited", stat.allowInherited),
+		zap.String("action-type", stat.actionType.String()),
+		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
+}
+
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
 func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
 	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.hotStatReportInterval())
@@ -146,6 +168,18 @@ func (stat *HotPeerStat) GetLoad(dim int) float64 {
 		return math.Round(stat.rollingLoads[dim].Get())
 	}
 	return math.Round(stat.Loads[dim])
+}
+
+// GetLoads returns denoising loads if possible.
+func (stat *HotPeerStat) GetLoads() []float64 {
+	if stat.rollingLoads != nil {
+		ret := make([]float64, len(stat.rollingLoads))
+		for dim := range ret {
+			ret[dim] = math.Round(stat.rollingLoads[dim].Get())
+		}
+		return ret
+	}
+	return stat.Loads
 }
 
 // GetThresholds returns thresholds.

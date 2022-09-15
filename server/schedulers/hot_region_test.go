@@ -1015,7 +1015,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re.Len(stats, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
-			re.Less(500.0*units.KiB, s.Loads[statistics.ByteDim])
+			re.Less(500.0*units.KiB, s.GetLoad(statistics.ByteDim))
 		}
 	}
 
