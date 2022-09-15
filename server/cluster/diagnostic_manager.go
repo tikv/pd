@@ -141,34 +141,33 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 		return nil
 	}
 
-	wa := cache.NewWeightAllocator(length, 3)
-
-	counter := make(map[uint64]map[plan.Status]float64)
-	for i := 0; i < length; i++ {
-		item := items[i].Value.(*DiagnosticResult)
-		for storeID, status := range item.StoreStatus {
-			if _, ok := counter[storeID]; !ok {
-				counter[storeID] = make(map[plan.Status]float64)
-			}
-			statusCounter := counter[storeID]
-			statusCounter[status] += wa.Get(i)
-		}
-	}
-	statusCounter := make(map[plan.Status]uint64)
-	for _, store := range counter {
-		max := 0.
-		curStat := *plan.NewStatus(plan.StatusOK)
-		for stat, c := range store {
-			if c > max {
-				max = c
-				curStat = stat
-			}
-		}
-		statusCounter[curStat] += 1
-	}
 	var resStr string
 	firstStatus := items[0].Value.(*DiagnosticResult).Status
-	if firstStatus == pending {
+	if firstStatus == pending || firstStatus == normal {
+		wa := cache.NewWeightAllocator(length, 3)
+		counter := make(map[uint64]map[plan.Status]float64)
+		for i := 0; i < length; i++ {
+			item := items[i].Value.(*DiagnosticResult)
+			for storeID, status := range item.StoreStatus {
+				if _, ok := counter[storeID]; !ok {
+					counter[storeID] = make(map[plan.Status]float64)
+				}
+				statusCounter := counter[storeID]
+				statusCounter[status] += wa.Get(i)
+			}
+		}
+		statusCounter := make(map[plan.Status]uint64)
+		for _, store := range counter {
+			max := 0.
+			curStat := *plan.NewStatus(plan.StatusOK)
+			for stat, c := range store {
+				if c > max {
+					max = c
+					curStat = stat
+				}
+			}
+			statusCounter[curStat] += 1
+		}
 		if len(statusCounter) > 0 {
 			for k, v := range statusCounter {
 				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
