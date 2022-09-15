@@ -96,7 +96,7 @@ type diagnosticRecorder struct {
 	schedulerName string
 	cluster       *RaftCluster
 	summaryFunc   plan.Summary
-	results       *resultCache
+	results       *cache.FIFO
 }
 
 func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorder {
@@ -109,7 +109,7 @@ func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorde
 		cluster:       cluster,
 		schedulerName: name,
 		summaryFunc:   summaryFunc,
-		results:       newResultMemorizer(maxDiagnosticResultNum),
+		results:       cache.NewFIFO(maxDiagnosticResultNum),
 	}
 }
 
@@ -124,80 +124,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	if d.results.Len() == 0 {
 		return nil
 	}
-	return d.results.generateResult()
-}
-
-func (d *diagnosticRecorder) setResultFromStatus(status string) {
-	if d == nil {
-		return
-	}
-	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
-	d.results.put(result)
-}
-
-func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
-	if d == nil {
-		return
-	}
-	result := d.analyze(ops, plans, uint64(time.Now().Unix()))
-	d.results.put(result)
-}
-
-func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
-	res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: normal}
-	name := d.schedulerName
-	// TODO: support more schedulers and checkers
-	switch name {
-	case schedulers.BalanceRegionName:
-		runningNum := d.cluster.GetOperatorController().OperatorCount(operator.OpRegion)
-		if runningNum != 0 || len(ops) != 0 {
-			res.Status = scheduling
-			return res
-		}
-		res.Status = pending
-		if d.summaryFunc != nil {
-			isAllNormal := false
-			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
-			if isAllNormal {
-				res.Status = normal
-			}
-		}
-		return res
-	default:
-	}
-	// TODO: save plan into result
-	return res
-}
-
-// DiagnosticResult is used to save diagnostic result and is also used to output.
-type DiagnosticResult struct {
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Summary   string `json:"summary"`
-	Timestamp uint64 `json:"timestamp"`
-
-	StoreStatus        map[uint64]plan.Status `json:"-"`
-	SchedulablePlans   []plan.Plan            `json:"-"`
-	UnschedulablePlans []plan.Plan            `json:"-"`
-}
-
-// resultCache is an encapsulation for cache.FIFO.
-type resultCache struct {
-	*cache.FIFO
-}
-
-func newResultMemorizer(maxCount int) *resultCache {
-	return &resultCache{FIFO: cache.NewFIFO(maxCount)}
-}
-
-func (m *resultCache) put(result *DiagnosticResult) {
-	m.Put(result.Timestamp, result)
-}
-
-// generateResult firstly selects the continuous items which have the same Status with the the lastest one.
-// And then dynamically assign weights to these results. More recent results will be assigned more weight.
-func (m *resultCache) generateResult() *DiagnosticResult {
-	items := m.FIFO.FromLastSameElems(func(i interface{}) (bool, string) {
+	items := d.results.FromLastSameElems(func(i interface{}) (bool, string) {
 		result, ok := i.(*DiagnosticResult)
 		if result == nil {
 			return ok, ""
@@ -244,4 +171,57 @@ func (m *resultCache) generateResult() *DiagnosticResult {
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
 	}
+}
+
+func (d *diagnosticRecorder) setResultFromStatus(status string) {
+	if d == nil {
+		return
+	}
+	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
+	d.results.Put(result.Timestamp, result)
+}
+
+func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
+	if d == nil {
+		return
+	}
+	result := d.analyze(ops, plans, uint64(time.Now().Unix()))
+	d.results.Put(result.Timestamp, result)
+}
+
+func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
+	res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: normal}
+	name := d.schedulerName
+	// TODO: support more schedulers and checkers
+	switch name {
+	case schedulers.BalanceRegionName:
+		if len(ops) != 0 {
+			res.Status = scheduling
+			return res
+		}
+		res.Status = pending
+		if d.summaryFunc != nil {
+			isAllNormal := false
+			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
+			if isAllNormal {
+				res.Status = normal
+			}
+		}
+		return res
+	default:
+	}
+	// TODO: save plan into result
+	return res
+}
+
+// DiagnosticResult is used to save diagnostic result and is also used to output.
+type DiagnosticResult struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	Summary   string `json:"summary"`
+	Timestamp uint64 `json:"timestamp"`
+
+	StoreStatus        map[uint64]plan.Status `json:"-"`
+	SchedulablePlans   []plan.Plan            `json:"-"`
+	UnschedulablePlans []plan.Plan            `json:"-"`
 }
