@@ -656,6 +656,9 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 	switch bs.resourceTy {
 	case writeLeader:
 		if bs.firstPriority == statistics.QueryDim {
+			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
+			// when its first priority is QueryDim`, because `Write-peer` does not have `QueryDim`.
+			// The reason is similar with `tikvCollector.GetLoads`
 			return bs.sche.conf.GetStoreStatZombieDuration()
 		}
 		return bs.sche.conf.GetRegionsStatZombieDuration()
