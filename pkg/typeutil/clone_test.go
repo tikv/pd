@@ -15,9 +15,9 @@ func TestDeepClone(t *testing.T) {
 	dst := DeepClone(src, func() *pdpb.StoreHeartbeatRequest {
 		return &pdpb.StoreHeartbeatRequest{}
 	})
+	re.EqualValues(dst.Stats.StoreId, 1)
 	dst.Stats.StoreId = 2
 	re.EqualValues(src.Stats.StoreId, 1)
-	re.EqualValues(dst.Stats.StoreId, 2)
 
 	// case2: the source is nil
 	var src2 *metapb.Region
