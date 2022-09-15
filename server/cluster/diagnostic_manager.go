@@ -70,7 +70,7 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
 	if !d.cluster.opt.IsDiagnosticAllowed() {
-		return nil, errs.ErrDiagnosticDisabled.FastGenByArgs(name)
+		return nil, errs.ErrDiagnosticDisabled
 	}
 
 	isSchedulerExisted, _ := d.cluster.IsSchedulerExisted(name)
