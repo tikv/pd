@@ -634,7 +634,11 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	var maxZombieDur time.Duration
 	switch bs.resourceTy {
 	case writeLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
+		if bs.firstPriority == statistics.QueryDim {
+			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
+		} else {
+			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
+		}
 	case writePeer:
 		if bs.best.srcStore.IsTiFlash() {
 			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
