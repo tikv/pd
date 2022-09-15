@@ -645,8 +645,9 @@ func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core
 			return statusStoreNotMatchRule
 		}
 		newRegionOptions = []core.RegionCreateOption{
+			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID),
 			core.WithLeader(&metapb.Peer{Id: sourcePeer.GetId(), StoreId: targetStoreID}),
-			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID)}
+		}
 	}
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
