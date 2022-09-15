@@ -40,4 +40,5 @@ func TestWeightAllocator(t *testing.T) {
 	re.Equal(1./21.*3., wa.Get(3))
 	re.Equal(1./21.*2, wa.Get(6))
 	re.Equal(1./21., wa.Get(9))
+	re.Equal(0., wa.Get(10))
 }
