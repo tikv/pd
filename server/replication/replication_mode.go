@@ -369,7 +369,7 @@ func (m *ModeManager) drGetState() string {
 
 const (
 	idleTimeout  = time.Minute
-	tickInterval = time.Second * 10
+	tickInterval = 500 * time.Millisecond
 )
 
 // Run starts the background job.
