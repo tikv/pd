@@ -70,7 +70,7 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
 	if !d.cluster.opt.IsDiagnosticAllowed() {
-		return nil, errs.ErrDiagnosticDisabled.FastGenByArgs(name)
+		return nil, errs.ErrDiagnosticDisabled
 	}
 
 	isSchedulerExisted, _ := d.cluster.IsSchedulerExisted(name)
@@ -141,43 +141,45 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 		return nil
 	}
 
-	wa := cache.NewWeightAllocator(length, 3)
-
-	counter := make(map[uint64]map[plan.Status]float64)
-	for i := 0; i < length; i++ {
-		item := items[i].Value.(*DiagnosticResult)
-		for storeID, status := range item.StoreStatus {
-			if _, ok := counter[storeID]; !ok {
-				counter[storeID] = make(map[plan.Status]float64)
-			}
-			statusCounter := counter[storeID]
-			statusCounter[status] += wa.Get(i)
-		}
-	}
-	statusCounter := make(map[plan.Status]uint64)
-	for _, store := range counter {
-		max := 0.
-		curStat := *plan.NewStatus(plan.StatusOK)
-		for stat, c := range store {
-			if c > max {
-				max = c
-				curStat = stat
-			}
-		}
-		statusCounter[curStat] += 1
-	}
 	var resStr string
-	if len(statusCounter) > 0 {
-		for k, v := range statusCounter {
-			resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+	firstStatus := items[0].Value.(*DiagnosticResult).Status
+	if firstStatus == pending || firstStatus == normal {
+		wa := cache.NewWeightAllocator(length, 3)
+		counter := make(map[uint64]map[plan.Status]float64)
+		for i := 0; i < length; i++ {
+			item := items[i].Value.(*DiagnosticResult)
+			for storeID, status := range item.StoreStatus {
+				if _, ok := counter[storeID]; !ok {
+					counter[storeID] = make(map[plan.Status]float64)
+				}
+				statusCounter := counter[storeID]
+				statusCounter[status] += wa.Get(i)
+			}
 		}
-	} else {
-		// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
-		resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
+		statusCounter := make(map[plan.Status]uint64)
+		for _, store := range counter {
+			max := 0.
+			curStat := *plan.NewStatus(plan.StatusOK)
+			for stat, c := range store {
+				if c > max {
+					max = c
+					curStat = stat
+				}
+			}
+			statusCounter[curStat] += 1
+		}
+		if len(statusCounter) > 0 {
+			for k, v := range statusCounter {
+				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+			}
+		} else if firstStatus == pending {
+			// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
+			resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
+		}
 	}
 	return &DiagnosticResult{
-		Name:      items[0].Value.(*DiagnosticResult).Name,
-		Status:    items[0].Value.(*DiagnosticResult).Status,
+		Name:      d.schedulerName,
+		Status:    firstStatus,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
 	}

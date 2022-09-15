@@ -471,7 +471,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts, nil)
+	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector)
 	leaderSchedulePolicy := opts.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(targets[i].GetID())
