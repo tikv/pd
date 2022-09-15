@@ -100,6 +100,16 @@ func TestScheduler(t *testing.T) {
 		re.Equal(expectedConfig, configInfo)
 	}
 
+	checkSchedulerDescribeCommand := func(args []string, expectedResult map[string]interface{}, schedulerName string) {
+		if args != nil {
+			mustExec(args, nil)
+		}
+		result := make(map[string]interface{})
+		mustExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+		re.Equal(expectedResult["status"], result["status"])
+		re.Equal(expectedResult["summary"], result["summary"])
+	}
+
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
@@ -422,4 +432,6 @@ func TestScheduler(t *testing.T) {
 	re.Contains(echo, "\"degree\": 10")
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
 	re.Contains(echo, "Success!")
+
+	checkSchedulerDescribeCommand(nil, map[string]interface{}{"status": "normal", "summary": ""}, "balance-region-scheduler")
 }

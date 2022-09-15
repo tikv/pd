@@ -30,11 +30,11 @@ import (
 )
 
 var (
-	schedulersPrefix         = "pd/api/v1/schedulers"
-	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
-	schedulerDiagnosisPrefix = "pd/api/v1/schedulers/diagnosis"
-	evictLeaderSchedulerName = "evict-leader-scheduler"
-	grantLeaderSchedulerName = "grant-leader-scheduler"
+	schedulersPrefix          = "pd/api/v1/schedulers"
+	schedulerConfigPrefix     = "pd/api/v1/scheduler-config"
+	schedulerDiagnosticPrefix = "pd/api/v1/schedulers/diagnostic"
+	evictLeaderSchedulerName  = "evict-leader-scheduler"
+	grantLeaderSchedulerName  = "grant-leader-scheduler"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -776,6 +776,7 @@ func NewDescribeSchedulerCommand() *cobra.Command {
 	}
 	c.AddCommand(
 		newDescribeBalanceRegionCommand(),
+		newDescribeBalanceLeaderCommand(),
 	)
 	return c
 }
@@ -789,13 +790,22 @@ func newDescribeBalanceRegionCommand() *cobra.Command {
 	return c
 }
 
+func newDescribeBalanceLeaderCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-leader-scheduler",
+		Short: "describe the balance-leader-scheduler",
+		Run:   describeSchedulerCommandFunc,
+	}
+	return c
+}
+
 func describeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 0 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 	schedulerName := cmd.Name()
-	url := path.Join(schedulerDiagnosisPrefix, schedulerName)
+	url := path.Join(schedulerDiagnosticPrefix, schedulerName)
 
 	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
