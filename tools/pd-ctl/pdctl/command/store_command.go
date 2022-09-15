@@ -502,7 +502,7 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	// if force flag isn't set then it means do nothing
 	isDelete, err := cmd.Flags().GetBool("delete")
 	if err != nil {
-		cmd.Println("can't parse paramenters", err)
+		cmd.Println("can't parse parameters", err)
 		return
 	}
 	if len(args) <= 1 {
@@ -517,14 +517,14 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	var toDeletedLabel string
 	if isDelete {
 		if len(args) != 2 {
-			cmd.PrintErrln("Failed: not allow to delete multiple labesl at a time")
+			cmd.PrintErrln("Failed: not allow to delete multiple labels at a time")
 			return
 		}
 		toDeletedLabel = args[1]
 		b, _ := json.Marshal(toDeletedLabel)
 		res, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(b)))
 		if err != nil {
-			cmd.Printf("Failed! %s", err)
+			cmd.Printf("Failed! %s\n", err)
 			return
 		}
 		cmd.Printf("Success! %s\n", res)
@@ -538,14 +538,12 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	for i := 1; i < len(args); {
 		if i == 1 {
 			sliceArg := strings.Split(args[i], "=")
-			fmt.Println("judge way", sliceArg)
 			if len(sliceArg) != 2 {
 				useEqual = false
 			}
 		}
 		if useEqual { // new way
 			sliceArg := strings.Split(args[i], "=")
-			fmt.Println("new way", sliceArg)
 			if len(sliceArg) != 2 {
 				cmd.PrintErrln("Failed: invalid arguments, expect <key>=<value>")
 				return

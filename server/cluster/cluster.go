@@ -1060,7 +1060,6 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 }
 
 // DeleteStoreLabel updates a store's location labels
-// If 'force' is true, then update the store's labels forcibly.
 func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	store := c.GetStore(storeID)
 	if store == nil {
