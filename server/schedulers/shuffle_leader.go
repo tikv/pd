@@ -110,7 +110,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	// 2. transfer a leader to the store.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	targetStore := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster.GetOpts(), s.filters...).
+		FilterTarget(cluster.GetOpts(), nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
@@ -118,7 +118,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	}
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	region := filter.SelectOneRegion(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), pendingFilter, downFilter)
+	region := filter.SelectOneRegion(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
 		return nil, nil

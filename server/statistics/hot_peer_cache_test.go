@@ -331,6 +331,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
+	oldItem.AntiCount = oldItem.defaultAntiCount()
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	re.Equal(1, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
@@ -589,7 +590,7 @@ type testMovingAverageCase struct {
 }
 
 func checkMovingAverage(re *require.Assertions, testCase *testMovingAverageCase) {
-	interval := 1 * time.Second
+	interval := time.Second
 	tm := movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 	var results []float64
 	for _, data := range testCase.report {

@@ -436,6 +436,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("group", "", "group id")
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
+	show.Flags().Bool("detail", false, "detailed match info for region")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -552,6 +553,9 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		reqPath, respIsList = path.Join(rulePrefix, group, id), false
 	case region != "" && group == "" && id == "": // rules matches a region
 		reqPath = path.Join(rulesPrefix, "region", region)
+		if ok, _ := cmd.Flags().GetBool("detail"); ok {
+			reqPath = path.Join(reqPath, "detail")
+		}
 	default:
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return

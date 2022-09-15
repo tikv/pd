@@ -171,6 +171,11 @@ error = '''
 stop dashboard failed
 '''
 
+["PD:diagnostic:ErrDiagnosticLoadPlanError"]
+error = '''
+load plan failed
+'''
+
 ["PD:dir:ErrReadDirName"]
 error = '''
 read dir name error
@@ -604,6 +609,11 @@ scheduler existed
 ["PD:scheduler:ErrSchedulerNotFound"]
 error = '''
 scheduler not found
+'''
+
+["PD:scheduler:ErrSchedulerTiKVSplitDisabled"]
+error = '''
+tikv split region disabled
 '''
 
 ["PD:semver:ErrSemverNewVersion"]

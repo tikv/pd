@@ -68,7 +68,7 @@ func makeRegion(def string) *core.RegionInfo {
 }
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
-//       count role constraints location_labels
+// count role constraints location_labels
 func makeRule(def string) *Rule {
 	var rule Rule
 	splits := strings.Split(def, "/")
