@@ -78,7 +78,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 }
 
 func (s *StoreInfo) cloneMetaStore() *metapb.Store {
-	return typeutil.DeepClone(s.meta, typeutil.StoreFactory)
+	return typeutil.DeepClone(s.meta, StoreFactory)
 }
 
 // Clone creates a copy of current StoreInfo.

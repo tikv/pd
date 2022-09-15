@@ -12,30 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package typeutil
+package core
 
 import (
-	"reflect"
+	"testing"
+
+	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
-// Codec is the interface representing objects that can marshal and unmarshal themselves.
-type Codec interface {
-	Marshal() (data []byte, err error)
-	Unmarshal(data []byte) error
+func BenchmarkDeepClone(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		src := &metapb.Region{Id: 1}
+		dst := typeutil.DeepClone(src, RegionFactory)
+		dst.Id = 1
+	}
 }
 
-// DeepClone returns the deep copy of the source
-func DeepClone[T Codec](src T, factory func() T) T {
-	if reflect.ValueOf(src).IsNil() {
-		var dst T
+func BenchmarkProtoClone(b *testing.B) {
+	clone := func(src *metapb.Region) *metapb.Region {
+		dst := proto.Clone(src).(*metapb.Region)
 		return dst
 	}
-	b, err := src.Marshal()
-	if err != nil {
-		var dst T
-		return dst
+	for i := 0; i < b.N; i++ {
+		src := &metapb.Region{Id: 1}
+		dst := clone(src)
+		dst.Id = 1
 	}
-	dst := factory()
-	dst.Unmarshal(b)
-	return dst
 }

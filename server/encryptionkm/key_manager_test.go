@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/election"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -295,9 +296,7 @@ func TestGetKey(t *testing.T) {
 	// Get key that require a reload.
 	// Deliberately cancel watcher, delete a key and check if it has reloaded.
 	loadedKeys := m.keys.Load().(*encryptionpb.KeyDictionary)
-	newLoadedKeys := typeutil.DeepClone(loadedKeys, func() *encryptionpb.KeyDictionary {
-		return &encryptionpb.KeyDictionary{}
-	})
+	newLoadedKeys := typeutil.DeepClone(loadedKeys, core.KeyDictionaryFactory)
 
 	delete(newLoadedKeys.Keys, 456)
 	m.keys.Store(newLoadedKeys)
@@ -909,9 +908,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	re.NoError(err)
 	// Check encryption is disabled
 	<-reloadEvent
-	expectedKeys := typeutil.DeepClone(keys, func() *encryptionpb.KeyDictionary {
-		return &encryptionpb.KeyDictionary{}
-	})
+	expectedKeys := typeutil.DeepClone(keys, core.KeyDictionaryFactory)
 	expectedKeys.CurrentKeyId = disableEncryptionKeyID
 	expectedKeys.Keys[123].WasExposed = true
 	re.True(proto.Equal(m.keys.Load().(*encryptionpb.KeyDictionary), expectedKeys))

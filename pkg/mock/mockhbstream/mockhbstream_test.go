@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/hbstream"
 )
 
@@ -50,18 +51,14 @@ func TestActivity(t *testing.T) {
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
-			return &pdpb.RegionHeartbeatResponse{}
-		})
+		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
-			return &pdpb.RegionHeartbeatResponse{}
-		})
+		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
@@ -73,9 +70,7 @@ func TestActivity(t *testing.T) {
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, func() *pdpb.RegionHeartbeatResponse {
-			return &pdpb.RegionHeartbeatResponse{}
-		})
+		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
 		hbs.SendMsg(region, newMsg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})

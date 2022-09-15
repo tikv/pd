@@ -1064,7 +1064,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
 	suite.NoError(err)
-	offlineStore := typeutil.DeepClone(store, typeutil.StoreFactory)
+	offlineStore := typeutil.DeepClone(store, core.StoreFactory)
 	offlineStore.State = metapb.StoreState_Offline
 	offlineStore.NodeState = metapb.NodeState_Removing
 

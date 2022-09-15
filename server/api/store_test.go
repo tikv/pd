@@ -124,8 +124,8 @@ func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Sto
 		}
 	}
 	for _, s := range ss {
-		obtained := typeutil.DeepClone(s.Store.Store, typeutil.StoreFactory)
-		expected := typeutil.DeepClone(mapWant[obtained.Id], typeutil.StoreFactory)
+		obtained := typeutil.DeepClone(s.Store.Store, core.StoreFactory)
+		expected := typeutil.DeepClone(mapWant[obtained.Id], core.StoreFactory)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
 		re.Equal(expected, obtained)
