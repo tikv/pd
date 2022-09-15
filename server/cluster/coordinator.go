@@ -861,6 +861,7 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 // DiagnosableSchedulers includes all schedulers which pd support to diagnose.
 var DiagnosableSchedulers = map[string]struct{}{
 	schedulers.BalanceRegionName: {},
+	schedulers.BalanceLeaderName: {},
 }
 
 // scheduleController is used to manage a scheduler to schedule.

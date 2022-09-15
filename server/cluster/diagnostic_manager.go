@@ -48,6 +48,7 @@ const (
 // SummaryFuncs includes all implementations of plan.Summary.
 var SummaryFuncs = map[string]plan.Summary{
 	schedulers.BalanceRegionName: schedulers.BalancePlanSummary,
+	schedulers.BalanceLeaderName: schedulers.BalancePlanSummary,
 }
 
 type diagnosticManager struct {
@@ -68,6 +69,10 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 }
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
+	if !d.cluster.opt.IsDiagnosticAllowed() {
+		return nil, errs.ErrDiagnosticDisabled.FastGenByArgs(name)
+	}
+
 	isSchedulerExisted, _ := d.cluster.IsSchedulerExisted(name)
 	isDisabled, _ := d.cluster.IsSchedulerDisabled(name)
 	if !isSchedulerExisted || isDisabled {
@@ -162,8 +167,13 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 		statusCounter[curStat] += 1
 	}
 	var resStr string
-	for k, v := range statusCounter {
-		resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+	if len(statusCounter) > 0 {
+		for k, v := range statusCounter {
+			resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
+		}
+	} else {
+		// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
+		resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
 	}
 	return &DiagnosticResult{
 		Name:      items[0].Value.(*DiagnosticResult).Name,
@@ -190,11 +200,25 @@ func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans 
 }
 
 func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
-	res := &DiagnosticResult{Name: schedulers.BalanceRegionName, Timestamp: ts, Status: normal}
+	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: normal}
 	name := d.schedulerName
 	// TODO: support more schedulers and checkers
 	switch name {
 	case schedulers.BalanceRegionName:
+		if len(ops) != 0 {
+			res.Status = scheduling
+			return res
+		}
+		res.Status = pending
+		if d.summaryFunc != nil {
+			isAllNormal := false
+			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
+			if isAllNormal {
+				res.Status = normal
+			}
+		}
+		return res
+	case schedulers.BalanceLeaderName:
 		if len(ops) != 0 {
 			res.Status = scheduling
 			return res
