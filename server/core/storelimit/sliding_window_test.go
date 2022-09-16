@@ -28,6 +28,8 @@ func TestSlidingWindow(t *testing.T) {
 	re.EqualValues(s.GetUsed(), 0)
 
 	// case 2: it will occupy the high window size if the normal window is full.
+	capacity = 1000
+	s.Reset(capacity)
 	re.True(s.Take(capacity, NormalPriority))
 	re.False(s.Take(capacity, NormalPriority))
 	re.True(s.Take(capacity-100, HighPriority))

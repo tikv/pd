@@ -14,6 +14,7 @@
 
 package storelimit
 
+// Limiter is the interface of store limit.
 type Limiter interface {
 	Available(n int64, level Level) bool
 	Take(token int64, level Level) bool
