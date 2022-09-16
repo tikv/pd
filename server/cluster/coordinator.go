@@ -612,9 +612,12 @@ func collectPendingInfluence(stores []*core.StoreInfo) {
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_byte_rate").Set(infl.Loads[statistics.ByteDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_key_rate").Set(infl.Loads[statistics.KeyDim])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_query_rate").Set(infl.Loads[statistics.QueryDim])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionReadBytes])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.RegionReadKeys])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_query_rate").Set(infl.Loads[statistics.RegionReadQueryNum])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionWriteBytes])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.RegionWriteKeys])
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_query_rate").Set(infl.Loads[statistics.RegionWriteQueryNum])
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
 		}
 	}
