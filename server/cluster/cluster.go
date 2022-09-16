@@ -1066,7 +1066,7 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
-	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels()))
+	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
 	hit := false
 	for _, label := range newStore.GetLabels() {
 		if label.Key == labelKey {
