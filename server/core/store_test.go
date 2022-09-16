@@ -15,6 +15,7 @@
 package core
 
 import (
+	"github.com/tikv/pd/pkg/typeutil"
 	"math"
 	"sync"
 	"testing"
@@ -94,7 +95,7 @@ func TestCloneStore(t *testing.T) {
 func TestCloneMetaStore(t *testing.T) {
 	re := require.New(t)
 	store := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
-	store2 := NewStoreInfo(store).cloneMetaStore()
+	store2 := typeutil.DeepClone(NewStoreInfo(store).meta, StoreFactory)
 	re.Equal(store2.Labels, store.Labels)
 	store2.Labels[0].Value = "changed value"
 	re.NotEqual(store2.Labels, store.Labels)
