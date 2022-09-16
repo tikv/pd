@@ -563,8 +563,8 @@ func DistinctScore(labels []string, stores []*StoreInfo, other *StoreInfo) float
 
 // MergeLabels merges the passed in labels with origins, overriding duplicated
 // ones.
-func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
-	storeLabels := s.GetLabels()
+func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+	storeLabels := origin
 L:
 	for _, newLabel := range labels {
 		for _, label := range storeLabels {
