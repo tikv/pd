@@ -15,11 +15,11 @@
 package core
 
 import (
-	"github.com/tikv/pd/pkg/typeutil"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 )
 
