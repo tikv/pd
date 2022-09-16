@@ -1067,15 +1067,13 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	}
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
 	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
-	hit := false
 	for _, label := range newStore.GetLabels() {
 		if label.Key == labelKey {
-			hit = true
 			continue
 		}
 		labels = append(labels, label)
 	}
-	if !hit {
+	if len(labels) == len(store.GetLabels()) {
 		return errors.Errorf("the label key %s does not exist", labelKey)
 	}
 	newStore.Labels = labels
