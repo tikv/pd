@@ -60,6 +60,9 @@ type PDPeerStats struct {
 }
 
 func fromPeer(peer *metapb.Peer) MetaPeer {
+	if peer == nil {
+		return MetaPeer{}
+	}
 	return MetaPeer{
 		Peer:      peer,
 		RoleName:  peer.GetRole().String(),

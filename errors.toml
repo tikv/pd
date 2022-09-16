@@ -81,6 +81,11 @@ error = '''
 get TSO timeout
 '''
 
+["PD:cluster:ErrInvalidStoreID"]
+error = '''
+invalid store id %d, not found
+'''
+
 ["PD:cluster:ErrNotBootstrapped"]
 error = '''
 TiKV cluster not bootstrapped, please start TiKV first

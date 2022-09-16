@@ -630,21 +630,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch bs.resourceTy {
-	case writeLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		}
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
+	maxZombieDur := bs.calcMaxZombieDur()
 
 	// TODO: Process operators atomically.
 	// main peer
@@ -663,6 +649,28 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	}
 	bs.logBestSolution()
 	return true
+}
+
+// Depending on the source of the statistics used, a different ZombieDuration will be used.
+// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
+	switch bs.resourceTy {
+	case writeLeader:
+		if bs.firstPriority == statistics.QueryDim {
+			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
+			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
+			// The reason is the same with `tikvCollector.GetLoads`.
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		}
+		return bs.sche.conf.GetRegionsStatZombieDuration()
+	case writePeer:
+		if bs.best.srcStore.IsTiFlash() {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		}
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	default:
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
