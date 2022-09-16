@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -809,7 +808,7 @@ func (c *coordinator) runScheduler(s *scheduleController) {
 		select {
 		case <-timer.C:
 			timer.Reset(s.GetInterval())
-			diagnosable := s.IsDiagnosticAllowed()
+			diagnosable := s.diagnosticRecorder != nil && s.cluster.opt.IsDiagnosticAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
@@ -858,18 +857,11 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 	return c.diagnosticManager.getDiagnosticResult(name)
 }
 
-// DiagnosableSchedulers includes all schedulers which pd support to diagnose.
-var DiagnosableSchedulers = map[string]struct{}{
-	schedulers.BalanceRegionName: {},
-	schedulers.BalanceLeaderName: {},
-}
-
 // scheduleController is used to manage a scheduler to schedule.
 type scheduleController struct {
 	schedule.Scheduler
 	cluster            *RaftCluster
 	opController       *schedule.OperatorController
-	diagnosticManager  *diagnosticManager
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -885,7 +877,6 @@ func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleContro
 		Scheduler:          s,
 		cluster:            c.cluster,
 		opController:       c.opController,
-		diagnosticManager:  c.diagnosticManager,
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
@@ -899,10 +890,6 @@ func (s *scheduleController) Ctx() context.Context {
 
 func (s *scheduleController) Stop() {
 	s.cancel()
-}
-
-func (s *scheduleController) IsDiagnosticAllowed() bool {
-	return s.diagnosticRecorder.isAllowed()
 }
 
 func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {

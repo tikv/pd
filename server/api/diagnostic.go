@@ -38,7 +38,7 @@ func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHand
 
 func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	if _, ok := cluster.DiagnosableSchedulers[name]; !ok {
+	if _, ok := cluster.DiagnosableSummaryFunc[name]; !ok {
 		h.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name).Error())
 		return
 	}

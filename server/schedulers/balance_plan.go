@@ -117,7 +117,7 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
 		if !ok {
-			return nil, false, errs.ErrDiagnosticLoadPlanError
+			return nil, false, errs.ErrDiagnosticLoadPlan
 		}
 		step := p.GetStep()
 		// We can simply think of createOperator as a filtering step for target in BalancePlanSummary.

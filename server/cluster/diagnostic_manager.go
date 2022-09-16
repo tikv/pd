@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/movingaverage"
-	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/schedulers"
@@ -46,21 +45,21 @@ const (
 	maxDiagnosticResultNum = 10
 )
 
-// SummaryFuncs includes all implementations of plan.Summary.
-var SummaryFuncs = map[string]plan.Summary{
+// DiagnosableSummaryFunc includes all implementations of plan.Summary.
+// And it also includes all schedulers which pd support to diagnose.
+var DiagnosableSummaryFunc = map[string]plan.Summary{
 	schedulers.BalanceRegionName: schedulers.BalancePlanSummary,
 	schedulers.BalanceLeaderName: schedulers.BalancePlanSummary,
 }
 
 type diagnosticManager struct {
-	syncutil.RWMutex
 	cluster   *RaftCluster
 	recorders map[string]*diagnosticRecorder
 }
 
 func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 	recorders := make(map[string]*diagnosticRecorder)
-	for name := range DiagnosableSchedulers {
+	for name := range DiagnosableSummaryFunc {
 		recorders[name] = newDiagnosticRecorder(name, cluster)
 	}
 	return &diagnosticManager{
@@ -97,7 +96,7 @@ func (d *diagnosticManager) getRecorder(name string) *diagnosticRecorder {
 	return d.recorders[name]
 }
 
-// diagnosticRecorder is used to manage diagnose mechanism
+// diagnosticRecorder is used to manage diagnostic for one scheduler.
 type diagnosticRecorder struct {
 	schedulerName string
 	cluster       *RaftCluster
@@ -106,7 +105,7 @@ type diagnosticRecorder struct {
 }
 
 func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorder {
-	summaryFunc, ok := SummaryFuncs[name]
+	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		log.Error("can't find summary function", zap.String("scheduler-name", name))
 		return nil
@@ -117,13 +116,6 @@ func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorde
 		summaryFunc:   summaryFunc,
 		results:       cache.NewFIFO(maxDiagnosticResultNum),
 	}
-}
-
-func (d *diagnosticRecorder) isAllowed() bool {
-	if d == nil {
-		return false
-	}
-	return d.cluster.opt.IsDiagnosticAllowed()
 }
 
 func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {

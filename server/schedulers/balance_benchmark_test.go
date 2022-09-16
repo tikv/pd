@@ -53,7 +53,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 	if ruleEnable {
 		addTiflash(tc)
 	}
-	storeID, regionID := uint64(1), uint64(1)
+	storeID, regionID := uint64(0), uint64(0)
 	for _, host := range hosts {
 		for _, rack := range racks {
 			for _, az := range zones {
@@ -61,15 +61,15 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				tc.AddLabelsStore(storeID, int(storeID), label)
 				storeID++
+				tc.AddLabelsStore(storeID, int(storeID), label)
 			}
 			for j := 0; j < regionCount; j++ {
 				if ruleEnable {
 					learnID := regionID%uint64(tiflashCount) + uint64(storeCount)
-					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{learnID})
+					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 1, storeID - 2}, []uint64{learnID})
 				} else {
-					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
+					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 1, storeID - 2}, nil)
 				}
 				regionID++
 			}

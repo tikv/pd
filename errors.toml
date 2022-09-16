@@ -181,7 +181,7 @@ error = '''
 diagnostic is disabled
 '''
 
-["PD:diagnostic:ErrDiagnosticLoadPlanError"]
+["PD:diagnostic:ErrDiagnosticLoadPlan"]
 error = '''
 load plan failed
 '''

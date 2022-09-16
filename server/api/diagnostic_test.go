@@ -89,6 +89,9 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	suite.Equal("disabled", result.Status)
 
+	evictLeaderURL := suite.urlPrefix + "/" + schedulers.EvictLeaderName
+	suite.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
+
 	input := make(map[string]interface{})
 	input["name"] = schedulers.BalanceRegionName
 	body, err := json.Marshal(input)
@@ -96,7 +99,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex, body, tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Millisecond * 50)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
@@ -108,7 +111,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(5 * time.Second)
+	time.Sleep(time.Millisecond * 50)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
@@ -119,14 +122,14 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(5 * time.Second)
+	time.Sleep(time.Millisecond * 50)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
 	suite.Equal("pending", result.Status)
 
 	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	time.Sleep(5 * time.Second)
+	time.Sleep(time.Millisecond * 50)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
