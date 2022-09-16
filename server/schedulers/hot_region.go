@@ -629,21 +629,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch bs.resourceTy {
-	case writeLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		}
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
+	maxZombieDur := bs.calcMaxZombieDur()
 
 	// TODO: Process operators atomically.
 	// main peer
@@ -662,6 +648,28 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	}
 	bs.logBestSolution()
 	return true
+}
+
+// Depending on the source of the statistics used, a different ZombieDuration will be used.
+// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
+	switch bs.resourceTy {
+	case writeLeader:
+		if bs.firstPriority == statistics.QueryDim {
+			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
+			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
+			// The reason is the same with `tikvCollector.GetLoads`.
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		}
+		return bs.sche.conf.GetRegionsStatZombieDuration()
+	case writePeer:
+		if bs.best.srcStore.IsTiFlash() {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		}
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	default:
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -826,29 +834,57 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
 	case movePeer:
+		if bs.rwTy == statistics.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
-
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
 		}
 
 	case transferLeader:
+		if !bs.cur.mainPeerStat.IsLeader() { // source peer must be leader whether it is move leader or transfer leader
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
-			filters = append(filters, leaderFilter)
-		}
-
-		for _, peer := range bs.cur.region.GetFollowers() {
-			if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
-				candidates = append(candidates, detail)
+		if bs.rwTy == statistics.Read {
+			peers := bs.cur.region.GetPeers()
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for storeID, detail := range bs.stLoadDetail {
+				if storeID == bs.cur.mainPeerStat.StoreID {
+					continue
+				}
+				// transfer leader
+				if slice.AnyOf(peers, func(i int) bool {
+					return peers[i].GetStoreId() == storeID
+				}) {
+					candidates = append(candidates, detail)
+					continue
+				}
+				// move leader
+				if filter.Target(bs.GetOpts(), detail.StoreInfo, moveLeaderFilters) {
+					candidates = append(candidates, detail)
+				}
+			}
+		} else {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for _, peer := range bs.cur.region.GetFollowers() {
+				if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
+					candidates = append(candidates, detail)
+				}
 			}
 		}
 

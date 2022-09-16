@@ -1046,17 +1046,44 @@ func (c *RaftCluster) GetRangeHoles() [][]string {
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
 	store := c.GetStore(storeID)
 	if store == nil {
-		return errors.Errorf("invalid store ID %d, not found", storeID)
+		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
 	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	if force {
+		newStore.Labels = labels
+	} else {
+		// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
+		newStore.Labels = core.MergeLabels(newStore.GetLabels(), labels)
+	}
+	// PutStore will perform label merge.
+	return c.putStoreImpl(newStore)
+}
+
+// DeleteStoreLabel updates a store's location labels
+func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
+	for _, label := range newStore.GetLabels() {
+		if label.Key == labelKey {
+			continue
+		}
+		labels = append(labels, label)
+	}
+	if len(labels) == len(store.GetLabels()) {
+		return errors.Errorf("the label key %s does not exist", labelKey)
+	}
 	newStore.Labels = labels
 	// PutStore will perform label merge.
-	return c.putStoreImpl(newStore, force)
+	return c.putStoreImpl(newStore)
 }
 
 // PutStore puts a store.
 func (c *RaftCluster) PutStore(store *metapb.Store) error {
-	if err := c.putStoreImpl(store, false); err != nil {
+	if err := c.putStoreImpl(store); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1066,7 +1093,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 
 // putStoreImpl puts a store.
 // If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+func (c *RaftCluster) putStoreImpl(store *metapb.Store) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1096,10 +1123,6 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
-		if !force {
-			// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
-			labels = s.MergeLabels(labels)
-		}
 		// Update an existed store.
 		s = s.Clone(
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
