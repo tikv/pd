@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -144,7 +145,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	var resStr string
 	firstStatus := items[0].Value.(*DiagnosticResult).Status
 	if firstStatus == pending || firstStatus == normal {
-		wa := cache.NewWeightAllocator(length, 3)
+		wa := movingaverage.NewWeightAllocator(length, 3)
 		counter := make(map[uint64]map[plan.Status]float64)
 		for i := 0; i < length; i++ {
 			item := items[i].Value.(*DiagnosticResult)
