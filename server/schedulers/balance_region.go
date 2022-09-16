@@ -227,12 +227,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector) *operator.Operator {
+	// the filter should sort by cpu cost
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, solver.region.GetStoreIDs()),
-		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
-		filter.NewRegionScoreFilter(s.GetName(), solver.source, solver.GetOpts()),
 		filter.NewSpecialUseFilter(s.GetName()),
 		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+		filter.NewRegionScoreFilter(s.GetName(), solver.source, solver.GetOpts()),
+		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
 	}
 
 	candidates := filter.NewCandidates(solver.GetStores()).

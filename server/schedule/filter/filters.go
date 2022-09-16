@@ -583,11 +583,7 @@ func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.Store
 }
 
 func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := f.ruleManager.FitRegion(f.cluster, region)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcStore, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule

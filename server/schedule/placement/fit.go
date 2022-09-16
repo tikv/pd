@@ -52,6 +52,46 @@ func (f *RegionFit) IsCached() bool {
 	return f.mu.cached
 }
 
+// Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
+func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region *core.RegionInfo) bool {
+	fit := f.getRuleFitByStoreID(srcStoreID)
+	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+		return false
+	}
+
+	peers := make([]*fitPeer, 0, len(fit.Peers))
+	for _, p := range fit.Peers {
+		peer := &fitPeer{
+			Peer:     p,
+			isLeader: region.GetLeader().GetId() == p.GetId(),
+			store:    getStoreByID(f.regionStores, p.GetStoreId()),
+		}
+		if p.GetStoreId() == srcStoreID {
+			peer.store = dstStore
+		}
+		peers = append(peers, peer)
+	}
+	// Sort peers to keep the match result deterministic.
+	sort.Slice(peers, func(i, j int) bool {
+		// Put healthy peers in front of priority to fit healthy peers.
+		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
+		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
+	})
+	score := isolationScore(peers, fit.Rule.LocationLabels)
+	return fit.IsolationScore <= score
+}
+
+func (f *RegionFit) getRuleFitByStoreID(storeID uint64) *RuleFit {
+	for _, rf := range f.RuleFits {
+		for _, p := range rf.Peers {
+			if p.GetStoreId() == storeID {
+				return rf
+			}
+		}
+	}
+	return nil
+}
+
 // IsSatisfied returns if the rules are properly satisfied.
 // It means all Rules are fulfilled and there is no orphan peers.
 func (f *RegionFit) IsSatisfied() bool {

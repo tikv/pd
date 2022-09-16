@@ -15,6 +15,9 @@ package schedulers
 
 import (
 	"context"
+	"github.com/stretchr/testify/assert"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/plan"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -25,13 +28,14 @@ import (
 )
 
 var (
-	zones = []string{"az1", "az2", "az3"}
-	racks = []string{"rack1", "rack2", "rack3"}
-	hosts = []string{"host1", "host2", "host3", "host4", "host5", "host6", "host7", "host8", "host9"}
+	zones = []string{"zone1", "zone2", "zone3"}
+	racks = []string{"rack1", "rack2", "rack3", "rack4", "rack5", "rack6"}
+	hosts = []string{"host1", "host2", "host3", "host4", "host5", "host6",
+		"host7", "host8", "host9"}
 
-	regionCount  = 100
-	storeCount   = 81
-	tiflashCount = 9
+	regionCount  = 2000
+	storeCount   = len(zones) * len(racks) * len(hosts)
+	tiflashCount = 30
 )
 
 // newBenchCluster store region count is same with storeID and
@@ -40,7 +44,7 @@ var (
 func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombstoneEnable bool) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
+	opt.GetScheduleConfig().TolerantSizeRatio = float64(1)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
 	if labelEnable {
@@ -60,12 +64,12 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				tc.AddLabelsStore(storeID, int(storeID), label)
+				tc.AddLabelsStore(storeID, regionCount, label)
 				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
 				if ruleEnable {
-					learnID := regionID%uint64(tiflashCount) + uint64(storeCount)
+					learnID := regionID%uint64(tiflashCount-1) + uint64(storeCount)
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{learnID})
 				} else {
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
@@ -88,7 +92,12 @@ func addTiflash(tc *mockcluster.Cluster) {
 	for i := 0; i < tiflashCount; i++ {
 		label := make(map[string]string, 3)
 		label["engine"] = "tiflash"
-		tc.AddLabelsStore(uint64(storeCount+i), regionCount, label)
+		if i == tiflashCount-1 {
+			tc.AddLabelsStore(uint64(storeCount+i), regionCount/100, label)
+		} else {
+			tc.AddLabelsStore(uint64(storeCount+i), regionCount/10, label)
+		}
+
 	}
 	rule := &placement.Rule{
 		GroupID: "tiflash-override",
@@ -105,13 +114,20 @@ func addTiflash(tc *mockcluster.Cluster) {
 
 func BenchmarkPlacementRule(b *testing.B) {
 	ctx := context.Background()
+	re := assert.New(b)
 	tc := newBenchCluster(ctx, true, true, false)
 	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
 	b.ResetTimer()
+	var ops []*operator.Operator
+	var plans []plan.Plan
 	for i := 0; i < b.N; i++ {
-		sc.Schedule(tc, false)
+		ops, plans = sc.Schedule(tc, false)
 	}
+	b.StopTimer()
+	re.Len(plans, 0)
+	re.Len(ops, 1)
+	re.Contains(ops[0].String(), "to [191]")
 }
 
 func BenchmarkLabel(b *testing.B) {
