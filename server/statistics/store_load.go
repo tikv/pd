@@ -166,6 +166,11 @@ func (s *StoreSummaryInfo) IsTiFlash() bool {
 	return s.isTiFlash
 }
 
+// SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
+func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
+	s.isTiFlash = true
+}
+
 // GetPendingInfluence returns the current pending influence.
 func GetPendingInfluence(stores []*core.StoreInfo) map[uint64]*Influence {
 	stInfos := SummaryStoreInfos(stores)
