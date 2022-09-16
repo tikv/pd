@@ -97,7 +97,6 @@ func addTiflash(tc *mockcluster.Cluster) {
 		} else {
 			tc.AddLabelsStore(uint64(storeCount+i), regionCount/10, label)
 		}
-
 	}
 	rule := &placement.Rule{
 		GroupID: "tiflash-override",
