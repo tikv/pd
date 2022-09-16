@@ -53,7 +53,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 	if ruleEnable {
 		addTiflash(tc)
 	}
-	storeID, regionID := uint64(1), uint64(1)
+	storeID, regionID := uint64(0), uint64(0)
 	for _, host := range hosts {
 		for _, rack := range racks {
 			for _, az := range zones {
