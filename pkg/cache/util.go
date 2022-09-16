@@ -31,7 +31,7 @@ type WeightAllocator struct {
 
 // NewWeightAllocator returns a new WeightAllocator.
 func NewWeightAllocator(length, segNum int) *WeightAllocator {
-	if segNum < 1 || length < 0 {
+	if segNum < 1 || length < 1 {
 		return &WeightAllocator{}
 	}
 	segLength := length / segNum
