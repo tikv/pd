@@ -31,8 +31,8 @@ const (
 	collectMetricsTaskType
 )
 
-// flowItemTask indicates the task in flowItem queue
-type flowItemTask interface {
+// FlowItemTask indicates the task in flowItem queue
+type FlowItemTask interface {
 	taskType() flowItemTaskKind
 	runTask(cache *hotPeerCache)
 }
@@ -43,7 +43,7 @@ type checkPeerTask struct {
 }
 
 // NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) flowItemTask {
+func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
 	return &checkPeerTask{
 		peerInfo:   peerInfo,
 		regionInfo: regionInfo,
@@ -66,7 +66,7 @@ type checkExpiredTask struct {
 }
 
 // NewCheckExpiredItemTask creates task to collect expired items
-func NewCheckExpiredItemTask(region *core.RegionInfo) flowItemTask {
+func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 	return &checkExpiredTask{
 		region: region,
 	}
@@ -90,7 +90,7 @@ type collectUnReportedPeerTask struct {
 }
 
 // NewCollectUnReportedPeerTask creates task to collect unreported peers
-func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) flowItemTask {
+func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) FlowItemTask {
 	return &collectUnReportedPeerTask{
 		storeID:  storeID,
 		regions:  regions,
