@@ -1015,7 +1015,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re.Len(stats, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
-			re.Less(500.0*units.KiB, s.GetLoad(statistics.RegionReadBytes))
+			re.Less(500.0*units.KiB, s.GetLoad(statistics.ByteDim))
 		}
 	}
 
@@ -1785,20 +1785,20 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
-			statistics.RegionReadQuery: 10,
-			statistics.RegionReadBytes: 1,
+			statistics.QueryDim: 10,
+			statistics.ByteDim:  1,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
-			statistics.RegionReadQuery: 1,
-			statistics.RegionReadBytes: 10,
+			statistics.QueryDim: 1,
+			statistics.ByteDim:  10,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
-			statistics.RegionReadQuery: 5,
-			statistics.RegionReadBytes: 6,
+			statistics.QueryDim: 5,
+			statistics.ByteDim:  6,
 		},
 	}}
 
@@ -2535,4 +2535,66 @@ func checkPriority(re *require.Assertions, hb *hotScheduler, tc *mockcluster.Clu
 	re.Equal(dims[1][1], writeLeaderSolver.secondPriority)
 	re.Equal(dims[2][0], writePeerSolver.firstPriority)
 	re.Equal(dims[2][1], writePeerSolver.secondPriority)
+}
+
+type maxZombieDurTestCase struct {
+	typ           resourceType
+	isTiFlash     bool
+	firstPriority int
+	maxZombieDur  int
+}
+
+func TestMaxZombieDuration(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
+	re.NoError(err)
+	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
+	testCases := []maxZombieDurTestCase{
+		{
+			typ:          readPeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          readLeader,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			isTiFlash:    true,
+			maxZombieDur: maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.KeyDim,
+			maxZombieDur:  maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.QueryDim,
+			maxZombieDur:  maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+	}
+	for _, testCase := range testCases {
+		src := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
+		}
+		if testCase.isTiFlash {
+			src.SetEngineAsTiFlash()
+		}
+		bs := &balanceSolver{
+			sche:          hb.(*hotScheduler),
+			resourceTy:    testCase.typ,
+			firstPriority: testCase.firstPriority,
+			best:          &solution{srcStore: src},
+		}
+		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
+	}
 }

@@ -371,13 +371,12 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 }
 
 // calcPeersRate precomputes the peer rate and stores it in cachedPeersRate.
-func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
+func (s *solution) calcPeersRate(dims ...int) {
 	s.cachedPeersRate = make([]float64, statistics.DimLen)
 	for _, dim := range dims {
-		kind := statistics.GetRegionStatKind(rw, dim)
-		peersRate := s.mainPeerStat.GetLoad(kind)
+		peersRate := s.mainPeerStat.GetLoad(dim)
 		if s.revertPeerStat != nil {
-			peersRate -= s.revertPeerStat.GetLoad(kind)
+			peersRate -= s.revertPeerStat.GetLoad(dim)
 		}
 		s.cachedPeersRate[dim] = peersRate
 	}
@@ -630,39 +629,49 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch bs.resourceTy {
-	case writeLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		}
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
+	maxZombieDur := bs.calcMaxZombieDur()
 
 	// TODO: Process operators atomically.
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
-	infl := statistics.Influence{Loads: bs.best.mainPeerStat.Loads, Count: 1}
+	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+	bs.rwTy.SetFullLoadRates(infl.Loads, bs.best.mainPeerStat.GetLoads())
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
 	// revert peers
 	if bs.best.revertPeerStat != nil {
-		infl = statistics.Influence{Loads: bs.best.revertPeerStat.Loads, Count: 1}
+		infl = statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+		bs.rwTy.SetFullLoadRates(infl.Loads, bs.best.revertPeerStat.GetLoads())
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
 	}
 	bs.logBestSolution()
 	return true
+}
+
+// Depending on the source of the statistics used, a different ZombieDuration will be used.
+// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
+	switch bs.resourceTy {
+	case writeLeader:
+		if bs.firstPriority == statistics.QueryDim {
+			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
+			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
+			// The reason is the same with `tikvCollector.GetLoads`.
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		}
+		return bs.sche.conf.GetRegionsStatZombieDuration()
+	case writePeer:
+		if bs.best.srcStore.IsTiFlash() {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		}
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	default:
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -737,14 +746,12 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statis
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
 	sort.Slice(firstSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
-		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
+		return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
 	})
 	secondSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondSort, ret)
 	sort.Slice(secondSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
-		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
+		return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
 	})
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {
@@ -942,7 +949,7 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRank() {
 	bs.cur.progressiveRank = 1
-	bs.cur.calcPeersRate(bs.rwTy, bs.firstPriority, bs.secondPriority)
+	bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
 	if bs.cur.getPeersRateFromCache(bs.firstPriority) < bs.getMinRate(bs.firstPriority) &&
 		bs.cur.getPeersRateFromCache(bs.secondPriority) < bs.getMinRate(bs.secondPriority) {
 		return
@@ -1345,8 +1352,8 @@ func (bs *balanceSolver) logBestSolution() {
 		// Log more information on solutions containing revertRegion
 		srcFirstRate, dstFirstRate := best.getExtremeLoad(bs.firstPriority)
 		srcSecondRate, dstSecondRate := best.getExtremeLoad(bs.secondPriority)
-		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		mainSecondRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
+		mainFirstRate := best.mainPeerStat.GetLoad(bs.firstPriority)
+		mainSecondRate := best.mainPeerStat.GetLoad(bs.secondPriority)
 		log.Info("use solution with revert regions",
 			zap.Uint64("src-store", best.srcStore.GetID()),
 			zap.Float64("src-first-rate", srcFirstRate),

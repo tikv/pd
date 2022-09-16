@@ -89,7 +89,8 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	Kind  RWType    `json:"-"`
+	Kind RWType `json:"-"`
+	// Loads contains only Kind-related statistics and is DimLen in length.
 	Loads []float64 `json:"loads"`
 
 	// rolling statistics, recording some recently added records.
@@ -121,8 +122,8 @@ func (stat *HotPeerStat) ID() uint64 {
 }
 
 // Less compares two HotPeerStat.Implementing TopNItem.
-func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
-	return stat.GetLoad(RegionStatKind(k)) < than.(*HotPeerStat).GetLoad(RegionStatKind(k))
+func (stat *HotPeerStat) Less(dim int, than TopNItem) bool {
+	return stat.GetLoad(dim) < than.(*HotPeerStat).GetLoad(dim)
 }
 
 // Log is used to output some info
@@ -162,21 +163,23 @@ func (stat *HotPeerStat) GetActionType() ActionType {
 }
 
 // GetLoad returns denoising load if possible.
-func (stat *HotPeerStat) GetLoad(k RegionStatKind) float64 {
-	if len(stat.rollingLoads) > int(k) {
-		return math.Round(stat.rollingLoads[int(k)].Get())
+func (stat *HotPeerStat) GetLoad(dim int) float64 {
+	if stat.rollingLoads != nil {
+		return math.Round(stat.rollingLoads[dim].Get())
 	}
-	return math.Round(stat.Loads[int(k)])
+	return math.Round(stat.Loads[dim])
 }
 
-// GetLoads returns denoising load if possible.
+// GetLoads returns denoising loads if possible.
 func (stat *HotPeerStat) GetLoads() []float64 {
-	regionStats := stat.Kind.RegionStats()
-	loads := make([]float64, len(regionStats))
-	for i, k := range regionStats {
-		loads[i] = stat.GetLoad(k)
+	if stat.rollingLoads != nil {
+		ret := make([]float64, len(stat.rollingLoads))
+		for dim := range ret {
+			ret[dim] = math.Round(stat.rollingLoads[dim].Get())
+		}
+		return ret
 	}
-	return loads
+	return stat.Loads
 }
 
 // GetThresholds returns thresholds.
@@ -188,8 +191,8 @@ func (stat *HotPeerStat) GetThresholds() []float64 {
 // Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
-	ret.Loads = make([]float64, RegionStatCount)
-	for i := RegionStatKind(0); i < RegionStatCount; i++ {
+	ret.Loads = make([]float64, DimLen)
+	for i := 0; i < DimLen; i++ {
 		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil
