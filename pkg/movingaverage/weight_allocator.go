@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cache
+package movingaverage
 
 // WeightAllocator is used to alloc weight for cache.
 // When we need to use multiple items from the cache,
