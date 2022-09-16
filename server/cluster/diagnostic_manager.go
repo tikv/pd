@@ -118,6 +118,13 @@ func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorde
 	}
 }
 
+func (d *diagnosticRecorder) isAllowed() bool {
+	if d == nil {
+		return false
+	}
+	return d.cluster.opt.IsDiagnosticAllowed()
+}
+
 func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	if d.results.Len() == 0 {
 		return nil
