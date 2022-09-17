@@ -420,8 +420,6 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
-
-	pick func(s interface{}, p func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -462,11 +460,6 @@ func (bs *balanceSolver) init() {
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
-
-	bs.pick = slice.AnyOf
-	if bs.sche.conf.IsStrictPickingStoreEnabled() {
-		bs.pick = slice.AllOf
-	}
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -706,11 +699,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 }
 
 func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(minLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
-		}
-		return true
+	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
+		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
 	})
 }
 
@@ -924,11 +914,25 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(maxLoad.Loads, func(i int) bool {
+	return bs.checkByPriorityAndTolerance(maxLoad.Loads, func(i int) bool {
+		return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
+	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndTolerance(s interface{}, p func(int) bool) bool {
+	if bs.sche.conf.IsStrictPickingStoreEnabled() {
+		return slice.AllOf(s, func(i int) bool {
+			if bs.isSelectedDim(i) {
+				return p(i)
+			}
+			return true
+		})
+	}
+	return slice.AnyOf(s, func(i int) bool {
 		if bs.isSelectedDim(i) {
-			return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
+			return p(i)
 		}
-		return true
+		return false
 	})
 }
 
