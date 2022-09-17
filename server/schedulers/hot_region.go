@@ -787,7 +787,7 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, dim int) (m
 	if minPerceivedLoadIndex > perceivedLoadIndex {
 		minPerceivedLoadIndex = perceivedLoadIndex
 	}
-	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].Loads[dim]
+	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].GetLoad(dim)
 	return
 }
 
