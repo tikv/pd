@@ -129,7 +129,7 @@ type hotRegionSchedulerConfig struct {
 	QueryRateRankStepRatio float64  `json:"query-rate-rank-step-ratio"`
 	CountRankStepRatio     float64  `json:"count-rank-step-ratio"`
 	GreatDecRatio          float64  `json:"great-dec-ratio"`
-	MinorDecRatio          float64  `json:"minor-dec-ratio"`
+	MinorDecRatio          float64  `json:"minor-dec-ratio"` // only for v1
 	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
 	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
 	ReadPriorities         []string `json:"read-priorities"`
@@ -137,7 +137,7 @@ type hotRegionSchedulerConfig struct {
 	// For first priority of write leader, it is better to consider key rate or query rather than byte
 	WriteLeaderPriorities []string `json:"write-leader-priorities"`
 	WritePeerPriorities   []string `json:"write-peer-priorities"`
-	StrictPickingStore    bool     `json:"strict-picking-store,string"`
+	StrictPickingStore    bool     `json:"strict-picking-store,string"` // only for v1
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
@@ -289,6 +289,12 @@ func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.StrictPickingStore
+}
+
+func (conf *hotRegionSchedulerConfig) SetRankFormulaVersion(v string) {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.RankFormulaVersion = v
 }
 
 func (conf *hotRegionSchedulerConfig) GetRankFormulaVersion() string {
