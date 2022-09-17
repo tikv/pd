@@ -44,12 +44,14 @@ type rankV2Ratios struct {
 }
 
 func newRankV2Ratios(balancedRatio float64) *rankV2Ratios {
+	// limit 0.7 <= balancedRatio <= 0.95
 	if balancedRatio < 0.7 {
 		balancedRatio = 0.7
 	}
 	if balancedRatio > 0.95 {
 		balancedRatio = 0.95
 	}
+
 	rs := &rankV2Ratios{balancedRatio: balancedRatio}
 	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.15)
 	rs.balancedCheckRatio = balancedRatio - 0.02
@@ -59,7 +61,7 @@ func newRankV2Ratios(balancedRatio float64) *rankV2Ratios {
 
 func (bs *balanceSolver) initRankV2() {
 	bs.firstPriorityV2Ratios = newRankV2Ratios(bs.sche.conf.GetGreatDecRatio())
-	// The second priority is less demanding.
+	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
 	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.preBalancedRatio)
 
 	bs.isAvailable = isAvailableV2
@@ -128,10 +130,13 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
-// | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
-// |   isBetter                         | -4       | -3            | -2       |
-// |   isNotWorsened                    | -1       | 1             | 1        |
-// |   Worsened                         | 0        | 1             | 1        |
+// isBetter: score > 0
+// isNotWorsened: score == 0
+// isWorsened: score < 0
+// | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | isWorsened |
+// |   isBetter                         | -4       | -3            | -2         |
+// |   isNotWorsened                    | -1       | 1             | 1          |
+// |   isWorsened                       | 0        | 1             | 1          |
 func (bs *balanceSolver) calcProgressiveRankV2() {
 	bs.cur.progressiveRank = 1
 	bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
@@ -269,7 +274,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		return 0
 	case maxBetterRate < peersRate && peersRate <= maxNotWorsenedRate:
 		return -1
-	default:
+	default: // peersRate < minNotWorsenedRate || peersRate > maxNotWorsenedRate
 		return -2
 	}
 }
@@ -335,14 +340,13 @@ func (bs *balanceSolver) getRkCmpByPriorityV2(dim int, curScore, oldScore int, c
 	case curScore < oldScore:
 		return -1
 	// curScore == oldScore
-	case curScore == 3, curScore == 1:
-		// When the balance state can be reached, the smaller the influence, the better.
-		// When maxBalancedRate is exceeded, the smaller the influence, the better.
-		return -rankCmp(curPeersRate, oldPeersRate, stepRank(0, dimToStep[dim]))
-	case curScore <= 0:
-		// When the score is less than 0, the smaller the influence, the better
+	case curScore == 3, curScore <= 1:
+		// curScore == 3: When the balance state can be reached, the smaller the influence, the better.
+		// curScore == 1: When maxBalancedRate is exceeded, the smaller the influence, the better.
+		// curScore <= 0: When the score is less than 0, the smaller the influence, the better.
 		return -rankCmp(curPeersRate, oldPeersRate, stepRank(0, dimToStep[dim]))
 	default: // curScore == 2
+		// On the way to balance state, the bigger the influence, the better.
 		return rankCmp(curPeersRate, oldPeersRate, stepRank(0, dimToStep[dim]))
 	}
 }
