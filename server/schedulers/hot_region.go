@@ -420,6 +420,8 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
+
+	checkByPriorityAndTolerance func(loads []float64, f func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -460,6 +462,15 @@ func (bs *balanceSolver) init() {
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
+
+	switch {
+	case bs.resourceTy == writeLeader:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+	case bs.sche.conf.IsStrictPickingStoreEnabled():
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAllOf
+	default:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAnyOf
+	}
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -483,14 +494,14 @@ func (bs *balanceSolver) getPriorities() []string {
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster schedule.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
-	solver := &balanceSolver{
+	bs := &balanceSolver{
 		Cluster: cluster,
 		sche:    sche,
 		rwTy:    rwTy,
 		opTy:    opTy,
 	}
-	solver.init()
-	return solver
+	bs.init()
+	return bs
 }
 
 func (bs *balanceSolver) isValid() bool {
@@ -919,21 +930,26 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndTolerance(s interface{}, p func(int) bool) bool {
-	if bs.sche.conf.IsStrictPickingStoreEnabled() {
-		return slice.AllOf(s, func(i int) bool {
-			if bs.isSelectedDim(i) {
-				return p(i)
-			}
-			return true
-		})
-	}
-	return slice.AnyOf(s, func(i int) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f func(int) bool) bool {
+	return slice.AllOf(loads, func(i int) bool {
 		if bs.isSelectedDim(i) {
-			return p(i)
+			return f(i)
+		}
+		return true
+	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f func(int) bool) bool {
+	return slice.AnyOf(loads, func(i int) bool {
+		if bs.isSelectedDim(i) {
+			return f(i)
 		}
 		return false
 	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
+	return f(bs.firstPriority)
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
