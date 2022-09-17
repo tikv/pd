@@ -272,3 +272,85 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.False(hb.searchRevertRegions[readLeader])
 	clearPendingInfluence(hb)
 }
+
+func TestSkipUniformStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	statistics.Denoising = false
+	opt := config.NewTestOptions()
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetRankFormulaVersion("v2")
+	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+	tc.AddRegionStore(4, 20)
+	tc.AddRegionStore(5, 20)
+
+	// Case1: two dim are both enough uniform
+	tc.UpdateStorageReadStats(1, 10.05*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 9.45*units.MB*statistics.StoreHeartBeatReportInterval, 9.45*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 10.0*units.MB*statistics.StoreHeartBeatReportInterval, 10.0*units.MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, statistics.Read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 0.05 * units.MB, 0.05 * units.MB, 0},
+	})
+	// when there is no uniform store filter, still schedule although the cluster is enough uniform
+	stddevThreshold = 0.0
+	ops, _ := hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	clearPendingInfluence(hb.(*hotScheduler))
+	// when there is uniform store filter, not schedule
+	stddevThreshold = 0.1
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
+	clearPendingInfluence(hb.(*hotScheduler))
+
+	// Case2: the first dim is enough uniform, we should schedule the second dim
+	tc.UpdateStorageReadStats(1, 10.15*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 9.45*units.MB*statistics.StoreHeartBeatReportInterval, 9.85*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 9.85*units.MB*statistics.StoreHeartBeatReportInterval, 16.0*units.MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, statistics.Read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 0.05 * units.MB, 0.05 * units.MB, 0},
+		{2, []uint64{3, 2, 1}, 0.05 * units.MB, 2 * units.MB, 0},
+	})
+	// when there is no uniform store filter, still schedule although the first dim is enough uniform
+	stddevThreshold = 0.0
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	clearPendingInfluence(hb.(*hotScheduler))
+	// when there is uniform store filter, schedule the second dim, which is no uniform
+	stddevThreshold = 0.1
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
+	clearPendingInfluence(hb.(*hotScheduler))
+
+	// Case3: the second dim is enough uniform, we should schedule the first dim, although its rank is higher than the second dim
+	tc.UpdateStorageReadStats(1, 10.05*units.MB*statistics.StoreHeartBeatReportInterval, 10.05*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 9.85*units.MB*statistics.StoreHeartBeatReportInterval, 9.45*units.MB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 16*units.MB*statistics.StoreHeartBeatReportInterval, 9.85*units.MB*statistics.StoreHeartBeatReportInterval)
+	addRegionInfo(tc, statistics.Read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 0.05 * units.MB, 0.05 * units.MB, 0},
+		{2, []uint64{3, 2, 1}, 2 * units.MB, 0.05 * units.MB, 0},
+	})
+	// when there is no uniform store filter, still schedule although the second dim is enough uniform
+	stddevThreshold = 0.0
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	clearPendingInfluence(hb.(*hotScheduler))
+	// when there is uniform store filter, schedule the first dim, which is no uniform
+	stddevThreshold = 0.1
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
+	clearPendingInfluence(hb.(*hotScheduler))
+}
