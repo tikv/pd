@@ -1340,9 +1340,19 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), typ))
 	if isRevert {
+		bs.collectHotPeerLoad(op, bs.best.revertPeerStat)
 		op.FinishedCounters = append(op.FinishedCounters,
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out-for-revert", dim),
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in-for-revert", dim))
+	} else {
+		bs.collectHotPeerLoad(op, bs.best.mainPeerStat)
+	}
+}
+
+func (bs *balanceSolver) collectHotPeerLoad(op *operator.Operator, peer *statistics.HotPeerStat) {
+	for dim, load := range peer.GetLoads() {
+		// TODO: add it to op.Finished
+		hotPeerHist.WithLabelValues(bs.sche.GetName(), bs.rwTy.String(), dimToString(dim)).Observe(load)
 	}
 }
 
