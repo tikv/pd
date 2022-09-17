@@ -73,10 +73,6 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
-
-	// PeerRate needs to satisfy at least one to be considered valid.
-	perceivedRatio     = 0.2 // PeerRate needs to be 20% above what needs to be balanced.
-	perceivedLoadIndex = 10  // PeerRate needs to be greater than the 10th hotspot.
 )
 
 var (

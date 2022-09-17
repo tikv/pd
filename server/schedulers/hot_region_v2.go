@@ -21,6 +21,12 @@ import (
 	"math"
 )
 
+const (
+	// PeerRate needs to satisfy at least one to be considered valid.
+	perceivedRatio     = 0.2 // PeerRate needs to be 20% above what needs to be balanced.
+	perceivedLoadIndex = 10  // PeerRate needs to be greater than the 10th hotspot.
+)
+
 // isAvailable returns the solution is available.
 // If the solution has no revertRegion, progressiveRank should < 0.
 // If the solution has some revertRegion, progressiveRank should equal to -4 or -3.
