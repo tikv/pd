@@ -262,6 +262,11 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	h.regionPendings[regionID] = influence
 
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
+	for _, rwTy := range []statistics.RWType{statistics.Read, statistics.Write} {
+		for dim, kind := range rwTy.RegionStats() {
+			hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), dimToString(dim)).Observe(infl.Loads[kind])
+		}
+	}
 	return true
 }
 
@@ -646,14 +651,12 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
-	bs.collectHotPeerLoad(bs.best.mainPeerStat)
 	// revert peers
 	if bs.best.revertPeerStat != nil {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
-		bs.collectHotPeerLoad(bs.best.revertPeerStat)
 	}
 	bs.logBestSolution()
 	return true
@@ -1373,13 +1376,6 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 		op.FinishedCounters = append(op.FinishedCounters,
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out-for-revert", dim),
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in-for-revert", dim))
-	}
-}
-
-func (bs *balanceSolver) collectHotPeerLoad(peer *statistics.HotPeerStat) {
-	for dim, load := range peer.GetLoads() {
-		// TODO: add it to op.Finished
-		hotPeerHist.WithLabelValues(bs.sche.GetName(), bs.rwTy.String(), dimToString(dim)).Observe(load)
 	}
 }
 
