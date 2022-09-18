@@ -238,6 +238,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
+		// When approaching the balanced state, wait for pending influence to zero before scheduling to reduce jitter.
 		pendingRateLimit = true
 	} else {
 		// At this time, it is considered to be in the unbalanced state.
@@ -259,7 +260,8 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 	switch {
 	case minBetterRate <= peersRate && peersRate <= maxBetterRate:
 		// Positive score requires some restrictions.
-		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) && (!pendingRateLimit || srcPendingRate+dstPendingRate < 1) {
+		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) &&
+			(!pendingRateLimit || math.Abs(srcPendingRate)+math.Abs(dstPendingRate) < 1) {
 			switch {
 			case peersRate < minBalancedRate:
 				return 2
