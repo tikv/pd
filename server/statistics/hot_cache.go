@@ -95,6 +95,25 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	return false
 }
 
+// GetHotPeerStat returns hot peer stat with specified regionID and storeID.
+func (w *HotCache) GetHotPeerStat(rw RWType, regionID, storeID uint64) *HotPeerStat {
+	switch rw {
+	case Read:
+		task := newGetHotPeerStatTask(regionID, storeID)
+		succ := w.CheckReadAsync(task)
+		if succ {
+			return task.waitRet(w.ctx)
+		}
+	case Write:
+		task := newGetHotPeerStatTask(regionID, storeID)
+		succ := w.CheckWriteAsync(task)
+		if succ {
+			return task.waitRet(w.ctx)
+		}
+	}
+	return nil
+}
+
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
 	writeMetricsTask := newCollectMetricsTask("write")

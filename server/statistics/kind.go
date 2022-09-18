@@ -154,6 +154,17 @@ func (rw RWType) RegionStats() []RegionStatKind {
 	return nil
 }
 
+// Inverse returns the opposite of kind.
+func (rw RWType) Inverse() RWType {
+	switch rw {
+	case Write:
+		return Read
+	case Read:
+		return Write
+	}
+	return Read
+}
+
 // GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
 func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
 	deltaLoads := peer.GetLoads()
