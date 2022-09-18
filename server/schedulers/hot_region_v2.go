@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	// PeerRate needs to satisfy at least one to be considered valid.
-	perceivedRatio     = 0.2 // PeerRate needs to be 20% above what needs to be balanced.
-	perceivedLoadIndex = 10  // PeerRate needs to be greater than the 10th hotspot.
+	firstPriorityPerceivedRatio = 0.2  // PeerRate needs to be 20% above what needs to be balanced.
+	firstPriorityMinHotRatio    = 0.02 // PeerRate needs to be greater than 1% lowRate
+
+	secondPriorityPerceivedRatio = 0.3  // PeerRate needs to be 20% above what needs to be balanced.
+	secondPriorityMinHotRatio    = 0.03 // PeerRate needs to be greater than 1.5% lowRate
 )
 
 // isAvailable returns the solution is available.
@@ -41,9 +43,11 @@ type rankV2Ratios struct {
 	balancedRatio         float64
 	preBalancedCheckRatio float64
 	balancedCheckRatio    float64
+	perceivedRatio        float64
+	minHotRatio           float64
 }
 
-func newRankV2Ratios(balancedRatio float64) *rankV2Ratios {
+func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2Ratios {
 	// limit 0.7 <= balancedRatio <= 0.95
 	if balancedRatio < 0.7 {
 		balancedRatio = 0.7
@@ -52,7 +56,7 @@ func newRankV2Ratios(balancedRatio float64) *rankV2Ratios {
 		balancedRatio = 0.95
 	}
 
-	rs := &rankV2Ratios{balancedRatio: balancedRatio}
+	rs := &rankV2Ratios{balancedRatio: balancedRatio, perceivedRatio: perceivedRatio, minHotRatio: minHotRatio}
 	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.15)
 	rs.balancedCheckRatio = balancedRatio - 0.02
 	rs.preBalancedCheckRatio = rs.preBalancedRatio - 0.03
@@ -60,9 +64,9 @@ func newRankV2Ratios(balancedRatio float64) *rankV2Ratios {
 }
 
 func (bs *balanceSolver) initRankV2() {
-	bs.firstPriorityV2Ratios = newRankV2Ratios(bs.sche.conf.GetGreatDecRatio())
+	bs.firstPriorityV2Ratios = newRankV2Ratios(bs.sche.conf.GetGreatDecRatio(), firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
 	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
-	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.preBalancedRatio)
+	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.preBalancedRatio, secondPriorityPerceivedRatio, secondPriorityMinHotRatio)
 
 	bs.isAvailable = isAvailableV2
 	bs.filterUniformStore = bs.filterUniformStoreV2
@@ -210,6 +214,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		minNotWorsenedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
 		// highRate - (highRate+lowRate)/(1.0+balancedRatio)*balancedRatio
 		maxNotWorsenedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
+
 		if minNotWorsenedRate > 0 {
 			minNotWorsenedRate = 0
 		}
@@ -245,16 +250,11 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		// As long as the balance is significantly improved, it is judged as 1.
 		// If the balance is not reduced, it is judged as 0.
 		// If the rate relationship between src and dst is reversed, there will be a certain penalty.
+		// maxBetterRate may be less than minBetterRate, in which case a positive fraction cannot be produced.
 		minNotWorsenedRate = -bs.getMinRate(dim)
-		minBetterRate = math.Min(minBalancedRate*perceivedRatio, bs.minPerceivedLoads[dim])
-		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*perceivedRatio
-		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*perceivedRatio
-		if maxBetterRate < minBetterRate {
-			maxBetterRate = minBetterRate
-		}
-		if maxNotWorsenedRate < maxBetterRate {
-			maxNotWorsenedRate = maxBalancedRate
-		}
+		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio)
+		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*rs.perceivedRatio
+		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*rs.perceivedRatio
 	}
 
 	switch {
