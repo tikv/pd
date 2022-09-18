@@ -420,6 +420,8 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
+
+	checkByPriorityAndTolerance func(loads []float64, f func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -460,6 +462,18 @@ func (bs *balanceSolver) init() {
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
+	bs.pickCheckPolicy()
+}
+
+func (bs *balanceSolver) pickCheckPolicy() {
+	switch {
+	case bs.resourceTy == writeLeader:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+	case bs.sche.conf.IsStrictPickingStoreEnabled():
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAllOf
+	default:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAnyOf
+	}
 }
 
 func (bs *balanceSolver) isSelectedDim(dim int) bool {
@@ -483,14 +497,14 @@ func (bs *balanceSolver) getPriorities() []string {
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster schedule.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
-	solver := &balanceSolver{
+	bs := &balanceSolver{
 		Cluster: cluster,
 		sche:    sche,
 		rwTy:    rwTy,
 		opTy:    opTy,
 	}
-	solver.init()
-	return solver
+	bs.init()
+	return bs
 }
 
 func (bs *balanceSolver) isValid() bool {
@@ -628,16 +642,14 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
-	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
-	bs.rwTy.SetFullLoadRates(infl.Loads, bs.best.mainPeerStat.GetLoads())
+	infl := bs.collectPendingInfluence(bs.best.mainPeerStat)
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
 	bs.collectHotPeerLoad(bs.best.mainPeerStat)
 	// revert peers
 	if bs.best.revertPeerStat != nil {
-		infl = statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
-		bs.rwTy.SetFullLoadRates(infl.Loads, bs.best.revertPeerStat.GetLoads())
+		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
@@ -645,6 +657,17 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	}
 	bs.logBestSolution()
 	return true
+}
+
+func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) statistics.Influence {
+	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+	bs.rwTy.SetFullLoadRates(infl.Loads, peer.GetLoads())
+	inverse := bs.rwTy.Inverse()
+	another := bs.GetHotPeerStat(inverse, peer.RegionID, peer.StoreID)
+	if another != nil {
+		inverse.SetFullLoadRates(infl.Loads, another.GetLoads())
+	}
+	return infl
 }
 
 // Depending on the source of the statistics used, a different ZombieDuration will be used.
@@ -690,7 +713,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			continue
 		}
 
-		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
+		if bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		} else {
@@ -700,7 +723,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	return ret
 }
 
-func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
 	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
 		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
 	})
@@ -921,21 +944,26 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndTolerance(s interface{}, p func(int) bool) bool {
-	if bs.sche.conf.IsStrictPickingStoreEnabled() {
-		return slice.AllOf(s, func(i int) bool {
-			if bs.isSelectedDim(i) {
-				return p(i)
-			}
-			return true
-		})
-	}
-	return slice.AnyOf(s, func(i int) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f func(int) bool) bool {
+	return slice.AllOf(loads, func(i int) bool {
 		if bs.isSelectedDim(i) {
-			return p(i)
+			return f(i)
+		}
+		return true
+	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f func(int) bool) bool {
+	return slice.AnyOf(loads, func(i int) bool {
+		if bs.isSelectedDim(i) {
+			return f(i)
 		}
 		return false
 	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
+	return f(bs.firstPriority)
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {

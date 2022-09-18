@@ -366,13 +366,19 @@ func (f *hotPeerCache) isRegionHotWithPeer(region *core.RegionInfo, peer *metapb
 	if peer == nil {
 		return false
 	}
-	storeID := peer.GetStoreId()
-	if peers, ok := f.peersOfStore[storeID]; ok {
-		if stat := peers.Get(region.GetID()); stat != nil {
-			return stat.(*HotPeerStat).HotDegree >= hotDegree
-		}
+	if stat := f.getHotPeerStat(region.GetID(), peer.GetStoreId()); stat != nil {
+		return stat.HotDegree >= hotDegree
 	}
 	return false
+}
+
+func (f *hotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
+	if peers, ok := f.peersOfStore[storeID]; ok {
+		if stat := peers.Get(regionID); stat != nil {
+			return stat.(*HotPeerStat)
+		}
+	}
+	return nil
 }
 
 func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {

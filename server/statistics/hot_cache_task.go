@@ -29,6 +29,7 @@ const (
 	collectRegionStatsTaskType
 	isRegionHotTaskType
 	collectMetricsTaskType
+	getHotPeerStatTaskType
 )
 
 // FlowItemTask indicates the task in flowItem queue
@@ -187,4 +188,36 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 
 func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
 	cache.collectMetrics(t.typ)
+}
+
+type getHotPeerStatTask struct {
+	regionID uint64
+	storeID  uint64
+	ret      chan *HotPeerStat
+}
+
+func newGetHotPeerStatTask(regionID, storeID uint64) *getHotPeerStatTask {
+	return &getHotPeerStatTask{
+		regionID: regionID,
+		storeID:  storeID,
+		ret:      make(chan *HotPeerStat, 1),
+	}
+}
+
+func (t *getHotPeerStatTask) taskType() flowItemTaskKind {
+	return getHotPeerStatTaskType
+}
+
+func (t *getHotPeerStatTask) runTask(cache *hotPeerCache) {
+	t.ret <- cache.getHotPeerStat(t.regionID, t.storeID)
+}
+
+// TODO: do we need a wait-return timeout?
+func (t *getHotPeerStatTask) waitRet(ctx context.Context) *HotPeerStat {
+	select {
+	case <-ctx.Done():
+		return nil
+	case r := <-t.ret:
+		return r
+	}
 }

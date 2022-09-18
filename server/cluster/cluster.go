@@ -1994,6 +1994,11 @@ func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())
 }
 
+// GetHotPeerStat returns hot peer stat with specified regionID and storeID.
+func (c *RaftCluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
+	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
+}
+
 // RegionReadStats returns hot region's read stats.
 // The result only includes peers that are hot enough.
 // RegionStats is a thread-safe method

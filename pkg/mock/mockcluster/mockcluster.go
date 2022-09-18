@@ -128,6 +128,11 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
 }
 
+// GetHotPeerStat returns hot peer stat with specified regionID and storeID.
+func (mc *Cluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
+	return mc.HotCache.GetHotPeerStat(rw, regionID, storeID)
+}
+
 // RegionReadStats returns hot region's read stats.
 // The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
