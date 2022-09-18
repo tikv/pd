@@ -15,7 +15,6 @@
 package core
 
 import (
-	"github.com/tikv/pd/pkg/typeutil"
 	"math"
 	"sync"
 	"testing"
@@ -25,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
 func TestDistinctScore(t *testing.T) {

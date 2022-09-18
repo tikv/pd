@@ -30,10 +30,11 @@ import (
 )
 
 var (
-	schedulersPrefix         = "pd/api/v1/schedulers"
-	schedulerConfigPrefix    = "pd/api/v1/scheduler-config"
-	evictLeaderSchedulerName = "evict-leader-scheduler"
-	grantLeaderSchedulerName = "grant-leader-scheduler"
+	schedulersPrefix          = "pd/api/v1/schedulers"
+	schedulerConfigPrefix     = "pd/api/v1/scheduler-config"
+	schedulerDiagnosticPrefix = "pd/api/v1/schedulers/diagnostic"
+	evictLeaderSchedulerName  = "evict-leader-scheduler"
+	grantLeaderSchedulerName  = "grant-leader-scheduler"
 )
 
 // NewSchedulerCommand returns a scheduler command.
@@ -48,6 +49,7 @@ func NewSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewPauseSchedulerCommand())
 	c.AddCommand(NewResumeSchedulerCommand())
 	c.AddCommand(NewConfigSchedulerCommand())
+	c.AddCommand(NewDescribeSchedulerCommand())
 	return c
 }
 
@@ -764,4 +766,51 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 		return
 	}
 	cmd.Println("Success!")
+}
+
+// NewDescribeSchedulerCommand returns command to describe the scheduler.
+func NewDescribeSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "describe",
+		Short: "describe a scheduler",
+	}
+	c.AddCommand(
+		newDescribeBalanceRegionCommand(),
+		newDescribeBalanceLeaderCommand(),
+	)
+	return c
+}
+
+func newDescribeBalanceRegionCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-region-scheduler",
+		Short: "describe the balance-region-scheduler",
+		Run:   describeSchedulerCommandFunc,
+	}
+	return c
+}
+
+func newDescribeBalanceLeaderCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-leader-scheduler",
+		Short: "describe the balance-leader-scheduler",
+		Run:   describeSchedulerCommandFunc,
+	}
+	return c
+}
+
+func describeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	schedulerName := cmd.Name()
+	url := path.Join(schedulerDiagnosticPrefix, schedulerName)
+
+	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println(r)
 }

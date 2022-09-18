@@ -14,6 +14,10 @@
 
 package statistics
 
+import (
+	"github.com/tikv/pd/server/core"
+)
+
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
 
@@ -21,10 +25,10 @@ type RegionStatKind int
 const (
 	RegionReadBytes RegionStatKind = iota
 	RegionReadKeys
-	RegionReadQuery
+	RegionReadQueryNum
 	RegionWriteBytes
 	RegionWriteKeys
-	RegionWriteQuery
+	RegionWriteQueryNum
 
 	RegionStatCount
 )
@@ -39,9 +43,9 @@ func (k RegionStatKind) String() string {
 		return "write_bytes"
 	case RegionWriteKeys:
 		return "write_keys"
-	case RegionReadQuery:
+	case RegionReadQueryNum:
 		return "read_query"
-	case RegionWriteQuery:
+	case RegionWriteQueryNum:
 		return "write_query"
 	}
 	return "unknown RegionStatKind"
@@ -124,8 +128,8 @@ const (
 	Read
 )
 
-func (k RWType) String() string {
-	switch k {
+func (rw RWType) String() string {
+	switch rw {
 	case Write:
 		return "write"
 	case Read:
@@ -134,15 +138,38 @@ func (k RWType) String() string {
 	return "unimplemented"
 }
 
+var (
+	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
+	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum}
+)
+
 // RegionStats returns hot items according to kind
-func (k RWType) RegionStats() []RegionStatKind {
-	switch k {
+func (rw RWType) RegionStats() []RegionStatKind {
+	switch rw {
 	case Write:
-		return []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQuery}
+		return writeRegionStats
 	case Read:
-		return []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQuery}
+		return readRegionStats
 	}
 	return nil
+}
+
+// GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
+func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
+	deltaLoads := peer.GetLoads()
+	interval := peer.GetInterval()
+	loads := make([]float64, DimLen)
+	for dim, k := range rw.RegionStats() {
+		loads[dim] = deltaLoads[k] / float64(interval)
+	}
+	return loads
+}
+
+// SetFullLoadRates set load rates to full as read or write type.
+func (rw RWType) SetFullLoadRates(full []float64, loads []float64) {
+	for dim, k := range rw.RegionStats() {
+		full[k] = loads[dim]
+	}
 }
 
 // ActionType indicates the action type for the stat item.

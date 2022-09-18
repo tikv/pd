@@ -767,6 +767,9 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	// EnableDiagnostic is the the option to enable using diagnostic
+	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -792,6 +795,7 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
+	defaultEnableDiagnostic          = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -874,6 +878,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	if !meta.IsDefined("enable-diagnostic") {
+		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
