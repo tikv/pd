@@ -404,8 +404,7 @@ type balanceSolver struct {
 	opTy         opType
 	resourceTy   resourceType
 
-	cur               *solution
-	minPerceivedLoads [statistics.DimLen]float64
+	cur *solution
 
 	best *solution
 	ops  []*operator.Operator
@@ -600,9 +599,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		var hotPeers []*statistics.HotPeerStat
-		hotPeers, bs.minPerceivedLoads[bs.firstPriority], bs.minPerceivedLoads[bs.secondPriority] = bs.filterHotPeers(srcStore)
-		for _, mainPeerStat := range hotPeers {
+		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
@@ -618,8 +615,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				if bs.needSearchRevertRegions() {
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
-					hotRevertPeers, _, _ := bs.filterHotPeers(bs.cur.dstStore)
-					for _, revertPeerStat := range hotRevertPeers {
+					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) {
@@ -742,7 +738,7 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
 // The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat, minFirstPerceivedLoad, minSecondPerceivedLoad float64) {
+func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
 			// no in pending operator and no need cool down after transfer leader
@@ -750,57 +746,48 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (
 		}
 	}
 
-	var firstSortedPeers, secondSortedPeers []*statistics.HotPeerStat
-	minFirstPerceivedLoad, firstSortedPeers = bs.sortHotPeers(storeLoad.HotPeers, bs.firstPriority)
-	minSecondPerceivedLoad, secondSortedPeers = bs.sortHotPeers(storeLoad.HotPeers, bs.secondPriority)
-	if len(firstSortedPeers) <= bs.maxPeerNum {
-		ret = make([]*statistics.HotPeerStat, 0, len(firstSortedPeers))
-		for _, peer := range firstSortedPeers {
+	src := storeLoad.HotPeers
+	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
+	if len(src) <= bs.maxPeerNum {
+		ret = make([]*statistics.HotPeerStat, 0, len(src))
+		for _, peer := range src {
 			appendItem(peer)
 		}
 	} else {
-		union := bs.selectHotPeers(firstSortedPeers, secondSortedPeers)
+		union := bs.sortHotPeers(src)
 		ret = make([]*statistics.HotPeerStat, 0, len(union))
 		for peer := range union {
 			appendItem(peer)
 		}
 	}
+
 	return
 }
 
-func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat, dim int) (minPerceivedLoad float64, sortedPeers []*statistics.HotPeerStat) {
-	if len(ret) == 0 {
-		return 0, nil
-	}
-
-	sortedPeers = make([]*statistics.HotPeerStat, len(ret))
-	copy(sortedPeers, ret)
-	sort.Slice(sortedPeers, func(i, j int) bool {
-		return sortedPeers[i].GetLoad(dim) > sortedPeers[j].GetLoad(dim)
+func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
+	firstSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(firstSort, ret)
+	sort.Slice(firstSort, func(i, j int) bool {
+		return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
 	})
-
-	minPerceivedLoadIndex := len(ret) - 1
-	if minPerceivedLoadIndex > perceivedLoadIndex {
-		minPerceivedLoadIndex = perceivedLoadIndex
-	}
-	minPerceivedLoad = sortedPeers[minPerceivedLoadIndex].GetLoad(dim)
-	return
-}
-
-func (bs *balanceSolver) selectHotPeers(firstSortedPeers, secondSortedPeers []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
+	secondSort := make([]*statistics.HotPeerStat, len(ret))
+	copy(secondSort, ret)
+	sort.Slice(secondSort, func(i, j int) bool {
+		return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
+	})
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {
-		for len(firstSortedPeers) > 0 {
-			peer := firstSortedPeers[0]
-			firstSortedPeers = firstSortedPeers[1:]
+		for len(firstSort) > 0 {
+			peer := firstSort[0]
+			firstSort = firstSort[1:]
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
 			}
 		}
-		for len(union) < bs.maxPeerNum && len(secondSortedPeers) > 0 {
-			peer := secondSortedPeers[0]
-			secondSortedPeers = secondSortedPeers[1:]
+		for len(union) < bs.maxPeerNum && len(secondSort) > 0 {
+			peer := secondSort[0]
+			secondSort = secondSort[1:]
 			if _, ok := union[peer]; !ok {
 				union[peer] = struct{}{}
 				break
