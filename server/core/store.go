@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
@@ -76,17 +77,10 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	return storeInfo
 }
 
-func (s *StoreInfo) cloneMetaStore() *metapb.Store {
-	b, _ := s.meta.Marshal()
-	store := &metapb.Store{}
-	store.Unmarshal(b)
-	return store
-}
-
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
-		meta:                s.cloneMetaStore(),
+		meta:                typeutil.DeepClone(s.meta, StoreFactory),
 		storeStats:          s.storeStats,
 		pauseLeaderTransfer: s.pauseLeaderTransfer,
 		slowStoreEvicted:    s.slowStoreEvicted,

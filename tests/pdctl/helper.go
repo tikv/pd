@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
@@ -52,8 +52,8 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 		}
 	}
 	for _, s := range stores {
-		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
-		expected := proto.Clone(mapWant[obtained.Id].Store.Store).(*metapb.Store)
+		obtained := typeutil.DeepClone(s.Store.Store, core.StoreFactory)
+		expected := typeutil.DeepClone(mapWant[obtained.Id].Store.Store, core.StoreFactory)
 		// Ignore state
 		obtained.State, expected.State = 0, 0
 		obtained.NodeState, expected.NodeState = 0, 0
