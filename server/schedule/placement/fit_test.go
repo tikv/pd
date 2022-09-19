@@ -39,6 +39,9 @@ func makeStores() StoreSet {
 						"host": fmt.Sprintf("host%d", host),
 						"id":   fmt.Sprintf("id%d", x),
 					}
+					if x == 5 {
+						labels["engine"] = "tiflash"
+					}
 					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels))
 				}
 			}
@@ -109,6 +112,38 @@ func checkPeerMatch(peers []*metapb.Peer, expect string) bool {
 	return len(m) == 0
 }
 
+func TestReplace(t *testing.T) {
+	re := require.New(t)
+	stores := makeStores()
+
+	testCases := []struct {
+		region     string
+		rules      []string
+		srcStoreID uint64
+		dstStoreID uint64
+		ok         bool
+	}{
+		{"1111,2111,3111", []string{"3/voter//zone"}, 1111, 4111, true},
+		// replace failed when the target store doesn't match the rule.
+		{"1111,2111,3111", []string{"3/voter/zone=zone1+zone2+zone3/zone"}, 1111, 4111, false},
+		// replace failed when the isolation level decrease.
+		{"1111,2111,3111", []string{"3/voter//zone"}, 1111, 2113, false},
+		{"1111,2111,3111,1115_learner", []string{"3/voter//zone", "1/learner/engine=tiflash/host"}, 1115, 2115, true},
+		// replace failed when the target store is not tiflash
+		{"1111,2111,3111,1115_learner", []string{"3/voter//zone", "1/learner/engine=tiflash/host"}, 1115, 1112, false},
+	}
+	for _, tc := range testCases {
+		region := makeRegion(tc.region)
+		var rules []*Rule
+		for _, r := range tc.rules {
+			rules = append(rules, makeRule(r))
+		}
+		rf := fitRegion(stores.GetStores(), region, rules)
+		rf.regionStores = stores.GetStores()
+		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID), region), tc.ok)
+	}
+}
+
 func TestFitRegion(t *testing.T) {
 	re := require.New(t)
 	stores := makeStores()
@@ -154,6 +189,7 @@ func TestFitRegion(t *testing.T) {
 		}
 	}
 }
+
 func TestIsolationScore(t *testing.T) {
 	as := assert.New(t)
 	stores := makeStores()
