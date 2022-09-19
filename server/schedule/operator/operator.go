@@ -56,6 +56,7 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
+	influence        *OpInfluence
 }
 
 // NewOperator creates a new operator.
@@ -322,9 +323,19 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 
 // TotalInfluence calculates the store difference which whole operator steps make.
 func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for step := 0; step < len(o.steps); step++ {
-		o.steps[step].Influence(opInfluence, region)
+	if !o.HasInfluence() {
+		o.influence = NewOpInfluence()
+		for step := 0; step < len(o.steps); step++ {
+			o.steps[step].Influence(*o.influence, region)
+		}
 	}
+	opInfluence.Add(o.influence)
+	return
+}
+
+// HasInfluence returns true if operator's influence cached.
+func (o *Operator) HasInfluence() bool {
+	return o.influence != nil
 }
 
 // OpHistory is used to log and visualize completed operators.

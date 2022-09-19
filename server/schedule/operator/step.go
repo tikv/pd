@@ -200,8 +200,8 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
-	ToStore, PeerID uint64
-	IsLightWeight   bool
+	ToStore, PeerID, SendStore uint64
+	IsLightWeight              bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -255,6 +255,11 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	if al.SendStore == 0 {
+		return
+	}
+	send := opInfluence.GetStoreInfluence(al.SendStore)
+	send.SendCost += regionSize
 }
 
 // Timeout returns true if the step is timeout.

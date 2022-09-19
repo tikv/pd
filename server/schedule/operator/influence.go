@@ -24,6 +24,25 @@ type OpInfluence struct {
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence() *OpInfluence {
+	return &OpInfluence{
+		StoresInfluence: make(map[uint64]*StoreInfluence),
+	}
+}
+
+func (m *OpInfluence) Add(other *OpInfluence) {
+	for id, v := range other.StoresInfluence {
+		m.GetStoreInfluence(id).add(v)
+	}
+}
+
+func (m *OpInfluence) Sub(other *OpInfluence) {
+	for id, v := range other.StoresInfluence {
+		m.GetStoreInfluence(id).sub(v)
+	}
+}
+
 // GetStoreInfluence get storeInfluence of specific store.
 func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
@@ -41,6 +60,34 @@ type StoreInfluence struct {
 	LeaderSize  int64
 	LeaderCount int64
 	StepCost    map[storelimit.Type]int64
+	SendCost    int64
+}
+
+// GetSendCost returns the cost of sending snapshot.
+func (s *StoreInfluence) GetSendCost() int64 {
+	return s.SendCost
+}
+
+func (s *StoreInfluence) add(other *StoreInfluence) {
+	s.RegionCount += other.RegionCount
+	s.RegionSize += other.RegionSize
+	s.LeaderSize += other.LeaderSize
+	s.LeaderCount += other.LeaderCount
+	for _, v := range storelimit.TypeNameValue {
+		s.addStepCost(v, other.GetStepCost(v))
+	}
+	s.SendCost += other.SendCost
+}
+
+func (s *StoreInfluence) sub(other *StoreInfluence) {
+	s.RegionCount -= other.RegionCount
+	s.RegionSize -= other.RegionSize
+	s.LeaderSize -= other.LeaderSize
+	s.LeaderCount -= other.LeaderCount
+	for _, v := range storelimit.TypeNameValue {
+		s.addStepCost(v, -other.GetStepCost(v))
+	}
+	s.SendCost += other.SendCost
 }
 
 // ResourceProperty returns delta size of leader/region by influence.

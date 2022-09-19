@@ -682,9 +682,10 @@ func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.lightWeight {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(),
+			IsLightWeight: b.lightWeight, SendStore: b.originLeaderStoreID})
 	} else {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
 	}
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId()})

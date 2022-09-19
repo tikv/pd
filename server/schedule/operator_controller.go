@@ -744,7 +744,12 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
+	if op.HasInfluence() {
+		op.TotalInfluence(influence, nil)
+		return
+	}
 	region := cluster.GetRegion(op.RegionID())
+	// region may be nil when the operator's is merged or the region is splitting.
 	if region != nil {
 		op.TotalInfluence(influence, region)
 	}
@@ -752,9 +757,7 @@ func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, clust
 
 // NewTotalOpInfluence creates a OpInfluence.
 func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
+	influence := *operator.NewOpInfluence()
 
 	for _, op := range operators {
 		AddOpInfluence(op, influence, cluster)
