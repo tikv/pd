@@ -174,6 +174,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	for _, solver.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
 		for i := 0; i < retryLimit; i++ {
+			if s.BaseScheduler.OpController.Ctx().Err() != nil {
+				break
+			}
+
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
 			// Pending region may means the disk is overload, remove the pending region firstly.
