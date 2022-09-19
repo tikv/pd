@@ -131,6 +131,13 @@ func TestReplace(t *testing.T) {
 		{"1111,2111,3111,1115_learner", []string{"3/voter//zone", "1/learner/engine=tiflash/host"}, 1115, 2115, true},
 		// replace failed when the target store is not tiflash
 		{"1111,2111,3111,1115_learner", []string{"3/voter//zone", "1/learner/engine=tiflash/host"}, 1115, 1112, false},
+		{"1111_lead,2111,3111", []string{"1/leader/zone=zone1/zone", "2/voter//zone"}, 1111, 1112, true},
+		// replace failed when the leader is not match the leader constraint.
+		{"1111_leader,2111,3111", []string{"1/leader/zone=zone1/zone", "2/voter//zone"}, 1111, 2112, false},
+		// transfer leader
+		{"1111_leader,1112,1131", []string{"1/leader/host=host1/host", "2/voter//host"}, 1111, 1112, true},
+		// replace failed when the leader is not match the leader constraint.
+		{"1111_leader,1121,1131", []string{"1/leader/host=host1/host", "2/voter//host"}, 1111, 1121, false},
 	}
 	for _, tc := range testCases {
 		region := makeRegion(tc.region)

@@ -20,14 +20,12 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
-	"go.uber.org/zap"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
@@ -631,25 +629,7 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 }
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	targetStoreID := store.GetID()
-	sourcePeer := f.region.GetStorePeer(f.srcLeaderStoreID)
-	targetPeer := f.region.GetStorePeer(targetStoreID)
-	newRegionOptions := []core.RegionCreateOption{core.WithLeader(targetPeer)}
-	if targetPeer == nil {
-		if !f.allowMoveLeader {
-			log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-			return statusStoreNotMatchRule
-		}
-		newRegionOptions = []core.RegionCreateOption{
-			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID),
-			core.WithLeader(&metapb.Peer{Id: sourcePeer.GetId(), StoreId: targetStoreID}),
-		}
-	}
-	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
-	)
-	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
