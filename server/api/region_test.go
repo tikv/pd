@@ -223,6 +223,10 @@ func (suite *regionTestSuite) TestRegionCheck() {
 }
 
 func (suite *regionTestSuite) TestRegions() {
+	r := NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
+	suite.Nil(r.Leader.Peer)
+	suite.Len(r.Leader.RoleName, 0)
+
 	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),

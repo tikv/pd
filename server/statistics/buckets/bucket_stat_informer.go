@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/keyutil"
 	"github.com/tikv/pd/pkg/slice"
@@ -26,13 +25,12 @@ import (
 	"github.com/tikv/pd/server/statistics"
 )
 
-var minHotThresholds = [statistics.RegionStatCount]uint64{
-	statistics.RegionReadBytes:  8 * units.KiB,
-	statistics.RegionReadKeys:   128,
-	statistics.RegionReadQuery:  128,
-	statistics.RegionWriteBytes: 1 * units.KiB,
-	statistics.RegionWriteKeys:  32,
-	statistics.RegionWriteQuery: 32,
+var minHotThresholds [statistics.RegionStatCount]uint64
+
+func init() {
+	for i := range minHotThresholds {
+		minHotThresholds[i] = uint64(statistics.MinHotThresholds[i])
+	}
 }
 
 // BucketStatInformer is used to get the bucket statistics.

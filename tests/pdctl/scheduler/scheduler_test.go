@@ -100,6 +100,14 @@ func TestScheduler(t *testing.T) {
 		re.Equal(expectedConfig, configInfo)
 	}
 
+	checkSchedulerDescibeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
+		time.Sleep(time.Millisecond * 50)
+		result := make(map[string]interface{})
+		mustExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+		re.Equal(expectedStatus, result["status"])
+		re.Equal(expectedSummary, result["summary"])
+	}
+
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
@@ -120,6 +128,10 @@ func TestScheduler(t *testing.T) {
 	}
 	checkSchedulerCommand(nil, expected)
 
+	echo := mustExec([]string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
+	re.Contains(echo, "Success!")
+	checkSchedulerDescibeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
+
 	// scheduler delete command
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
 	expected = map[string]bool{
@@ -128,6 +140,8 @@ func TestScheduler(t *testing.T) {
 		"split-bucket-scheduler":       true,
 	}
 	checkSchedulerCommand(args, expected)
+
+	checkSchedulerDescibeCommand("balance-region-scheduler", "disabled", "")
 
 	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler"}
 
@@ -257,7 +271,7 @@ func TestScheduler(t *testing.T) {
 	re.Equal(expected3, conf3)
 
 	// test balance region config
-	echo := mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
@@ -393,10 +407,12 @@ func TestScheduler(t *testing.T) {
 	checkSchedulerWithStatusCommand(nil, "paused", []string{
 		"balance-leader-scheduler",
 	})
+	checkSchedulerDescibeCommand("balance-leader-scheduler", "paused", "")
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	checkSchedulerWithStatusCommand(nil, "paused", nil)
+	checkSchedulerDescibeCommand("balance-leader-scheduler", "normal", "")
 
 	// set label scheduler to disabled manually.
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)

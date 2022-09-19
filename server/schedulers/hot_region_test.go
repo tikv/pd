@@ -1015,7 +1015,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re.Len(stats, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
-			re.Less(500.0*units.KiB, s.GetLoad(statistics.RegionReadBytes))
+			re.Less(500.0*units.KiB, s.GetLoad(statistics.ByteDim))
 		}
 	}
 
@@ -1785,20 +1785,20 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	hotPeers := []*statistics.HotPeerStat{{
 		RegionID: 1,
 		Loads: []float64{
-			statistics.RegionReadQuery: 10,
-			statistics.RegionReadBytes: 1,
+			statistics.QueryDim: 10,
+			statistics.ByteDim:  1,
 		},
 	}, {
 		RegionID: 2,
 		Loads: []float64{
-			statistics.RegionReadQuery: 1,
-			statistics.RegionReadBytes: 10,
+			statistics.QueryDim: 1,
+			statistics.ByteDim:  10,
 		},
 	}, {
 		RegionID: 3,
 		Loads: []float64{
-			statistics.RegionReadQuery: 5,
-			statistics.RegionReadBytes: 6,
+			statistics.QueryDim: 5,
+			statistics.ByteDim:  6,
 		},
 	}}
 
@@ -2535,4 +2535,289 @@ func checkPriority(re *require.Assertions, hb *hotScheduler, tc *mockcluster.Clu
 	re.Equal(dims[1][1], writeLeaderSolver.secondPriority)
 	re.Equal(dims[2][0], writePeerSolver.firstPriority)
 	re.Equal(dims[2][1], writePeerSolver.secondPriority)
+}
+
+type maxZombieDurTestCase struct {
+	typ           resourceType
+	isTiFlash     bool
+	firstPriority int
+	maxZombieDur  int
+}
+
+func TestMaxZombieDuration(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
+	re.NoError(err)
+	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
+	testCases := []maxZombieDurTestCase{
+		{
+			typ:          readPeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          readLeader,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			maxZombieDur: maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+		{
+			typ:          writePeer,
+			isTiFlash:    true,
+			maxZombieDur: maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.KeyDim,
+			maxZombieDur:  maxZombieDur * statistics.RegionHeartBeatReportInterval,
+		},
+		{
+			typ:           writeLeader,
+			firstPriority: statistics.QueryDim,
+			maxZombieDur:  maxZombieDur * statistics.StoreHeartBeatReportInterval,
+		},
+	}
+	for _, testCase := range testCases {
+		src := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
+		}
+		if testCase.isTiFlash {
+			src.SetEngineAsTiFlash()
+		}
+		bs := &balanceSolver{
+			sche:          hb.(*hotScheduler),
+			resourceTy:    testCase.typ,
+			firstPriority: testCase.firstPriority,
+			best:          &solution{srcStore: src},
+		}
+		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
+	}
+}
+
+type expectTestCase struct {
+	strict         bool
+	isSrc          bool
+	allow          bool
+	toleranceRatio float64
+	rs             resourceType
+	load           *statistics.StoreLoad
+	expect         *statistics.StoreLoad
+}
+
+func TestExpect(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
+	re.NoError(err)
+	testCases := []expectTestCase{
+		// test src, it will be allowed when loads are higher than expect
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // all dims are higher than expect, allow schedule
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: true,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // all dims are higher than expect, but lower than expect*toleranceRatio, not allow schedule
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc:          true,
+			toleranceRatio: 2.2,
+			allow:          false,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // only queryDim is lower, but the dim is no selected, allow schedule
+				Loads: []float64{2.0, 2.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: true,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // only keyDim is lower, and the dim is selected, not allow schedule
+				Loads: []float64{2.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: false,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // keyDim is higher, and the dim is selected, allow schedule
+				Loads: []float64{1.0, 2.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: true,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, not allow schedule
+				Loads: []float64{1.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: false,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // all dims are lower than expect, not allow schedule
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: true,
+			allow: false,
+		},
+		{
+			strict: true,
+			rs:     writeLeader,
+			load: &statistics.StoreLoad{ // only keyDim is higher, but write leader only consider the first priority
+				Loads: []float64{1.0, 2.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: true,
+			allow: true,
+		},
+		// test dst, it will be allowed when loads are lower than expect
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // all dims are lower than expect, allow schedule
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: true,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // all dims are lower than expect, but higher than expect*toleranceRatio, not allow schedule
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc:          false,
+			toleranceRatio: 2.0,
+			allow:          false,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, allow schedule
+				Loads: []float64{1.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: true,
+		},
+		{
+			strict: true, // all of
+			load: &statistics.StoreLoad{ // byteDim is higher, and the dim is selected, not allow schedule
+				Loads: []float64{2.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: false,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // keyDim is lower, the dim is selected, allow schedule
+				Loads: []float64{2.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: true,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // although queryDim is lower, the dim is no selected, not allow schedule
+				Loads: []float64{2.0, 2.0, 1.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: false,
+		},
+		{
+			strict: false, // any of
+			load: &statistics.StoreLoad{ // all dims are higher than expect, not allow schedule
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{1.0, 1.0, 1.0},
+			},
+			isSrc: false,
+			allow: false,
+		},
+		{
+			strict: true,
+			rs:     writeLeader,
+			load: &statistics.StoreLoad{ // only keyDim is lower, but write leader only consider the first priority
+				Loads: []float64{2.0, 1.0, 2.0},
+			},
+			expect: &statistics.StoreLoad{
+				Loads: []float64{2.0, 2.0, 2.0},
+			},
+			isSrc: false,
+			allow: true,
+		},
+	}
+	for _, testCase := range testCases {
+		toleranceRatio := testCase.toleranceRatio
+		if toleranceRatio == 0.0 {
+			toleranceRatio = 1.0 // default for test case
+		}
+		bs := &balanceSolver{
+			sche:           hb.(*hotScheduler),
+			firstPriority:  statistics.KeyDim,
+			secondPriority: statistics.ByteDim,
+			resourceTy:     testCase.rs,
+		}
+		bs.sche.conf.StrictPickingStore = testCase.strict
+		bs.pickCheckPolicy()
+		if testCase.isSrc {
+			re.Equal(testCase.allow, bs.checkSrcByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
+		} else {
+			re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
+		}
+	}
 }

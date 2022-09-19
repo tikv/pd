@@ -272,6 +272,18 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// IsDiagnosticAllowed returns whether is enable to use diagnostic.
+func (o *PersistOptions) IsDiagnosticAllowed() bool {
+	return o.GetScheduleConfig().EnableDiagnostic
+}
+
+// SetEnableDiagnostic to set the option for diagnose. It's only used to test.
+func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
+}
+
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
