@@ -55,8 +55,14 @@ func (f *RegionFit) IsCached() bool {
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region *core.RegionInfo) bool {
 	fit := f.getRuleFitByStoreID(srcStoreID)
+	// check the target store is fit all constraints.
 	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
 		return false
+	}
+
+	// the members of the rule are same, it shouldn't check the score.
+	if fit.contain(dstStore.GetID()) {
+		return true
 	}
 
 	peers := make([]*fitPeer, 0, len(fit.Peers))
@@ -161,6 +167,15 @@ type RuleFit struct {
 // IsSatisfied returns if the rule is properly satisfied.
 func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
+}
+
+func (f *RuleFit) contain(storeID uint64) bool {
+	for _, p := range f.Peers {
+		if p.GetStoreId() == storeID {
+			return true
+		}
+	}
+	return false
 }
 
 func compareRuleFit(a, b *RuleFit) int {
