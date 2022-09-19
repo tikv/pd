@@ -141,7 +141,7 @@ type hotRegionSchedulerConfig struct {
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
-	// Version used by `calcProgressiveRank1 and 1betterThan1. The v2 version code is in hot_region_v2.go.
+	// Version used by `calcProgressiveRank1 and betterThan1. The v2 version code is in hot_region_v2.go.
 	RankFormulaVersion string `json:"rank-formula-version"`
 	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
@@ -320,9 +320,7 @@ func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool 
 
 func (conf *hotRegionSchedulerConfig) getForbidRWTypeLocked() string {
 	switch conf.ForbidRWType {
-	case statistics.Read.String():
-		return conf.ForbidRWType
-	case statistics.Write.String():
+	case statistics.Read.String(), statistics.Write.String():
 		return conf.ForbidRWType
 	default:
 		return ""

@@ -57,7 +57,9 @@ func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2
 	}
 
 	rs := &rankV2Ratios{balancedRatio: balancedRatio, perceivedRatio: perceivedRatio, minHotRatio: minHotRatio}
-	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.15)
+	// preBalancedRatio = 1.0 - 2*(1.0-balancedRatio)
+	// The maximum value with `balancedRatio-0.1` is to prevent the preBalance range becoming too large.
+	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.1)
 	rs.balancedCheckRatio = balancedRatio - 0.02
 	rs.preBalancedCheckRatio = rs.preBalancedRatio - 0.03
 	return rs
@@ -287,7 +289,7 @@ func (bs *balanceSolver) betterThanV2(old *solution) bool {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
-		// Higher rank is better.
+		// Smaller rank is better.
 		return bs.cur.progressiveRank < old.progressiveRank
 	}
 	if (bs.cur.revertRegion == nil) != (old.revertRegion == nil) {

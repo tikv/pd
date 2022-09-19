@@ -393,7 +393,7 @@ func (s *solution) getPeersRateFromCache(dim int) float64 {
 // isAvailable returns the solution is available.
 // The solution should have no revertRegion and progressiveRank < 0.
 func isAvailableV1(s *solution) bool {
-	return s.progressiveRank < 0 && s.revertRegion == nil
+	return s.progressiveRank < 0
 }
 
 type balanceSolver struct {
@@ -1101,7 +1101,7 @@ func (bs *balanceSolver) betterThanV1(old *solution) bool {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
-		// Higher rank is better.
+		// Smaller rank is better.
 		return bs.cur.progressiveRank < old.progressiveRank
 	}
 	if (bs.cur.revertRegion == nil) != (old.revertRegion == nil) {
