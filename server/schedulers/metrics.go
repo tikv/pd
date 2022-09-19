@@ -109,8 +109,16 @@ var hotPendingStatus = prometheus.NewGaugeVec(
 		Namespace: "pd",
 		Subsystem: "scheduler",
 		Name:      "hot_pending",
-		Help:      "Counter of direction of balance related schedulers.",
+		Help:      "Pending influence status in hot region scheduler.",
 	}, []string{"type", "source", "target"})
+
+var hotPendingSum = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_pending_sum",
+		Help:      "Pending influence sum of store in hot region scheduler.",
+	}, []string{"type", "store", "rw", "dim"})
 
 var hotPeerHist = prometheus.NewHistogramVec(
 	prometheus.HistogramOpts{
@@ -134,5 +142,6 @@ func init() {
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
+	prometheus.MustRegister(hotPendingSum)
 	prometheus.MustRegister(hotPeerHist)
 }

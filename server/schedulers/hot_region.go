@@ -248,6 +248,16 @@ func (h *hotScheduler) summaryPendingInfluence() {
 			to.AddInfluence(&p.origin, weight)
 		}
 	}
+	for storeID, info := range h.stInfos {
+		storeLabel := strconv.FormatUint(storeID, 10)
+		if infl := info.PendingSum; infl != nil {
+			for _, rwTy := range []statistics.RWType{statistics.Read, statistics.Write} {
+				for dim, kind := range rwTy.RegionStats() {
+					hotPendingSum.WithLabelValues(h.GetName(), storeLabel, rwTy.String(), dimToString(dim)).Set(infl.Loads[kind])
+				}
+			}
+		}
+	}
 }
 
 func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
