@@ -66,11 +66,11 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["rack"] = rack
 				label["host"] = host
 				storeID++
-				tc.AddLabelsStore(storeID, int(storeID), label)
+				tc.AddLabelsStore(storeID, regionCount, label)
 			}
 			for j := 0; j < regionCount; j++ {
 				if ruleEnable {
-					learnID := regionID%uint64(tiflashCount-1) + uint64(storeCount)
+					learnID := regionID%uint64(tiflashCount) + uint64(storeCount)
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{learnID})
 				} else {
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, nil)
