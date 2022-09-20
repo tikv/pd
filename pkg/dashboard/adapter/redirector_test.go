@@ -16,6 +16,7 @@ package adapter
 
 import (
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -105,7 +106,7 @@ func checkHTTPRequest(re *require.Assertions, client *http.Client, req *http.Req
 	defer resp.Body.Close()
 	re.Equal(expectedCode, resp.StatusCode)
 	if expectedCode >= http.StatusOK && expectedCode <= http.StatusAlreadyReported {
-		text, err := io.ReadAll(resp.Body)
+		text, err := ioutil.ReadAll(resp.Body)
 		re.NoError(err)
 		re.Equal(expectedText, string(text))
 	}

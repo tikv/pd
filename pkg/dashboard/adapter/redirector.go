@@ -117,11 +117,13 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proxySources := r.Header.Values(proxyHeader)
-	for _, proxySource := range proxySources {
-		if proxySource == h.name {
-			w.WriteHeader(http.StatusLoopDetected)
-			return
+	proxySources, ok := r.Header[http.CanonicalHeaderKey(proxyHeader)]
+	if ok {
+		for _, proxySource := range proxySources {
+			if proxySource == h.name {
+				w.WriteHeader(http.StatusLoopDetected)
+				return
+			}
 		}
 	}
 
