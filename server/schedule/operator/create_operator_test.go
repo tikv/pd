@@ -16,27 +16,21 @@ package operator
 
 import (
 	"context"
-<<<<<<< HEAD
-	"strings"
-=======
 	"encoding/hex"
+	"strings"
 	"testing"
->>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-<<<<<<< HEAD
-=======
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
->>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/versioninfo"
+
+	"github.com/stretchr/testify/require"
 )
 
 var _ = Suite(&testCreateOperatorSuite{})
