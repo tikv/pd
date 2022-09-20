@@ -119,9 +119,12 @@ func TestRuleFitFilter(t *testing.T) {
 	}{
 		{1, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
 		{2, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
-		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		// store 3 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
+		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusOK},
+		// the labels of store 4 and store 3 are same, so the isolation score will decrease.
 		{4, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
-		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
+		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
 	}
 	// Init cluster

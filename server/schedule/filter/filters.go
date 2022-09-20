@@ -580,6 +580,11 @@ func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.Store
 	return statusOK
 }
 
+// Target filters stores when select them as schedule target.
+// It ensures after replace a peer with new one, the isolation level will not decrease and
+// the replaced store can match the source rule.
+// RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
+// but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if f.oldFit.Replace(f.srcStore, store, f.region) {
 		return statusOK
