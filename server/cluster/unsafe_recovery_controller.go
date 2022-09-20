@@ -262,7 +262,7 @@ func (u *unsafeRecoveryController) checkTimeout() bool {
 
 	if time.Now().After(u.timeout) {
 		ret := u.HandleErr(errors.Errorf("Exceeds timeout %v", u.timeout))
-		time.Now().Add(storeRequestInterval)
+		u.timeout = time.Now().Add(storeRequestInterval * 2)
 		return ret
 	}
 	return false
