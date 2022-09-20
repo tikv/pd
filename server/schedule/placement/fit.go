@@ -65,24 +65,7 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region 
 		return true
 	}
 
-	peers := make([]*fitPeer, 0, len(fit.Peers))
-	for _, p := range fit.Peers {
-		peer := &fitPeer{
-			Peer:     p,
-			isLeader: region.GetLeader().GetId() == p.GetId(),
-			store:    getStoreByID(f.regionStores, p.GetStoreId()),
-		}
-		if p.GetStoreId() == srcStoreID {
-			peer.store = dstStore
-		}
-		peers = append(peers, peer)
-	}
-	// Sort peers to keep the match result deterministic.
-	sort.Slice(peers, func(i, j int) bool {
-		// Put healthy peers in front of priority to fit healthy peers.
-		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
-		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
-	})
+	peers := newFitPeer(f.regionStores, region, fit.Peers, replaceFitPeerOpt(srcStoreID, dstStore))
 	score := isolationScore(peers, fit.Rule.LocationLabels)
 	return fit.IsolationScore <= score
 }
@@ -219,22 +202,40 @@ type fitWorker struct {
 	exit          bool
 }
 
-func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
-	regionPeers := region.GetPeers()
-	peers := make([]*fitPeer, 0, len(regionPeers))
-	for _, p := range regionPeers {
-		peers = append(peers, &fitPeer{
+type fitPeerOpt func(peer *fitPeer)
+
+func replaceFitPeerOpt(srcStoreID uint64, dstStore *core.StoreInfo) fitPeerOpt {
+	return func(peer *fitPeer) {
+		if peer.Peer.GetStoreId() == srcStoreID {
+			peer.store = dstStore
+		}
+	}
+}
+
+func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer, opts ...fitPeerOpt) []*fitPeer {
+	peers := make([]*fitPeer, len(fitPeers))
+	for i, p := range fitPeers {
+		peer := &fitPeer{
 			Peer:     p,
 			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
-		})
+		}
+		for _, opt := range opts {
+			opt(peer)
+		}
+		peers[i] = peer
 	}
 	// Sort peers to keep the match result deterministic.
 	sort.Slice(peers, func(i, j int) bool {
-		// Put healthy peers in front to priority to fit healthy peers.
+		// Put healthy peers in front of priority to fit healthy peers.
 		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
+	return peers
+}
+
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
+	peers := newFitPeer(stores, region, region.GetPeers())
 
 	return &fitWorker{
 		stores:        stores,
