@@ -348,7 +348,7 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 // AddNoLeaderRegion adds region with specified replicas, no leader.
 func (mc *Cluster) AddNoLeaderRegion(regionID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, 0, otherPeerStoreIDs...)
-	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
+	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/mb), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
 	return region
 }

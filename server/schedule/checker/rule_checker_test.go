@@ -289,25 +289,16 @@ func (s *testRuleCheckerSuite) TestFixRoleLeaderIssue3130(c *C) {
 	c.Assert(op.Step(0).(operator.RemovePeer).FromStore, Equals, uint64(1))
 }
 
-<<<<<<< HEAD
-func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {
-	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
-	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
-	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
-	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host3"})
-	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	s.ruleManager.SetRule(&placement.Rule{
-=======
-func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "follower"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "follower"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "leader"})
-	suite.ruleManager.SetRuleGroup(&placement.RuleGroup{
+func (s *testRuleCheckerSuite) TestFixLeaderRoleWithUnhealthyRegion(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "follower"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "follower"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "leader"})
+	s.ruleManager.SetRuleGroup(&placement.RuleGroup{
 		ID:       "cluster",
 		Index:    2,
 		Override: true,
 	})
-	err := suite.ruleManager.SetRules([]*placement.Rule{
+	err := s.ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "cluster",
 			ID:      "r1",
@@ -329,22 +320,21 @@ func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
 			},
 		},
 	})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	// no Leader
-	suite.cluster.AddNoLeaderRegion(1, 1, 2, 3)
-	r := suite.cluster.GetRegion(1)
-	op := suite.rc.Check(r)
-	suite.Nil(op)
+	s.cluster.AddNoLeaderRegion(1, 1, 2, 3)
+	r := s.cluster.GetRegion(1)
+	op := s.rc.Check(r)
+	c.Assert(op, IsNil)
 }
 
-func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host3"})
-	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
-	suite.ruleManager.SetRule(&placement.Rule{
->>>>>>> 16b374abd (checker: fix the issue that unhealthy region cause panic (#5494))
+func (s *testRuleCheckerSuite) TestBetterReplacement(c *C) {
+	s.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
+	s.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host2"})
+	s.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host3"})
+	s.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3)
+	s.ruleManager.SetRule(&placement.Rule{
 		GroupID:        "pd",
 		ID:             "test",
 		Index:          100,
