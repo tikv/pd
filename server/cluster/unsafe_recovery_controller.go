@@ -261,7 +261,9 @@ func (u *unsafeRecoveryController) checkTimeout() bool {
 	}
 
 	if time.Now().After(u.timeout) {
-		return u.HandleErr(errors.Errorf("Exceeds timeout %v", u.timeout))
+		ret := u.HandleErr(errors.Errorf("Exceeds timeout %v", u.timeout))
+		time.Now().Add(storeRequestInterval)
+		return ret
 	}
 	return false
 }
@@ -318,38 +320,34 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 			case collectReport:
 				fallthrough
 			case tombstoneTiFlashLearner:
-				hasPlan, err = u.generateTombstoneTiFlashLearnerPlan(newestRegionTree, peersMap)
-				if err != nil {
+				if hasPlan, err = u.generateTombstoneTiFlashLearnerPlan(newestRegionTree, peersMap); hasPlan && err == nil {
+					u.changeStage(tombstoneTiFlashLearner)
 					break
 				}
-				if hasPlan {
-					u.changeStage(tombstoneTiFlashLearner)
+				if err != nil {
 					break
 				}
 				fallthrough
 			case forceLeaderForCommitMerge:
-				hasPlan, err = u.generateForceLeaderPlan(newestRegionTree, peersMap, true)
-				if err != nil {
+				if hasPlan, err = u.generateForceLeaderPlan(newestRegionTree, peersMap, true); hasPlan && err == nil {
+					u.changeStage(forceLeaderForCommitMerge)
 					break
 				}
-				if hasPlan {
-					u.changeStage(forceLeaderForCommitMerge)
+				if err != nil {
 					break
 				}
 				fallthrough
 			case forceLeader:
-				hasPlan, err = u.generateForceLeaderPlan(newestRegionTree, peersMap, false)
-				if err != nil {
+				if hasPlan, err = u.generateForceLeaderPlan(newestRegionTree, peersMap, false); hasPlan && err == nil {
+					u.changeStage(forceLeader)
 					break
 				}
-				if hasPlan {
-					u.changeStage(forceLeader)
+				if err != nil {
 					break
 				}
 				fallthrough
 			case demoteFailedVoter:
-				hasPlan = u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap)
-				if hasPlan {
+				if hasPlan = u.generateDemoteFailedVoterPlan(newestRegionTree, peersMap); hasPlan {
 					u.changeStage(demoteFailedVoter)
 					break
 				} else if !reCheck {
@@ -359,19 +357,18 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				}
 				fallthrough
 			case createEmptyRegion:
-				hasPlan, err = u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
-				if err != nil {
-					break
-				}
-				if hasPlan {
+				if hasPlan, err = u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap); hasPlan && err == nil {
 					u.changeStage(createEmptyRegion)
+					break
+
+				}
+				if err != nil {
 					break
 				}
 				fallthrough
 			case exitForceLeader:
 				// no need to generate plan, empty recovery plan triggers exit force leader on TiKV side
-				hasPlan = u.generateExitForceLeaderPlan()
-				if hasPlan {
+				if hasPlan = u.generateExitForceLeaderPlan(); hasPlan {
 					u.changeStage(exitForceLeader)
 				}
 			default:
