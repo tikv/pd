@@ -306,6 +306,7 @@ func TestScheduler(t *testing.T) {
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
+		"rank-formula-version":       "v1",
 	}
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
@@ -350,6 +351,19 @@ func TestScheduler(t *testing.T) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	re.Equal(expected1, conf1)
+
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v0"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	expected1["rank-formula-version"] = "v2"
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v2"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+	expected1["rank-formula-version"] = "v1"
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v1"}, nil)
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
+	expected1["forbid-rw-type"] = "read"
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	re.Equal(expected1, conf1)
