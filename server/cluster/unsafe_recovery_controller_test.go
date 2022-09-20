@@ -1055,10 +1055,8 @@ func TestTimeout(t *testing.T) {
 
 	time.Sleep(time.Second)
 	req := newStoreHeartbeat(1, nil)
+	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
-	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
-	req.StoreReport = &pdpb.StoreReport{Step: 2}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(failed, recoveryController.GetStage())
 }
