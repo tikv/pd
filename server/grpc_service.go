@@ -1162,18 +1162,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}
 
 	if len(request.GetRegionsId()) > 0 {
-		ops, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		opsCount, failures, err := rc.GetRegionScatter().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
 		if err != nil {
 			return nil, err
 		}
-		for _, op := range ops {
-			if ok := rc.GetOperatorController().AddOperator(op); !ok {
-				failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-			}
-		}
 		percentage := 100
 		if len(failures) > 0 {
-			percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+			percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 			log.Debug("scatter regions", zap.Errors("failures", func() []error {
 				r := make([]error, 0, len(failures))
 				for _, err := range failures {
@@ -1430,6 +1425,12 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
+			Message: "cluster id is not ready",
+		})
+	}
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
