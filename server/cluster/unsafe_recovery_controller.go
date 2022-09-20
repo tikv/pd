@@ -298,7 +298,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 
 	if allCollected {
 		newestRegionTree, peersMap, buildErr := u.buildUpFromReports()
-		if u.HandleErr(buildErr) {
+		if buildErr != nil && u.HandleErr(buildErr) {
 			return
 		}
 
