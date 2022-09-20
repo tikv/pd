@@ -40,7 +40,9 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
@@ -63,7 +65,9 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
