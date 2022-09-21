@@ -721,9 +721,8 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
-		// region is updated, add a witness peer.
+		// region is updated
 		region = origin.Clone(
-			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
 			core.WithIncVersion(),
 			core.WithIncConfVer(),
 		)
@@ -780,6 +779,15 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+		// Change one peer to witness
+		region = region.Clone(
+			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
+			core.WithIncConfVer(),
+		)
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core.Regions, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
