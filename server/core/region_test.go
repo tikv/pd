@@ -457,6 +457,9 @@ func TestSetRegion(t *testing.T) {
 		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
+		if i%3 == 0 {
+			peer2.IsWitness = true
+		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
@@ -467,7 +470,7 @@ func TestSetRegion(t *testing.T) {
 	}
 
 	peer1 := &metapb.Peer{StoreId: uint64(4), Id: uint64(101)}
-	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102)}
+	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102), Role: metapb.PeerRole_Learner}
 	peer3 := &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
@@ -475,7 +478,6 @@ func TestSetRegion(t *testing.T) {
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
 	}, peer1)
-	region.learners = append(region.learners, peer2)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	regions.SetRegion(region)
 	checkRegions(re, regions)
@@ -484,7 +486,7 @@ func TestSetRegion(t *testing.T) {
 
 	regions.SetRegion(region)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
-	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
+	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102), Role: metapb.PeerRole_Learner}
 	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
 	region = NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
@@ -492,7 +494,6 @@ func TestSetRegion(t *testing.T) {
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
 	}, peer1)
-	region.learners = append(region.learners, peer2)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	regions.SetRegion(region)
 	checkRegions(re, regions)
@@ -573,33 +574,21 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	leaderMap := make(map[uint64]uint64)
 	followerMap := make(map[uint64]uint64)
 	learnerMap := make(map[uint64]uint64)
+	witnessMap := make(map[uint64]uint64)
 	pendingPeerMap := make(map[uint64]uint64)
 	for _, item := range regions.GetRegions() {
-		if leaderCount, ok := leaderMap[item.leader.StoreId]; ok {
-			leaderMap[item.leader.StoreId] = leaderCount + 1
-		} else {
-			leaderMap[item.leader.StoreId] = 1
-		}
+		leaderMap[item.leader.StoreId]++
 		for _, follower := range item.GetFollowers() {
-			if followerCount, ok := followerMap[follower.StoreId]; ok {
-				followerMap[follower.StoreId] = followerCount + 1
-			} else {
-				followerMap[follower.StoreId] = 1
-			}
+			followerMap[follower.StoreId]++
 		}
 		for _, learner := range item.GetLearners() {
-			if learnerCount, ok := learnerMap[learner.StoreId]; ok {
-				learnerMap[learner.StoreId] = learnerCount + 1
-			} else {
-				learnerMap[learner.StoreId] = 1
-			}
+			learnerMap[learner.StoreId]++
+		}
+		for _, witness := range item.GetWitnesses() {
+			witnessMap[witness.StoreId]++
 		}
 		for _, pendingPeer := range item.GetPendingPeers() {
-			if pendingPeerCount, ok := pendingPeerMap[pendingPeer.StoreId]; ok {
-				pendingPeerMap[pendingPeer.StoreId] = pendingPeerCount + 1
-			} else {
-				pendingPeerMap[pendingPeer.StoreId] = 1
-			}
+			pendingPeerMap[pendingPeer.StoreId]++
 		}
 	}
 	for key, value := range regions.leaders {
@@ -610,6 +599,9 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	}
 	for key, value := range regions.learners {
 		re.Equal(int(learnerMap[key]), value.length())
+	}
+	for key, value := range regions.witnesses {
+		re.Equal(int(witnessMap[key]), value.length())
 	}
 	for key, value := range regions.pendingPeers {
 		re.Equal(int(pendingPeerMap[key]), value.length())

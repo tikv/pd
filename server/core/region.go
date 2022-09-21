@@ -111,6 +111,7 @@ func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
 	return r.leader.GetId() == region.leader.GetId() &&
 		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
 		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
+		SortedPeersEqual(r.GetWitnesses(), region.GetWitnesses()) &&
 		SortedPeersEqual(r.GetPendingPeers(), region.GetPendingPeers())
 }
 
