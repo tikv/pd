@@ -65,8 +65,8 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				storeID++
 				tc.AddLabelsStore(storeID, regionCount, label)
+				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
 				if ruleEnable {
