@@ -33,13 +33,13 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 	}
 }
 
-// @Tags stats
-// @Summary Get region statistics of a specified range.
-// @Param start_key query string true "Start key"
-// @Param end_key query string true "End key"
-// @Produce json
-// @Success 200 {object} statistics.RegionStats
-// @Router /stats/region [get]
+// @Tags     stats
+// @Summary  Get region statistics of a specified range.
+// @Param    start_key  query  string  true  "Start key"
+// @Param    end_key    query  string  true  "End key"
+// @Produce  json
+// @Success  200  {object}  statistics.RegionStats
+// @Router   /stats/region [get]
 func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")

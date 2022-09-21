@@ -48,21 +48,21 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 	}
 }
 
-// @Tags config
-// @Summary Get full config.
-// @Produce json
-// @Success 200 {object} config.Config
-// @Router /config [get]
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetConfig())
 }
 
-// @Tags config
-// @Summary Get default config.
-// @Produce json
-// @Success 200 {object} config.Config
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/default [get]
+// @Tags     config
+// @Summary  Get default config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/default [get]
 func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
 	config := config.NewConfig()
 	err := config.Adjust(nil, false)
@@ -74,16 +74,16 @@ func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // FIXME: details of input json body params
-// @Tags config
-// @Summary Update a config item.
-// @Accept json
-// @Param ttlSecond query integer false "ttl". ttl param is only for BR and lightning now. Don't use it.
-// @Param body body object false "json params"
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config [post]
+// @Tags     config
+// @Summary  Update a config item.
+// @Accept   json
+// @Param    ttlSecond  query  integer  false  "ttl param is only for BR and lightning now. Don't use it."
+// @Param    body       body   object   false  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The config is updated."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config [post]
 func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
 	data, err := io.ReadAll(r.Body)
@@ -303,25 +303,25 @@ func mergeConfig(v interface{}, data []byte) (updated bool, found bool, err erro
 	return false, found, nil
 }
 
-// @Tags config
-// @Summary Get schedule config.
-// @Produce json
-// @Success 200 {object} config.ScheduleConfig
-// @Router /config/schedule [get]
+// @Tags     config
+// @Summary  Get schedule config.
+// @Produce  json
+// @Success  200  {object}  config.ScheduleConfig
+// @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetScheduleConfig())
 }
 
-// @Tags config
-// @Summary Update a schedule config item.
-// @Accept json
-// @Param body body object string "json params"
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
-// @Router /config/schedule [post]
+// @Tags     config
+// @Summary  Update a schedule config item.
+// @Accept   json
+// @Param    body  body  object  string  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The config is updated."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure  503  {string}  string  "PD server has no leader."
+// @Router   /config/schedule [post]
 func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -364,25 +364,25 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags config
-// @Summary Get replication config.
-// @Produce json
-// @Success 200 {object} config.ReplicationConfig
-// @Router /config/replicate [get]
+// @Tags     config
+// @Summary  Get replication config.
+// @Produce  json
+// @Success  200  {object}  config.ReplicationConfig
+// @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
-// @Tags config
-// @Summary Update a replication config item.
-// @Accept json
-// @Param body body object string "json params"
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
-// @Router /config/replicate [post]
+// @Tags     config
+// @Summary  Update a replication config item.
+// @Accept   json
+// @Param    body  body  object  string  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The config is updated."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure  503  {string}  string  "PD server has no leader."
+// @Router   /config/replicate [post]
 func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
@@ -396,25 +396,24 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags config
-// @Summary Get label property config.
-// @Produce json
-// @Success 200 {object} config.LabelPropertyConfig
-// @Failure 400 {string} string "The input is invalid."
-// @Router /config/label-property [get]
+// @Tags     config
+// @Summary  Get label property config.
+// @Produce  json
+// @Success  200  {object}  config.LabelPropertyConfig
+// @Router   /config/label-property [get]
 func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }
 
-// @Tags config
-// @Summary Update label property config item.
-// @Accept json
-// @Param body body object string "json params"
-// @Produce json
-// @Success 200 {string} string "The config is updated."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
-// @Router /config/label-property [post]
+// @Tags     config
+// @Summary  Update label property config item.
+// @Accept   json
+// @Param    body  body  object  string  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The config is updated."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure  503  {string}  string  "PD server has no leader."
+// @Router   /config/label-property [post]
 func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -437,24 +436,24 @@ func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Requ
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags config
-// @Summary Get cluster version.
-// @Produce json
-// @Success 200 {object} semver.Version
-// @Router /config/cluster-version [get]
+// @Tags     config
+// @Summary  Get cluster version.
+// @Produce  json
+// @Success  200  {object}  semver.Version
+// @Router   /config/cluster-version [get]
 func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
 }
 
-// @Tags config
-// @Summary Update cluster version.
-// @Accept json
-// @Param body body object string "json params"
-// @Produce json
-// @Success 200 {string} string "The cluster version is updated."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Failure 503 {string} string "PD server has no leader."
-// @Router /config/cluster-version [post]
+// @Tags     config
+// @Summary  Update cluster version.
+// @Accept   json
+// @Param    body  body  object  string  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The cluster version is updated."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure  503  {string}  string  "PD server has no leader."
+// @Router   /config/cluster-version [post]
 func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -474,23 +473,23 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
 }
 
-// @Tags config
-// @Summary Get replication mode config.
-// @Produce json
-// @Success 200 {object} config.ReplicationModeConfig
-// @Router /config/replication-mode [get]
+// @Tags     config
+// @Summary  Get replication mode config.
+// @Produce  json
+// @Success  200  {object}  config.ReplicationModeConfig
+// @Router   /config/replication-mode [get]
 func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationModeConfig())
 }
 
-// @Tags config
-// @Summary Set replication mode config.
-// @Accept json
-// @Param body body object string "json params"
-// @Produce json
-// @Success 200 {string} string "The replication mode config is updated."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /config/replication-mode [post]
+// @Tags     config
+// @Summary  Set replication mode config.
+// @Accept   json
+// @Param    body  body  object  string  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The replication mode config is updated."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/replication-mode [post]
 func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationModeConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
@@ -504,11 +503,11 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
 }
 
-// @Tags config
-// @Summary Get PD server config.
-// @Produce json
-// @Success 200 {object} config.PDServerConfig
-// @Router /config/pd-server [get]
+// @Tags     config
+// @Summary  Get PD server config.
+// @Produce  json
+// @Success  200  {object}  config.PDServerConfig
+// @Router   /config/pd-server [get]
 func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
 }

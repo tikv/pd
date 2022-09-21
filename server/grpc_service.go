@@ -717,10 +717,20 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
+		failpoint.Inject("grpcClientClosed", func() {
+			err = status.Error(codes.Canceled, "grpc client closed")
+			request = nil
+		})
 		if err == io.EOF {
 			return nil
 		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
 		forwardedHost := getForwardedHost(stream.Context())
+		failpoint.Inject("grpcClientClosed", func() {
+			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
+		})
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -805,6 +815,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 	for {
 		request, err := server.Recv()
+		regionHeartbeatCounter.WithLabelValues("fake", "fake", "report", "pending").Inc()
 		if err == io.EOF {
 			return nil
 		}
@@ -1479,6 +1490,12 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.errorHeader(&pdpb.Error{
+			Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
+			Message: "cluster id is not ready",
+		})
+	}
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
@@ -1743,6 +1760,9 @@ func getForwardedHost(ctx context.Context) string {
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
+	failpoint.Inject("useForwardRequest", func() {
+		failpoint.Return(false)
+	})
 	if forwardedHost == "" {
 		return true
 	}

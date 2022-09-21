@@ -860,6 +860,45 @@ func (s *testClusterInfoSuite) TestRegionFlowChanged(c *C) {
 	c.Assert(newRegion.GetBytesRead(), Equals, uint64(1000))
 }
 
+func (s *testClusterInfoSuite) TestRegionSizeChanged(c *C) {
+	_, opt, err := newTestScheduleConfig()
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, nil)
+	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	region := newTestRegions(1, 3, 3)[0]
+	cluster.opt.GetMaxMergeRegionKeys()
+	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
+	curMaxMergeKeys := int64(cluster.opt.GetMaxMergeRegionKeys())
+	region = region.Clone(
+		core.WithLeader(region.GetPeers()[2]),
+		core.SetApproximateSize(curMaxMergeSize-1),
+		core.SetApproximateKeys(curMaxMergeKeys-1),
+		core.SetFromHeartbeat(true),
+	)
+	cluster.processRegionHeartbeat(region)
+	regionID := region.GetID()
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsTrue)
+	// Test ApproximateSize and ApproximateKeys change.
+	region = region.Clone(
+		core.WithLeader(region.GetPeers()[2]),
+		core.SetApproximateSize(curMaxMergeSize+1),
+		core.SetApproximateKeys(curMaxMergeKeys+1),
+		core.SetFromHeartbeat(true),
+	)
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsFalse)
+	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
+	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize + 2)))
+	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys + 2)))
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsTrue)
+	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize)))
+	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys)))
+	cluster.processRegionHeartbeat(region)
+	c.Assert(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion), IsFalse)
+}
+
 func (s *testClusterInfoSuite) TestConcurrentReportBucket(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -1227,7 +1266,70 @@ func (s *testClusterInfoSuite) TestTopologyWeight(c *C) {
 		}
 	}
 
-	c.Assert(getStoreTopoWeight(testStore, stores, labels), Equals, 1.0/3/3/4)
+	c.Assert(1.0/3/3/4, Equals, getStoreTopoWeight(testStore, stores, labels, 3))
+}
+
+func (s *testClusterInfoSuite) TestTopologyWeight1(c *C) {
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6}
+
+	c.Assert(1.0/3, Equals, getStoreTopoWeight(store2, stores, labels, 3))
+	c.Assert(1.0/3/4, Equals, getStoreTopoWeight(store1, stores, labels, 3))
+	c.Assert(1.0/3/4, Equals, getStoreTopoWeight(store6, stores, labels, 3))
+}
+
+func (s *testClusterInfoSuite) TestTopologyWeight2(c *C) {
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5}
+
+	c.Assert(1.0/3, Equals, getStoreTopoWeight(store2, stores, labels, 3))
+	c.Assert(1.0/3/3, Equals, getStoreTopoWeight(store1, stores, labels, 3))
+}
+
+func (s *testClusterInfoSuite) TestTopologyWeight3(c *C) {
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
+	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
+	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
+
+	store7 := core.NewStoreInfoWithLabel(7, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
+	store8 := core.NewStoreInfoWithLabel(8, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
+	store9 := core.NewStoreInfoWithLabel(9, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
+	store10 := core.NewStoreInfoWithLabel(10, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6, store7, store8, store9, store10}
+
+	c.Assert(1.0/5/2, Equals, getStoreTopoWeight(store7, stores, labels, 5))
+	c.Assert(1.0/5/4, Equals, getStoreTopoWeight(store8, stores, labels, 5))
+	c.Assert(1.0/5/4, Equals, getStoreTopoWeight(store9, stores, labels, 5))
+	c.Assert(1.0/5/2, Equals, getStoreTopoWeight(store10, stores, labels, 5))
+}
+
+func (s *testClusterInfoSuite) TestTopologyWeight4(c *C) {
+	labels := []string{"dc", "zone", "host"}
+	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+
+	stores := []*core.StoreInfo{store1, store2, store3, store4}
+
+	c.Assert(1.0/3/2, Equals, getStoreTopoWeight(store1, stores, labels, 3))
+	c.Assert(1.0/3, Equals, getStoreTopoWeight(store3, stores, labels, 3))
+	c.Assert(1.0/3, Equals, getStoreTopoWeight(store4, stores, labels, 3))
 }
 
 func (s *testClusterInfoSuite) TestCalculateStoreSize1(c *C) {
