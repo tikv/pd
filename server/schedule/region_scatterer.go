@@ -119,33 +119,20 @@ type RegionScatterer struct {
 	name           string
 	cluster        Cluster
 	ordinaryEngine engineContext
-<<<<<<< HEAD
 	specialEngines map[string]engineContext
-=======
-	specialEngines sync.Map
 	opController   *OperatorController
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
 func NewRegionScatterer(ctx context.Context, cluster Cluster, opController *OperatorController) *RegionScatterer {
 	return &RegionScatterer{
-<<<<<<< HEAD
 		ctx:            ctx,
 		name:           regionScatterName,
 		cluster:        cluster,
 		ordinaryEngine: newEngineContext(ctx, filter.NewOrdinaryEngineFilter(regionScatterName)),
 		specialEngines: make(map[string]engineContext),
-=======
-		ctx:          ctx,
-		name:         regionScatterName,
-		cluster:      cluster,
-		opController: opController,
-		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
-			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
-		}),
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
+		opController:   opController,
 	}
 }
 

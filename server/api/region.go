@@ -33,12 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
-<<<<<<< HEAD
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/operator"
-=======
-	"github.com/tikv/pd/server/schedule/filter"
->>>>>>> aec18f1bd (schedule: add scatter operator into OperatorController immediately (#5439))
 	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
