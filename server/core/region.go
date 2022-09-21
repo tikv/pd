@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -194,17 +195,17 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))
 	for _, peer := range r.downPeers {
-		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
+		downPeers = append(downPeers, typeutil.DeepClone(peer, PeerStatsFactory))
 	}
 	pendingPeers := make([]*metapb.Peer, 0, len(r.pendingPeers))
 	for _, peer := range r.pendingPeers {
-		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
+		pendingPeers = append(pendingPeers, typeutil.DeepClone(peer, RegionPeerFactory))
 	}
 
 	region := &RegionInfo{
 		term:              r.term,
-		meta:              proto.Clone(r.meta).(*metapb.Region),
-		leader:            proto.Clone(r.leader).(*metapb.Peer),
+		meta:              typeutil.DeepClone(r.meta, RegionFactory),
+		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
 		writtenBytes:      r.writtenBytes,
@@ -213,10 +214,10 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:          r.readKeys,
 		approximateSize:   r.approximateSize,
 		approximateKeys:   r.approximateKeys,
-		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
+		interval:          typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
-		queryStats:        proto.Clone(r.queryStats).(*pdpb.QueryStats),
+		queryStats:        typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 	}
 
 	for _, opt := range opts {
@@ -991,7 +992,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, proto.Clone(item.region.meta).(*metapb.Region))
+		regions = append(regions, typeutil.DeepClone(item.region.meta, RegionFactory))
 	}
 	return regions
 }
@@ -1334,7 +1335,7 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	var meta = proto.Clone(h.Region).(*metapb.Region)
+	meta := typeutil.DeepClone(h.Region, RegionFactory)
 	meta.StartKey = HexRegionKey(meta.StartKey)
 	meta.EndKey = HexRegionKey(meta.EndKey)
 	return strings.TrimSpace(proto.CompactTextString(meta))
@@ -1355,10 +1356,9 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		meta := proto.Clone(r).(*metapb.Region)
+		meta := typeutil.DeepClone(r, RegionFactory)
 		meta.StartKey = HexRegionKey(meta.StartKey)
 		meta.EndKey = HexRegionKey(meta.EndKey)
-
 		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())

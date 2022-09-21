@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1048,7 +1047,7 @@ func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLa
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
-	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	if force {
 		newStore.Labels = labels
 	} else {
@@ -1065,7 +1064,7 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
-	newStore := proto.Clone(store.GetMeta()).(*metapb.Store)
+	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
 	for _, label := range newStore.GetLabels() {
 		if label.Key == labelKey {
@@ -1960,7 +1959,7 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
-	return proto.Clone(c.meta).(*metapb.Cluster)
+	return typeutil.DeepClone(c.meta, core.ClusterFactory)
 }
 
 // PutMetaCluster puts meta cluster.
@@ -1970,7 +1969,7 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	if meta.GetId() != c.clusterID {
 		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
 	}
-	return c.putMetaLocked(proto.Clone(meta).(*metapb.Cluster))
+	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
 // GetRegionStats returns region statistics from cluster.
