@@ -721,7 +721,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
-		// region is updated.
+		// region is updated
 		region = origin.Clone(
 			core.WithIncVersion(),
 			core.WithIncConfVer(),
@@ -779,6 +779,15 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+		// Change one peer to witness
+		region = region.Clone(
+			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
+			core.WithIncConfVer(),
+		)
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core.Regions, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
@@ -1862,6 +1871,7 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)
+	witnessCount := make(map[uint64]int)
 	for _, region := range regions {
 		for _, peer := range region.GetPeers() {
 			regionCount[peer.StoreId]++
@@ -1871,6 +1881,9 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 			} else {
 				followerCount[peer.StoreId]++
 				checkRegion(re, cache.GetFollower(peer.StoreId, region), region)
+			}
+			if peer.IsWitness {
+				witnessCount[peer.StoreId]++
 			}
 		}
 	}
@@ -1884,6 +1897,9 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 	}
 	for id, count := range followerCount {
 		re.Equal(count, cache.GetStoreFollowerCount(id))
+	}
+	for id, count := range witnessCount {
+		re.Equal(count, cache.GetStoreWitnessCount(id))
 	}
 
 	for _, region := range cache.GetRegions() {
