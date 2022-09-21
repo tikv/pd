@@ -76,7 +76,7 @@ func (h *Redirector) SetAddress(addr string) {
 	defaultDirector := h.proxy.Director
 	h.proxy.Director = func(r *http.Request) {
 		defaultDirector(r)
-		r.Header.Set(proxyHeader, h.name)
+		r.Header.Add(proxyHeader, h.name)
 	}
 
 	if h.tlsConfig != nil {
@@ -118,9 +118,12 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(r.Header.Get(proxyHeader)) > 0 {
-		w.WriteHeader(http.StatusLoopDetected)
-		return
+	proxySources := r.Header.Values(proxyHeader)
+	for _, proxySource := range proxySources {
+		if proxySource == h.name {
+			w.WriteHeader(http.StatusLoopDetected)
+			return
+		}
 	}
 
 	proxy.ServeHTTP(w, r)
