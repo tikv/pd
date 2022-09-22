@@ -52,6 +52,35 @@ func (f *RegionFit) IsCached() bool {
 	return f.mu.cached
 }
 
+// Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
+func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region *core.RegionInfo) bool {
+	fit := f.getRuleFitByStoreID(srcStoreID)
+	// check the target store is fit all constraints.
+	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+		return false
+	}
+
+	// the members of the rule are same, it shouldn't check the score.
+	if fit.contain(dstStore.GetID()) {
+		return true
+	}
+
+	peers := newFitPeer(f.regionStores, region, fit.Peers, replaceFitPeerOpt(srcStoreID, dstStore))
+	score := isolationScore(peers, fit.Rule.LocationLabels)
+	return fit.IsolationScore <= score
+}
+
+func (f *RegionFit) getRuleFitByStoreID(storeID uint64) *RuleFit {
+	for _, rf := range f.RuleFits {
+		for _, p := range rf.Peers {
+			if p.GetStoreId() == storeID {
+				return rf
+			}
+		}
+	}
+	return nil
+}
+
 // IsSatisfied returns if the rules are properly satisfied.
 // It means all Rules are fulfilled and there is no orphan peers.
 func (f *RegionFit) IsSatisfied() bool {
@@ -123,6 +152,15 @@ func (f *RuleFit) IsSatisfied() bool {
 	return len(f.Peers) == f.Rule.Count && len(f.PeersWithDifferentRole) == 0
 }
 
+func (f *RuleFit) contain(storeID uint64) bool {
+	for _, p := range f.Peers {
+		if p.GetStoreId() == storeID {
+			return true
+		}
+	}
+	return false
+}
+
 func compareRuleFit(a, b *RuleFit) int {
 	switch {
 	case len(a.Peers) < len(b.Peers):
@@ -164,22 +202,40 @@ type fitWorker struct {
 	exit          bool
 }
 
-func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
-	regionPeers := region.GetPeers()
-	peers := make([]*fitPeer, 0, len(regionPeers))
-	for _, p := range regionPeers {
-		peers = append(peers, &fitPeer{
+type fitPeerOpt func(peer *fitPeer)
+
+func replaceFitPeerOpt(srcStoreID uint64, dstStore *core.StoreInfo) fitPeerOpt {
+	return func(peer *fitPeer) {
+		if peer.Peer.GetStoreId() == srcStoreID {
+			peer.store = dstStore
+		}
+	}
+}
+
+func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer, opts ...fitPeerOpt) []*fitPeer {
+	peers := make([]*fitPeer, len(fitPeers))
+	for i, p := range fitPeers {
+		peer := &fitPeer{
 			Peer:     p,
 			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
-		})
+		}
+		for _, opt := range opts {
+			opt(peer)
+		}
+		peers[i] = peer
 	}
 	// Sort peers to keep the match result deterministic.
 	sort.Slice(peers, func(i, j int) bool {
-		// Put healthy peers in front to priority to fit healthy peers.
+		// Put healthy peers in front of priority to fit healthy peers.
 		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
+	return peers
+}
+
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
+	peers := newFitPeer(stores, region, region.GetPeers())
 
 	return &fitWorker{
 		stores:        stores,
