@@ -19,7 +19,6 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -27,7 +26,6 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
-	"go.uber.org/zap"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
@@ -586,12 +584,13 @@ func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.Store
 	return statusOK
 }
 
+// Target filters stores when select them as schedule target.
+// It ensures after replace a peer with new one, the isolation level will not decrease and
+// the replaced store can match the source rule.
+// RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
+// but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := f.ruleManager.FitRegion(f.cluster, region)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcStore, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
@@ -639,25 +638,7 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 }
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	targetStoreID := store.GetID()
-	sourcePeer := f.region.GetStorePeer(f.srcLeaderStoreID)
-	targetPeer := f.region.GetStorePeer(targetStoreID)
-	newRegionOptions := []core.RegionCreateOption{core.WithLeader(targetPeer)}
-	if targetPeer == nil {
-		if !f.allowMoveLeader {
-			log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-			return statusStoreNotMatchRule
-		}
-		newRegionOptions = []core.RegionCreateOption{
-			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID),
-			core.WithLeader(&metapb.Peer{Id: sourcePeer.GetId(), StoreId: targetStoreID}),
-		}
-	}
-	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
-	)
-	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule

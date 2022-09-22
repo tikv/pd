@@ -1493,11 +1493,11 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 
 func stringToDim(name string) int {
 	switch name {
-	case BytePriority:
+	case statistics.BytePriority:
 		return statistics.ByteDim
-	case KeyPriority:
+	case statistics.KeyPriority:
 		return statistics.KeyDim
-	case QueryPriority:
+	case statistics.QueryPriority:
 		return statistics.QueryDim
 	}
 	return statistics.ByteDim
@@ -1506,11 +1506,11 @@ func stringToDim(name string) int {
 func dimToString(dim int) string {
 	switch dim {
 	case statistics.ByteDim:
-		return BytePriority
+		return statistics.BytePriority
 	case statistics.KeyDim:
-		return KeyPriority
+		return statistics.KeyPriority
 	case statistics.QueryDim:
-		return QueryPriority
+		return statistics.QueryPriority
 	default:
 		return ""
 	}
