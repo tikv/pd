@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -279,10 +279,13 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	if err != nil {
 		return err
 	}
+	newStore := typeutil.DeepClone(store, core.StoreFactory)
+	newRegion := typeutil.DeepClone(region, core.RegionFactory)
+
 	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
-		Store:  proto.Clone(store).(*metapb.Store),
-		Region: proto.Clone(region).(*metapb.Region),
+		Store:  newStore,
+		Region: newRegion,
 	})
 	if err != nil {
 		return err
@@ -295,9 +298,10 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	newStore := typeutil.DeepClone(store, core.StoreFactory)
 	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
-		Store:  proto.Clone(store).(*metapb.Store),
+		Store:  newStore,
 	})
 	cancel()
 	if err != nil {
@@ -358,9 +362,10 @@ func (c *client) PutPDConfig(config *PDConfig) error {
 
 func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	newStats := typeutil.DeepClone(stats, core.StoreStatsFactory)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
-		Stats:  proto.Clone(stats).(*pdpb.StoreStats),
+		Stats:  newStats,
 	})
 	cancel()
 	if err != nil {

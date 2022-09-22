@@ -130,10 +130,10 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
-	re.Len(storeStats[1][0].Loads, int(statistics.RegionStatCount))
-	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[statistics.RegionReadBytes])
-	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[statistics.RegionReadKeys])
-	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[statistics.RegionReadQuery])
+	re.Len(storeStats[1][0].Loads, statistics.DimLen)
+	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[statistics.ByteDim])
+	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[statistics.KeyDim])
+	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[statistics.QueryDim])
 	// After cold heartbeat, we won't find region 1 peer in regionStats
 	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
 	time.Sleep(20 * time.Millisecond)
@@ -155,8 +155,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
-	re.Len(storeStats[1], 1)
-	re.Equal(uint64(1), storeStats[1][0].RegionID)
+	re.Len(storeStats[1], 0)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
@@ -593,7 +592,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 		EndKey:      []byte{byte(1 + 1)},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 	}
-	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}),
+	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: statistics.RegionHeartBeatReportInterval}),
 		core.SetWrittenBytes(30000*10),
 		core.SetWrittenKeys(300000*10))
 	err = cluster.processRegionHeartbeat(region)
@@ -722,7 +721,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
-		// region is updated.
+		// region is updated
 		region = origin.Clone(
 			core.WithIncVersion(),
 			core.WithIncConfVer(),
@@ -780,6 +779,15 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core.Regions, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
+
+		// Change one peer to witness
+		region = region.Clone(
+			core.WithWitnesses([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}),
+			core.WithIncConfVer(),
+		)
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core.Regions, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
@@ -1863,6 +1871,7 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)
+	witnessCount := make(map[uint64]int)
 	for _, region := range regions {
 		for _, peer := range region.GetPeers() {
 			regionCount[peer.StoreId]++
@@ -1872,6 +1881,9 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 			} else {
 				followerCount[peer.StoreId]++
 				checkRegion(re, cache.GetFollower(peer.StoreId, region), region)
+			}
+			if peer.IsWitness {
+				witnessCount[peer.StoreId]++
 			}
 		}
 	}
@@ -1885,6 +1897,9 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 	}
 	for id, count := range followerCount {
 		re.Equal(count, cache.GetStoreFollowerCount(id))
+	}
+	for id, count := range witnessCount {
+		re.Equal(count, cache.GetStoreWitnessCount(id))
 	}
 
 	for _, region := range cache.GetRegions() {

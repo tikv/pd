@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
@@ -50,6 +51,7 @@ type StoreInfo struct {
 	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
+	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
 	pendingPeerCount    int
@@ -76,61 +78,23 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	return storeInfo
 }
 
-func (s *StoreInfo) cloneMetaStore() *metapb.Store {
-	b, _ := s.meta.Marshal()
-	store := &metapb.Store{}
-	store.Unmarshal(b)
-	return store
-}
-
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	store := &StoreInfo{
-		meta:                s.cloneMetaStore(),
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
-		minResolvedTS:       s.minResolvedTS,
-	}
-
+	store := *s
+	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
 	for _, opt := range opts {
-		opt(store)
+		opt(&store)
 	}
-	return store
+	return &store
 }
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
-	store := &StoreInfo{
-		meta:                s.meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
-		minResolvedTS:       s.minResolvedTS,
-	}
-
+	store := *s
 	for _, opt := range opts {
-		opt(store)
+		opt(&store)
 	}
-	return store
+	return &store
 }
 
 // AllowLeaderTransfer returns if the store is allowed to be selected
@@ -256,6 +220,11 @@ func (s *StoreInfo) GetLeaderCount() int {
 // GetRegionCount returns the Region count of the store.
 func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
+}
+
+// GetWitnessCount returns the witness count of the store.
+func (s *StoreInfo) GetWitnessCount() int {
+	return s.witnessCount
 }
 
 // GetLeaderSize returns the leader size of the store.
@@ -563,8 +532,8 @@ func DistinctScore(labels []string, stores []*StoreInfo, other *StoreInfo) float
 
 // MergeLabels merges the passed in labels with origins, overriding duplicated
 // ones.
-func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
-	storeLabels := s.GetLabels()
+func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+	storeLabels := origin
 L:
 	for _, newLabel := range labels {
 		for _, label := range storeLabels {
@@ -731,10 +700,11 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
+			SetWitnessCount(witnessCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))

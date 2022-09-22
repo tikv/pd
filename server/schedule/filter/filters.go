@@ -18,16 +18,14 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
-	"go.uber.org/zap"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
@@ -40,7 +38,9 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
@@ -63,7 +63,9 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				}
 				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
 					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
@@ -582,12 +584,13 @@ func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.Store
 	return statusOK
 }
 
+// Target filters stores when select them as schedule target.
+// It ensures after replace a peer with new one, the isolation level will not decrease and
+// the replaced store can match the source rule.
+// RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
+// but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := f.ruleManager.FitRegion(f.cluster, region)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcStore, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
@@ -605,11 +608,12 @@ type ruleLeaderFitFilter struct {
 	region           *core.RegionInfo
 	oldFit           *placement.RegionFit
 	srcLeaderStoreID uint64
+	allowMoveLeader  bool
 }
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64) Filter {
+func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
 	return &ruleLeaderFitFilter{
 		scope:            scope,
 		cluster:          cluster,
@@ -617,6 +621,7 @@ func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManage
 		region:           region,
 		oldFit:           ruleManager.FitRegion(cluster, region),
 		srcLeaderStoreID: srcLeaderStoreID,
+		allowMoveLeader:  allowMoveLeader,
 	}
 }
 
@@ -633,16 +638,7 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 }
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	targetPeer := f.region.GetStorePeer(store.GetID())
-	if targetPeer == nil {
-		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-		return statusStoreNotMatchRule
-	}
-	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithLeader(targetPeer))
-	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
@@ -664,9 +660,9 @@ func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *co
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+func NewPlacementLeaderSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
 	if opt.IsPlacementRulesEnabled() {
-		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
+		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID(), allowMoveLeader)
 	}
 	return nil
 }
@@ -835,7 +831,7 @@ func (f *isolationFilter) Target(opt *config.PersistOptions, store *core.StoreIn
 // FitRegion in filter
 func createRegionForRuleFit(startKey, endKey []byte,
 	peers []*metapb.Peer, leader *metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
-	copyLeader := proto.Clone(leader).(*metapb.Peer)
+	copyLeader := typeutil.DeepClone(leader, core.RegionPeerFactory)
 	copyPeers := make([]*metapb.Peer, 0, len(peers))
 	for _, p := range peers {
 		peer := &metapb.Peer{

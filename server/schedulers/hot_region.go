@@ -54,7 +54,7 @@ func init() {
 		if len(data) != 0 {
 			// After upgrading, use compatible config.
 			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
-			conf.apply(compatibleConfig)
+			conf.applyPrioritiesConfig(compatiblePrioritiesConfig)
 			if err := decoder(conf); err != nil {
 				return nil, err
 			}
@@ -141,6 +141,7 @@ func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *hotScheduler) GetMinInterval() time.Duration {
 	return minHotScheduleInterval
 }
+
 func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
@@ -348,6 +349,9 @@ type solution struct {
 	// 1 indicates that this is a non-optimizable solution.
 	// See `calcProgressiveRank` for more about progressive rank.
 	progressiveRank int64
+	// only for rank v2
+	firstScore  int
+	secondScore int
 }
 
 // getExtremeLoad returns the min load of the src store and the max load of the dst store.
@@ -370,13 +374,12 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 }
 
 // calcPeersRate precomputes the peer rate and stores it in cachedPeersRate.
-func (s *solution) calcPeersRate(rw statistics.RWType, dims ...int) {
+func (s *solution) calcPeersRate(dims ...int) {
 	s.cachedPeersRate = make([]float64, statistics.DimLen)
 	for _, dim := range dims {
-		kind := statistics.GetRegionStatKind(rw, dim)
-		peersRate := s.mainPeerStat.GetLoad(kind)
+		peersRate := s.mainPeerStat.GetLoad(dim)
 		if s.revertPeerStat != nil {
-			peersRate -= s.revertPeerStat.GetLoad(kind)
+			peersRate -= s.revertPeerStat.GetLoad(dim)
 		}
 		s.cachedPeersRate[dim] = peersRate
 	}
@@ -388,10 +391,9 @@ func (s *solution) getPeersRateFromCache(dim int) float64 {
 }
 
 // isAvailable returns the solution is available.
-// If the solution has no revertRegion, progressiveRank should < 0.
-// If the solution has some revertRegion, progressiveRank should < -1.
-func (s *solution) isAvailable() bool {
-	return s.progressiveRank < -1 || (s.progressiveRank < 0 && s.revertRegion == nil)
+// The solution should have no revertRegion and progressiveRank < 0.
+func isAvailableV1(s *solution) bool {
+	return s.progressiveRank < 0
 }
 
 type balanceSolver struct {
@@ -421,7 +423,18 @@ type balanceSolver struct {
 	maxPeerNum    int
 	minHotDegree  int
 
-	pick func(s interface{}, p func(int) bool) bool
+	firstPriorityV2Ratios  *rankV2Ratios
+	secondPriorityV2Ratios *rankV2Ratios
+
+	// The rank correlation function used according to the version
+	isAvailable                 func(*solution) bool
+	filterUniformStore          func() (string, bool)
+	needSearchRevertRegions     func() bool
+	setSearchRevertRegions      func()
+	calcProgressiveRank         func()
+	betterThan                  func(*solution) bool
+	rankToDimString             func() string
+	checkByPriorityAndTolerance func(loads []float64, f func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -463,9 +476,33 @@ func (bs *balanceSolver) init() {
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
 
-	bs.pick = slice.AnyOf
-	if bs.sche.conf.IsStrictPickingStoreEnabled() {
-		bs.pick = slice.AllOf
+	switch bs.sche.conf.GetRankFormulaVersion() {
+	case "v1":
+		bs.initRankV1()
+	default:
+		bs.initRankV2()
+	}
+}
+
+func (bs *balanceSolver) initRankV1() {
+	bs.isAvailable = isAvailableV1
+	bs.filterUniformStore = bs.filterUniformStoreV1
+	bs.needSearchRevertRegions = func() bool { return false }
+	bs.setSearchRevertRegions = func() {}
+	bs.calcProgressiveRank = bs.calcProgressiveRankV1
+	bs.betterThan = bs.betterThanV1
+	bs.rankToDimString = bs.rankToDimStringV1
+	bs.pickCheckPolicyV1()
+}
+
+func (bs *balanceSolver) pickCheckPolicyV1() {
+	switch {
+	case bs.resourceTy == writeLeader:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+	case bs.sche.conf.IsStrictPickingStoreEnabled():
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAllOf
+	default:
+		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
 	}
 }
 
@@ -479,25 +516,25 @@ func (bs *balanceSolver) getPriorities() []string {
 	// For write, they are different
 	switch bs.resourceTy {
 	case readLeader, readPeer:
-		return adjustConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
 	case writeLeader:
-		return adjustConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
 	case writePeer:
-		return adjustConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
 	}
 	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster schedule.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
-	solver := &balanceSolver{
+	bs := &balanceSolver{
 		Cluster: cluster,
 		sche:    sche,
 		rwTy:    rwTy,
 		opTy:    opTy,
 	}
-	solver.init()
-	return solver
+	bs.init()
+	return bs
 }
 
 func (bs *balanceSolver) isValid() bool {
@@ -507,7 +544,7 @@ func (bs *balanceSolver) isValid() bool {
 	return true
 }
 
-func (bs *balanceSolver) filterUniformStore() (string, bool) {
+func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
 	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
@@ -538,7 +575,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			schedulerCounter.WithLabelValues(bs.sche.GetName(), fmt.Sprintf("%s-skip-%s-uniform-store", bs.rwTy.String(), label)).Inc()
 			return
 		}
-		if bs.cur.isAvailable() && bs.betterThan(bs.best) {
+		if bs.isAvailable(bs.cur) && bs.betterThan(bs.best) {
 			if newOps := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				clone := *bs.cur
@@ -548,7 +585,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 
 	// Whether to allow move region peer from dstStore to srcStore
-	searchRevertRegions := bs.sche.searchRevertRegions[bs.resourceTy] && !bs.sche.conf.IsStrictPickingStoreEnabled()
 	var allowRevertRegion func(region *core.RegionInfo, srcStoreID uint64) bool
 	if bs.opTy == transferLeader {
 		allowRevertRegion = func(region *core.RegionInfo, srcStoreID uint64) bool {
@@ -576,16 +612,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.cur.dstStore = dstStore
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
-
-				if searchRevertRegions && (bs.cur.progressiveRank >= -1 && bs.cur.progressiveRank <= 0) &&
-					(bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil) {
-					// The search-revert-regions is performed only when the following conditions are met to improve performance.
-					// * `searchRevertRegions` is true. It depends on the result of the last `solve`.
-					// * `IsStrictPickingStoreEnabled` is false.
-					// * The current solution is not good enough. -1 <= progressiveRank <= 0
-					// * The current best solution is not good enough.
-					//     * The current best solution has progressiveRank < -1 and does not contain revert regions.
-					//     * The current best solution contain revert regions.
+				if bs.needSearchRevertRegions() {
 					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
 					dstStoreID := dstStore.GetID()
 					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
@@ -605,20 +632,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			}
 		}
 	}
-	searchRevertRegions = bs.allowSearchRevertRegions()
-	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
-	if searchRevertRegions {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "allow-search-revert-regions").Inc()
-	}
-	return bs.ops
-}
 
-func (bs *balanceSolver) allowSearchRevertRegions() bool {
-	// The next solve is allowed to search-revert-regions only when the following conditions are met.
-	// * No best solution was found this time.
-	// * The progressiveRank of the best solution is -1.
-	// * The best solution contain revert regions.
-	return bs.best == nil || bs.best.progressiveRank >= -1 || bs.best.revertRegion != nil
+	bs.setSearchRevertRegions()
+	return bs.ops
 }
 
 func (bs *balanceSolver) tryAddPendingInfluence() bool {
@@ -629,39 +645,58 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
 		return false
 	}
-	// Depending on the source of the statistics used, a different ZombieDuration will be used.
-	// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
-	var maxZombieDur time.Duration
-	switch bs.resourceTy {
-	case writeLeader:
-		maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
-			maxZombieDur = bs.sche.conf.GetRegionsStatZombieDuration()
-		} else {
-			maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-		}
-	default:
-		maxZombieDur = bs.sche.conf.GetStoreStatZombieDuration()
-	}
+	maxZombieDur := bs.calcMaxZombieDur()
 
 	// TODO: Process operators atomically.
 	// main peer
 	srcStoreID := bs.best.srcStore.GetID()
 	dstStoreID := bs.best.dstStore.GetID()
-	infl := statistics.Influence{Loads: bs.cur.mainPeerStat.Loads, Count: 1}
+	infl := bs.collectPendingInfluence(bs.best.mainPeerStat)
 	if !bs.sche.tryAddPendingInfluence(bs.ops[0], srcStoreID, dstStoreID, infl, maxZombieDur) {
 		return false
 	}
 	// revert peers
 	if bs.best.revertPeerStat != nil {
-		infl = statistics.Influence{Loads: bs.best.revertPeerStat.Loads, Count: 1}
+		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
 		}
 	}
 	bs.logBestSolution()
 	return true
+}
+
+func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) statistics.Influence {
+	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+	bs.rwTy.SetFullLoadRates(infl.Loads, peer.GetLoads())
+	inverse := bs.rwTy.Inverse()
+	another := bs.GetHotPeerStat(inverse, peer.RegionID, peer.StoreID)
+	if another != nil {
+		inverse.SetFullLoadRates(infl.Loads, another.GetLoads())
+	}
+	return infl
+}
+
+// Depending on the source of the statistics used, a different ZombieDuration will be used.
+// If the statistics are from the sum of Regions, there will be a longer ZombieDuration.
+func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
+	switch bs.resourceTy {
+	case writeLeader:
+		if bs.firstPriority == statistics.QueryDim {
+			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
+			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
+			// The reason is the same with `tikvCollector.GetLoads`.
+			return bs.sche.conf.GetStoreStatZombieDuration()
+		}
+		return bs.sche.conf.GetRegionsStatZombieDuration()
+	case writePeer:
+		if bs.best.srcStore.IsTiFlash() {
+			return bs.sche.conf.GetRegionsStatZombieDuration()
+		}
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	default:
+		return bs.sche.conf.GetStoreStatZombieDuration()
+	}
 }
 
 // filterSrcStores compare the min rate and the ratio * expectation rate, if two dim rate is greater than
@@ -685,7 +720,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			continue
 		}
 
-		if bs.checkSrcByDimPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
+		if bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			ret[id] = detail
 			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 		} else {
@@ -695,12 +730,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	return ret
 }
 
-func (bs *balanceSolver) checkSrcByDimPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(minLoad.Loads, func(i int) bool {
-		if bs.isSelectedDim(i) {
-			return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
-		}
-		return true
+func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
+		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
 	})
 }
 
@@ -736,14 +768,12 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statis
 	firstSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(firstSort, ret)
 	sort.Slice(firstSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority)
-		return firstSort[i].GetLoad(k) > firstSort[j].GetLoad(k)
+		return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
 	})
 	secondSort := make([]*statistics.HotPeerStat, len(ret))
 	copy(secondSort, ret)
 	sort.Slice(secondSort, func(i, j int) bool {
-		k := statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority)
-		return secondSort[i].GetLoad(k) > secondSort[j].GetLoad(k)
+		return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
 	})
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	for len(union) < bs.maxPeerNum {
@@ -826,29 +856,57 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
 	case movePeer:
+		if bs.rwTy == statistics.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore),
 		}
-
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
 		}
 
 	case transferLeader:
+		if !bs.cur.mainPeerStat.IsLeader() { // source peer must be leader whether it is move leader or transfer leader
+			return nil
+		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore); leaderFilter != nil {
-			filters = append(filters, leaderFilter)
-		}
-
-		for _, peer := range bs.cur.region.GetFollowers() {
-			if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
-				candidates = append(candidates, detail)
+		if bs.rwTy == statistics.Read {
+			peers := bs.cur.region.GetPeers()
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for storeID, detail := range bs.stLoadDetail {
+				if storeID == bs.cur.mainPeerStat.StoreID {
+					continue
+				}
+				// transfer leader
+				if slice.AnyOf(peers, func(i int) bool {
+					return peers[i].GetStoreId() == storeID
+				}) {
+					candidates = append(candidates, detail)
+					continue
+				}
+				// move leader
+				if filter.Target(bs.GetOpts(), detail.StoreInfo, moveLeaderFilters) {
+					candidates = append(candidates, detail)
+				}
+			}
+		} else {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+				filters = append(filters, leaderFilter)
+			}
+			for _, peer := range bs.cur.region.GetFollowers() {
+				if detail, ok := bs.stLoadDetail[peer.GetStoreId()]; ok {
+					candidates = append(candidates, detail)
+				}
 			}
 		}
 
@@ -888,12 +946,31 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.pick(maxLoad.Loads, func(i int) bool {
+	return bs.checkByPriorityAndTolerance(maxLoad.Loads, func(i int) bool {
+		return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
+	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f func(int) bool) bool {
+	return slice.AllOf(loads, func(i int) bool {
 		if bs.isSelectedDim(i) {
-			return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
+			return f(i)
 		}
 		return true
 	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f func(int) bool) bool {
+	return slice.AnyOf(loads, func(i int) bool {
+		if bs.isSelectedDim(i) {
+			return f(i)
+		}
+		return false
+	})
+}
+
+func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
+	return f(bs.firstPriority)
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
@@ -911,9 +988,9 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // |   isBetter                         | -4       | -3            | -1 / 0   |
 // |   isNotWorsened                    | -2       | 1             | 1        |
 // |   Worsened                         | 0        | 1             | 1        |
-func (bs *balanceSolver) calcProgressiveRank() {
+func (bs *balanceSolver) calcProgressiveRankV1() {
 	bs.cur.progressiveRank = 1
-	bs.cur.calcPeersRate(bs.rwTy, bs.firstPriority, bs.secondPriority)
+	bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
 	if bs.cur.getPeersRateFromCache(bs.firstPriority) < bs.getMinRate(bs.firstPriority) &&
 		bs.cur.getPeersRateFromCache(bs.secondPriority) < bs.getMinRate(bs.secondPriority) {
 		return
@@ -954,14 +1031,22 @@ func (bs *balanceSolver) calcProgressiveRank() {
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.
 // This will make the hot region scheduling slow even serialize running when each 2 store's pending influence is close.
-func (bs *balanceSolver) isTolerance(dim int) bool {
+func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
+	srcStoreID := bs.cur.srcStore.GetID()
+	dstStoreID := bs.cur.dstStore.GetID()
 	srcRate, dstRate := bs.cur.getCurrentLoad(dim)
+	srcPending, dstPending := bs.cur.getPendingLoad(dim)
+	if reverse {
+		srcStoreID, dstStoreID = dstStoreID, srcStoreID
+		srcRate, dstRate = dstRate, srcRate
+		srcPending, dstPending = dstPending, srcPending
+	}
+
 	if srcRate <= dstRate {
 		return false
 	}
-	srcPending, dstPending := bs.cur.getPendingLoad(dim)
 	pendingAmp := 1 + pendingAmpFactor*srcRate/(srcRate-dstRate)
-	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(bs.cur.srcStore.GetID(), 10), strconv.FormatUint(bs.cur.dstStore.GetID(), 10)).Set(pendingAmp)
+	hotPendingStatus.WithLabelValues(bs.rwTy.String(), strconv.FormatUint(srcStoreID, 10), strconv.FormatUint(dstStoreID, 10)).Set(pendingAmp)
 	return srcRate-pendingAmp*srcPending > dstRate+pendingAmp*dstPending
 }
 
@@ -984,12 +1069,12 @@ func (bs *balanceSolver) getHotDecRatioByPriorities(dim int) (isHot bool, decRat
 func (bs *balanceSolver) isBetterForWriteLeader() bool {
 	srcRate, dstRate := bs.cur.getExtremeLoad(bs.firstPriority)
 	peersRate := bs.cur.getPeersRateFromCache(bs.firstPriority)
-	return srcRate-peersRate >= dstRate+peersRate && bs.isTolerance(bs.firstPriority)
+	return srcRate-peersRate >= dstRate+peersRate && bs.isTolerance(bs.firstPriority, false)
 }
 
 func (bs *balanceSolver) isBetter(dim int) bool {
 	isHot, decRatio := bs.getHotDecRatioByPriorities(dim)
-	return isHot && decRatio <= bs.greatDecRatio && bs.isTolerance(dim)
+	return isHot && decRatio <= bs.greatDecRatio && bs.isTolerance(dim, false)
 }
 
 // isNotWorsened must be true if isBetter is true.
@@ -1011,12 +1096,12 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThan(old *solution) bool {
+func (bs *balanceSolver) betterThanV1(old *solution) bool {
 	if old == nil {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
-		// Higher rank is better.
+		// Smaller rank is better.
 		return bs.cur.progressiveRank < old.progressiveRank
 	}
 	if (bs.cur.revertRegion == nil) != (old.revertRegion == nil) {
@@ -1043,7 +1128,7 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 		}
 
 		// We will firstly consider ensuring converge faster, secondly reduce oscillation
-		firstCmp, secondCmp := bs.getRkCmpPriorities(old)
+		firstCmp, secondCmp := bs.getRkCmpPrioritiesV1(old)
 		switch bs.cur.progressiveRank {
 		case -4: // isBetter(firstPriority) && isBetter(secondPriority)
 			if firstCmp != 0 {
@@ -1071,20 +1156,15 @@ func (bs *balanceSolver) betterThan(old *solution) bool {
 	return false
 }
 
-func (bs *balanceSolver) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int) {
-	dimToStep := func(priority int) float64 {
-		switch priority {
-		case statistics.ByteDim:
-			return 100
-		case statistics.KeyDim:
-			return 10
-		case statistics.QueryDim:
-			return 10
-		}
-		return 100
-	}
-	firstCmp = rankCmp(bs.cur.getPeersRateFromCache(bs.firstPriority), old.getPeersRateFromCache(bs.firstPriority), stepRank(0, dimToStep(bs.firstPriority)))
-	secondCmp = rankCmp(bs.cur.getPeersRateFromCache(bs.secondPriority), old.getPeersRateFromCache(bs.secondPriority), stepRank(0, dimToStep(bs.secondPriority)))
+var dimToStep = [statistics.DimLen]float64{
+	statistics.ByteDim:  100,
+	statistics.KeyDim:   10,
+	statistics.QueryDim: 10,
+}
+
+func (bs *balanceSolver) getRkCmpPrioritiesV1(old *solution) (firstCmp int, secondCmp int) {
+	firstCmp = rankCmp(bs.cur.getPeersRateFromCache(bs.firstPriority), old.getPeersRateFromCache(bs.firstPriority), stepRank(0, dimToStep[bs.firstPriority]))
+	secondCmp = rankCmp(bs.cur.getPeersRateFromCache(bs.secondPriority), old.getPeersRateFromCache(bs.secondPriority), stepRank(0, dimToStep[bs.secondPriority]))
 	return
 }
 
@@ -1176,6 +1256,21 @@ func (bs *balanceSolver) isReadyToBuild() bool {
 		bs.cur.revertRegion != nil && bs.cur.revertRegion.GetID() == bs.cur.revertPeerStat.ID()
 }
 
+func (bs *balanceSolver) rankToDimStringV1() string {
+	switch bs.cur.progressiveRank {
+	case -4:
+		return "all"
+	case -3:
+		return dimToString(bs.firstPriority)
+	case -2:
+		return dimToString(bs.secondPriority)
+	case -1:
+		return dimToString(bs.firstPriority) + "-only"
+	default:
+		return "none"
+	}
+}
+
 func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	if !bs.isReadyToBuild() {
 		return nil
@@ -1185,17 +1280,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	dstStoreID := bs.cur.dstStore.GetID()
 	sourceLabel := strconv.FormatUint(srcStoreID, 10)
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
-	dim := ""
-	switch bs.cur.progressiveRank {
-	case -4:
-		dim = "all"
-	case -3:
-		dim = dimToString(bs.firstPriority)
-	case -2:
-		dim = dimToString(bs.secondPriority)
-	case -1:
-		dim = dimToString(bs.firstPriority) + "-only"
-	}
+	dim := bs.rankToDimString()
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
@@ -1316,8 +1401,8 @@ func (bs *balanceSolver) logBestSolution() {
 		// Log more information on solutions containing revertRegion
 		srcFirstRate, dstFirstRate := best.getExtremeLoad(bs.firstPriority)
 		srcSecondRate, dstSecondRate := best.getExtremeLoad(bs.secondPriority)
-		mainFirstRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.firstPriority))
-		mainSecondRate := best.mainPeerStat.GetLoad(statistics.GetRegionStatKind(bs.rwTy, bs.secondPriority))
+		mainFirstRate := best.mainPeerStat.GetLoad(bs.firstPriority)
+		mainSecondRate := best.mainPeerStat.GetLoad(bs.secondPriority)
 		log.Info("use solution with revert regions",
 			zap.Uint64("src-store", best.srcStore.GetID()),
 			zap.Float64("src-first-rate", srcFirstRate),
@@ -1408,11 +1493,11 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 
 func stringToDim(name string) int {
 	switch name {
-	case BytePriority:
+	case statistics.BytePriority:
 		return statistics.ByteDim
-	case KeyPriority:
+	case statistics.KeyPriority:
 		return statistics.KeyDim
-	case QueryPriority:
+	case statistics.QueryPriority:
 		return statistics.QueryDim
 	}
 	return statistics.ByteDim
@@ -1421,11 +1506,11 @@ func stringToDim(name string) int {
 func dimToString(dim int) string {
 	switch dim {
 	case statistics.ByteDim:
-		return BytePriority
+		return statistics.BytePriority
 	case statistics.KeyDim:
-		return KeyPriority
+		return statistics.KeyPriority
 	case statistics.QueryDim:
-		return QueryPriority
+		return statistics.QueryPriority
 	default:
 		return ""
 	}
