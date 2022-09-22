@@ -559,7 +559,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{QueryPriority, BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -968,7 +968,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	scheduler, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb := scheduler.(*hotScheduler)
-	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
@@ -1122,7 +1122,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1180,7 +1180,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	old := pendingAmpFactor
 	pendingAmpFactor = 0.0
 	defer func() {
@@ -1299,7 +1299,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetStrictPickingStore(false)
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -1854,7 +1854,7 @@ func TestHotReadPeerSchedule(t *testing.T) {
 	sche, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc.UpdateStorageReadStats(1, 20*units.MiB, 20*units.MiB)
 	tc.UpdateStorageReadStats(2, 19*units.MiB, 19*units.MiB)
@@ -1903,12 +1903,12 @@ func TestHotScheduleWithPriority(t *testing.T) {
 		{1, []uint64{1, 2, 3}, 2 * units.MiB, 1 * units.MiB, 0},
 		{6, []uint64{4, 2, 3}, 1 * units.MiB, 2 * units.MiB, 0},
 	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 4, 5)
@@ -1925,12 +1925,12 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	addRegionInfo(tc, statistics.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2 * units.MiB, 2 * units.MiB, 0},
 	})
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
-	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
@@ -1944,7 +1944,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(4, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 1*units.MiB*statistics.StoreHeartBeatReportInterval, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	hb.(*hotScheduler).conf.StrictPickingStore = true
 	ops, _ = hb.Schedule(tc, false)
 	re.Empty(ops)
@@ -1959,7 +1959,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 6*units.MiB*statistics.StoreHeartBeatReportInterval, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(4, 1*units.MiB*statistics.StoreHeartBeatReportInterval, 10*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 1*units.MiB*statistics.StoreHeartBeatReportInterval, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	hb.(*hotScheduler).conf.StrictPickingStore = true
 	ops, _ = hb.Schedule(tc, false)
 	re.Empty(ops)
@@ -1999,7 +1999,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	addRegionInfo(tc, statistics.Write, []testRegionInfo{
 		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	stddevThreshold = 0.1
 	ops, _ := hb.Schedule(tc, false)
 	re.Empty(ops)
@@ -2018,7 +2018,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	addRegionInfo(tc, statistics.Write, []testRegionInfo{
 		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	stddevThreshold = 0.1
 	ops, _ = hb.Schedule(tc, false)
 	re.Empty(ops)
@@ -2062,11 +2062,11 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	defer func() {
 		schedulePeerPr, pendingAmpFactor = old1, old2
 	}()
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
@@ -2089,8 +2089,8 @@ func TestCompatibility(t *testing.T) {
 	})
 	// config error value
 	hb.(*hotScheduler).conf.ReadPriorities = []string{"error"}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"error", BytePriority}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"error", statistics.BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.QueryPriority, statistics.BytePriority, statistics.KeyPriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -2104,18 +2104,18 @@ func TestCompatibility(t *testing.T) {
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// config byte and key
-	hb.(*hotScheduler).conf.ReadPriorities = []string{KeyPriority, BytePriority}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{BytePriority, KeyPriority}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{KeyPriority, BytePriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.KeyDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
 	})
 	// config query in low version
-	hb.(*hotScheduler).conf.ReadPriorities = []string{QueryPriority, BytePriority}
-	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{QueryPriority, BytePriority}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -2124,7 +2124,7 @@ func TestCompatibility(t *testing.T) {
 	// config error value
 	hb.(*hotScheduler).conf.ReadPriorities = []string{"error", "error"}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{}
-	hb.(*hotScheduler).conf.WritePeerPriorities = []string{QueryPriority, BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.QueryPriority, statistics.BytePriority, statistics.KeyPriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.ByteDim, statistics.KeyDim},
 		{statistics.KeyDim, statistics.ByteDim},
@@ -2229,7 +2229,7 @@ func TestConfigValidation(t *testing.T) {
 	err = hc.valid()
 	re.Error(err)
 
-	// qps is not allowed to be set in priorities for write-peer-priorities
+	// query is not allowed to be set in priorities for write-peer-priorities
 	hc = initHotRegionScheduleConfig()
 	hc.WritePeerPriorities = []string{"query", "byte"}
 	err = hc.valid()
