@@ -45,7 +45,7 @@ var (
 func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombstoneEnable bool) *mockcluster.Cluster {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	opt.GetScheduleConfig().TolerantSizeRatio = float64(1)
+	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
 	if labelEnable {
@@ -65,7 +65,7 @@ func newBenchCluster(ctx context.Context, ruleEnable, labelEnable bool, tombston
 				label["az"] = az
 				label["rack"] = rack
 				label["host"] = host
-				tc.AddLabelsStore(storeID, regionCount, label)
+				tc.AddLabelsStore(storeID, regionCount-int(storeID), label)
 				storeID++
 			}
 			for j := 0; j < regionCount; j++ {
@@ -128,9 +128,9 @@ func addTiflash(tc *mockcluster.Cluster) {
 		label := make(map[string]string, 3)
 		label["engine"] = "tiflash"
 		if i == tiflashCount-1 {
-			tc.AddLabelsStore(uint64(storeCount+i), regionCount/100, label)
+			tc.AddLabelsStore(uint64(storeCount+i), 1, label)
 		} else {
-			tc.AddLabelsStore(uint64(storeCount+i), regionCount/10, label)
+			tc.AddLabelsStore(uint64(storeCount+i), regionCount-storeCount-i, label)
 		}
 	}
 	rule := &placement.Rule{
