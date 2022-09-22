@@ -427,5 +427,6 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		suite.Equal(testCase.IsFinish, step.IsFinish(region))
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
+		_ = step.GetCmd(region, true)
 	}
 }
