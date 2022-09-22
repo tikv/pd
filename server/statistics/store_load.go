@@ -144,18 +144,6 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 	s.isTiFlash = true
 }
 
-// GetPendingInfluence returns the current pending influence.
-func GetPendingInfluence(stores []*core.StoreInfo) map[uint64]*Influence {
-	stInfos := SummaryStoreInfos(stores)
-	ret := make(map[uint64]*Influence, len(stInfos))
-	for id, info := range stInfos {
-		if info.PendingSum != nil {
-			ret[id] = info.PendingSum
-		}
-	}
-	return ret
-}
-
 // StoreLoad records the current load.
 type StoreLoad struct {
 	Loads []float64

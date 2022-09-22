@@ -553,8 +553,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
 	collectHotMetrics(c.cluster, stores, statistics.Read)
-	// Collects pending influence.
-	collectPendingInfluence(stores)
 }
 
 func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
@@ -577,8 +575,8 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		stat, ok := status.AsLeader[storeID]
-		if ok {
+		stat, hasHotLeader := status.AsLeader[storeID]
+		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
@@ -590,8 +588,8 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
-		stat, ok = status.AsPeer[storeID]
-		if ok {
+		stat, hasHotPeer := status.AsPeer[storeID]
+		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
@@ -602,29 +600,18 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
-	}
-}
 
-func collectPendingInfluence(stores []*core.StoreInfo) {
-	pendings := statistics.GetPendingInfluence(stores)
-	for _, s := range stores {
-		storeAddress := s.GetAddress()
-		storeID := s.GetID()
-		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionReadBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.RegionReadKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_query_rate").Set(infl.Loads[statistics.RegionReadQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionWriteBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.RegionWriteKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_query_rate").Set(infl.Loads[statistics.RegionWriteQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
+		if !hasHotLeader && !hasHotPeer {
+			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
+				hotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			})
 		}
 	}
 }
 
 func (c *coordinator) resetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
+	hotPendingSum.Reset()
 }
 
 func (c *coordinator) shouldRun() bool {
