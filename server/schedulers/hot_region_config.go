@@ -118,20 +118,24 @@ type hotRegionSchedulerConfig struct {
 
 	// rank step ratio decide the step when calculate rank
 	// step = max current * rank step ratio
-	ByteRateRankStepRatio  float64  `json:"byte-rate-rank-step-ratio"`
-	KeyRateRankStepRatio   float64  `json:"key-rate-rank-step-ratio"`
-	QueryRateRankStepRatio float64  `json:"query-rate-rank-step-ratio"`
-	CountRankStepRatio     float64  `json:"count-rank-step-ratio"`
-	GreatDecRatio          float64  `json:"great-dec-ratio"`
-	MinorDecRatio          float64  `json:"minor-dec-ratio"` // only for v1
-	SrcToleranceRatio      float64  `json:"src-tolerance-ratio"`
-	DstToleranceRatio      float64  `json:"dst-tolerance-ratio"`
-	ReadPriorities         []string `json:"read-priorities"`
+	ByteRateRankStepRatio  float64 `json:"byte-rate-rank-step-ratio"`
+	KeyRateRankStepRatio   float64 `json:"key-rate-rank-step-ratio"`
+	QueryRateRankStepRatio float64 `json:"query-rate-rank-step-ratio"`
+	CountRankStepRatio     float64 `json:"count-rank-step-ratio"`
+	GreatDecRatio          float64 `json:"great-dec-ratio"`
+	MinorDecRatio          float64 `json:"minor-dec-ratio"` // only for v1
+
+	// If SrcToleranceRatio and DstToleranceRatio are zero,
+	// it means hot region scheduler will not consider about expectation and variance.
+	SrcToleranceRatio float64 `json:"src-tolerance-ratio"`
+	DstToleranceRatio float64 `json:"dst-tolerance-ratio"`
 
 	// For first priority of write leader, it is better to consider key rate or query rather than byte
 	WriteLeaderPriorities []string `json:"write-leader-priorities"`
 	WritePeerPriorities   []string `json:"write-peer-priorities"`
-	StrictPickingStore    bool     `json:"strict-picking-store,string"` // only for v1
+	ReadPriorities        []string `json:"read-priorities"`
+
+	StrictPickingStore bool `json:"strict-picking-store,string"` // only for v1
 
 	// Separately control whether to start hotspot scheduling for TiFlash
 	EnableForTiFlash bool `json:"enable-for-tiflash,string"`

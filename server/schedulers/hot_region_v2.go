@@ -92,6 +92,9 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 }
 
 func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
+	if !bs.enableExpectation() {
+		return "", false
+	}
 	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
