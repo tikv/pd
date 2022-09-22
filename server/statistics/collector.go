@@ -62,7 +62,7 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, 
 			// Use sum of hot peers to estimate leader-only byte rate.
 			// For Write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
 			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
-			// Write{QPS} does not require such processing.
+			// Write{Query} does not require such processing.
 			loads[ByteDim] = peerLoadSum[ByteDim]
 			loads[KeyDim] = peerLoadSum[KeyDim]
 			loads[QueryDim] = storeLoads[StoreWriteQuery]
