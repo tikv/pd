@@ -459,7 +459,9 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	}
 	if solver.IsRegionHot(solver.region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-		collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+		if collector != nil {
+			collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+		}
 		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
 		return nil
 	}
@@ -540,7 +542,9 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	defer func() { solver.step-- }()
 	if !solver.shouldBalance(l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
-		collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+		if collector != nil {
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+		}
 		return nil
 	}
 	solver.step++
@@ -548,7 +552,9 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.region, solver.region.GetLeader().GetStoreId(), solver.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
-		collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+		if collector != nil {
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+		}
 		return nil
 	}
 	op.Counters = append(op.Counters,
