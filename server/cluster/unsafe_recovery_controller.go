@@ -360,7 +360,6 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 				if hasPlan, err = u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap); hasPlan && err == nil {
 					u.changeStage(createEmptyRegion)
 					break
-
 				}
 				if err != nil {
 					break
