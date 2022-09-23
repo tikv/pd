@@ -209,6 +209,9 @@ func (s *StoreInfo) GetLabels() []*metapb.StoreLabel {
 
 // GetID returns the ID of the store.
 func (s *StoreInfo) GetID() uint64 {
+	if s == nil {
+		return 0
+	}
 	return s.meta.GetId()
 }
 

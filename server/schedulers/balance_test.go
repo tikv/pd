@@ -188,7 +188,7 @@ func TestTolerantRatio(t *testing.T) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	// create a region to control average region size.
 	re.NotNil(tc.AddLeaderRegion(1, 1, 2))
-	regionSize := int64(96 * units.MiB)
+	regionSize := int64(96)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tbl := []struct {
@@ -226,7 +226,10 @@ func TestTolerantRatio(t *testing.T) {
 		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, t.kind, tc, operator.OpInfluence{})
 		solver.region = region
-		re.Equal(t.expectTolerantResource(t.kind), solver.getTolerantResource())
+
+		sourceScore := t.expectTolerantResource(t.kind)
+		targetScore := solver.getTolerantResource()
+		re.Equal(sourceScore, targetScore)
 	}
 }
 
