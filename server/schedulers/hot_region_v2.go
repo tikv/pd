@@ -19,6 +19,8 @@ package schedulers
 import (
 	"fmt"
 	"math"
+
+	"github.com/tikv/pd/server/statistics"
 )
 
 const (
@@ -90,6 +92,9 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 }
 
 func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
+	if !bs.enableExpectation() {
+		return "", false
+	}
 	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
@@ -98,11 +103,11 @@ func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
 	}
 	if isUniformFirstPriority && (bs.cur.progressiveRank == -2 || bs.cur.progressiveRank == -3) {
 		// If first priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for second priority dim
-		return dimToString(bs.firstPriority), true
+		return statistics.DimToString(bs.firstPriority), true
 	}
 	if isUniformSecondPriority && bs.cur.progressiveRank == -1 {
 		// If second priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for first priority dim
-		return dimToString(bs.secondPriority), true
+		return statistics.DimToString(bs.secondPriority), true
 	}
 	return "", false
 }
@@ -360,11 +365,11 @@ func (bs *balanceSolver) rankToDimStringV2() string {
 	case -4:
 		return "all"
 	case -3:
-		return dimToString(bs.firstPriority)
+		return statistics.DimToString(bs.firstPriority)
 	case -2:
-		return dimToString(bs.firstPriority) + "-only"
+		return statistics.DimToString(bs.firstPriority) + "-only"
 	case -1:
-		return dimToString(bs.secondPriority)
+		return statistics.DimToString(bs.secondPriority)
 	default:
 		return "none"
 	}

@@ -315,11 +315,7 @@ func (pl PromoteLearner) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (pl PromoteLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	peer := region.GetStorePeer(pl.ToStore)
-	if peer == nil {
-		return nil
-	}
+func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	return createResponse(addNode(pl.PeerID, pl.ToStore), useConfChangeV2)
 }
 
@@ -537,11 +533,7 @@ func (dv DemoteVoter) Timeout(start time.Time, regionSize int64) bool {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (dv DemoteVoter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	peer := region.GetStorePeer(dv.ToStore)
-	if peer == nil {
-		return nil
-	}
+func (dv DemoteVoter) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	return createResponse(addLearnerNode(dv.PeerID, dv.ToStore), useConfChangeV2)
 }
 
