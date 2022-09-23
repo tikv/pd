@@ -28,14 +28,24 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
+// SelectFaultTargetStores selects fault stores that be selected as target store from the list.
+func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, _ *plan.Collector) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		return slice.AnyOf(filters, func(i int) bool {
+			status := filters[i].Target(opt, s)
+			return status != statusOK
+		})
+	})
+}
+
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		sourceID := strconv.FormatUint(s.GetID(), 10)
+		targetID := ""
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
-				sourceID := strconv.FormatUint(s.GetID(), 10)
-				targetID := ""
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
 				if collector != nil {
@@ -51,12 +61,12 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		targetID := strconv.FormatUint(s.GetID(), 10)
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
 				cfilter, ok := filter.(comparingFilter)
-				targetID := strconv.FormatUint(s.GetID(), 10)
 				sourceID := ""
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
@@ -98,25 +108,6 @@ type comparingFilter interface {
 	Filter
 	// GetSourceStoreID returns the source store when comparing.
 	GetSourceStoreID() uint64
-}
-
-// Source checks if store can pass all Filters as source store.
-func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
-	storeAddress := store.GetAddress()
-	storeID := strconv.FormatUint(store.GetID(), 10)
-	for _, filter := range filters {
-		status := filter.Source(opt, store)
-		if !status.IsOK() {
-			if status != statusStoreRemoved {
-				sourceID := storeID
-				targetID := ""
-				filterCounter.WithLabelValues("filter-source", storeAddress,
-					sourceID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
-			}
-			return false
-		}
-	}
-	return true
 }
 
 // Target checks if store can pass all Filters as target store.
@@ -847,42 +838,4 @@ func createRegionForRuleFit(startKey, endKey []byte,
 		Peers:    copyPeers,
 	}, copyLeader, opts...)
 	return cloneRegion
-}
-
-// RegionScoreFilter filter target store that it's score must higher than the given score
-type RegionScoreFilter struct {
-	scope string
-	score float64
-}
-
-// NewRegionScoreFilter creates a Filter that filters all high score stores.
-func NewRegionScoreFilter(scope string, source *core.StoreInfo, opt *config.PersistOptions) Filter {
-	return &RegionScoreFilter{
-		scope: scope,
-		score: source.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0),
-	}
-}
-
-// Scope scopes only for balance region
-func (f *RegionScoreFilter) Scope() string {
-	return f.scope
-}
-
-// Type types region score filter
-func (f *RegionScoreFilter) Type() string {
-	return "region-score-filter"
-}
-
-// Source ignore source
-func (f *RegionScoreFilter) Source(opt *config.PersistOptions, _ *core.StoreInfo) *plan.Status {
-	return statusOK
-}
-
-// Target return true if target's score less than source's score
-func (f *RegionScoreFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	score := store.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0)
-	if score < f.score {
-		return statusOK
-	}
-	return statusStoreScoreDisallowed
 }

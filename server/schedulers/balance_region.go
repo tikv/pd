@@ -146,6 +146,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
+	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts, collector)
 	stores = filter.SelectSourceStores(stores, s.filters, opts, collector)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
@@ -171,8 +172,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	}
 
 	solver.step++
-	for _, solver.source = range stores {
+	var sourceIndex int
+	for sourceIndex, solver.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
+		solver.sourceScore = solver.sourceStoreScore()
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
@@ -218,7 +221,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			solver.step++
-			if op := s.transferPeer(solver, collector); op != nil {
+			if op := s.transferPeer(solver, collector, stores[sourceIndex:], faultTargets); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()
@@ -232,25 +235,27 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
+	excludeTargets := solver.region.GetStoreIDs()
+	for _, store := range faultStores {
+		excludeTargets[store.GetID()] = struct{}{}
+	}
 	// the order of the filters should be sorted by the cost of the cpu overhead.
 	// the more expensive the filter is, the later it should be placed.
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), nil, solver.region.GetStoreIDs()),
-		filter.NewSpecialUseFilter(s.GetName()),
-		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
-		filter.NewRegionScoreFilter(s.GetName(), solver.source, solver.GetOpts()),
+		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
 		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
 	}
 
-	candidates := filter.NewCandidates(solver.GetStores()).
-		FilterTarget(solver.GetOpts(), collector, filters...).
-		Sort(filter.RegionScoreComparer(solver.GetOpts()))
+	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, filters...)
 
 	if len(candidates.Stores) != 0 {
 		solver.step++
 	}
-	for _, solver.target = range candidates.Stores {
+
+	for i := range candidates.Stores {
+		solver.target = candidates.Stores[len(candidates.Stores)-i-1]
+		solver.targetScore = solver.targetStoreScore()
 		regionID := solver.region.GetID()
 		sourceID := solver.source.GetID()
 		targetID := solver.target.GetID()

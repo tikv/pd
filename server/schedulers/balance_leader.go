@@ -540,6 +540,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.step++
 	defer func() { solver.step-- }()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(), solver.targetStoreScore()
 	if !solver.shouldBalance(l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		if collector != nil {
