@@ -586,7 +586,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if err := c.PDServerCfg.adjust(configMetaData.Child("pd-server")); err != nil {
 		return err
 	}
-	if err := c.ScheduleMode.adjust(configMetaData.Child("mode")); err != nil {
+	if err := c.ScheduleMode.adjust(configMetaData.Child("schedule-mode")); err != nil {
 		return err
 	}
 

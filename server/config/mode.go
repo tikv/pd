@@ -42,7 +42,7 @@ func (o *PersistOptions) SwitchMode(storage endpoint.ConfigStorage, oldMode, new
 	}
 	// if the new mode setting doesn't exist, init a new one.
 	if !existed {
-		// We must have the Normal config.
+		// We must have the Normal config because when we first switch the mode, the normal mode settings will be persisted.
 		_, err := storage.LoadScheduleMode(Normal, newCfg)
 		if err != nil {
 			return err
