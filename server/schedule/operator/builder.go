@@ -87,30 +87,35 @@ type Builder struct {
 // BuilderOption is used to create operator builder.
 type BuilderOption func(*Builder)
 
+// NilPeerError represents nil peer error in NewBuilder
 type NilPeerError struct{}
 
 func (b *NilPeerError) Error() string {
 	return "cannot build operator for region with nil peer"
 }
 
+// NoLeaderError represents no leader error in NewBuilder
 type NoLeaderError struct{}
 
 func (b *NoLeaderError) Error() string {
 	return "cannot build operator for region with no leader"
 }
 
+// NoPlacementRuleError represents no placement rule error in NewBuilder
 type NoPlacementRuleError struct{}
 
 func (b *NoPlacementRuleError) Error() string {
 	return "cannot build operator for region match no placement rule"
 }
 
+// RegionInJointStateError represents region in joint state error in NewBuilder
 type RegionInJointStateError struct{}
 
 func (b *RegionInJointStateError) Error() string {
 	return "cannot build operator for region which is in joint state"
 }
 
+// MismatchPeersError represents mismatch peers error in SetLeaders
 type MismatchPeersError struct {
 	Peers map[uint64]*metapb.Peer
 }
@@ -119,24 +124,28 @@ func (b *MismatchPeersError) Error() string {
 	return fmt.Sprintf("setPeers with mismatch peers: %v", b.Peers)
 }
 
+// NoVoterError represents target peers have no voter error in prepareBuild
 type NoVoterError struct{}
 
 func (b *NoVoterError) Error() string {
 	return "cannot create operator: target peers have no voter"
 }
 
+// LeaderNotAllowedError represents target leader is not allowed error in prepareBuild
 type LeaderNotAllowedError struct{}
 
 func (b *LeaderNotAllowedError) Error() string {
 	return "cannot create operator: target leader is not allowed"
 }
 
+// NoValidLeaderError represents no valid leader in buildStepsWithJointConsensus
 type NoValidLeaderError struct{}
 
 func (b *NoValidLeaderError) Error() string {
 	return "cannot build steps with joint consensus: no valid leader"
 }
 
+// NoValidLeaderError represents empty plan in buildStepsWithoutJointConsensus
 type EmptyPlanError struct{}
 
 func (b *EmptyPlanError) Error() string {
