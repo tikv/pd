@@ -22,12 +22,6 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-// Denoising is an option to calculate flow base on the real heartbeats. Should
-// only turn off by the simulator and the test.
-var Denoising = true
-
-const queueCap = 20000
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -85,33 +79,30 @@ func (w *HotCache) RegionStats(kind RWType, minHotDegree int) map[uint64][]*HotP
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	writeIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
-	readIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
-	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
-	succ2 := w.CheckReadAsync(readIsRegionHotTask)
+	writeCheckRegionHotTask := newCheckRegionHotTask(region, minHotDegree)
+	readCheckRegionHotTask := newCheckRegionHotTask(region, minHotDegree)
+	succ1 := w.CheckWriteAsync(writeCheckRegionHotTask)
+	succ2 := w.CheckReadAsync(readCheckRegionHotTask)
 	if succ1 && succ2 {
-		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+		return writeCheckRegionHotTask.waitRet(w.ctx) || readCheckRegionHotTask.waitRet(w.ctx)
 	}
 	return false
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
-func (w *HotCache) GetHotPeerStat(rw RWType, regionID, storeID uint64) *HotPeerStat {
-	switch rw {
+func (w *HotCache) GetHotPeerStat(kind RWType, regionID, storeID uint64) *HotPeerStat {
+	task := newGetHotPeerStatTask(regionID, storeID)
+	var succ bool
+	switch kind {
 	case Read:
-		task := newGetHotPeerStatTask(regionID, storeID)
-		succ := w.CheckReadAsync(task)
-		if succ {
-			return task.waitRet(w.ctx)
-		}
+		succ = w.CheckReadAsync(task)
 	case Write:
-		task := newGetHotPeerStatTask(regionID, storeID)
-		succ := w.CheckWriteAsync(task)
-		if succ {
-			return task.waitRet(w.ctx)
-		}
+		succ = w.CheckWriteAsync(task)
 	}
-	return nil
+	if !succ {
+		return nil
+	}
+	return task.waitRet(w.ctx)
 }
 
 // CollectMetrics collects the hot cache metrics.
