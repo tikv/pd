@@ -324,8 +324,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = time.Second
-	maxRetryTimes          = 5
+	retryInterval          = 500 * time.Millisecond
+	maxRetryTimes          = 6
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -698,12 +698,11 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-		retryTimeConsuming time.Duration
-		err                error
-		streamAddr         string
-		stream             pdpb.PD_TsoClient
-		streamCtx          context.Context
-		cancel             context.CancelFunc
+		err        error
+		streamAddr string
+		stream     pdpb.PD_TsoClient
+		streamCtx  context.Context
+		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -760,6 +759,7 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+	streamLoopTimer := time.NewTimer(c.option.timeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -792,24 +792,24 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+				if !c.option.getEnableTSOFollowerProxy() {
+					c.updateMember()
+				}
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-				if retryTimeConsuming >= c.option.timeout {
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case <-streamLoopTimer.C:
+					streamLoopTimer.Reset(c.option.timeout)
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
-					retryTimeConsuming = 0
 					continue tsoBatchLoop
-				}
-				select {
-				case <-dispatcherCtx.Done():
-					return
 				case <-time.After(time.Second):
-					retryTimeConsuming += time.Second
-					continue
+					continue streamChoosingLoop
 				}
 			}
-			retryTimeConsuming = 0
 			select {
 			case <-streamCtx.Done():
 				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
