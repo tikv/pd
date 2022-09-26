@@ -792,9 +792,6 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-				if !c.option.getEnableTSOFollowerProxy() {
-					c.updateMember()
-				}
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				select {
 				case <-dispatcherCtx.Done():
@@ -927,6 +924,8 @@ func (c *client) tryConnect(
 		networkErrNum uint64
 		err           error
 		stream        pdpb.PD_TsoClient
+		url           string
+		cc            *grpc.ClientConn
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
 		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
@@ -942,9 +941,11 @@ func (c *client) tryConnect(
 			return true
 		})
 	}
-	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
+
 	for i := 0; i < maxRetryTimes; i++ {
+		c.updateMember()
+		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {
