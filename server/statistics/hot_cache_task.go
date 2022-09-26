@@ -29,10 +29,11 @@ const (
 	collectRegionStatsTaskType
 	isRegionHotTaskType
 	collectMetricsTaskType
+	getHotPeerStatTaskType
 )
 
-// flowItemTask indicates the task in flowItem queue
-type flowItemTask interface {
+// FlowItemTask indicates the task in flowItem queue
+type FlowItemTask interface {
 	taskType() flowItemTaskKind
 	runTask(cache *hotPeerCache)
 }
@@ -43,7 +44,7 @@ type checkPeerTask struct {
 }
 
 // NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) flowItemTask {
+func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
 	return &checkPeerTask{
 		peerInfo:   peerInfo,
 		regionInfo: regionInfo,
@@ -66,7 +67,7 @@ type checkExpiredTask struct {
 }
 
 // NewCheckExpiredItemTask creates task to collect expired items
-func NewCheckExpiredItemTask(region *core.RegionInfo) flowItemTask {
+func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 	return &checkExpiredTask{
 		region: region,
 	}
@@ -90,7 +91,7 @@ type collectUnReportedPeerTask struct {
 }
 
 // NewCollectUnReportedPeerTask creates task to collect unreported peers
-func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) flowItemTask {
+func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) FlowItemTask {
 	return &collectUnReportedPeerTask{
 		storeID:  storeID,
 		regions:  regions,
@@ -187,4 +188,36 @@ func (t *collectMetricsTask) taskType() flowItemTaskKind {
 
 func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
 	cache.collectMetrics(t.typ)
+}
+
+type getHotPeerStatTask struct {
+	regionID uint64
+	storeID  uint64
+	ret      chan *HotPeerStat
+}
+
+func newGetHotPeerStatTask(regionID, storeID uint64) *getHotPeerStatTask {
+	return &getHotPeerStatTask{
+		regionID: regionID,
+		storeID:  storeID,
+		ret:      make(chan *HotPeerStat, 1),
+	}
+}
+
+func (t *getHotPeerStatTask) taskType() flowItemTaskKind {
+	return getHotPeerStatTaskType
+}
+
+func (t *getHotPeerStatTask) runTask(cache *hotPeerCache) {
+	t.ret <- cache.getHotPeerStat(t.regionID, t.storeID)
+}
+
+// TODO: do we need a wait-return timeout?
+func (t *getHotPeerStatTask) waitRet(ctx context.Context) *HotPeerStat {
+	select {
+	case <-ctx.Done():
+		return nil
+	case r := <-t.ret:
+		return r
+	}
 }

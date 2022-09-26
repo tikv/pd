@@ -39,7 +39,7 @@ func (it *item) Less(k int, than TopNItem) bool {
 func TestPut(t *testing.T) {
 	re := require.New(t)
 	const Total, N = 10000, 50
-	tn := NewTopN(DimLen, N, 1*time.Hour)
+	tn := NewTopN(DimLen, N, time.Hour)
 
 	putPerm(re, tn, Total, func(x int) float64 {
 		return float64(-x) + 1
@@ -128,7 +128,7 @@ func putPerm(re *require.Assertions, tn *TopN, total int, f func(x int) float64,
 func TestRemove(t *testing.T) {
 	re := require.New(t)
 	const Total, N = 10000, 50
-	tn := NewTopN(DimLen, N, 1*time.Hour)
+	tn := NewTopN(DimLen, N, time.Hour)
 
 	putPerm(re, tn, Total, func(x int) float64 {
 		return float64(-x)

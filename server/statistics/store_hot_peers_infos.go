@@ -143,7 +143,7 @@ func summaryStoresLoadByEngine(
 		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
 			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(GetRegionStatKind(rwTy, i))
+				peerLoadSum[i] += peer.Loads[i]
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}

@@ -200,6 +200,8 @@ const (
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	enableLocationReplacement      = "schedule.enable-location-replacement"
+	// it's related to schedule, but it's not an explicit config
+	enableTiKVSplitRegion = "schedule.enable-tikv-split-region"
 )
 
 var supportedTTLConfigs = []string{
@@ -214,6 +216,7 @@ var supportedTTLConfigs = []string{
 	hotRegionScheduleLimitKey,
 	schedulerMaxWaitingOperatorKey,
 	enableLocationReplacement,
+	enableTiKVSplitRegion,
 	"default-add-peer",
 	"default-remove-peer",
 }
@@ -266,6 +269,18 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	v := o.GetScheduleConfig().Clone()
 	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
+}
+
+// IsDiagnosticAllowed returns whether is enable to use diagnostic.
+func (o *PersistOptions) IsDiagnosticAllowed() bool {
+	return o.GetScheduleConfig().EnableDiagnostic
+}
+
+// SetEnableDiagnostic to set the option for diagnose. It's only used to test.
+func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableDiagnostic = enable
 	o.SetScheduleConfig(v)
 }
 
@@ -519,6 +534,11 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
+	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
+}
+
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	if v, ok := o.GetTTLData(enableLocationReplacement); ok {
@@ -728,6 +748,26 @@ func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 
 func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLBool(key string) (result bool, contains bool, err error) {
+	stringForm, ok := o.GetTTLData(key)
+	if !ok {
+		return
+	}
+	result, err = strconv.ParseBool(stringForm)
+	contains = true
+	return
+}
+
+func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
+	if v, ok, err := o.getTTLBool(key); ok {
 		if err == nil {
 			return v
 		}

@@ -20,7 +20,6 @@ import (
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
-	TotalLoads     []float64         `json:"-"`
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
