@@ -77,7 +77,7 @@ func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", suite.cluster, region)
-	suite.Error(builder.err)
+	suite.Error(builder.err.(*NoLeaderError))
 }
 
 func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
@@ -102,7 +102,7 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 	suite.Error(suite.newBuilder().SetLeader(2).RemovePeer(2).err)
 	suite.Error(suite.newBuilder().PromoteLearner(4).err)
 	suite.Error(suite.newBuilder().SetLeader(4).err)
-	suite.Error(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err)
+	suite.Error(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err.(*MismatchPeersError))
 
 	m := map[uint64]*metapb.Peer{
 		2: {StoreId: 2},
@@ -121,7 +121,7 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
 	// no voter.
 	_, err := suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, Role: metapb.PeerRole_Learner}}).prepareBuild()
-	suite.Error(err)
+	suite.Error(err.(*NoVoterError))
 
 	// use joint consensus
 	builder := suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
