@@ -176,6 +176,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	for sourceIndex, solver.source = range stores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
 		solver.sourceScore = solver.sourceStoreScore()
+		if sourceIndex == len(stores)-1 {
+			break
+		}
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
@@ -221,7 +224,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			solver.step++
-			if op := s.transferPeer(solver, collector, stores[sourceIndex:], faultTargets); op != nil {
+			if op := s.transferPeer(solver, collector, stores[sourceIndex+1:], faultTargets); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()

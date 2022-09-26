@@ -28,16 +28,6 @@ import (
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
-// SelectFaultTargetStores selects fault stores that be selected as target store from the list.
-func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, _ *plan.Collector) []*core.StoreInfo {
-	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
-		return slice.AnyOf(filters, func(i int) bool {
-			status := filters[i].Target(opt, s)
-			return status != statusOK
-		})
-	})
-}
-
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
@@ -48,6 +38,30 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			if !status.IsOK() {
 				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
 					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
+				return false
+			}
+			return true
+		})
+	})
+}
+
+// SelectFaultTargetStores selects fault stores that can't be selected as target store from the list.
+func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		targetID := strconv.FormatUint(s.GetID(), 10)
+		return slice.AnyOf(filters, func(i int) bool {
+			status := filters[i].Target(opt, s)
+			if !status.IsOK() {
+				cfilter, ok := filters[i].(comparingFilter)
+				sourceID := ""
+				if ok {
+					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+				}
+				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
+					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
