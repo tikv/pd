@@ -413,7 +413,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
-		schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 		if op = creator(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
