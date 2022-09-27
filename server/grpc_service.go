@@ -43,12 +43,21 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	heartbeatSendTimeout = 5 * time.Second
+
+	// tso
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+)
+
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 )
 
 // GetMembers implements gRPC PDServer.
@@ -92,11 +101,6 @@ func (s *Server) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.Get
 		TsoAllocatorLeaders: tsoAllocatorLeaders,
 	}, nil
 }
-
-const (
-	maxMergeTSORequests    = 10000
-	defaultTSOProxyTimeout = 3 * time.Second
-)
 
 // Tso implements gRPC PDServer.
 func (s *Server) Tso(stream pdpb.PD_TsoServer) error {
@@ -623,10 +627,6 @@ func (s *Server) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbea
 	return resp, nil
 }
 
-const regionHeartbeatSendTimeout = 5 * time.Second
-
-var errSendRegionHeartbeatTimeout = errors.New("send region heartbeat timeout")
-
 // heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
@@ -646,9 +646,9 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.WithStack(err)
-	case <-time.After(regionHeartbeatSendTimeout):
+	case <-time.After(heartbeatSendTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return errors.WithStack(errSendRegionHeartbeatTimeout)
+		return ErrSendHeartbeatTimeout
 	}
 }
 
@@ -1408,7 +1408,7 @@ func (s *Server) GetOperator(ctx context.Context, request *pdpb.GetOperatorReque
 // TODO: Call it in gRPC interceptor.
 func (s *Server) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return errors.WithStack(ErrNotLeader)
+		return ErrNotLeader
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -1588,7 +1588,7 @@ func (s *Server) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocat
 // the gRPC communication between PD servers internally.
 func (s *Server) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
-		return errors.WithStack(ErrNotStarted)
+		return ErrNotStarted
 	}
 	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
