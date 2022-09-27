@@ -34,5 +34,4 @@ func TestString(t *testing.T) {
 	for _, data := range testcases {
 		re.Equal(data.expected, filterType(data.filterType).String())
 	}
-
 }

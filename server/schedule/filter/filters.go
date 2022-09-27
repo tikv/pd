@@ -100,13 +100,6 @@ type Filter interface {
 	Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status
 }
 
-// comparingFilter is an interface to filter target store by comparing source and target stores
-type comparingFilter interface {
-	Filter
-	// GetSourceStoreID returns the source store when comparing.
-	GetSourceStoreID() uint64
-}
-
 // Target checks if store can pass all Filters as target store.
 func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeID := strconv.FormatUint(store.GetID(), 10)
@@ -850,7 +843,7 @@ func (f *RegionScoreFilter) Scope() string {
 
 // Type types region score filter
 func (f *RegionScoreFilter) Type() filterType {
-	return RegionScoreFilterType
+	return regionScoreFilterType
 }
 
 // Source ignore source

@@ -33,6 +33,7 @@ var actions = [ActionLen]string{
 	"filter-target",
 }
 
+// String implements fmt.Stringer interface.
 func (a action) String() string {
 	if a < ActionLen {
 		return actions[a]
@@ -77,6 +78,7 @@ var scopes = [ScopeLen]string{
 	"random-merge-scheduler",
 }
 
+// String implements fmt.Stringer interface.
 func (s scope) String() string {
 	if s >= ScopeLen {
 		return "unknown"
@@ -96,7 +98,8 @@ const (
 	engineFilterType
 	specialUseFilterType
 	isolationFilterType
-	RegionScoreFilterType
+	regionScoreFilterType
+	idFilterType
 	StoreStateFilterType
 
 	FiltersLen = iota + ReasonLen - 1
@@ -113,6 +116,7 @@ var filters = [FiltersLen]string{
 	"special-use-filter",
 	"isolation-filter",
 	"region-score-filter",
+	"idFilter",
 	"store-state",
 }
 
@@ -151,6 +155,7 @@ var storeStateReasons = [ReasonLen]string{
 	"reject-leader",
 }
 
+// String implements fmt.Stringer interface.
 func (r storeStateReason) String() string {
 	if r < ReasonLen {
 		return storeStateReasons[r]
@@ -158,8 +163,9 @@ func (r storeStateReason) String() string {
 	return "unknown"
 }
 
+// String implements fmt.Stringer interface.
 func (f filterType) String() string {
-	if f <= RegionScoreFilterType {
+	if f <= idFilterType {
 		return filters[f]
 	}
 	if int(f) < int(FiltersLen) {
@@ -168,6 +174,7 @@ func (f filterType) String() string {
 	return "unknown"
 }
 
+// FilterCounter records the filter counter.
 type FilterCounter struct {
 	scope string
 	// record filter counter for each store.
