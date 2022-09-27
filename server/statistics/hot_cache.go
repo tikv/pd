@@ -79,12 +79,12 @@ func (w *HotCache) RegionStats(kind RWType, minHotDegree int) map[uint64][]*HotP
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	writeCheckRegionHotTask := newCheckRegionHotTask(region, minHotDegree)
-	readCheckRegionHotTask := newCheckRegionHotTask(region, minHotDegree)
-	succ1 := w.CheckWriteAsync(writeCheckRegionHotTask)
-	succ2 := w.CheckReadAsync(readCheckRegionHotTask)
+	checkRegionHotWriteTask := newCheckRegionHotTask(region, minHotDegree)
+	checkRegionHotReadTask := newCheckRegionHotTask(region, minHotDegree)
+	succ1 := w.CheckWriteAsync(checkRegionHotWriteTask)
+	succ2 := w.CheckReadAsync(checkRegionHotReadTask)
 	if succ1 && succ2 {
-		return writeCheckRegionHotTask.waitRet(w.ctx) || readCheckRegionHotTask.waitRet(w.ctx)
+		return checkRegionHotWriteTask.waitRet(w.ctx) || checkRegionHotReadTask.waitRet(w.ctx)
 	}
 	return false
 }
