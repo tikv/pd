@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/tempurl"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 const (
@@ -138,4 +139,10 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	return sc.ServerConfig.Adjust(meta, false)
+}
+
+// PDConfig saves some config which may be changed in PD.
+type PDConfig struct {
+	PlacementRules []*placement.Rule
+	LocationLabels typeutil.StringSlice
 }
