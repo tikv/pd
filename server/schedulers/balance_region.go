@@ -73,10 +73,11 @@ type balanceRegionSchedulerConfig struct {
 type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	conf         *balanceRegionSchedulerConfig
-	opController *schedule.OperatorController
-	filters      []filter.Filter
-	counter      *prometheus.CounterVec
+	conf          *balanceRegionSchedulerConfig
+	opController  *schedule.OperatorController
+	filters       []filter.Filter
+	counter       *prometheus.CounterVec
+	filterCounter *filter.FilterCounter
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
@@ -89,6 +90,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
+		filterCounter: filter.NewFilterCounter(filter.BalanceRegion.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -146,7 +148,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	stores = filter.SelectSourceStores(stores, s.filters, opts, collector)
+	stores = filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
@@ -176,7 +178,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		for i := 0; i < retryLimit; i++ {
 			schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 			// Priority pick the region that has a pending peer.
-			// Pending region may means the disk is overload, remove the pending region firstly.
+			// Pending region may mean the disk is overload, remove the pending region firstly.
 			solver.region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 				baseRegionFilters...)
 			if solver.region == nil {
@@ -190,7 +192,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.region == nil {
-				// Finally pick learner.
+				// Finally, pick learner.
 				solver.region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
 					append(baseRegionFilters, pendingFilter)...)
 			}
@@ -208,7 +210,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
 				continue
 			}
-			// Check region whether have leader
+			// Check region leader
 			if solver.region.GetLeader() == nil {
 				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
 				if collector != nil {
@@ -225,6 +227,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			}
 			solver.step--
 		}
+		s.filterCounter.Flush()
 		s.retryQuota.Attenuate(solver.source)
 	}
 	s.retryQuota.GC(stores)
@@ -244,7 +247,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	}
 
 	candidates := filter.NewCandidates(solver.GetStores()).
-		FilterTarget(solver.GetOpts(), collector, filters...).
+		FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...).
 		Sort(filter.RegionScoreComparer(solver.GetOpts()))
 
 	if len(candidates.Stores) != 0 {

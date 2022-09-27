@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,25 @@
 
 package filter
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"testing"
 
-var (
-	filterCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "filter",
-			Help:      "Counter of the filter",
-		}, []string{"action", "scope", "type", "store"})
+	"github.com/stretchr/testify/require"
 )
 
-func init() {
-	prometheus.MustRegister(filterCounter)
+func TestString(t *testing.T) {
+	re := require.New(t)
+	testcases := []struct {
+		filterType int
+		expected   string
+	}{
+		{int(StoreStateFilterType), "store-state--filter"},
+		{int(StoreStateFilterType + 1), "store-state-tombstone-filter"},
+		{int(FiltersLen - 1), "store-state-reject-leader-filter"},
+	}
+
+	for _, data := range testcases {
+		re.Equal(data.expected, filterType(data.filterType).String())
+	}
+
 }

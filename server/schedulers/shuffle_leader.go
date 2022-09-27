@@ -110,7 +110,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	// 2. transfer a leader to the store.
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	targetStore := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster.GetOpts(), nil, s.filters...).
+		FilterTarget(cluster.GetOpts(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()

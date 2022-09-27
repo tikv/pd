@@ -35,14 +35,14 @@ func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, collector *plan.Collector, filters ...Filter) *StoreCandidates {
-	c.Stores = SelectSourceStores(c.Stores, filters, opt, collector)
+func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, collector *plan.Collector, counter *FilterCounter, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectSourceStores(c.Stores, filters, opt, collector, counter)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, collector *plan.Collector, filters ...Filter) *StoreCandidates {
-	c.Stores = SelectTargetStores(c.Stores, filters, opt, collector)
+func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, collector *plan.Collector, counter *FilterCounter, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectTargetStores(c.Stores, filters, opt, collector, counter)
 	return c
 }
 
