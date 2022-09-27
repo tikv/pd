@@ -15,22 +15,13 @@ package operator
 
 import (
 	"context"
-<<<<<<< HEAD
-	"strings"
-=======
 	"encoding/hex"
-	"testing"
->>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
+	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-<<<<<<< HEAD
-=======
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
->>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -1084,15 +1075,18 @@ func (s *testCreateOperatorSuite) TestMoveRegionWithoutJointConsensus(c *C) {
 	}
 }
 
+var _ = Suite(&testCreateOperatorWithRulesSuite{})
+
+type testCreateOperatorWithRulesSuite struct{}
+
 // Ref https://github.com/tikv/pd/issues/5401
-func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
-	re := require.New(t)
+func (s *testCreateOperatorWithRulesSuite) TestCreateLeaveJointStateOperatorWithoutFitRules(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	opts := config.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	re.NoError(cluster.SetRules([]*placement.Rule{
+	err := cluster.SetRules([]*placement.Rule{
 		{
 			GroupID:     "pd",
 			ID:          "default",
@@ -1117,7 +1111,8 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 			Role:        placement.Voter,
 			Count:       1,
 		},
-	}))
+	})
+	c.Assert(err, IsNil)
 	cluster.AddRegionStore(1, 1)
 	cluster.AddRegionStore(2, 1)
 	cluster.AddRegionStore(3, 1)
@@ -1129,15 +1124,15 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c")}, originPeers[0])
 	op, err := CreateLeaveJointStateOperator("test", cluster, region)
-	re.NoError(err)
-	re.Equal(OpLeader, op.Kind())
-	re.Len(op.steps, 2)
+	c.Assert(err, IsNil)
+	c.Assert(op.kind, Equals, OpLeader)
+	c.Assert(op.steps, HasLen, 2)
 	step0 := op.steps[0].(TransferLeader)
-	re.Equal(uint64(3), step0.FromStore)
-	re.Equal(uint64(4), step0.ToStore)
+	c.Assert(step0.FromStore, Equals, uint64(3))
+	c.Assert(step0.ToStore, Equals, uint64(4))
 	step1 := op.steps[1].(ChangePeerV2Leave)
-	re.Len(step1.PromoteLearners, 1)
-	re.Len(step1.DemoteVoters, 1)
-	re.Equal(uint64(4), step1.PromoteLearners[0].ToStore)
-	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
+	c.Assert(step1.PromoteLearners, HasLen, 1)
+	c.Assert(step1.DemoteVoters, HasLen, 1)
+	c.Assert(step1.PromoteLearners[0].ToStore, Equals, uint64(4))
+	c.Assert(step1.DemoteVoters[0].ToStore, Equals, uint64(3))
 }
