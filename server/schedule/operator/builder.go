@@ -29,11 +29,13 @@ import (
 )
 
 // Builder is used to create operators. Usage:
-//     op, err := NewBuilder(desc, cluster, region).
-//                 RemovePeer(store1).
-//                 AddPeer(peer1).
-//                 SetLeader(store2).
-//                 Build(kind)
+//
+//	op, err := NewBuilder(desc, cluster, region).
+//	            RemovePeer(store1).
+//	            AddPeer(peer1).
+//	            SetLeader(store2).
+//	            Build(kind)
+//
 // The generated Operator will choose the most appropriate execution order
 // according to various constraints.
 type Builder struct {
@@ -53,8 +55,9 @@ type Builder struct {
 	targetLeaderStoreID uint64
 	err                 error
 
-	// skip origin check flags
+	// skip check flags
 	skipOriginJointStateCheck bool
+	skipPlacementRulesCheck   bool
 
 	// build flags
 	useJointConsensus bool
@@ -78,6 +81,11 @@ type BuilderOption func(*Builder)
 // SkipOriginJointStateCheck lets the builder skip the joint state check for origin peers.
 func SkipOriginJointStateCheck(b *Builder) {
 	b.skipOriginJointStateCheck = true
+}
+
+// SkipPlacementRulesCheck lets the builder skip the placement rules check for origin and target peers.
+func SkipPlacementRulesCheck(b *Builder) {
+	b.skipPlacementRulesCheck = true
 }
 
 // NewBuilder creates a Builder.
@@ -123,7 +131,7 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	// placement rules
 	var rules []*placement.Rule
-	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
+	if err == nil && !b.skipPlacementRulesCheck && cluster.GetOpts().IsPlacementRulesEnabled() {
 		fit := opt.FitRegion(cluster, region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
@@ -737,7 +745,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	}
 
 	// placement rules
-	if len(b.rules) == 0 {
+	if b.skipPlacementRulesCheck || len(b.rules) == 0 {
 		return true
 	}
 	for _, r := range b.rules {
