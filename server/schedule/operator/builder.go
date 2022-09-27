@@ -29,11 +29,13 @@ import (
 )
 
 // Builder is used to create operators. Usage:
-//     op, err := NewBuilder(desc, cluster, region).
-//                 RemovePeer(store1).
-//                 AddPeer(peer1).
-//                 SetLeader(store2).
-//                 Build(kind)
+//
+//	op, err := NewBuilder(desc, cluster, region).
+//	            RemovePeer(store1).
+//	            AddPeer(peer1).
+//	            SetLeader(store2).
+//	            Build(kind)
+//
 // The generated Operator will choose the most appropriate execution order
 // according to various constraints.
 type Builder struct {
@@ -129,13 +131,8 @@ func NewBuilder(desc string, cluster opt.Cluster, region *core.RegionInfo, opts 
 
 	// placement rules
 	var rules []*placement.Rule
-<<<<<<< HEAD
-	if err == nil && cluster.GetOpts().IsPlacementRulesEnabled() {
+	if err == nil && !b.skipPlacementRulesCheck && cluster.GetOpts().IsPlacementRulesEnabled() {
 		fit := opt.FitRegion(cluster, region)
-=======
-	if err == nil && !b.skipPlacementRulesCheck && b.GetOpts().IsPlacementRulesEnabled() {
-		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
->>>>>>> d8620c975 (operator: allows to skip placement rules checks (#5458))
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
 		}
