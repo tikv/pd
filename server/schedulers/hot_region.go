@@ -556,6 +556,9 @@ func (bs *balanceSolver) isValid() bool {
 }
 
 func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
+	if !bs.enableExpectation() {
+		return "", false
+	}
 	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
@@ -982,6 +985,10 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f fun
 
 func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
+}
+
+func (bs *balanceSolver) enableExpectation() bool {
+	return bs.sche.conf.GetDstToleranceRatio() > 0 && bs.sche.conf.GetSrcToleranceRatio() > 0
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
