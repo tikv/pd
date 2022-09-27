@@ -780,7 +780,6 @@ func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 
 // SetHotPendingInfluenceMetrics mock method
 func (mc *Cluster) SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
-
 }
 
 // GetBasicCluster mock method
