@@ -55,6 +55,11 @@ const (
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
+
+	// These are used to control the interval of checker running
+	maxIdleTime    = 100 * time.Millisecond
+	minIdleTime    = 10 * time.Millisecond
+	targetInterval = 1 * time.Minute
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -111,11 +116,13 @@ func (c *coordinator) patrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	timer := time.NewTimer(c.cluster.GetOpts().GetPatrolRegionInterval())
+	timer := time.NewTimer(maxIdleTime)
 	defer timer.Stop()
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
+	regionCount := c.cluster.GetRegionCount()
+	scannedCount := 0
 	var (
 		key     []byte
 		regions []*core.RegionInfo
@@ -123,7 +130,7 @@ func (c *coordinator) patrolRegions() {
 	for {
 		select {
 		case <-timer.C:
-			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
+			timer.Reset(c.getPaceInterval(start, regionCount-scannedCount))
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -142,13 +149,17 @@ func (c *coordinator) patrolRegions() {
 
 		key, regions = c.checkRegions(key)
 		if len(regions) == 0 {
+			scannedCount = 0
 			continue
 		}
+		scannedCount += len(regions)
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
+			regionCount = c.cluster.GetRegionCount()
+			scannedCount = 0
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
@@ -274,6 +285,29 @@ func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
 	} else {
 		c.checkers.AddWaitingRegion(region)
 	}
+}
+
+func (c *coordinator) getPaceInterval(start time.Time, remainedRegionCount int) time.Duration {
+	if c.cluster.GetOpts().GetPatrolRegionInterval() != 0 {
+		return c.cluster.GetOpts().GetPatrolRegionInterval()
+	}
+	elapsed := time.Since(start)
+	remainedTime := targetInterval.Nanoseconds() - elapsed.Nanoseconds()
+	if remainedTime < 0 {
+		remainedTime = 0
+	}
+
+	if remainedRegionCount < 1 {
+		remainedRegionCount = 1
+	}
+	interval := time.Duration(remainedTime / int64(remainedRegionCount))
+	if minIdleTime > 0 && interval < minIdleTime {
+		interval = minIdleTime
+	}
+	if maxIdleTime > 0 && interval > maxIdleTime {
+		interval = maxIdleTime
+	}
+	return interval
 }
 
 // drivePushOperator is used to push the unfinished operator to the executor.
