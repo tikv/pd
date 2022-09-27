@@ -14,13 +14,13 @@
 package operator
 
 import (
+	"encoding/hex"
 	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -1065,4 +1065,63 @@ func (s *testCreateOperatorSuite) TestMoveRegionWithoutJointConsensus(c *C) {
 			}
 		}
 	}
+}
+
+var _ = Suite(&testCreateOperatorWithRulesSuite{})
+
+type testCreateOperatorWithRulesSuite struct{}
+
+// Ref https://github.com/tikv/pd/issues/5401
+func (s *testCreateOperatorWithRulesSuite) TestCreateLeaveJointStateOperatorWithoutFitRules(c *C) {
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(opts)
+	err := cluster.SetRules([]*placement.Rule{
+		{
+			GroupID:     "pd",
+			ID:          "default",
+			StartKeyHex: hex.EncodeToString([]byte("")),
+			EndKeyHex:   hex.EncodeToString([]byte("")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t1",
+			ID:          "t1",
+			StartKeyHex: hex.EncodeToString([]byte("a")),
+			EndKeyHex:   hex.EncodeToString([]byte("b")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+		{
+			GroupID:     "t2",
+			ID:          "t2",
+			StartKeyHex: hex.EncodeToString([]byte("b")),
+			EndKeyHex:   hex.EncodeToString([]byte("c")),
+			Role:        placement.Voter,
+			Count:       1,
+		},
+	})
+	c.Assert(err, IsNil)
+	cluster.AddRegionStore(1, 1)
+	cluster.AddRegionStore(2, 1)
+	cluster.AddRegionStore(3, 1)
+	cluster.AddRegionStore(4, 1)
+	originPeers := []*metapb.Peer{
+		{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+		{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+	}
+
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c")}, originPeers[0])
+	op, err := CreateLeaveJointStateOperator("test", cluster, region)
+	c.Assert(err, IsNil)
+	c.Assert(op.kind, Equals, OpLeader)
+	c.Assert(op.steps, HasLen, 2)
+	step0 := op.steps[0].(TransferLeader)
+	c.Assert(step0.FromStore, Equals, uint64(3))
+	c.Assert(step0.ToStore, Equals, uint64(4))
+	step1 := op.steps[1].(ChangePeerV2Leave)
+	c.Assert(step1.PromoteLearners, HasLen, 1)
+	c.Assert(step1.DemoteVoters, HasLen, 1)
+	c.Assert(step1.PromoteLearners[0].ToStore, Equals, uint64(4))
+	c.Assert(step1.DemoteVoters[0].ToStore, Equals, uint64(3))
 }
