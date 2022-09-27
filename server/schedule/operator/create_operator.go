@@ -285,7 +285,7 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpWitness, region.GetApproximateSize(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
@@ -299,18 +299,18 @@ func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.
 		return NewBuilder(desc, ci, region).
 			AddPeer(newPeer).
 			RemovePeer(peer.StoreId).
-			Build(OpWitness)
+			Build(OpRegion)
 	}
 	newPeer := &metapb.Peer{Id: id, StoreId: peer.StoreId, Role: peer.GetRole(), IsWitness: false}
 	return NewBuilder(desc, ci, region).
 		RemovePeer(peer.StoreId).
 		AddPeer(newPeer).
-		Build(OpWitness)
+		Build(OpRegion)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperatorV2(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpWitness, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
 
 // CreateMovePeerAndPromoteWitessOperator creates an operator that replaces an old peer with a new peer, and promote a witness to voter.
