@@ -1079,6 +1079,7 @@ var _ = Suite(&testCreateOperatorWithRulesSuite{})
 
 type testCreateOperatorWithRulesSuite struct{}
 
+// Ref https://github.com/tikv/pd/issues/5401
 func (s *testCreateOperatorWithRulesSuite) TestCreateLeaveJointStateOperatorWithoutFitRules(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
