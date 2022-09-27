@@ -130,7 +130,7 @@ func (s *testRegionSuite) TestRegionTreeStat(c *C) {
 	c.Assert(tree.totalSize, Equals, int64(4))
 	updateNewItem(tree, s.newRegionWithStat("b", "e", 5, 6))
 	c.Assert(tree.totalSize, Equals, int64(6))
-	tree.remove(s.newRegionWithStat("a", "b", 1, 2))
+	tree.remove(s.newRegionWithStat("a", "b", 2, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))
 	tree.remove(s.newRegionWithStat("f", "g", 1, 2))
 	c.Assert(tree.totalSize, Equals, int64(5))

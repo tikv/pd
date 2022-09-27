@@ -151,8 +151,8 @@ func (t *regionTree) remove(region *RegionInfo) {
 		return
 	}
 
-	t.totalSize -= region.approximateSize
-	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalSize -= result.(*regionItem).region.GetApproximateSize()
+	regionWriteBytesRate, regionWriteKeysRate := result.(*regionItem).region.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	t.tree.Remove(result)
