@@ -61,7 +61,7 @@ const (
 	maxIdleTime      = 100 * time.Millisecond
 	minIdleTime      = 10 * time.Millisecond
 	targetInterval   = 1 * time.Minute
-	cpuBusyThreshold = 70.0
+	cpuBusyThreshold = 80.0
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -314,10 +314,10 @@ func (c *coordinator) getPaceInterval(start time.Time, remainedRegionCount int, 
 		remainedRegionCount = 1
 	}
 	interval := time.Duration(remainedTime / int64(remainedRegionCount))
-	if minIdleTime > 0 && interval < minIdleTime {
+	if interval < minIdleTime {
 		interval = minIdleTime
 	}
-	if maxIdleTime > 0 && interval > maxIdleTime {
+	if interval > maxIdleTime {
 		interval = maxIdleTime
 	}
 	return interval
