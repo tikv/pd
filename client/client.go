@@ -944,7 +944,7 @@ func (c *client) tryConnect(
 	// retry several times before falling back to the follower when the network problem happens
 
 	for i := 0; i < maxRetryTimes; i++ {
-		c.updateMember()
+		c.ScheduleCheckLeader()
 		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
