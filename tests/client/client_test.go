@@ -347,6 +347,86 @@ func TestTSOFollowerProxy(t *testing.T) {
 	wg.Wait()
 }
 
+// TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
+func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+
+	var wg sync.WaitGroup
+
+	// test resign pd leader or stop pd leader
+	wg.Add(1 + 1)
+	var maxUnavailableTime, leaderReadyTime time.Time
+	go func() {
+		defer wg.Done()
+		var lastTS uint64
+		for i := 0; i < tsoRequestRound; i++ {
+			var physical, logical int64
+			var ts uint64
+			physical, logical, err = cli.GetTS(context.Background())
+			ts = tsoutil.ComposeTS(physical, logical)
+			if err != nil {
+				maxUnavailableTime = time.Now()
+				continue
+			}
+			re.NoError(err)
+			re.Less(lastTS, ts)
+			lastTS = ts
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		leader.Stop()
+		cluster.WaitLeader()
+		leaderReadyTime = time.Now()
+		cluster.RunServers([]*tests.TestServer{leader})
+	}()
+	wg.Wait()
+	t.Log(maxUnavailableTime, leaderReadyTime)
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+
+	// test kill pd leader pod or network of leader is unreachable
+	wg.Add(1 + 1)
+	maxUnavailableTime, leaderReadyTime = time.Time{}, time.Time{}
+	go func() {
+		defer wg.Done()
+		var lastTS uint64
+		for i := 0; i < tsoRequestRound; i++ {
+			var physical, logical int64
+			var ts uint64
+			physical, logical, err = cli.GetTS(context.Background())
+			ts = tsoutil.ComposeTS(physical, logical)
+			if err != nil {
+				maxUnavailableTime = time.Now()
+				continue
+			}
+			re.NoError(err)
+			re.Less(lastTS, ts)
+			lastTS = ts
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+		leader.Stop()
+		cluster.WaitLeader()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+		leaderReadyTime = time.Now()
+	}()
+	wg.Wait()
+	t.Log(maxUnavailableTime, leaderReadyTime)
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+}
+
 func TestGlobalAndLocalTSO(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
