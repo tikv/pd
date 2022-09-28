@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	gopsutil "github.com/shirou/gopsutil/cpu"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
@@ -57,9 +58,10 @@ const (
 	PluginUnload = "PluginUnload"
 
 	// These are used to control the interval of checker running
-	maxIdleTime    = 100 * time.Millisecond
-	minIdleTime    = 10 * time.Millisecond
-	targetInterval = 1 * time.Minute
+	maxIdleTime      = 100 * time.Millisecond
+	minIdleTime      = 10 * time.Millisecond
+	targetInterval   = 1 * time.Minute
+	cpuBusyThreshold = 70.0
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -118,11 +120,13 @@ func (c *coordinator) patrolRegions() {
 	defer c.wg.Done()
 	timer := time.NewTimer(maxIdleTime)
 	defer timer.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
-	regionCount := c.cluster.GetRegionCount()
-	scannedCount := 0
+	regionCount, scannedCount := c.cluster.GetRegionCount(), 0
+	usage := 0.0
 	var (
 		key     []byte
 		regions []*core.RegionInfo
@@ -130,7 +134,11 @@ func (c *coordinator) patrolRegions() {
 	for {
 		select {
 		case <-timer.C:
-			timer.Reset(c.getPaceInterval(start, regionCount-scannedCount))
+			timer.Reset(c.getPaceInterval(start, regionCount-scannedCount, usage))
+		case <-ticker.C:
+			if u, err := gopsutil.Percent(0, false); err == nil && len(u) != 0 {
+				usage = u[0]
+			}
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -287,10 +295,15 @@ func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
 	}
 }
 
-func (c *coordinator) getPaceInterval(start time.Time, remainedRegionCount int) time.Duration {
+func (c *coordinator) getPaceInterval(start time.Time, remainedRegionCount int, cpuUsage float64) time.Duration {
 	if c.cluster.GetOpts().GetPatrolRegionInterval() != 0 {
 		return c.cluster.GetOpts().GetPatrolRegionInterval()
 	}
+
+	if cpuUsage >= cpuBusyThreshold {
+		return maxIdleTime
+	}
+
 	elapsed := time.Since(start)
 	remainedTime := targetInterval.Nanoseconds() - elapsed.Nanoseconds()
 	if remainedTime < 0 {
