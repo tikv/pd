@@ -259,9 +259,8 @@ func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
 func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
 		return createResponse(addLearnerNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
-	} else {
-		return createResponse(addNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
 	}
+	return createResponse(addNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
 }
 
 // BecomeNonWitness is an OpStep that makes a peer become a witness.
@@ -269,6 +268,7 @@ type BecomeNonWitness struct {
 	StoreID, PeerID uint64
 }
 
+// ConfVerChanged returns the delta value for version increased by this step.
 func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(bn.StoreID)
 	return typeutil.BoolToUint64(peer.GetId() == bn.PeerID)
@@ -290,7 +290,7 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// CheckInProcess checks if the step is in the progress of advancing.
+// CheckInProgress checks if the step is in the progress of advancing.
 func (bn BecomeNonWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
 	if err := validateStore(ci, bn.StoreID); err != nil {
 		return err
