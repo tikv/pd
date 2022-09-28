@@ -289,27 +289,7 @@ func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.Reg
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
-func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer, targetStoreID uint64) (*Operator, error) {
-	id, err := ci.GetAllocator().Alloc()
-	if err != nil {
-		return nil, err
-	}
-	if targetStoreID != 0 {
-		newPeer := &metapb.Peer{Id: id, StoreId: targetStoreID, Role: peer.GetRole(), IsWitness: false}
-		return NewBuilder(desc, ci, region).
-			AddPeer(newPeer).
-			RemovePeer(peer.StoreId).
-			Build(OpRegion)
-	}
-	newPeer := &metapb.Peer{Id: id, StoreId: peer.StoreId, Role: peer.GetRole(), IsWitness: false}
-	return NewBuilder(desc, ci, region).
-		RemovePeer(peer.StoreId).
-		AddPeer(newPeer).
-		Build(OpRegion)
-}
-
-// CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
-func CreateNonWitnessPeerOperatorV2(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
 

@@ -295,7 +295,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			lv = "set-learner-non-witness"
 		}
 		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-		return operator.CreateNonWitnessPeerOperatorV2("fix-non-witness-peer", c.cluster, region, peer)
+		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
 	}
 	return nil, nil
 }
