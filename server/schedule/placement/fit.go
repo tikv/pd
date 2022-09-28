@@ -194,12 +194,14 @@ func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule)
 }
 
 type fitWorker struct {
-	stores        []*core.StoreInfo
-	bestFit       RegionFit  // update during execution
-	peers         []*fitPeer // p.selected is updated during execution.
-	rules         []*Rule
-	needIsolation bool
-	exit          bool
+	bestFit RegionFit  // update during execution
+	peers   []*fitPeer // p.selected is updated during execution.
+	rules   []*Rule
+	// caches for match info for rules to peers. match,exist:= rulesMatchCache[i][j]
+	// exist is false means haven't been cached. match is true means peers[j] can match rules[i]
+	rulesMatchCache map[int]map[int]bool
+	needIsolation   bool
+	exit            bool
 }
 
 type fitPeerOpt func(peer *fitPeer)
@@ -237,12 +239,19 @@ func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*m
 func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
 	peers := newFitPeer(stores, region, region.GetPeers())
 
+	matchRules := make(map[int]map[int]bool, len(rules))
+	for id, rule := range rules {
+		if checkRule(rule, stores) {
+			matchRules[id] = make(map[int]bool)
+		}
+	}
+
 	return &fitWorker{
-		stores:        stores,
-		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:         peers,
-		needIsolation: needIsolation(rules),
-		rules:         rules,
+		bestFit:         RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:           peers,
+		rulesMatchCache: matchRules,
+		needIsolation:   needIsolation(rules),
+		rules:           rules,
 	}
 }
 
@@ -268,13 +277,22 @@ func (w *fitWorker) fitRule(index int) bool {
 	}
 
 	var candidates []*fitPeer
-	if checkRule(w.rules[index], w.stores) {
+	if matchPeers, exist := w.rulesMatchCache[index]; exist {
 		// Only consider stores:
 		// 1. Match label constraints
 		// 2. Role match, or can match after transformed.
 		// 3. Not selected by other rules.
-		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) {
+		for idx, p := range w.peers {
+			// Not selected by other rules.
+			if p.selected {
+				continue
+			}
+			m, cached := matchPeers[idx]
+			if !cached {
+				m = MatchLabelConstraints(p.store, w.rules[index].LabelConstraints)
+				matchPeers[idx] = m
+			}
+			if m {
 				candidates = append(candidates, p)
 			}
 		}
