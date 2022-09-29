@@ -41,7 +41,13 @@ const (
 	HotRegionReportMinInterval = 3
 
 	hotRegionAntiCount = 2
+
+	queueCap = 20000
 )
+
+// Denoising is an option to calculate flow base on the real heartbeats. Should
+// only turn off by the simulator and the test.
+var Denoising = true
 
 // MinHotThresholds is the threshold at which this dimension is recorded as a hot spot.
 var MinHotThresholds = [RegionStatCount]float64{
