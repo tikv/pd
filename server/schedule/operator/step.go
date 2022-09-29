@@ -252,7 +252,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 
 // Timeout returns true if the step is timeout.
 func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > slowStepWaitDuration(regionSize)
+	return time.Since(start) > fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
