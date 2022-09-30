@@ -247,7 +247,8 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 
 	regionSize := region.GetApproximateSize()
 	to.RegionSize -= regionSize
-	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+	// TODO: Confirm no performance issues
+	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
 // Timeout returns true if the step is timeout.
@@ -307,7 +308,6 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
-	// FIXME: to.WitnessCount -= 1
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
