@@ -16,80 +16,118 @@ package api
 
 import (
 	"fmt"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 )
 
-var _ = Suite(&testMinResolvedTSSuite{})
-
-type testMinResolvedTSSuite struct {
-	svr       *server.Server
-	cleanup   cleanUpFunc
-	urlPrefix string
+type minResolvedTSTestSuite struct {
+	suite.Suite
+	svr             *server.Server
+	cleanup         cleanUpFunc
+	url             string
+	defaultInterval time.Duration
 }
 
-func (s *testMinResolvedTSSuite) SetUpSuite(c *C) {
-	cluster.DefaultMinResolvedTSPersistenceInterval = time.Microsecond
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
+func TestMinResolvedTSTestSuite(t *testing.T) {
+	suite.Run(t, new(minResolvedTSTestSuite))
+}
 
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+func (suite *minResolvedTSTestSuite) SetupSuite() {
+	suite.defaultInterval = time.Millisecond
+	cluster.DefaultMinResolvedTSPersistenceInterval = suite.defaultInterval
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
-	mustBootstrapCluster(c, s.svr)
-	mustPutStore(c, s.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	addr := suite.svr.GetAddr()
+	suite.url = fmt.Sprintf("%s%s/api/v1/min-resolved-ts", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
+	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"))
-	mustRegionHeartbeat(c, s.svr, r1)
+	mustRegionHeartbeat(re, suite.svr, r1)
 	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"))
-	mustRegionHeartbeat(c, s.svr, r2)
+	mustRegionHeartbeat(re, suite.svr, r2)
 }
 
-func (s *testMinResolvedTSSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *minResolvedTSTestSuite) TearDownSuite() {
+	suite.cleanup()
 }
 
-func (s *testMinResolvedTSSuite) TestMinResolvedTS(c *C) {
-	url := s.urlPrefix + "/min-resolved-ts"
-	rc := s.svr.GetRaftCluster()
-	ts := uint64(233)
-	rc.SetMinResolvedTS(1, ts)
-
-	// no run job
-	result := &minResolvedTS{
+func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
+	// case1: default run job
+	interval := suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
+	suite.checkMinResolvedTS(&minResolvedTS{
+		MinResolvedTS:   0,
+		IsRealTime:      true,
+		PersistInterval: interval,
+	})
+	// case2: stop run job
+	zero := typeutil.Duration{Duration: 0}
+	suite.setMinResolvedTSPersistenceInterval(zero)
+	time.Sleep(interval.Duration) // wait sync
+	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   0,
 		IsRealTime:      false,
-		PersistInterval: typeutil.Duration{Duration: 0},
-	}
-	res, err := testDialClient.Get(url)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	listResp := &minResolvedTS{}
-	err = apiutil.ReadJSON(res.Body, listResp)
-	c.Assert(err, IsNil)
-	c.Assert(listResp, DeepEquals, result)
-
-	// run job
-	interval := typeutil.NewDuration(time.Microsecond)
-	cfg := s.svr.GetRaftCluster().GetOpts().GetPDServerConfig().Clone()
-	cfg.MinResolvedTSPersistenceInterval = interval
-	s.svr.GetRaftCluster().GetOpts().SetPDServerConfig(cfg)
-	time.Sleep(time.Millisecond)
-	result = &minResolvedTS{
+		PersistInterval: zero,
+	})
+	// case3: start run job
+	interval = typeutil.Duration{Duration: suite.defaultInterval}
+	suite.setMinResolvedTSPersistenceInterval(interval)
+	suite.Equal(interval, suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval)
+	time.Sleep(suite.defaultInterval) // wait sync
+	suite.checkMinResolvedTS(&minResolvedTS{
+		MinResolvedTS:   0,
+		IsRealTime:      true,
+		PersistInterval: interval,
+	})
+	// case4: set min resolved ts
+	rc := suite.svr.GetRaftCluster()
+	ts := uint64(233)
+	rc.SetMinResolvedTS(1, ts)
+	time.Sleep(suite.defaultInterval) // wait sync
+	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   ts,
 		IsRealTime:      true,
 		PersistInterval: interval,
-	}
-	res, err = testDialClient.Get(url)
-	c.Assert(err, IsNil)
+	})
+	// case5: stop persist and return last persist value when interval is 0
+	interval = typeutil.Duration{Duration: 0}
+	suite.setMinResolvedTSPersistenceInterval(interval)
+	time.Sleep(suite.defaultInterval) // wait sync
+	suite.checkMinResolvedTS(&minResolvedTS{
+		MinResolvedTS:   ts,
+		IsRealTime:      false,
+		PersistInterval: interval,
+	})
+	rc.SetMinResolvedTS(1, ts+1)
+	time.Sleep(suite.defaultInterval) // wait sync
+	suite.checkMinResolvedTS(&minResolvedTS{
+		MinResolvedTS:   ts, // last persist value
+		IsRealTime:      false,
+		PersistInterval: interval,
+	})
+}
+
+func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
+	cfg := suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().Clone()
+	cfg.MinResolvedTSPersistenceInterval = duration
+	suite.svr.GetRaftCluster().GetOpts().SetPDServerConfig(cfg)
+}
+
+func (suite *minResolvedTSTestSuite) checkMinResolvedTS(expect *minResolvedTS) {
+	res, err := testDialClient.Get(suite.url)
+	suite.NoError(err)
 	defer res.Body.Close()
-	listResp = &minResolvedTS{}
+	listResp := &minResolvedTS{}
 	err = apiutil.ReadJSON(res.Body, listResp)
-	c.Assert(err, IsNil)
-	c.Assert(listResp, DeepEquals, result)
+	suite.NoError(err)
+	suite.Equal(expect, listResp)
 }

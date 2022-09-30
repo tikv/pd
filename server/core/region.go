@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -31,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -46,6 +48,7 @@ type RegionInfo struct {
 	term              uint64
 	meta              *metapb.Region
 	learners          []*metapb.Peer
+	witnesses         []*metapb.Peer
 	voters            []*metapb.Peer
 	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
@@ -58,7 +61,7 @@ type RegionInfo struct {
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
-	QueryStats        *pdpb.QueryStats
+	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets       unsafe.Pointer
@@ -82,17 +85,24 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 func classifyVoterAndLearner(region *RegionInfo) {
 	learners := make([]*metapb.Peer, 0, 1)
 	voters := make([]*metapb.Peer, 0, len(region.meta.Peers))
+	witnesses := make([]*metapb.Peer, 0, 1)
 	for _, p := range region.meta.Peers {
 		if IsLearner(p) {
 			learners = append(learners, p)
 		} else {
 			voters = append(voters, p)
 		}
+		// Whichever peer role can be a witness
+		if IsWitness(p) {
+			witnesses = append(witnesses, p)
+		}
 	}
 	sort.Sort(peerSlice(learners))
 	sort.Sort(peerSlice(voters))
+	sort.Sort(peerSlice(witnesses))
 	region.learners = learners
 	region.voters = voters
+	region.witnesses = witnesses
 }
 
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
@@ -101,6 +111,7 @@ func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
 	return r.leader.GetId() == region.leader.GetId() &&
 		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
 		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
+		SortedPeersEqual(r.GetWitnesses(), region.GetWitnesses()) &&
 		SortedPeersEqual(r.GetPendingPeers(), region.GetPendingPeers())
 }
 
@@ -130,7 +141,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	// The size of empty region will be correct by the previous RegionInfo.
-	regionSize := heartbeat.GetApproximateSize() / (1 << 20)
+	regionSize := heartbeat.GetApproximateSize() / units.MiB
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
@@ -149,7 +160,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
-		QueryStats:        heartbeat.GetQueryStats(),
+		queryStats:        heartbeat.GetQueryStats(),
 	}
 
 	for _, opt := range opts {
@@ -193,17 +204,17 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))
 	for _, peer := range r.downPeers {
-		downPeers = append(downPeers, proto.Clone(peer).(*pdpb.PeerStats))
+		downPeers = append(downPeers, typeutil.DeepClone(peer, PeerStatsFactory))
 	}
 	pendingPeers := make([]*metapb.Peer, 0, len(r.pendingPeers))
 	for _, peer := range r.pendingPeers {
-		pendingPeers = append(pendingPeers, proto.Clone(peer).(*metapb.Peer))
+		pendingPeers = append(pendingPeers, typeutil.DeepClone(peer, RegionPeerFactory))
 	}
 
 	region := &RegionInfo{
 		term:              r.term,
-		meta:              proto.Clone(r.meta).(*metapb.Region),
-		leader:            proto.Clone(r.leader).(*metapb.Peer),
+		meta:              typeutil.DeepClone(r.meta, RegionFactory),
+		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
 		writtenBytes:      r.writtenBytes,
@@ -212,9 +223,10 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readKeys:          r.readKeys,
 		approximateSize:   r.approximateSize,
 		approximateKeys:   r.approximateKeys,
-		interval:          proto.Clone(r.interval).(*pdpb.TimeInterval),
+		interval:          typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus: r.replicationStatus,
 		buckets:           r.buckets,
+		queryStats:        typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 	}
 
 	for _, opt := range opts {
@@ -247,6 +259,11 @@ func (r *RegionInfo) GetLearners() []*metapb.Peer {
 // GetVoters returns the voters.
 func (r *RegionInfo) GetVoters() []*metapb.Peer {
 	return r.voters
+}
+
+// GetWitnesses returns the witnesses.
+func (r *RegionInfo) GetWitnesses() []*metapb.Peer {
+	return r.witnesses
 }
 
 // GetPeer returns the peer with specified peer id.
@@ -349,8 +366,8 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
-// GetStoreIds returns a map indicate the region distributed.
-func (r *RegionInfo) GetStoreIds() map[uint64]struct{} {
+// GetStoreIDs returns a map indicate the region distributed.
+func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
 	stores := make(map[uint64]struct{}, len(peers))
 	for _, peer := range peers {
@@ -687,6 +704,7 @@ type RegionsInfo struct {
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
+	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
@@ -698,6 +716,7 @@ func NewRegionsInfo() *RegionsInfo {
 		leaders:      make(map[uint64]*regionTree),
 		followers:    make(map[uint64]*regionTree),
 		learners:     make(map[uint64]*regionTree),
+		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 	}
 }
@@ -785,6 +804,8 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	}
 	// Add to learners.
 	setPeers(r.learners, region.GetLearners())
+	// Add to witnesses.
+	setPeers(r.witnesses, region.GetWitnesses())
 	// Add to PendingPeers
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 
@@ -822,6 +843,7 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 		}
 	}
 	updatePeersStat(r.learners, region.GetLearners())
+	updatePeersStat(r.witnesses, region.GetWitnesses())
 	updatePeersStat(r.pendingPeers, region.GetPendingPeers())
 }
 
@@ -847,6 +869,7 @@ func (r *RegionsInfo) removeRegionFromSubTree(region *RegionInfo) {
 		r.leaders[storeID].remove(region)
 		r.followers[storeID].remove(region)
 		r.learners[storeID].remove(region)
+		r.witnesses[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
 }
@@ -943,6 +966,7 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	if learners, ok := r.learners[storeID]; ok {
 		regions = append(regions, learners.scanRanges()...)
 	}
+	// no need to consider witness, as it is already included in leaders, followers and learners
 	return regions
 }
 
@@ -989,7 +1013,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, proto.Clone(item.region.meta).(*metapb.Region))
+		regions = append(regions, typeutil.DeepClone(item.region.meta, RegionFactory))
 	}
 	return regions
 }
@@ -1022,6 +1046,11 @@ func (r *RegionsInfo) GetStoreFollowerCount(storeID uint64) int {
 // GetStoreLearnerCount get the total count of a store's learner RegionInfo
 func (r *RegionsInfo) GetStoreLearnerCount(storeID uint64) int {
 	return r.learners[storeID].length()
+}
+
+// GetStoreWitnessCount get the total count of a store's witness RegionInfo
+func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
+	return r.witnesses[storeID].length()
 }
 
 // RandPendingRegion randomly gets a store's region with a pending peer.
@@ -1082,12 +1111,12 @@ func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInf
 
 // GetReadQueryNum returns read query num from this region
 func (r *RegionInfo) GetReadQueryNum() uint64 {
-	return GetReadQueryNum(r.QueryStats)
+	return GetReadQueryNum(r.queryStats)
 }
 
 // GetWriteQueryNum returns write query num from this region
 func (r *RegionInfo) GetWriteQueryNum() uint64 {
-	return GetWriteQueryNum(r.QueryStats)
+	return GetWriteQueryNum(r.queryStats)
 }
 
 // GetReadQueryNum returns read query num from this QueryStats
@@ -1332,7 +1361,7 @@ type HexRegionMeta struct {
 }
 
 func (h HexRegionMeta) String() string {
-	var meta = proto.Clone(h.Region).(*metapb.Region)
+	meta := typeutil.DeepClone(h.Region, RegionFactory)
 	meta.StartKey = HexRegionKey(meta.StartKey)
 	meta.EndKey = HexRegionKey(meta.EndKey)
 	return strings.TrimSpace(proto.CompactTextString(meta))
@@ -1353,10 +1382,9 @@ type HexRegionsMeta []*metapb.Region
 func (h HexRegionsMeta) String() string {
 	var b strings.Builder
 	for _, r := range h {
-		meta := proto.Clone(r).(*metapb.Region)
+		meta := typeutil.DeepClone(r, RegionFactory)
 		meta.StartKey = HexRegionKey(meta.StartKey)
 		meta.EndKey = HexRegionKey(meta.EndKey)
-
 		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())

@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -59,37 +61,36 @@ func (s *sequencer) next() uint64 {
 	return s.curID
 }
 
-var _ = Suite(&testScatterRegionSuite{})
-
-type testScatterRegionSuite struct{}
-
-func (s *testScatterRegionSuite) TestScatterRegions(c *C) {
-	s.scatter(c, 5, 50, true)
-	s.scatter(c, 5, 500, true)
-	s.scatter(c, 6, 50, true)
-	s.scatter(c, 5, 50, false)
-	s.scatterSpecial(c, 3, 6, 50)
-	s.scatterSpecial(c, 5, 5, 50)
+func TestScatterRegions(t *testing.T) {
+	re := require.New(t)
+	scatter(re, 5, 50, true)
+	scatter(re, 5, 500, true)
+	scatter(re, 6, 50, true)
+	scatter(re, 5, 50, false)
+	scatterSpecial(re, 3, 6, 50)
+	scatterSpecial(re, 5, 5, 50)
 }
 
-func (s *testScatterRegionSuite) checkOperator(op *operator.Operator, c *C) {
+func checkOperator(re *require.Assertions, op *operator.Operator) {
 	for i := 0; i < op.Len(); i++ {
 		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
 			for j := i + 1; j < op.Len(); j++ {
 				if tr, ok := op.Step(j).(operator.TransferLeader); ok {
-					c.Assert(rp.FromStore, Not(Equals), tr.FromStore)
-					c.Assert(rp.FromStore, Not(Equals), tr.ToStore)
+					re.NotEqual(tr.FromStore, rp.FromStore)
+					re.NotEqual(tr.ToStore, rp.FromStore)
 				}
 			}
 		}
 	}
 }
 
-func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, useRules bool) {
+func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
@@ -102,12 +103,12 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 		// region distributed in same stores.
 		tc.AddLeaderRegion(i, 1, 2, 3)
 	}
-	scatterer := NewRegionScatterer(ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region, ""); op != nil {
-			s.checkOperator(op, c)
+			checkOperator(re, op)
 			ApplyOperator(tc, op)
 		}
 	}
@@ -127,24 +128,26 @@ func (s *testScatterRegionSuite) scatter(c *C, numStores, numRegions uint64, use
 
 	// Each store should have the same number of peers.
 	for _, count := range countPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numStores))
+		re.LessOrEqual(float64(count), 1.1*float64(numRegions*3)/float64(numStores))
+		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions*3)/float64(numStores))
 	}
 
 	// Each store should have the same number of leaders.
-	c.Assert(countPeers, HasLen, int(numStores))
-	c.Assert(countLeader, HasLen, int(numStores))
+	re.Len(countPeers, int(numStores))
+	re.Len(countLeader, int(numStores))
 	for _, count := range countLeader {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numStores))
+		re.LessOrEqual(float64(count), 1.1*float64(numRegions)/float64(numStores))
+		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions)/float64(numStores))
 	}
 }
 
-func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpecialStores, numRegions uint64) {
+func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores, numRegions uint64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
@@ -156,9 +159,9 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
 	tc.SetEnablePlacementRules(true)
-	c.Assert(tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(tc.RuleManager.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
-		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}), IsNil)
+		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}))
 
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
 	tc.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3})
@@ -170,12 +173,12 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 			[]uint64{numOrdinaryStores + 1, numOrdinaryStores + 2, numOrdinaryStores + 3},
 		)
 	}
-	scatterer := NewRegionScatterer(ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region, ""); op != nil {
-			s.checkOperator(op, c)
+			checkOperator(re, op)
 			ApplyOperator(tc, op)
 		}
 	}
@@ -202,20 +205,21 @@ func (s *testScatterRegionSuite) scatterSpecial(c *C, numOrdinaryStores, numSpec
 
 	// Each store should have the same number of peers.
 	for _, count := range countOrdinaryPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
+		re.LessOrEqual(float64(count), 1.1*float64(numRegions*3)/float64(numOrdinaryStores))
+		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions*3)/float64(numOrdinaryStores))
 	}
 	for _, count := range countSpecialPeers {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions*3)/float64(numSpecialStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions*3)/float64(numSpecialStores))
+		re.LessOrEqual(float64(count), 1.1*float64(numRegions*3)/float64(numSpecialStores))
+		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions*3)/float64(numSpecialStores))
 	}
 	for _, count := range countOrdinaryLeaders {
-		c.Assert(float64(count), LessEqual, 1.1*float64(numRegions)/float64(numOrdinaryStores))
-		c.Assert(float64(count), GreaterEqual, 0.9*float64(numRegions)/float64(numOrdinaryStores))
+		re.LessOrEqual(float64(count), 1.1*float64(numRegions)/float64(numOrdinaryStores))
+		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions)/float64(numOrdinaryStores))
 	}
 }
 
-func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
+func TestStoreLimit(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
@@ -236,26 +240,29 @@ func (s *testScatterRegionSuite) TestStoreLimit(c *C) {
 		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
 	}
 
-	scatterer := NewRegionScatterer(ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
 		if op, _ := scatterer.Scatter(region, ""); op != nil {
-			c.Assert(oc.AddWaitingOperator(op), Equals, 1)
+			re.Equal(1, oc.AddWaitingOperator(op))
 		}
 	}
 }
 
-func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
+func TestScatterCheck(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name        string
 		checkRegion *core.RegionInfo
 		needFix     bool
@@ -276,26 +283,75 @@ func (s *testScatterRegionSuite) TestScatterCheck(c *C) {
 			needFix:     true,
 		},
 	}
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(ctx, tc)
-		_, err := scatterer.Scatter(testcase.checkRegion, "")
-		if testcase.needFix {
-			c.Assert(err, NotNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), IsTrue)
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		scatterer := NewRegionScatterer(ctx, tc, oc)
+		_, err := scatterer.Scatter(testCase.checkRegion, "")
+		if testCase.needFix {
+			re.Error(err)
+			re.True(tc.CheckRegionUnderSuspect(1))
 		} else {
-			c.Assert(err, IsNil)
-			c.Assert(tc.CheckRegionUnderSuspect(1), IsFalse)
+			re.NoError(err)
+			re.False(tc.CheckRegionUnderSuspect(1))
 		}
 		tc.ResetSuspectRegions()
 	}
 }
 
-func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
+// TestSomeStoresFilteredScatterGroupInConcurrency is used to test #5317 panic and won't test scatter result
+func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 5 connected stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	// Add 10 disconnected stores.
+	for i := uint64(6); i <= 15; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, 10*time.Minute)
+	}
+	// Add 85 down stores.
+	for i := uint64(16); i <= 100; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, 40*time.Minute)
+	}
+	re.Equal(tc.GetStore(uint64(6)).IsDisconnected(), true)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	var wg sync.WaitGroup
+	for j := 0; j < 10; j++ {
+		wg.Add(1)
+		go scatterOnce(tc, scatterer, fmt.Sprintf("group-%v", j), &wg)
+	}
+	wg.Wait()
+}
+
+func scatterOnce(tc *mockcluster.Cluster, scatter *RegionScatterer, group string, wg *sync.WaitGroup) {
+	regionID := 1
+	for i := 0; i < 100; i++ {
+		scatter.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), group)
+		regionID++
+	}
+	wg.Done()
+}
+
+func TestScatterGroupInConcurrency(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -303,7 +359,7 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 
-	testcases := []struct {
+	testCases := []struct {
 		name       string
 		groupCount int
 	}{
@@ -322,12 +378,12 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	}
 
 	// We send scatter interweave request for each group to simulate scattering multiple region groups in concurrency.
-	for _, testcase := range testcases {
-		c.Logf(testcase.name)
-		scatterer := NewRegionScatterer(ctx, tc)
+	for _, testCase := range testCases {
+		t.Log(testCase.name)
+		scatterer := NewRegionScatterer(ctx, tc, oc)
 		regionID := 1
 		for i := 0; i < 100; i++ {
-			for j := 0; j < testcase.groupCount; j++ {
+			for j := 0; j < testCase.groupCount; j++ {
 				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j))
 				regionID++
@@ -335,7 +391,7 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 		}
 
 		checker := func(ss *selectedStores, expected uint64, delta float64) {
-			for i := 0; i < testcase.groupCount; i++ {
+			for i := 0; i < testCase.groupCount; i++ {
 				// comparing the leader distribution
 				group := fmt.Sprintf("group-%v", i)
 				max := uint64(0)
@@ -349,8 +405,8 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 						min = count
 					}
 				}
-				c.Assert(math.Abs(float64(max)-float64(expected)), LessEqual, delta)
-				c.Assert(math.Abs(float64(min)-float64(expected)), LessEqual, delta)
+				re.LessOrEqual(math.Abs(float64(max)-float64(expected)), delta)
+				re.LessOrEqual(math.Abs(float64(min)-float64(expected)), delta)
 			}
 		}
 		// For leader, we expect each store have about 20 leader for each group
@@ -360,16 +416,47 @@ func (s *testScatterRegionSuite) TestScatterGroupInConcurrency(c *C) {
 	}
 }
 
-func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
+func TestScatterForManyRegion(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 60 stores.
+	for i := uint64(1); i <= 60; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	regions := make(map[uint64]*core.RegionInfo)
+	for i := 1; i <= 1200; i++ {
+		regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
+	}
+	failures := map[uint64]error{}
+	group := "group"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain", `return(true)`))
+	scatterer.scatterRegions(regions, failures, group, 3)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain"))
+	re.Len(failures, 0)
+}
+
+func TestScattersGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	testcases := []struct {
+	testCases := []struct {
 		name    string
 		failure bool
 	}{
@@ -382,24 +469,25 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 			failure: false,
 		},
 	}
-	group := "group"
-	for _, testcase := range testcases {
-		scatterer := NewRegionScatterer(ctx, tc)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain", `return(true)`))
+	for id, testCase := range testCases {
+		group := fmt.Sprintf("gourp-%d", id)
+		t.Log(testCase.name)
+		scatterer := NewRegionScatterer(ctx, tc, oc)
 		regions := map[uint64]*core.RegionInfo{}
 		for i := 1; i <= 100; i++ {
-			regions[uint64(i)] = tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+			regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
 		}
-		c.Log(testcase.name)
 		failures := map[uint64]error{}
-		if testcase.failure {
-			c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`), IsNil)
+		if testCase.failure {
+			re.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/scatterFail", `return(true)`))
 		}
 
 		scatterer.scatterRegions(regions, failures, group, 3)
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
-		c.Assert(exist, IsTrue)
+		re.True(exist)
 		for _, count := range groupDistribution {
 			if count > max {
 				max = count
@@ -409,22 +497,23 @@ func (s *testScatterRegionSuite) TestScattersGroup(c *C) {
 			}
 		}
 		// 100 regions divided 5 stores, each store expected to have about 20 regions.
-		c.Assert(min, LessEqual, uint64(20))
-		c.Assert(max, GreaterEqual, uint64(20))
-		c.Assert(max-min, LessEqual, uint64(3))
-		if testcase.failure {
-			c.Assert(failures, HasLen, 1)
+		re.LessOrEqual(min, uint64(20))
+		re.GreaterOrEqual(max, uint64(20))
+		re.LessOrEqual(max-min, uint64(3))
+		if testCase.failure {
+			re.Len(failures, 1)
 			_, ok := failures[1]
-			c.Assert(ok, IsTrue)
-			c.Assert(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"), IsNil)
+			re.True(ok)
+			re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterFail"))
 		} else {
-			c.Assert(failures, HasLen, 0)
+			re.Empty(failures)
 		}
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/scatterHbStreamsDrain"))
 }
 
-func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
-	// use a shorter gcTTL and gcInterval during the test
+func TestSelectedStoreGC(t *testing.T) {
+	re := require.New(t)
 	gcInterval = time.Second
 	gcTTL = time.Second * 3
 	ctx, cancel := context.WithCancel(context.Background())
@@ -432,29 +521,32 @@ func (s *testScatterRegionSuite) TestSelectedStoreGC(c *C) {
 	stores := newSelectedStores(ctx)
 	stores.Put(1, "testgroup")
 	_, ok := stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, IsTrue)
+	re.True(ok)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, IsTrue)
+	re.True(ok)
 	time.Sleep(gcTTL)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, IsFalse)
+	re.False(ok)
 	_, ok = stores.GetGroupDistribution("testgroup")
-	c.Assert(ok, IsFalse)
+	re.False(ok)
 }
 
 // TestRegionFromDifferentGroups test the multi regions. each region have its own group.
 // After scatter, the distribution for the whole cluster should be well.
-func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
+func TestRegionFromDifferentGroups(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	// Add 6 stores.
 	storeCount := 6
 	for i := uint64(1); i <= uint64(storeCount); i++ {
 		tc.AddRegionStore(i, 0)
 	}
-	scatterer := NewRegionScatterer(ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
 	regionCount := 50
 	for i := 1; i <= regionCount; i++ {
 		p := rand.Perm(storeCount)
@@ -472,18 +564,21 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 				min = count
 			}
 		}
-		c.Assert(max-min, LessEqual, uint64(2))
+		re.LessOrEqual(max-min, uint64(2))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
 
 // TestSelectedStores tests if the peer count has changed due to the picking strategy.
 // Ref https://github.com/tikv/pd/issues/4565
-func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
+func TestSelectedStores(t *testing.T) {
+	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 4; i++ {
 		tc.AddRegionStore(i, 0)
@@ -491,7 +586,7 @@ func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
 		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
 	}
 	group := "group"
-	scatterer := NewRegionScatterer(ctx, tc)
+	scatterer := NewRegionScatterer(ctx, tc, oc)
 
 	// Put a lot of regions in Store 1/2/3.
 	for i := uint64(1); i < 100; i++ {
@@ -507,7 +602,7 @@ func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
 	for i := uint64(1); i < 20; i++ {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group)
-		c.Assert(isPeerCountChanged(op), IsFalse)
+		re.False(isPeerCountChanged(op))
 	}
 }
 

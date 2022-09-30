@@ -70,17 +70,17 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
+		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(region.Size),
-			core.SetApproximateKeys(region.Keys),
+			core.SetApproximateSize(int64(regionSize)),
+			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
-		regionSize := uint64(region.Size)
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(regionSize)
+			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
 		}
 	}
 
@@ -146,7 +146,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
-		core.WithNewPeerIds(ids[0:len(ids)-1]...),
+		core.WithNewPeerIDs(ids[0:len(ids)-1]...),
 		core.WithIncVersion(),
 		core.SetApproximateKeys(region.GetApproximateKeys()/2),
 		core.SetApproximateSize(region.GetApproximateSize()/2),
@@ -196,7 +196,7 @@ func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
 		core.SetApproximateSize(region.GetApproximateSize()+size),
 		core.SetWrittenBytes(uint64(size)),
 	)
-	storeIDs := region.GetStoreIds()
+	storeIDs := region.GetStoreIDs()
 	for storeID := range storeIDs {
 		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
@@ -220,7 +220,7 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 		unhealthy        int
 		newLeaderStoreID uint64
 	)
-	ids := region.GetStoreIds()
+	ids := region.GetStoreIDs()
 	for id := range ids {
 		if r.conn.nodeHealth(id) {
 			newLeaderStoreID = id

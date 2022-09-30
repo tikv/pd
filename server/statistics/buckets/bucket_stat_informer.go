@@ -25,13 +25,12 @@ import (
 	"github.com/tikv/pd/server/statistics"
 )
 
-var minHotThresholds = [statistics.RegionStatCount]uint64{
-	statistics.RegionReadBytes:  8 * 1024,
-	statistics.RegionReadKeys:   128,
-	statistics.RegionReadQuery:  128,
-	statistics.RegionWriteBytes: 1 * 1024,
-	statistics.RegionWriteKeys:  32,
-	statistics.RegionWriteQuery: 32,
+var minHotThresholds [statistics.RegionStatCount]uint64
+
+func init() {
+	for i := range minHotThresholds {
+		minHotThresholds[i] = uint64(statistics.MinHotThresholds[i])
+	}
 }
 
 // BucketStatInformer is used to get the bucket statistics.

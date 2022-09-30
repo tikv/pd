@@ -23,9 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 )
 
-// RegionOption is used to select region.
-type RegionOption func(region *RegionInfo) bool
-
 // RegionCreateOption used to create region.
 type RegionCreateOption func(region *RegionInfo)
 
@@ -50,6 +47,21 @@ func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
 		sort.Sort(peerSlice(region.pendingPeers))
+	}
+}
+
+// WithWitnesses sets the witnesses for the region.
+func WithWitnesses(witnesses []*metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		peers := region.meta.GetPeers()
+		for i := range peers {
+			for _, l := range witnesses {
+				if peers[i].GetId() == l.GetId() {
+					peers[i].IsWitness = true
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -96,14 +108,14 @@ func WithNewRegionID(id uint64) RegionCreateOption {
 	}
 }
 
-// WithNewPeerIds sets new ids for peers.
-func WithNewPeerIds(peerIds ...uint64) RegionCreateOption {
+// WithNewPeerIDs sets new ids for peers.
+func WithNewPeerIDs(peerIDs ...uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		if len(peerIds) != len(region.meta.GetPeers()) {
+		if len(peerIDs) != len(region.meta.GetPeers()) {
 			return
 		}
 		for i, p := range region.meta.GetPeers() {
-			p.Id = peerIds[i]
+			p.Id = peerIDs[i]
 		}
 	}
 }
@@ -218,10 +230,29 @@ func SetWrittenQuery(v uint64) RegionCreateOption {
 	return SetQueryStats(q)
 }
 
-// SetQueryStats sets the query stats for the region.
+// SetQueryNum sets the read and write query with specific num.
+// This func is only used for test and simulator.
+func SetQueryNum(read, write uint64) RegionCreateOption {
+	r := RandomKindReadQuery(read)
+	w := RandomKindWriteQuery(write)
+	q := mergeQueryStat(r, w)
+	return SetQueryStats(q)
+}
+
+// SetQueryStats sets the query stats for the region, it will cover previous statistic.
+// This func is only used for unit test.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.QueryStats = v
+		region.queryStats = v
+	}
+}
+
+// AddQueryStats sets the query stats for the region, it will preserve previous statistic.
+// This func is only used for test and simulator.
+func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		q := mergeQueryStat(region.queryStats, v)
+		region.queryStats = q
 	}
 }
 
@@ -328,4 +359,28 @@ func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.fromHeartbeat = fromHeartbeat
 	}
+}
+
+func mergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
+	if q1 == nil && q2 == nil {
+		return &pdpb.QueryStats{}
+	}
+	if q1 == nil {
+		return q2
+	}
+	if q2 == nil {
+		return q1
+	}
+	q2.GC += q1.GC
+	q2.Get += q1.Get
+	q2.Scan += q1.Scan
+	q2.Coprocessor += q1.Coprocessor
+	q2.Delete += q1.Delete
+	q2.DeleteRange += q1.DeleteRange
+	q2.Put += q1.Put
+	q2.Prewrite += q1.Prewrite
+	q2.AcquirePessimisticLock += q1.AcquirePessimisticLock
+	q2.Commit += q1.Commit
+	q2.Rollback += q1.Rollback
+	return q2
 }

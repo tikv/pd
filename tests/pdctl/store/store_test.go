@@ -17,7 +17,6 @@ package store_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,7 +28,7 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
-	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
 func TestStore(t *testing.T) {
@@ -42,7 +41,7 @@ func TestStore(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := cmd.GetRootCmd()
+	cmd := ctl.GetRootCmd()
 
 	stores := []*api.StoreInfo{
 		{
@@ -101,7 +100,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "--state", "Up,Tombstone"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal(false, strings.Contains(string(output), "\"state\":"))
+	re.NotContains(string(output), "\"state\":")
 	storesInfo = new(api.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
@@ -115,51 +114,69 @@ func TestStore(t *testing.T) {
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	pdctl.CheckStoresInfo(re, []*api.StoreInfo{storeInfo}, stores[:1])
-
-	// store label <store_id> <key> <value> [<key> <value>]... [flags] command
 	re.Nil(storeInfo.Store.Labels)
 
-	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "cn"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "store", "1"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &storeInfo))
-
-	label := storeInfo.Store.Labels[0]
-	re.Equal("zone", label.Key)
-	re.Equal("cn", label.Value)
-
-	// store label <store_id> <key> <value> <key> <value>... command
-	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "us", "language", "English"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "store", "1"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &storeInfo))
-
-	label0 := storeInfo.Store.Labels[0]
-	re.Equal("zone", label0.Key)
-	re.Equal("us", label0.Value)
-	label1 := storeInfo.Store.Labels[1]
-	re.Equal("language", label1.Key)
-	re.Equal("English", label1.Value)
-
-	// store label <store_id> <key> <value> <key> <value>... -f command
-	args = []string{"-u", pdAddr, "store", "label", "1", "zone", "uk", "-f"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "store", "1"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &storeInfo))
-
-	label0 = storeInfo.Store.Labels[0]
-	re.Equal("zone", label0.Key)
-	re.Equal("uk", label0.Value)
-	re.Len(storeInfo.Store.Labels, 1)
+	// store <store_id> label command
+	labelTestCases := []struct {
+		args              []string
+		newArgs           []string
+		expectLabelLength int
+		expectKeys        []string
+		expectValues      []string
+	}{
+		{ // add label
+			args:              []string{"-u", pdAddr, "store", "label", "1", "zone", "cn"},
+			newArgs:           []string{"-u", pdAddr, "store", "label", "1", "zone=cn"},
+			expectLabelLength: 1,
+			expectKeys:        []string{"zone"},
+			expectValues:      []string{"cn"},
+		},
+		{ // update label
+			args:              []string{"-u", pdAddr, "store", "label", "1", "zone", "us", "language", "English"},
+			newArgs:           []string{"-u", pdAddr, "store", "label", "1", "zone=us", "language=English"},
+			expectLabelLength: 2,
+			expectKeys:        []string{"zone", "language"},
+			expectValues:      []string{"us", "English"},
+		},
+		{ // rewrite label
+			args:              []string{"-u", pdAddr, "store", "label", "1", "zone", "uk", "-f"},
+			newArgs:           []string{"-u", pdAddr, "store", "label", "1", "zone=uk", "--rewrite"},
+			expectLabelLength: 1,
+			expectKeys:        []string{"zone"},
+			expectValues:      []string{"uk"},
+		},
+		{ // delete label
+			args:              []string{"-u", pdAddr, "store", "label", "1", "zone", "--delete"},
+			newArgs:           []string{"-u", pdAddr, "store", "label", "1", "zone", "--delete"},
+			expectLabelLength: 0,
+			expectKeys:        []string{""},
+			expectValues:      []string{""},
+		},
+	}
+	for i := 0; i <= 1; i++ {
+		for _, testcase := range labelTestCases {
+			switch {
+			case i == 0: // old way
+				args = testcase.args
+			case i == 1: // new way
+				args = testcase.newArgs
+			}
+			cmd := ctl.GetRootCmd()
+			storeInfo := new(api.StoreInfo)
+			_, err = pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			args = []string{"-u", pdAddr, "store", "1"}
+			output, err = pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			re.NoError(json.Unmarshal(output, &storeInfo))
+			labels := storeInfo.Store.Labels
+			re.Len(labels, testcase.expectLabelLength)
+			for i := 0; i < testcase.expectLabelLength; i++ {
+				re.Equal(testcase.expectKeys[i], labels[i].Key)
+				re.Equal(testcase.expectValues[i], labels[i].Value)
+			}
+		}
+	}
 
 	// store weight <store_id> <leader_weight> <region_weight> command
 	re.Equal(float64(1), storeInfo.Status.LeaderWeight)
@@ -230,6 +247,9 @@ func TestStore(t *testing.T) {
 	re.Equal(float64(25), limit2)
 
 	// store limit all <key> <value> <rate> <type>
+	args = []string{"-u", pdAddr, "store", "label", "1", "zone=uk"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "store", "limit", "all", "zone", "uk", "20", "remove-peer"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -448,7 +468,7 @@ func TestTombstoneStore(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
-	cmd := cmd.GetRootCmd()
+	cmd := ctl.GetRootCmd()
 
 	stores := []*api.StoreInfo{
 		{

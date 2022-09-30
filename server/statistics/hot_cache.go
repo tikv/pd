@@ -22,12 +22,6 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-// Denoising is an option to calculate flow base on the real heartbeats. Should
-// only turned off by the simulator and the test.
-var Denoising = true
-
-const queueCap = 20000
-
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -48,7 +42,7 @@ func NewHotCache(ctx context.Context) *HotCache {
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(task flowItemTask) bool {
+func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
 	select {
 	case w.writeCache.taskQueue <- task:
 		return true
@@ -58,7 +52,7 @@ func (w *HotCache) CheckWriteAsync(task flowItemTask) bool {
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(task flowItemTask) bool {
+func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
 	select {
 	case w.readCache.taskQueue <- task:
 		return true
@@ -85,14 +79,30 @@ func (w *HotCache) RegionStats(kind RWType, minHotDegree int) map[uint64][]*HotP
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	writeIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
-	readIsRegionHotTask := newIsRegionHotTask(region, minHotDegree)
-	succ1 := w.CheckWriteAsync(writeIsRegionHotTask)
-	succ2 := w.CheckReadAsync(readIsRegionHotTask)
+	checkRegionHotWriteTask := newCheckRegionHotTask(region, minHotDegree)
+	checkRegionHotReadTask := newCheckRegionHotTask(region, minHotDegree)
+	succ1 := w.CheckWriteAsync(checkRegionHotWriteTask)
+	succ2 := w.CheckReadAsync(checkRegionHotReadTask)
 	if succ1 && succ2 {
-		return writeIsRegionHotTask.waitRet(w.ctx) || readIsRegionHotTask.waitRet(w.ctx)
+		return checkRegionHotWriteTask.waitRet(w.ctx) || checkRegionHotReadTask.waitRet(w.ctx)
 	}
 	return false
+}
+
+// GetHotPeerStat returns hot peer stat with specified regionID and storeID.
+func (w *HotCache) GetHotPeerStat(kind RWType, regionID, storeID uint64) *HotPeerStat {
+	task := newGetHotPeerStatTask(regionID, storeID)
+	var succ bool
+	switch kind {
+	case Read:
+		succ = w.CheckReadAsync(task)
+	case Write:
+		succ = w.CheckWriteAsync(task)
+	}
+	if !succ {
+		return nil
+	}
+	return task.waitRet(w.ctx)
 }
 
 // CollectMetrics collects the hot cache metrics.
@@ -118,7 +128,7 @@ func incMetrics(name string, storeID uint64, kind RWType) {
 	}
 }
 
-func (w *HotCache) updateItems(queue <-chan flowItemTask, runTask func(task flowItemTask)) {
+func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
 	for {
 		select {
 		case <-w.ctx.Done():
@@ -129,7 +139,7 @@ func (w *HotCache) updateItems(queue <-chan flowItemTask, runTask func(task flow
 	}
 }
 
-func (w *HotCache) runReadTask(task flowItemTask) {
+func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.readCache)
@@ -137,7 +147,7 @@ func (w *HotCache) runReadTask(task flowItemTask) {
 	}
 }
 
-func (w *HotCache) runWriteTask(task flowItemTask) {
+func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.writeCache)

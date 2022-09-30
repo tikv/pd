@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	mockDuration                = 1 * time.Second
+	mockDuration                = time.Second
 	mockClusterName             = "mock"
 	mockTiDBInstanceNamePattern = "%s-tidb-%d"
 	mockTiKVInstanceNamePattern = "%s-tikv-%d"
@@ -340,7 +340,7 @@ func TestGetDurationExpression(t *testing.T) {
 			expectedExpression: "30s",
 		},
 		{
-			duration:           60 * time.Second,
+			duration:           time.Minute,
 			expectedExpression: "60s",
 		},
 		{

@@ -37,6 +37,7 @@ var (
 	errNoStoreToReplace   = errors.New("no store to replace peer")
 	errPeerCannotBeLeader = errors.New("peer cannot be leader")
 	errNoNewLeader        = errors.New("no new leader")
+	errRegionNoLeader     = errors.New("region no leader")
 )
 
 const maxPendingListLen = 100000
@@ -78,9 +79,16 @@ func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {
 
 // CheckWithFit is similar with Checker with placement.RegionFit
 func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.RegionFit) (op *operator.Operator) {
+	// checker is paused
 	if c.IsPaused() {
 		checkerCounter.WithLabelValues("rule_checker", "paused").Inc()
 		return nil
+	}
+	// skip no leader region
+	if region.GetLeader() == nil {
+		checkerCounter.WithLabelValues("rule_checker", "region-no-leader").Inc()
+		log.Debug("fail to check region", zap.Uint64("region-id", region.GetID()), zap.Error(errRegionNoLeader))
+		return
 	}
 	// If the fit is fetched from cache, it seems that the region doesn't need cache
 	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
@@ -239,7 +247,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		checkerCounter.WithLabelValues("rule_checker", "fix-leader-role").Inc()
 		if c.allowLeader(fit, peer) {
-			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().StoreId, peer.GetStoreId(), []uint64{}, 0)
+			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().GetStoreId(), peer.GetStoreId(), []uint64{}, 0)
 		}
 		checkerCounter.WithLabelValues("rule_checker", "not-allow-leader")
 		return nil, errPeerCannotBeLeader
@@ -270,7 +278,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster.GetOpts(), s) {
+	if !stateFilter.Target(c.cluster.GetOpts(), s).IsOK() {
 		return false
 	}
 	for _, rf := range fit.RuleFits {

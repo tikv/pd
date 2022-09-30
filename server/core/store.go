@@ -19,22 +19,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval   = 5 * time.Minute
-	mb                     = 1 << 20 // megabyte
-	gb                     = 1 << 30 // 1GB size
-	initialMaxRegionCounts = 30      // exclude storage Threshold Filter when region less than 30
-	initialMinSpace        = 1 << 33 // 2^33=8GB
-	slowStoreThreshold     = 80
+	storePersistInterval = 5 * time.Minute
+	initialMinSpace      = 8 * units.GiB // 2^33=8GB
+	slowStoreThreshold   = 80
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -53,6 +51,7 @@ type StoreInfo struct {
 	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
+	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
 	pendingPeerCount    int
@@ -81,53 +80,21 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 
 // Clone creates a copy of current StoreInfo.
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
-	meta := proto.Clone(s.meta).(*metapb.Store)
-	store := &StoreInfo{
-		meta:                meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
-		minResolvedTS:       s.minResolvedTS,
-	}
-
+	store := *s
+	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
 	for _, opt := range opts {
-		opt(store)
+		opt(&store)
 	}
-	return store
+	return &store
 }
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
-	store := &StoreInfo{
-		meta:                s.meta,
-		storeStats:          s.storeStats,
-		pauseLeaderTransfer: s.pauseLeaderTransfer,
-		slowStoreEvicted:    s.slowStoreEvicted,
-		leaderCount:         s.leaderCount,
-		regionCount:         s.regionCount,
-		leaderSize:          s.leaderSize,
-		regionSize:          s.regionSize,
-		pendingPeerCount:    s.pendingPeerCount,
-		lastPersistTime:     s.lastPersistTime,
-		leaderWeight:        s.leaderWeight,
-		regionWeight:        s.regionWeight,
-		limiter:             s.limiter,
-		minResolvedTS:       s.minResolvedTS,
-	}
-
+	store := *s
 	for _, opt := range opts {
-		opt(store)
+		opt(&store)
 	}
-	return store
+	return &store
 }
 
 // AllowLeaderTransfer returns if the store is allowed to be selected
@@ -255,6 +222,11 @@ func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
 }
 
+// GetWitnessCount returns the witness count of the store.
+func (s *StoreInfo) GetWitnessCount() int {
+	return s.witnessCount
+}
+
 // GetLeaderSize returns the leader size of the store.
 func (s *StoreInfo) GetLeaderSize() int64 {
 	return s.leaderSize
@@ -330,9 +302,9 @@ func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio fl
 func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	var score float64
 	var amplification float64
-	available := float64(s.GetAvailable()) / mb
-	used := float64(s.GetUsedSize()) / mb
-	capacity := float64(s.GetCapacity()) / mb
+	available := float64(s.GetAvailable()) / units.MiB
+	used := float64(s.GetUsedSize()) / units.MiB
+	capacity := float64(s.GetCapacity()) / units.MiB
 
 	if s.GetRegionSize() == 0 || used == 0 {
 		amplification = 1
@@ -373,8 +345,8 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 }
 
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
-	A := float64(s.GetAvgAvailable()) / gb
-	C := float64(s.GetCapacity()) / gb
+	A := float64(s.GetAvgAvailable()) / units.GiB
+	C := float64(s.GetCapacity()) / units.GiB
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())
@@ -421,13 +393,14 @@ func (s *StoreInfo) AvailableRatio() float64 {
 }
 
 // IsLowSpace checks if the store is lack of space. Not check if region count less
-// than initialMaxRegionCounts and available space more than initialMinSpace
+// than InitClusterRegionThreshold and available space more than initialMinSpace
 func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	if s.GetStoreStats() == nil {
 		return false
 	}
-	// issue #3444
-	if s.regionCount < initialMaxRegionCounts && s.GetAvailable() > initialMinSpace {
+	// See https://github.com/tikv/pd/issues/3444 and https://github.com/tikv/pd/issues/5391
+	// TODO: we need find a better way to get the init region number when starting a new cluster.
+	if s.regionCount < InitClusterRegionThreshold && s.GetAvailable() > initialMinSpace {
 		return false
 	}
 	return s.AvailableRatio() < 1-lowSpaceRatio
@@ -559,8 +532,8 @@ func DistinctScore(labels []string, stores []*StoreInfo, other *StoreInfo) float
 
 // MergeLabels merges the passed in labels with origins, overriding duplicated
 // ones.
-func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
-	storeLabels := s.GetLabels()
+func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+	storeLabels := origin
 L:
 	for _, newLabel := range labels {
 		for _, label := range storeLabels {
@@ -727,10 +700,11 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
+			SetWitnessCount(witnessCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))

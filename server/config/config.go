@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
@@ -90,8 +91,9 @@ type Config struct {
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
 	// The interval to update physical part of timestamp. Usually, this config should not be set.
-	// It's only useful for test purposes.
-	// This config is only valid in 50ms to 10s. If it's configured too long or too short, it will
+	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
+	// more TSOs provided, and at the same time consuming more CPU time.
+	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
@@ -203,12 +205,12 @@ const (
 	defaultLeaderLease             = int64(3)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
-	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * 1024 * 1024 * 1024) // 8GB
+	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
 
 	// The default max bytes for grpc message
 	// Unsafe recovery report is included in store heartbeat, and assume that each peer report occupies about 500B at most,
-	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of regiona on one TiKV.
-	defaultMaxRequestBytes = uint(150 * 1024 * 1024) // 150MB
+	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
+	defaultMaxRequestBytes = uint(150 * units.MiB) // 150MB
 
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
@@ -230,13 +232,15 @@ const (
 
 	defaultLeaderPriorityCheckInterval = time.Minute
 
-	defaultUseRegionStorage                 = true
-	defaultTraceRegionFlow                  = true
-	defaultFlowRoundByDigit                 = 3 // KB
-	maxTraceFlowRoundByDigit                = 5 // 0.1 MB
-	defaultMaxResetTSGap                    = 24 * time.Hour
-	defaultMinResolvedTSPersistenceInterval = 0
-	defaultKeyType                          = "table"
+	defaultUseRegionStorage  = true
+	defaultTraceRegionFlow   = true
+	defaultFlowRoundByDigit  = 3 // KB
+	maxTraceFlowRoundByDigit = 5 // 0.1 MB
+	defaultMaxResetTSGap     = 24 * time.Hour
+	defaultKeyType           = "table"
+
+	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
+	DefaultMinResolvedTSPersistenceInterval = time.Second
 
 	defaultStrictlyMatchLabel   = false
 	defaultEnablePlacementRules = true
@@ -245,14 +249,13 @@ const (
 
 	defaultDashboardAddress = "auto"
 
-	defaultDRWaitStoreTimeout    = time.Minute
-	defaultDRTiKVSyncTimeoutHint = time.Minute
+	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 50 * time.Millisecond
+	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 
@@ -737,6 +740,9 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// on ebs-based BR we need to disable it with TTL
+	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -761,6 +767,9 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	// EnableDiagnostic is the the option to enable using diagnostic
+	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -785,7 +794,8 @@ const (
 	defaultMaxSnapshotCount          = 64
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
-	defaultSplitMergeInterval        = 1 * time.Hour
+	defaultSplitMergeInterval        = time.Hour
+	defaultEnableDiagnostic          = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -804,6 +814,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
@@ -859,11 +870,17 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
+	if !meta.IsDefined("enable-tikv-split-region") {
+		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
+	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	if !meta.IsDefined("enable-diagnostic") {
+		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
@@ -962,6 +979,9 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.LowSpaceRatio <= c.HighSpaceRatio {
 		return errors.New("low-space-ratio should be larger than high-space-ratio")
+	}
+	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
+		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
 	}
 	for _, scheduleConfig := range c.Schedulers {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
@@ -1153,7 +1173,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-		adjustDuration(&c.MinResolvedTSPersistenceInterval, defaultMinResolvedTSPersistenceInterval)
+		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
@@ -1201,6 +1221,9 @@ func (c *PDServerConfig) Validate() error {
 		if err := ValidateURLWithScheme(c.DashboardAddress); err != nil {
 			return err
 		}
+	}
+	if c.KeyType != "table" && c.KeyType != "raw" && c.KeyType != "txn" {
+		return errors.Errorf("key-type %v is invalid", c.KeyType)
 	}
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
@@ -1393,22 +1416,18 @@ func NormalizeReplicationMode(m string) string {
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
 type DRAutoSyncReplicationConfig struct {
-	LabelKey            string            `toml:"label-key" json:"label-key"`
-	Primary             string            `toml:"primary" json:"primary"`
-	DR                  string            `toml:"dr" json:"dr"`
-	PrimaryReplicas     int               `toml:"primary-replicas" json:"primary-replicas"`
-	DRReplicas          int               `toml:"dr-replicas" json:"dr-replicas"`
-	WaitStoreTimeout    typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
-	TiKVSyncTimeoutHint typeutil.Duration `toml:"tikv-sync-timeout-hint" json:"tikv-sync-timeout-hint"`
-	PauseRegionSplit    bool              `toml:"pause-region-split" json:"pause-region-split,string"`
+	LabelKey         string            `toml:"label-key" json:"label-key"`
+	Primary          string            `toml:"primary" json:"primary"`
+	DR               string            `toml:"dr" json:"dr"`
+	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
-	}
-	if !meta.IsDefined("tikv-sync-timeout-hint") {
-		c.TiKVSyncTimeoutHint = typeutil.NewDuration(defaultDRTiKVSyncTimeoutHint)
 	}
 }
 

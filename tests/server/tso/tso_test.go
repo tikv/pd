@@ -19,81 +19,67 @@ package tso_test
 
 import (
 	"context"
+	"testing"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
-var _ = Suite(&testTSOSuite{})
-
-type testTSOSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testTSOSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testTSOSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testTSOSuite) TestLoadTimestamp(c *C) {
+func TestLoadTimestamp(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
 		"pd3": "dc-3",
 	}
 	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(s.ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	lastTSMap := requestLocalTSOs(re, cluster, dcLocationConfig)
 
-	lastTSMap := requestLocalTSOs(c, cluster, dcLocationConfig)
-
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`), IsNil)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`))
 
 	// Reboot the cluster.
-	err = cluster.StopAll()
-	c.Assert(err, IsNil)
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
 
-	cluster.WaitAllLeaders(c, dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	// Re-request the Local TSOs.
-	newTSMap := requestLocalTSOs(c, cluster, dcLocationConfig)
+	newTSMap := requestLocalTSOs(re, cluster, dcLocationConfig)
 	for dcLocation, newTS := range newTSMap {
 		lastTS, ok := lastTSMap[dcLocation]
-		c.Assert(ok, IsTrue)
+		re.True(ok)
 		// The new physical time of TSO should be larger even if the system time is slow.
-		c.Assert(newTS.GetPhysical()-lastTS.GetPhysical(), Greater, int64(0))
+		re.Greater(newTS.GetPhysical()-lastTS.GetPhysical(), int64(0))
 	}
 
 	failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow")
 }
 
-func requestLocalTSOs(c *C, cluster *tests.TestCluster, dcLocationConfig map[string]string) map[string]*pdpb.Timestamp {
+func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLocationConfig map[string]string) map[string]*pdpb.Timestamp {
 	dcClientMap := make(map[string]pdpb.PDClient)
 	tsMap := make(map[string]*pdpb.Timestamp)
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(c, cluster.GetServer(pdName).GetAddr())
+		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 	for _, dcLocation := range dcLocationConfig {
 		req := &pdpb.TsoRequest{
@@ -103,8 +89,61 @@ func requestLocalTSOs(c *C, cluster *tests.TestCluster, dcLocationConfig map[str
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
-		tsMap[dcLocation] = testGetTimestamp(c, ctx, dcClientMap[dcLocation], req)
+		tsMap[dcLocation] = testGetTimestamp(re, ctx, dcClientMap[dcLocation], req)
 		cancel()
 	}
 	return tsMap
+}
+
+func TestDisableLocalTSOAfterEnabling(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dcLocationConfig := map[string]string{
+		"pd1": "dc-1",
+		"pd2": "dc-2",
+		"pd3": "dc-3",
+	}
+	dcLocationNum := len(dcLocationConfig)
+	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
+		conf.EnableLocalTSO = true
+		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+
+	cluster.WaitAllLeaders(re, dcLocationConfig)
+	requestLocalTSOs(re, cluster, dcLocationConfig)
+
+	// Reboot the cluster.
+	re.NoError(cluster.StopAll())
+	for _, server := range cluster.GetServers() {
+		server.SetEnableLocalTSO(false)
+	}
+	re.NoError(cluster.RunInitialServers())
+	cluster.WaitLeader()
+
+	// Re-request the global TSOs.
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	req := &pdpb.TsoRequest{
+		Header:     testutil.NewRequestHeader(clusterID),
+		Count:      1,
+		DcLocation: tso.GlobalDCLocation,
+	}
+
+	ctx = grpcutil.BuildForwardContext(ctx, leaderServer.GetAddr())
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	re.NoError(err)
+	defer tsoClient.CloseSend()
+	re.NoError(tsoClient.Send(req))
+	resp, err := tsoClient.Recv()
+	re.NoError(err)
+	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+	// Test whether the number of existing DCs is as expected.
+	dcLocations, err := leaderServer.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+	re.NoError(err)
+	re.Equal(0, len(dcLocations))
 }

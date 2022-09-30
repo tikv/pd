@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,42 +17,47 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"testing"
 
-	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/server"
 )
 
-var _ = Suite(&ProfSuite{})
-
-type ProfSuite struct {
+type profTestSuite struct {
+	suite.Suite
 	svr       *server.Server
 	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func (s *ProfSuite) SetUpSuite(c *C) {
-	s.svr, s.cleanup = mustNewServer(c)
-	mustWaitLeader(c, []*server.Server{s.svr})
-
-	addr := s.svr.GetAddr()
-	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, apiPrefix)
-
-	mustBootstrapCluster(c, s.svr)
+func TestProfTestSuite(t *testing.T) {
+	suite.Run(t, new(profTestSuite))
 }
 
-func (s *ProfSuite) TearDownSuite(c *C) {
-	s.cleanup()
+func (suite *profTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.svr, suite.cleanup = mustNewServer(re)
+	server.MustWaitLeader(re, []*server.Server{suite.svr})
+
+	addr := suite.svr.GetAddr()
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, apiPrefix)
+
+	mustBootstrapCluster(re, suite.svr)
 }
 
-func (s *ProfSuite) TestGetZip(c *C) {
-	rsp, err := testDialClient.Get(s.urlPrefix + "/pprof/zip?" + "seconds=5s")
-	c.Assert(err, IsNil)
+func (suite *profTestSuite) TearDownSuite() {
+	suite.cleanup()
+}
+
+func (suite *profTestSuite) TestGetZip() {
+	rsp, err := testDialClient.Get(suite.urlPrefix + "/pprof/zip?" + "seconds=5s")
+	suite.NoError(err)
 	defer rsp.Body.Close()
-	body, err := ioutil.ReadAll(rsp.Body)
-	c.Assert(err, IsNil)
-	c.Assert(body, NotNil)
+	body, err := io.ReadAll(rsp.Body)
+	suite.NoError(err)
+	suite.NotNil(body)
 	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
-	c.Assert(err, IsNil)
-	c.Assert(zipReader.File, HasLen, 7)
+	suite.NoError(err)
+	suite.Len(zipReader.File, 7)
 }

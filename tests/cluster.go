@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/check"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -158,6 +157,11 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
+// SetEnableLocalTSO sets the enable-local-tso flag of the TestServer.
+func (s *TestServer) SetEnableLocalTSO(enableLocalTSO bool) {
+	s.server.SetEnableLocalTSO(enableLocalTSO)
+}
+
 // GetPersistOptions returns the current TestServer's schedule option.
 func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 	s.RLock()
@@ -261,9 +265,9 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, err := s.grpcServer.GetMembers(context.TODO(), req)
-	if err != nil {
-		return "", errors.WithStack(err)
+	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
+	if members.Header.GetError() != nil {
+		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -276,6 +280,9 @@ func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
+	}
+	if members.GetHeader().GetError() != nil {
+		return 0, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
 	return members.GetEtcdLeader().GetMemberId(), nil
 }
@@ -366,9 +373,12 @@ func (s *TestServer) BootstrapCluster() error {
 		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	_, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
+	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
 		return err
+	}
+	if resp.GetHeader().GetError() != nil {
+		return errors.New(resp.GetHeader().GetError().String())
 	}
 	return nil
 }
@@ -605,27 +615,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 }
 
 // WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-func (c *TestCluster) WaitAllLeaders(testC *check.C, dcLocations map[string]string) {
-	c.WaitLeader()
-	c.CheckClusterDCLocation()
-	// Wait for each DC's Local TSO Allocator leader
-	wg := sync.WaitGroup{}
-	for _, dcLocation := range dcLocations {
-		wg.Add(1)
-		go func(dc string) {
-			testutil.WaitUntil(testC, func() bool {
-				leaderName := c.WaitAllocatorLeader(dc)
-				return leaderName != ""
-			})
-			wg.Done()
-		}(dcLocation)
-	}
-	wg.Wait()
-}
-
-// WaitAllLeadersWithTestify will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-// NOTICE: this is a temporary function that we will be used to replace `WaitAllLeaders` later.
-func (c *TestCluster) WaitAllLeadersWithTestify(re *require.Assertions, dcLocations map[string]string) {
+func (c *TestCluster) WaitAllLeaders(re *require.Assertions, dcLocations map[string]string) {
 	c.WaitLeader()
 	c.CheckClusterDCLocation()
 	// Wait for each DC's Local TSO Allocator leader
@@ -634,8 +624,7 @@ func (c *TestCluster) WaitAllLeadersWithTestify(re *require.Assertions, dcLocati
 		wg.Add(1)
 		go func(dc string) {
 			testutil.Eventually(re, func() bool {
-				leaderName := c.WaitAllocatorLeader(dc)
-				return leaderName != ""
+				return c.WaitAllocatorLeader(dc) != ""
 			})
 			wg.Done()
 		}(dcLocation)

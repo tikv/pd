@@ -15,7 +15,11 @@
 package simulator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +27,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -38,12 +44,15 @@ type Client interface {
 	PutStore(ctx context.Context, store *metapb.Store) error
 	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
 	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
+	PutPDConfig(*PDConfig) error
+
 	Close()
 }
 
 const (
 	pdTimeout             = time.Second
 	maxInitClusterRetries = 100
+	httpPrefix            = "pd/api/v1"
 )
 
 var (
@@ -56,6 +65,7 @@ type client struct {
 	tag        string
 	clusterID  uint64
 	clientConn *grpc.ClientConn
+	httpClient *http.Client
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -76,6 +86,7 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 		ctx:                      ctx,
 		cancel:                   cancel,
 		tag:                      tag,
+		httpClient:               &http.Client{},
 	}
 	cc, err := c.createConn()
 	if err != nil {
@@ -116,6 +127,9 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 	members, err := c.pdClient().GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
 		return nil, errors.WithStack(err)
+	}
+	if members.GetHeader().GetError() != nil {
+		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
 	return members, nil
 }
@@ -198,7 +212,8 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	defer wg.Done()
 	for {
 		select {
-		case region := <-c.reportRegionHeartbeatCh:
+		case r := <-c.reportRegionHeartbeatCh:
+			region := r.Clone()
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          c.requestHeader(),
 				Region:          region.GetMeta(),
@@ -243,6 +258,9 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if resp.GetHeader().GetError() != nil {
+		return 0, errors.Errorf("alloc id failed: %s", resp.GetHeader().GetError().String())
+	}
 	return resp.GetId(), nil
 }
 
@@ -261,22 +279,29 @@ func (c *client) Bootstrap(ctx context.Context, store *metapb.Store, region *met
 	if err != nil {
 		return err
 	}
-	_, err = c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
+	newStore := typeutil.DeepClone(store, core.StoreFactory)
+	newRegion := typeutil.DeepClone(region, core.RegionFactory)
+
+	res, err := c.pdClient().Bootstrap(ctx, &pdpb.BootstrapRequest{
 		Header: c.requestHeader(),
-		Store:  store,
-		Region: region,
+		Store:  newStore,
+		Region: newRegion,
 	})
 	if err != nil {
 		return err
+	}
+	if res.GetHeader().GetError() != nil {
+		return errors.Errorf("bootstrap failed: %s", resp.GetHeader().GetError().String())
 	}
 	return nil
 }
 
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	newStore := typeutil.DeepClone(store, core.StoreFactory)
 	resp, err := c.pdClient().PutStore(ctx, &pdpb.PutStoreRequest{
 		Header: c.requestHeader(),
-		Store:  store,
+		Store:  newStore,
 	})
 	cancel()
 	if err != nil {
@@ -289,11 +314,58 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	return nil
 }
 
+func (c *client) PutPDConfig(config *PDConfig) error {
+	if len(config.PlacementRules) > 0 {
+		path := fmt.Sprintf("%s/%s/config/rules/batch", c.url, httpPrefix)
+		ruleOps := make([]*placement.RuleOp, 0)
+		for _, rule := range config.PlacementRules {
+			ruleOps = append(ruleOps, &placement.RuleOp{
+				Rule:   rule,
+				Action: placement.RuleOpAdd,
+			})
+		}
+		content, _ := json.Marshal(ruleOps)
+		req, err := http.NewRequest(http.MethodPost, path, bytes.NewBuffer(content))
+		req.Header.Add("Content-Type", "application/json")
+		if err != nil {
+			return err
+		}
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		simutil.Logger.Info("add placement rule success", zap.String("rules", string(content)))
+	}
+	if len(config.LocationLabels) > 0 {
+		path := fmt.Sprintf("%s/%s/config", c.url, httpPrefix)
+		data := make(map[string]interface{})
+		data["location-labels"] = config.LocationLabels
+		content, err := json.Marshal(data)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequest(http.MethodPost, path, bytes.NewBuffer(content))
+		req.Header.Add("Content-Type", "application/json")
+		if err != nil {
+			return err
+		}
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		defer res.Body.Close()
+		simutil.Logger.Info("add location labels success", zap.String("labels", string(content)))
+	}
+	return nil
+}
+
 func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
+	newStats := typeutil.DeepClone(stats, core.StoreStatsFactory)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: c.requestHeader(),
-		Stats:  stats,
+		Stats:  newStats,
 	})
 	cancel()
 	if err != nil {

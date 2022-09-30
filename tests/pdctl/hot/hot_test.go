@@ -21,10 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -69,9 +70,10 @@ func TestHot(t *testing.T) {
 	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
-	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
-	bytesWritten := uint64(8 * 1024 * 1024)
-	bytesRead := uint64(16 * 1024 * 1024)
+
+	newStats := typeutil.DeepClone(ss.GetStoreStats(), core.StoreStatsFactory)
+	bytesWritten := uint64(8 * units.MiB)
+	bytesRead := uint64(16 * units.MiB)
 	keysWritten := uint64(2000)
 	keysRead := uint64(4000)
 	newStats.BytesWritten = bytesWritten
@@ -130,12 +132,12 @@ func TestHot(t *testing.T) {
 			switch hotType {
 			case "read":
 				loads := []float64{
-					statistics.RegionReadBytes:  float64(1000000000 * reportInterval),
-					statistics.RegionReadKeys:   float64(1000000000 * reportInterval),
-					statistics.RegionReadQuery:  float64(1000000000 * reportInterval),
-					statistics.RegionWriteBytes: 0,
-					statistics.RegionWriteKeys:  0,
-					statistics.RegionWriteQuery: 0,
+					statistics.RegionReadBytes:     float64(1000000000 * reportInterval),
+					statistics.RegionReadKeys:      float64(1000000000 * reportInterval),
+					statistics.RegionReadQueryNum:  float64(1000000000 * reportInterval),
+					statistics.RegionWriteBytes:    0,
+					statistics.RegionWriteKeys:     0,
+					statistics.RegionWriteQueryNum: 0,
 				}
 				leader := &metapb.Peer{
 					Id:      100 + regionIDCounter,
@@ -336,7 +338,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &hotRegions))
-	re.Len(hotRegions.HistoryHotRegion, 0)
+	re.Empty(hotRegions.HistoryHotRegion)
 	args = []string{"-u", pdAddr, "hot", "history"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)

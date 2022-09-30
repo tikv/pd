@@ -15,9 +15,14 @@
 package schedulers
 
 import (
+	"context"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 )
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
@@ -35,4 +40,38 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
+}
+
+func BenchmarkCandidateStores(b *testing.B) {
+	ctx := context.Background()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	for id := uint64(1); id < uint64(10000); id++ {
+		leaderCount := int(rand.Int31n(10000))
+		tc.AddLeaderStore(id, leaderCount)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		updateAndResortStoresInCandidateStores(tc)
+	}
+}
+
+func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
+	deltaMap := make(map[uint64]int64)
+	getScore := func(store *core.StoreInfo) float64 {
+		return store.LeaderScore(0, deltaMap[store.GetID()])
+	}
+	cs := newCandidateStores(tc.GetStores(), false, getScore)
+	stores := tc.GetStores()
+	// update score for store and reorder
+	for id, store := range stores {
+		offsets := cs.binarySearchStores(store)
+		if id%2 == 1 {
+			deltaMap[store.GetID()] = int64(rand.Int31n(10000))
+		} else {
+			deltaMap[store.GetID()] = int64(-rand.Int31n(10000))
+		}
+		cs.resortStoreWithPos(offsets[0])
+	}
 }

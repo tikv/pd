@@ -24,14 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Indicator dims.
-const (
-	ByteDim int = iota
-	KeyDim
-	QueryDim
-	DimLen
-)
-
 type dimStat struct {
 	typ         RegionStatKind
 	rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
@@ -89,7 +81,8 @@ type HotPeerStat struct {
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
 
-	Kind  RWType    `json:"-"`
+	Kind RWType `json:"-"`
+	// Loads contains only Kind-related statistics and is DimLen in length.
 	Loads []float64 `json:"loads"`
 
 	// rolling statistics, recording some recently added records.
@@ -100,6 +93,7 @@ type HotPeerStat struct {
 
 	actionType             ActionType
 	isLeader               bool
+	isLearner              bool
 	interval               uint64
 	thresholds             []float64
 	peers                  []*metapb.Peer
@@ -120,8 +114,8 @@ func (stat *HotPeerStat) ID() uint64 {
 }
 
 // Less compares two HotPeerStat.Implementing TopNItem.
-func (stat *HotPeerStat) Less(k int, than TopNItem) bool {
-	return stat.GetLoad(RegionStatKind(k)) < than.(*HotPeerStat).GetLoad(RegionStatKind(k))
+func (stat *HotPeerStat) Less(dim int, than TopNItem) bool {
+	return stat.GetLoad(dim) < than.(*HotPeerStat).GetLoad(dim)
 }
 
 // Log is used to output some info
@@ -131,6 +125,7 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Uint64("store", stat.StoreID),
 		zap.Bool("is-leader", stat.isLeader),
+		zap.Bool("is-learner", stat.isLearner),
 		zap.String("type", stat.Kind.String()),
 		zap.Float64s("loads", stat.GetLoads()),
 		zap.Float64s("loads-instant", stat.Loads),
@@ -160,21 +155,23 @@ func (stat *HotPeerStat) GetActionType() ActionType {
 }
 
 // GetLoad returns denoising load if possible.
-func (stat *HotPeerStat) GetLoad(k RegionStatKind) float64 {
-	if len(stat.rollingLoads) > int(k) {
-		return math.Round(stat.rollingLoads[int(k)].Get())
+func (stat *HotPeerStat) GetLoad(dim int) float64 {
+	if stat.rollingLoads != nil {
+		return math.Round(stat.rollingLoads[dim].Get())
 	}
-	return math.Round(stat.Loads[int(k)])
+	return math.Round(stat.Loads[dim])
 }
 
-// GetLoads returns denoising load if possible.
+// GetLoads returns denoising loads if possible.
 func (stat *HotPeerStat) GetLoads() []float64 {
-	regionStats := stat.Kind.RegionStats()
-	loads := make([]float64, len(regionStats))
-	for i, k := range regionStats {
-		loads[i] = stat.GetLoad(k)
+	if stat.rollingLoads != nil {
+		ret := make([]float64, len(stat.rollingLoads))
+		for dim := range ret {
+			ret[dim] = math.Round(stat.rollingLoads[dim].Get())
+		}
+		return ret
 	}
-	return loads
+	return stat.Loads
 }
 
 // GetThresholds returns thresholds.
@@ -183,11 +180,11 @@ func (stat *HotPeerStat) GetThresholds() []float64 {
 	return stat.thresholds
 }
 
-// Clone clones the HotPeerStat
+// Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
-	ret.Loads = make([]float64, RegionStatCount)
-	for i := RegionStatKind(0); i < RegionStatCount; i++ {
+	ret.Loads = make([]float64, DimLen)
+	for i := 0; i < DimLen; i++ {
 		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil
@@ -218,4 +215,25 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 		return 0
 	}
 	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
+}
+
+// GetStores returns stores of the item.
+func (stat *HotPeerStat) GetStores() []uint64 {
+	stores := []uint64{}
+	for _, peer := range stat.peers {
+		stores = append(stores, peer.StoreId)
+	}
+	return stores
+}
+
+// IsLearner indicates whether the item is learner.
+func (stat *HotPeerStat) IsLearner() bool {
+	return stat.isLearner
+}
+
+func (stat *HotPeerStat) defaultAntiCount() int {
+	if stat.Kind == Read {
+		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
+	return hotRegionAntiCount
 }

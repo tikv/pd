@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
@@ -201,7 +202,7 @@ func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
 	return h.opt.GetHotRegionsWriteInterval()
 }
 
-//  GetHotRegionsReservedDays gets days hot region information is kept.
+// GetHotRegionsReservedDays gets days hot region information is kept.
 func (h *Handler) GetHotRegionsReservedDays() uint64 {
 	return h.opt.GetHotRegionsReservedDays()
 }
@@ -749,11 +750,11 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 		return ErrRegionNotFound(targetID)
 	}
 
-	if !schedule.IsRegionHealthy(region) || !schedule.IsRegionReplicated(c, region) {
+	if !filter.IsRegionHealthy(region) || !filter.IsRegionReplicated(c, region) {
 		return ErrRegionAbnormalPeer(regionID)
 	}
 
-	if !schedule.IsRegionHealthy(target) || !schedule.IsRegionReplicated(c, target) {
+	if !filter.IsRegionHealthy(target) || !filter.IsRegionReplicated(c, target) {
 		return ErrRegionAbnormalPeer(targetID)
 	}
 
@@ -849,7 +850,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	if err != nil {
 		return 0, err
 	}
-	var ops []*operator.Operator
+	opsCount := 0
 	var failures map[uint64]error
 	// If startKey and endKey are both defined, use them first.
 	if len(startRawKey) > 0 && len(endRawKey) > 0 {
@@ -861,26 +862,19 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 		if err != nil {
 			return 0, err
 		}
-		ops, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
 		if err != nil {
 			return 0, err
 		}
 	} else {
-		ops, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
 		if err != nil {
 			return 0, err
 		}
 	}
-	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
-	for _, op := range ops {
-		op.AttachKind(operator.OpAdmin)
-		if ok := c.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-		}
-	}
 	percentage := 100
 	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 	}
 	return percentage, nil
 }
@@ -919,7 +913,11 @@ func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.Re
 }
 
 // ResetTS resets the ts with specified tso.
-func (h *Handler) ResetTS(ts uint64) error {
+func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+	log.Info("reset-ts",
+		zap.Uint64("new-ts", ts),
+		zap.Bool("ignore-smaller", ignoreSmaller),
+		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
 	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
@@ -927,7 +925,7 @@ func (h *Handler) ResetTS(ts uint64) error {
 	if tsoAllocator == nil {
 		return ErrServerNotStarted
 	}
-	return tsoAllocator.SetTSO(ts)
+	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // SetStoreLimitScene sets the limit values for different scenes
@@ -1032,23 +1030,14 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			if err != nil {
 				return nil, err
 			}
-			var peerID uint64
-			var isLearner bool
-			for _, peer := range meta.Peers {
-				if peer.StoreId == hotPeerStat.StoreID {
-					peerID = peer.Id
-					isLearner = core.IsLearner(peer)
-					break
-				}
-			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
 				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
-				PeerID:         peerID,
-				IsLeader:       peerID == region.GetLeader().Id,
-				IsLearner:      isLearner,
+				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
+				IsLeader:       hotPeerStat.IsLeader,
+				IsLearner:      hotPeerStat.IsLearner,
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,

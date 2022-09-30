@@ -22,11 +22,12 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -63,8 +64,8 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 	}
 
 	stats := &pdpb.StoreStats{}
-	stats.Capacity = 100 * (1 << 30)
-	stats.UsedSize = regionSize * (1 << 20)
+	stats.Capacity = 100 * units.GiB
+	stats.UsedSize = regionSize * units.MiB
 	stats.Available = stats.Capacity - stats.UsedSize
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
@@ -149,95 +150,83 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 	return c.putRegion(core.NewRegionInfo(region, nil))
 }
 
-var _ = Suite(&testCoordinatorSuite{})
+func TestBasic(t *testing.T) {
+	re := require.New(t)
 
-type testCoordinatorSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testCoordinatorSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
-}
-
-func (s *testCoordinatorSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testCoordinatorSuite) TestBasic(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
 
-	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 1))
 
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	oc.AddWaitingOperator(op1)
-	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1))
-	c.Assert(oc.GetOperator(1).RegionID(), Equals, op1.RegionID())
+	re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
+	re.Equal(op1.RegionID(), oc.GetOperator(1).RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op2)
-	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(0))
+	re.Equal(uint64(0), oc.OperatorCount(operator.OpRegion))
 
 	// Remove the operator manually, then we can add a new operator.
-	c.Assert(oc.RemoveOperator(op1), IsTrue)
+	re.True(oc.RemoveOperator(op1))
 	op3 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op3)
-	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(1))
-	c.Assert(oc.GetOperator(1).RegionID(), Equals, op3.RegionID())
+	re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion))
+	re.Equal(op3.RegionID(), oc.GetOperator(1).RegionID())
 }
 
-func (s *testCoordinatorSuite) TestDispatch(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestDispatch(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	co.prepareChecker.prepared = true
 	// Transfer peer from store 4 to store 1.
-	c.Assert(tc.addRegionStore(4, 40), IsNil)
-	c.Assert(tc.addRegionStore(3, 30), IsNil)
-	c.Assert(tc.addRegionStore(2, 20), IsNil)
-	c.Assert(tc.addRegionStore(1, 10), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
+	re.NoError(tc.addRegionStore(4, 40))
+	re.NoError(tc.addRegionStore(3, 30))
+	re.NoError(tc.addRegionStore(2, 20))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
 
 	// Transfer leader from store 4 to store 2.
-	c.Assert(tc.updateLeaderCount(4, 50), IsNil)
-	c.Assert(tc.updateLeaderCount(3, 50), IsNil)
-	c.Assert(tc.updateLeaderCount(2, 20), IsNil)
-	c.Assert(tc.updateLeaderCount(1, 10), IsNil)
-	c.Assert(tc.addLeaderRegion(2, 4, 3, 2), IsNil)
+	re.NoError(tc.updateLeaderCount(4, 50))
+	re.NoError(tc.updateLeaderCount(3, 50))
+	re.NoError(tc.updateLeaderCount(2, 20))
+	re.NoError(tc.updateLeaderCount(1, 10))
+	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
 
 	go co.runUntilStop()
 
 	// Wait for schedule and turn off balance.
-	waitOperator(c, co, 1)
-	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
-	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
-	waitOperator(c, co, 2)
-	testutil.CheckTransferLeader(c, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
-	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
+	waitOperator(re, co, 1)
+	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
+	waitOperator(re, co, 2)
+	testutil.CheckTransferLeader(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
+	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Transfer peer.
 	region := tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitPromoteLearner(re, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitRemovePeer(re, stream, region, 4)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 
 	// Transfer leader.
 	region = tc.GetRegion(2).Clone()
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitTransferLeader(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitTransferLeader(re, stream, region, 2)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 }
 
 func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream.HeartbeatStream) error {
@@ -249,10 +238,12 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 	return nil
 }
 
-func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
+func TestCollectMetrics(t *testing.T) {
+	re := require.New(t)
+
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
 		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
-	}, func(co *coordinator) { co.run() }, c)
+	}, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 
 	// Make sure there are no problem when concurrent write and read
@@ -263,7 +254,7 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 		go func(i int) {
 			defer wg.Done()
 			for j := 0; j < 1000; j++ {
-				c.Assert(tc.addRegionStore(uint64(i%5), rand.Intn(200)), IsNil)
+				re.NoError(tc.addRegionStore(uint64(i%5), rand.Intn(200)))
 			}
 		}(i)
 	}
@@ -278,10 +269,10 @@ func (s *testCoordinatorSuite) TestCollectMetrics(c *C) {
 	wg.Wait()
 }
 
-func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), c *C) (*testCluster, *coordinator, func()) {
+func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), re *require.Assertions) (*testCluster, *coordinator, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	if setCfg != nil {
 		setCfg(cfg)
 	}
@@ -302,28 +293,32 @@ func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run 
 	}
 }
 
-func (s *testCoordinatorSuite) checkRegion(c *C, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
+func checkRegionAndOperator(re *require.Assertions, tc *testCluster, co *coordinator, regionID uint64, expectAddOperator int) {
 	ops := co.checkers.CheckRegion(tc.GetRegion(regionID))
 	if ops == nil {
-		c.Assert(expectAddOperator, Equals, 0)
+		re.Equal(0, expectAddOperator)
 	} else {
-		c.Assert(co.opController.AddWaitingOperator(ops...), Equals, expectAddOperator)
+		re.Equal(expectAddOperator, co.opController.AddWaitingOperator(ops...))
 	}
 }
 
-func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestCheckRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	hbStreams, opt := co.hbStreams, tc.opt
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(4, 4), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	s.checkRegion(c, tc, co, 1, 1)
-	testutil.CheckAddPeer(c, co.opController.GetOperator(1), operator.OpReplica, 1)
-	s.checkRegion(c, tc, co, 1, 0)
+	re.NoError(tc.addRegionStore(4, 4))
+	re.NoError(tc.addRegionStore(3, 3))
+	re.NoError(tc.addRegionStore(2, 2))
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.addLeaderRegion(1, 2, 3))
+	checkRegionAndOperator(re, tc, co, 1, 1)
+	testutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
+	checkRegionAndOperator(re, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
 	p := &metapb.Peer{Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}
@@ -331,39 +326,41 @@ func (s *testCoordinatorSuite) TestCheckRegion(c *C) {
 		core.WithAddPeer(p),
 		core.WithPendingPeers(append(r.GetPendingPeers(), p)),
 	)
-	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, 0)
+	re.NoError(tc.putRegion(r))
+	checkRegionAndOperator(re, tc, co, 1, 0)
 
-	tc = newTestCluster(s.ctx, opt)
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	tc = newTestCluster(ctx, opt)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 
-	c.Assert(tc.addRegionStore(4, 4), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, 0)
+	re.NoError(tc.addRegionStore(4, 4))
+	re.NoError(tc.addRegionStore(3, 3))
+	re.NoError(tc.addRegionStore(2, 2))
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.putRegion(r))
+	checkRegionAndOperator(re, tc, co, 1, 0)
 	r = r.Clone(core.WithPendingPeers(nil))
-	c.Assert(tc.putRegion(r), IsNil)
-	s.checkRegion(c, tc, co, 1, 1)
+	re.NoError(tc.putRegion(r))
+	checkRegionAndOperator(re, tc, co, 1, 1)
 	op := co.opController.GetOperator(1)
-	c.Assert(op.Len(), Equals, 1)
-	c.Assert(op.Step(0).(operator.PromoteLearner).ToStore, Equals, uint64(1))
-	s.checkRegion(c, tc, co, 1, 0)
+	re.Equal(1, op.Len())
+	re.Equal(uint64(1), op.Step(0).(operator.PromoteLearner).ToStore)
+	checkRegionAndOperator(re, tc, co, 1, 0)
 }
 
-func (s *testCoordinatorSuite) TestCheckRegionWithScheduleDeny(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestCheckRegionWithScheduleDeny(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(4, 4), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	re.NoError(tc.addRegionStore(4, 4))
+	re.NoError(tc.addRegionStore(3, 3))
+	re.NoError(tc.addRegionStore(2, 2))
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.addLeaderRegion(1, 2, 3))
 	region := tc.GetRegion(1)
-	c.Assert(region, NotNil)
+	re.NotNil(region)
 	// test with label schedule=deny
 	labelerManager := tc.GetRegionLabeler()
 	labelerManager.SetLabelRule(&labeler.LabelRule{
@@ -373,21 +370,23 @@ func (s *testCoordinatorSuite) TestCheckRegionWithScheduleDeny(c *C) {
 		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
 	})
 
-	c.Assert(labelerManager.ScheduleDisabled(region), IsTrue)
-	s.checkRegion(c, tc, co, 1, 0)
+	re.True(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 1, 0)
 	labelerManager.DeleteLabelRule("schedulelabel")
-	c.Assert(labelerManager.ScheduleDisabled(region), IsFalse)
-	s.checkRegion(c, tc, co, 1, 1)
+	re.False(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 1, 1)
 }
 
-func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
+func TestCheckerIsBusy(t *testing.T) {
+	re := require.New(t)
+
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
 		cfg.MergeScheduleLimit = 10
-	}, nil, nil, c)
+	}, nil, nil, re)
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(1, 0), IsNil)
+	re.NoError(tc.addRegionStore(1, 0))
 	num := 1 + typeutil.MaxUint64(tc.opt.GetReplicaScheduleLimit(), tc.opt.GetMergeScheduleLimit())
 	var operatorKinds = []operator.OpKind{
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
@@ -395,50 +394,52 @@ func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
 	for i, operatorKind := range operatorKinds {
 		for j := uint64(0); j < num; j++ {
 			regionID := j + uint64(i+1)*num
-			c.Assert(tc.addLeaderRegion(regionID, 1), IsNil)
+			re.NoError(tc.addLeaderRegion(regionID, 1))
 			switch operatorKind {
 			case operator.OpReplica:
 				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
-				c.Assert(co.opController.AddWaitingOperator(op), Equals, 1)
+				re.Equal(1, co.opController.AddWaitingOperator(op))
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
 					ops, err := operator.CreateMergeRegionOperator("merge-region", co.cluster, tc.GetRegion(regionID), tc.GetRegion(regionID-1), operator.OpMerge)
-					c.Assert(err, IsNil)
-					c.Assert(co.opController.AddWaitingOperator(ops...), Equals, len(ops))
+					re.NoError(err)
+					re.Len(ops, co.opController.AddWaitingOperator(ops...))
 				}
 			}
 		}
 	}
-	s.checkRegion(c, tc, co, num, 0)
+	checkRegionAndOperator(re, tc, co, num, 0)
 }
 
-func (s *testCoordinatorSuite) TestReplica(c *C) {
+func TestReplica(t *testing.T) {
+	re := require.New(t)
+
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// Turn off balance.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addRegionStore(4, 4), IsNil)
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.addRegionStore(2, 2))
+	re.NoError(tc.addRegionStore(3, 3))
+	re.NoError(tc.addRegionStore(4, 4))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add peer to store 1.
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 2, 3))
 	region := tc.GetRegion(1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitPromoteLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitPromoteLearner(re, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 
 	// Peer in store 3 is down, remove peer in store 3 and add peer to store 4.
-	c.Assert(tc.setStoreDown(3), IsNil)
+	re.NoError(tc.setStoreDown(3))
 	downPeer := &pdpb.PeerStats{
 		Peer:        region.GetStorePeer(3),
 		DownSeconds: 24 * 60 * 60,
@@ -446,50 +447,52 @@ func (s *testCoordinatorSuite) TestReplica(c *C) {
 	region = region.Clone(
 		core.WithDownPeers(append(region.GetDownPeers(), downPeer)),
 	)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitPromoteLearner(c, stream, region, 4)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 4)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitPromoteLearner(re, stream, region, 4)
 	region = region.Clone(core.WithDownPeers(nil))
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 
 	// Remove peer from store 4.
-	c.Assert(tc.addLeaderRegion(2, 1, 2, 3, 4), IsNil)
+	re.NoError(tc.addLeaderRegion(2, 1, 2, 3, 4))
 	region = tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitRemovePeer(c, stream, region, 4)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitRemovePeer(re, stream, region, 4)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 
 	// Remove offline peer directly when it's pending.
-	c.Assert(tc.addLeaderRegion(3, 1, 2, 3), IsNil)
-	c.Assert(tc.setStoreOffline(3), IsNil)
+	re.NoError(tc.addLeaderRegion(3, 1, 2, 3))
+	re.NoError(tc.setStoreOffline(3))
 	region = tc.GetRegion(3)
 	region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 }
 
-func (s *testCoordinatorSuite) TestCheckCache(c *C) {
+func TestCheckCache(t *testing.T) {
+	re := require.New(t)
+
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// Turn off replica scheduling.
 		cfg.ReplicaScheduleLimit = 0
-	}, nil, nil, c)
+	}, nil, nil, re)
 	defer cleanup()
 
-	c.Assert(tc.addRegionStore(1, 0), IsNil)
-	c.Assert(tc.addRegionStore(2, 0), IsNil)
-	c.Assert(tc.addRegionStore(3, 0), IsNil)
+	re.NoError(tc.addRegionStore(1, 0))
+	re.NoError(tc.addRegionStore(2, 0))
+	re.NoError(tc.addRegionStore(3, 0))
 
 	// Add a peer with two replicas.
-	c.Assert(tc.addLeaderRegion(1, 2, 3), IsNil)
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 2, 3))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/break-patrol", `return`))
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
+	re.Len(co.checkers.GetWaitingRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
 	opt := tc.GetOpts()
@@ -499,90 +502,94 @@ func (s *testCoordinatorSuite) TestCheckCache(c *C) {
 	co.wg.Add(1)
 	co.patrolRegions()
 	oc := co.opController
-	c.Assert(oc.GetOperators(), HasLen, 1)
-	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
+	re.Len(oc.GetOperators(), 1)
+	re.Empty(co.checkers.GetWaitingRegions())
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 1)
+	re.Len(co.checkers.GetWaitingRegions(), 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	co.wg.Add(1)
 	co.patrolRegions()
-	c.Assert(oc.GetOperators(), HasLen, 1)
-	c.Assert(co.checkers.GetWaitingRegions(), HasLen, 0)
+	re.Len(oc.GetOperators(), 1)
+	re.Empty(co.checkers.GetWaitingRegions())
 
 	co.wg.Wait()
-	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"), IsNil)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/break-patrol"))
 }
 
-func (s *testCoordinatorSuite) TestPeerState(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+func TestPeerState(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 
 	// Transfer peer from store 4 to store 1.
-	c.Assert(tc.addRegionStore(1, 10), IsNil)
-	c.Assert(tc.addRegionStore(2, 10), IsNil)
-	c.Assert(tc.addRegionStore(3, 10), IsNil)
-	c.Assert(tc.addRegionStore(4, 40), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addRegionStore(2, 10))
+	re.NoError(tc.addRegionStore(3, 10))
+	re.NoError(tc.addRegionStore(4, 40))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Wait for schedule.
-	waitOperator(c, co, 1)
-	testutil.CheckTransferPeer(c, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	waitOperator(re, co, 1)
+	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
 	region := tc.GetRegion(1).Clone()
 
 	// Add new peer.
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 1)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitPromoteLearner(c, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 1)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitPromoteLearner(re, stream, region, 1)
 
 	// If the new peer is pending, the operator will not finish.
 	region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), region.GetStorePeer(1))))
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
-	c.Assert(co.opController.GetOperator(region.GetID()), NotNil)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
+	re.NotNil(co.opController.GetOperator(region.GetID()))
 
 	// The new peer is not pending now, the operator will finish.
 	// And we will proceed to remove peer in store 4.
 	region = region.Clone(core.WithPendingPeers(nil))
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitRemovePeer(c, stream, region, 4)
-	c.Assert(tc.addLeaderRegion(1, 1, 2, 3), IsNil)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitRemovePeer(re, stream, region, 4)
+	re.NoError(tc.addLeaderRegion(1, 1, 2, 3))
 	region = tc.GetRegion(1).Clone()
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitNoResponse(re, stream)
 }
 
-func (s *testCoordinatorSuite) TestShouldRun(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestShouldRun(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
-	c.Assert(tc.addLeaderStore(1, 5), IsNil)
-	c.Assert(tc.addLeaderStore(2, 2), IsNil)
-	c.Assert(tc.addLeaderStore(3, 0), IsNil)
-	c.Assert(tc.addLeaderStore(4, 0), IsNil)
-	c.Assert(tc.LoadRegion(1, 1, 2, 3), IsNil)
-	c.Assert(tc.LoadRegion(2, 1, 2, 3), IsNil)
-	c.Assert(tc.LoadRegion(3, 1, 2, 3), IsNil)
-	c.Assert(tc.LoadRegion(4, 1, 2, 3), IsNil)
-	c.Assert(tc.LoadRegion(5, 1, 2, 3), IsNil)
-	c.Assert(tc.LoadRegion(6, 2, 1, 4), IsNil)
-	c.Assert(tc.LoadRegion(7, 2, 1, 4), IsNil)
-	c.Assert(co.shouldRun(), IsFalse)
-	c.Assert(tc.core.Regions.GetStoreRegionCount(4), Equals, 2)
+	re.NoError(tc.addLeaderStore(1, 5))
+	re.NoError(tc.addLeaderStore(2, 2))
+	re.NoError(tc.addLeaderStore(3, 0))
+	re.NoError(tc.addLeaderStore(4, 0))
+	re.NoError(tc.LoadRegion(1, 1, 2, 3))
+	re.NoError(tc.LoadRegion(2, 1, 2, 3))
+	re.NoError(tc.LoadRegion(3, 1, 2, 3))
+	re.NoError(tc.LoadRegion(4, 1, 2, 3))
+	re.NoError(tc.LoadRegion(5, 1, 2, 3))
+	re.NoError(tc.LoadRegion(6, 2, 1, 4))
+	re.NoError(tc.LoadRegion(7, 2, 1, 4))
+	re.False(co.shouldRun())
+	re.Equal(2, tc.core.Regions.GetStoreRegionCount(4))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -596,33 +603,35 @@ func (s *testCoordinatorSuite) TestShouldRun(c *C) {
 		{7, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
-		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
-		c.Assert(co.shouldRun(), Equals, t.shouldRun)
+		re.NoError(tc.processRegionHeartbeat(nr))
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
-	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.prepareChecker.sum, Equals, 7)
+	re.Error(tc.processRegionHeartbeat(newRegion))
+	re.Equal(7, co.prepareChecker.sum)
 }
 
-func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestShouldRunWithNonLeaderRegions(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	tc.RaftCluster.coordinator = co
 	defer cleanup()
 
-	c.Assert(tc.addLeaderStore(1, 10), IsNil)
-	c.Assert(tc.addLeaderStore(2, 0), IsNil)
-	c.Assert(tc.addLeaderStore(3, 0), IsNil)
+	re.NoError(tc.addLeaderStore(1, 10))
+	re.NoError(tc.addLeaderStore(2, 0))
+	re.NoError(tc.addLeaderStore(3, 0))
 	for i := 0; i < 10; i++ {
-		c.Assert(tc.LoadRegion(uint64(i+1), 1, 2, 3), IsNil)
+		re.NoError(tc.LoadRegion(uint64(i+1), 1, 2, 3))
 	}
-	c.Assert(co.shouldRun(), IsFalse)
-	c.Assert(tc.core.Regions.GetStoreRegionCount(1), Equals, 10)
+	re.False(co.shouldRun())
+	re.Equal(10, tc.core.Regions.GetStoreRegionCount(1))
 
-	tbl := []struct {
+	testCases := []struct {
 		regionID  uint64
 		shouldRun bool
 	}{
@@ -637,292 +646,310 @@ func (s *testCoordinatorSuite) TestShouldRunWithNonLeaderRegions(c *C) {
 		{9, true},
 	}
 
-	for _, t := range tbl {
-		r := tc.GetRegion(t.regionID)
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
-		c.Assert(tc.processRegionHeartbeat(nr), IsNil)
-		c.Assert(co.shouldRun(), Equals, t.shouldRun)
+		re.NoError(tc.processRegionHeartbeat(nr))
+		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil)
-	c.Assert(tc.processRegionHeartbeat(newRegion), NotNil)
-	c.Assert(co.prepareChecker.sum, Equals, 9)
+	re.Error(tc.processRegionHeartbeat(newRegion))
+	re.Equal(9, co.prepareChecker.sum)
 
 	// Now, after server is prepared, there exist some regions with no leader.
-	c.Assert(tc.GetRegion(10).GetLeader().GetStoreId(), Equals, uint64(0))
+	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
 }
 
-func (s *testCoordinatorSuite) TestAddScheduler(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+func TestAddScheduler(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 
-	c.Assert(co.schedulers, HasLen, len(config.DefaultSchedulers))
-	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.SplitBucketName), IsNil)
-	c.Assert(co.schedulers, HasLen, 0)
+	re.Len(co.schedulers, len(config.DefaultSchedulers))
+	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
+	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
+	re.NoError(co.removeScheduler(schedulers.HotRegionName))
+	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.Empty(co.schedulers)
 
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add stores 1,2,3
-	c.Assert(tc.addLeaderStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderStore(2, 1), IsNil)
-	c.Assert(tc.addLeaderStore(3, 1), IsNil)
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
+	re.NoError(tc.addLeaderStore(3, 1))
 	// Add regions 1 with leader in store 1 and followers in stores 2,3
-	c.Assert(tc.addLeaderRegion(1, 1, 2, 3), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 1, 2, 3))
 	// Add regions 2 with leader in store 2 and followers in stores 1,3
-	c.Assert(tc.addLeaderRegion(2, 2, 1, 3), IsNil)
+	re.NoError(tc.addLeaderRegion(2, 2, 1, 3))
 	// Add regions 3 with leader in store 3 and followers in stores 1,2
-	c.Assert(tc.addLeaderRegion(3, 3, 1, 2), IsNil)
+	re.NoError(tc.addLeaderRegion(3, 3, 1, 2))
 
 	oc := co.opController
 
 	// test ConfigJSONDecoder create
 	bl, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	conf, err := bl.EncodeConfig()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	data := make(map[string]interface{})
 	err = json.Unmarshal(conf, &data)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	batch := data["batch"].(float64)
-	c.Assert(int(batch), Equals, 4)
+	re.Equal(4, int(batch))
 
 	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls), NotNil)
-	c.Assert(co.removeScheduler(gls.GetName()), NotNil)
+	re.NoError(err)
+	re.NotNil(co.addScheduler(gls))
+	re.NotNil(co.removeScheduler(gls.GetName()))
 
 	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls), IsNil)
+	re.NoError(err)
+	re.NoError(co.addScheduler(gls))
 
 	// Transfer all leaders to store 1.
-	waitOperator(c, co, 2)
+	waitOperator(re, co, 2)
 	region2 := tc.GetRegion(2)
-	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
-	region2 = waitTransferLeader(c, stream, region2, 1)
-	c.Assert(dispatchHeartbeat(co, region2, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region2, stream))
+	region2 = waitTransferLeader(re, stream, region2, 1)
+	re.NoError(dispatchHeartbeat(co, region2, stream))
+	waitNoResponse(re, stream)
 
-	waitOperator(c, co, 3)
+	waitOperator(re, co, 3)
 	region3 := tc.GetRegion(3)
-	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
-	region3 = waitTransferLeader(c, stream, region3, 1)
-	c.Assert(dispatchHeartbeat(co, region3, stream), IsNil)
-	waitNoResponse(c, stream)
+	re.NoError(dispatchHeartbeat(co, region3, stream))
+	region3 = waitTransferLeader(re, stream, region3, 1)
+	re.NoError(dispatchHeartbeat(co, region3, stream))
+	waitNoResponse(re, stream)
 }
 
-func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
-	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+func TestPersistScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
 	// Add stores 1,2
-	c.Assert(tc.addLeaderStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderStore(2, 1), IsNil)
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
 
-	c.Assert(co.schedulers, HasLen, 4)
+	re.Len(co.schedulers, 4)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls1, "1"), IsNil)
+	re.NoError(err)
+	re.NoError(co.addScheduler(gls1, "1"))
 	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(evict, "2"), IsNil)
-	c.Assert(co.schedulers, HasLen, 6)
+	re.NoError(err)
+	re.NoError(co.addScheduler(evict, "2"))
+	re.Len(co.schedulers, 6)
 	sches, _, err := storage.LoadAllScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 6)
-	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.SplitBucketName), IsNil)
-	c.Assert(co.schedulers, HasLen, 2)
-	c.Assert(co.cluster.opt.Persist(storage), IsNil)
+	re.NoError(err)
+	re.Len(sches, 6)
+	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
+	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
+	re.NoError(co.removeScheduler(schedulers.HotRegionName))
+	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.Len(co.schedulers, 2)
+	re.NoError(co.cluster.opt.Persist(storage))
 	co.stop()
 	co.wg.Wait()
 	// make a new coordinator for testing
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {
 		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
 	}()
-	c.Assert(newOpt.GetSchedulers(), HasLen, 4)
-	c.Assert(newOpt.Reload(storage), IsNil)
+	re.Len(newOpt.GetSchedulers(), 4)
+	re.NoError(newOpt.Reload(storage))
 	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 3)
+	re.NoError(err)
+	re.Len(sches, 3)
 
 	// option have 6 items because the default scheduler do not remove.
-	c.Assert(newOpt.GetSchedulers(), HasLen, 7)
-	c.Assert(newOpt.Persist(storage), IsNil)
+	re.Len(newOpt.GetSchedulers(), 7)
+	re.NoError(newOpt.Persist(storage))
 	tc.RaftCluster.opt = newOpt
 
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	c.Assert(co.schedulers, HasLen, 3)
+	re.Len(co.schedulers, 3)
 	co.stop()
 	co.wg.Wait()
 	// suppose restart PD again
 	_, newOpt, err = newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(storage), IsNil)
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	c.Assert(co.schedulers, HasLen, 3)
+	re.Len(co.schedulers, 3)
 	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(bls), IsNil)
+	re.NoError(err)
+	re.NoError(co.addScheduler(bls))
 	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(brs), IsNil)
-	c.Assert(co.schedulers, HasLen, 5)
+	re.NoError(err)
+	re.NoError(co.addScheduler(brs))
+	re.Len(co.schedulers, 5)
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 7)
-	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
+	re.Len(co.cluster.opt.GetSchedulers(), 7)
+	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
 	// the scheduler that is not enable by default will be completely deleted
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 6)
-	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
+	re.Len(co.cluster.opt.GetSchedulers(), 6)
+	re.Len(co.schedulers, 4)
+	re.NoError(co.cluster.opt.Persist(co.cluster.storage))
 	co.stop()
 	co.wg.Wait()
 	_, newOpt, err = newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(co.cluster.storage), IsNil)
+	re.NoError(err)
+	re.NoError(newOpt.Reload(co.cluster.storage))
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.run()
-	c.Assert(co.schedulers, HasLen, 4)
-	c.Assert(co.removeScheduler(schedulers.EvictLeaderName), IsNil)
-	c.Assert(co.schedulers, HasLen, 3)
+	re.Len(co.schedulers, 4)
+	re.NoError(co.removeScheduler(schedulers.EvictLeaderName))
+	re.Len(co.schedulers, 3)
 }
 
-func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
+func TestRemoveScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, func(co *coordinator) { co.run() }, re)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
 	// Add stores 1,2
-	c.Assert(tc.addLeaderStore(1, 1), IsNil)
-	c.Assert(tc.addLeaderStore(2, 1), IsNil)
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
 
-	c.Assert(co.schedulers, HasLen, 4)
+	re.Len(co.schedulers, 4)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
-	c.Assert(err, IsNil)
-	c.Assert(co.addScheduler(gls1, "1"), IsNil)
-	c.Assert(co.schedulers, HasLen, 5)
+	re.NoError(err)
+	re.NoError(co.addScheduler(gls1, "1"))
+	re.Len(co.schedulers, 5)
 	sches, _, err := storage.LoadAllScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 5)
+	re.NoError(err)
+	re.Len(sches, 5)
 
 	// remove all schedulers
-	c.Assert(co.removeScheduler(schedulers.BalanceLeaderName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.BalanceRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.HotRegionName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.GrantLeaderName), IsNil)
-	c.Assert(co.removeScheduler(schedulers.SplitBucketName), IsNil)
+	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
+	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
+	re.NoError(co.removeScheduler(schedulers.HotRegionName))
+	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
+	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(sches, HasLen, 0)
-	c.Assert(co.schedulers, HasLen, 0)
-	c.Assert(co.cluster.opt.Persist(co.cluster.storage), IsNil)
+	re.NoError(err)
+	re.Empty(sches)
+	re.Empty(co.schedulers)
+	re.NoError(co.cluster.opt.Persist(co.cluster.storage))
 	co.stop()
 	co.wg.Wait()
 
 	// suppose restart PD again
 	_, newOpt, err := newTestScheduleConfig()
-	c.Assert(err, IsNil)
-	c.Assert(newOpt.Reload(tc.storage), IsNil)
+	re.NoError(err)
+	re.NoError(newOpt.Reload(tc.storage))
 	tc.RaftCluster.opt = newOpt
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.run()
-	c.Assert(co.schedulers, HasLen, 0)
+	re.Empty(co.schedulers)
 	// the option remains default scheduler
-	c.Assert(co.cluster.opt.GetSchedulers(), HasLen, 4)
+	re.Len(co.cluster.opt.GetSchedulers(), 4)
 	co.stop()
 	co.wg.Wait()
 }
 
-func (s *testCoordinatorSuite) TestRestart(c *C) {
+func TestRestart(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		// Turn off balance, we test add replica only.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
-	}, nil, func(co *coordinator) { co.run() }, c)
+	}, nil, func(co *coordinator) { co.run() }, re)
 	hbStreams := co.hbStreams
 	defer cleanup()
 
 	// Add 3 stores (1, 2, 3) and a region with 1 replica on store 1.
-	c.Assert(tc.addRegionStore(1, 1), IsNil)
-	c.Assert(tc.addRegionStore(2, 2), IsNil)
-	c.Assert(tc.addRegionStore(3, 3), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
+	re.NoError(tc.addRegionStore(1, 1))
+	re.NoError(tc.addRegionStore(2, 2))
+	re.NoError(tc.addRegionStore(3, 3))
+	re.NoError(tc.addLeaderRegion(1, 1))
 	region := tc.GetRegion(1)
 	co.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
 	stream := mockhbstream.NewHeartbeatStream()
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 2)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitPromoteLearner(c, stream, region, 2)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 2)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitPromoteLearner(re, stream, region, 2)
 	co.stop()
 	co.wg.Wait()
 
 	// Recreate coordinator then add another replica on store 3.
-	co = newCoordinator(s.ctx, tc.RaftCluster, hbStreams)
+	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.prepareChecker.collect(region)
 	co.run()
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	region = waitAddLearner(c, stream, region, 3)
-	c.Assert(dispatchHeartbeat(co, region, stream), IsNil)
-	waitPromoteLearner(c, stream, region, 3)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	region = waitAddLearner(re, stream, region, 3)
+	re.NoError(dispatchHeartbeat(co, region, stream))
+	waitPromoteLearner(re, stream, region, 3)
 }
 
-func (s *testCoordinatorSuite) TestPauseScheduler(c *C) {
-	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, c)
+func TestPauseScheduler(t *testing.T) {
+	re := require.New(t)
+
+	_, co, cleanup := prepare(nil, nil, func(co *coordinator) { co.run() }, re)
 	defer cleanup()
 	_, err := co.isSchedulerAllowed("test")
-	c.Assert(err, NotNil)
+	re.Error(err)
 	co.pauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
 	paused, _ := co.isSchedulerPaused(schedulers.BalanceLeaderName)
-	c.Assert(paused, Equals, true)
+	re.True(paused)
 	pausedAt, err := co.getPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	resumeAt, err := co.getPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
-	c.Assert(err, IsNil)
-	c.Assert(resumeAt-pausedAt, Equals, int64(60))
+	re.NoError(err)
+	re.Equal(int64(60), resumeAt-pausedAt)
 	allowed, _ := co.isSchedulerAllowed(schedulers.BalanceLeaderName)
-	c.Assert(allowed, Equals, false)
+	re.False(allowed)
 }
 
 func BenchmarkPatrolRegion(b *testing.B) {
+	re := require.New(b)
+
 	mergeLimit := uint64(4100)
 	regionNum := 10000
 
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.MergeScheduleLimit = mergeLimit
-	}, nil, nil, &C{})
+	}, nil, nil, re)
 	defer cleanup()
 
 	tc.opt.SetSplitMergeInterval(time.Duration(0))
@@ -955,91 +982,79 @@ func BenchmarkPatrolRegion(b *testing.B) {
 	co.patrolRegions()
 }
 
-func waitOperator(c *C, co *coordinator, regionID uint64) {
-	testutil.WaitUntil(c, func() bool {
+func waitOperator(re *require.Assertions, co *coordinator, regionID uint64) {
+	testutil.Eventually(re, func() bool {
 		return co.opController.GetOperator(regionID) != nil
 	})
 }
 
-var _ = Suite(&testOperatorControllerSuite{})
+func TestOperatorCount(t *testing.T) {
+	re := require.New(t)
 
-type testOperatorControllerSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testOperatorControllerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
-}
-
-func (s *testOperatorControllerSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testOperatorControllerSuite) TestOperatorCount(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
-	c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(0))
-	c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(0))
+	re.Equal(uint64(0), oc.OperatorCount(operator.OpLeader))
+	re.Equal(uint64(0), oc.OperatorCount(operator.OpRegion))
 
-	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 1))
+	re.NoError(tc.addLeaderRegion(2, 2))
 	{
 		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op1)
-		c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1)) // 1:leader
+		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader)) // 1:leader
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op2)
-		c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(2)) // 1:leader, 2:leader
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
-		c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1)) // 2:leader
+		re.Equal(uint64(2), oc.OperatorCount(operator.OpLeader)) // 1:leader, 2:leader
+		re.True(oc.RemoveOperator(op1))
+		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader)) // 2:leader
 	}
 
 	{
 		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 		oc.AddWaitingOperator(op1)
-		c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(1)) // 1:region 2:leader
-		c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(1))
+		re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion)) // 1:region 2:leader
+		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
 		op2.SetPriorityLevel(core.HighPriority)
 		oc.AddWaitingOperator(op2)
-		c.Assert(oc.OperatorCount(operator.OpRegion), Equals, uint64(2)) // 1:region 2:region
-		c.Assert(oc.OperatorCount(operator.OpLeader), Equals, uint64(0))
+		re.Equal(uint64(2), oc.OperatorCount(operator.OpRegion)) // 1:region 2:region
+		re.Equal(uint64(0), oc.OperatorCount(operator.OpLeader))
 	}
 }
 
-func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestStoreOverloaded(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	opt := tc.GetOpts()
-	c.Assert(tc.addRegionStore(4, 100), IsNil)
-	c.Assert(tc.addRegionStore(3, 100), IsNil)
-	c.Assert(tc.addRegionStore(2, 100), IsNil)
-	c.Assert(tc.addRegionStore(1, 10), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
+	re.NoError(tc.addRegionStore(4, 100))
+	re.NoError(tc.addRegionStore(3, 100))
+	re.NoError(tc.addRegionStore(2, 100))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
 	start := time.Now()
 	{
-		ops := lb.Schedule(tc)
-		c.Assert(ops, HasLen, 1)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		re.Len(ops, 1)
 		op1 := ops[0]
-		c.Assert(op1, NotNil)
-		c.Assert(oc.AddOperator(op1), IsTrue)
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
+		re.NotNil(op1)
+		re.True(oc.AddOperator(op1))
+		re.True(oc.RemoveOperator(op1))
 	}
 	for {
 		time.Sleep(time.Millisecond * 10)
-		ops := lb.Schedule(tc)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		if time.Since(start) > time.Second {
 			break
 		}
-		c.Assert(ops, HasLen, 0)
+		re.Empty(ops)
 	}
 
 	// reset all stores' limit
@@ -1048,51 +1063,58 @@ func (s *testOperatorControllerSuite) TestStoreOverloaded(c *C) {
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	time.Sleep(time.Second)
 	for i := 0; i < 10; i++ {
-		ops := lb.Schedule(tc)
-		c.Assert(ops, HasLen, 1)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		re.Len(ops, 1)
 		op := ops[0]
-		c.Assert(oc.AddOperator(op), IsTrue)
-		c.Assert(oc.RemoveOperator(op), IsTrue)
+		re.True(oc.AddOperator(op))
+		re.True(oc.RemoveOperator(op))
 	}
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
-		c.Assert(len(lb.Schedule(tc)), Greater, 0)
+		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		re.Greater(len(ops), 0)
 	}
 }
 
-func (s *testOperatorControllerSuite) TestStoreOverloadedWithReplace(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestStoreOverloadedWithReplace(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
 	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	c.Assert(tc.addRegionStore(4, 100), IsNil)
-	c.Assert(tc.addRegionStore(3, 100), IsNil)
-	c.Assert(tc.addRegionStore(2, 100), IsNil)
-	c.Assert(tc.addRegionStore(1, 10), IsNil)
-	c.Assert(tc.addLeaderRegion(1, 2, 3, 4), IsNil)
-	c.Assert(tc.addLeaderRegion(2, 1, 3, 4), IsNil)
+	re.NoError(tc.addRegionStore(4, 100))
+	re.NoError(tc.addRegionStore(3, 100))
+	re.NoError(tc.addRegionStore(2, 100))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+	re.NoError(tc.addLeaderRegion(2, 1, 3, 4))
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
 	region = tc.GetRegion(2).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
-	c.Assert(oc.AddOperator(op1), IsTrue)
+	re.True(oc.AddOperator(op1))
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
 	op2.SetPriorityLevel(core.HighPriority)
-	c.Assert(oc.AddOperator(op2), IsTrue)
+	re.True(oc.AddOperator(op2))
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
-	c.Assert(oc.AddOperator(op3), IsFalse)
-	c.Assert(lb.Schedule(tc), HasLen, 0)
+	re.False(oc.AddOperator(op3))
+	ops, _ := lb.Schedule(tc, false /* dryRun */)
+	re.Empty(ops)
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
-	c.Assert(len(lb.Schedule(tc)), Greater, 0)
+	ops, _ = lb.Schedule(tc, false /* dryRun */)
+	re.Greater(len(ops), 0)
 }
 
-func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestDownStoreLimit(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
 	rc := co.checkers.GetRuleChecker()
@@ -1116,8 +1138,8 @@ func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
 	for i := uint64(1); i < 20; i++ {
 		tc.addRegionStore(i+3, 100)
 		op := rc.Check(region)
-		c.Assert(op, NotNil)
-		c.Assert(oc.AddOperator(op), IsTrue)
+		re.NotNil(op)
+		re.True(oc.AddOperator(op))
 		oc.RemoveOperator(op)
 	}
 
@@ -1126,26 +1148,10 @@ func (s *testOperatorControllerSuite) TestDownStoreLimit(c *C) {
 	for i := uint64(20); i < 25; i++ {
 		tc.addRegionStore(i+3, 100)
 		op := rc.Check(region)
-		c.Assert(op, NotNil)
-		c.Assert(oc.AddOperator(op), IsTrue)
+		re.NotNil(op)
+		re.True(oc.AddOperator(op))
 		oc.RemoveOperator(op)
 	}
-}
-
-var _ = Suite(&testScheduleControllerSuite{})
-
-type testScheduleControllerSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testScheduleControllerSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"), IsNil)
-}
-
-func (s *testScheduleControllerSuite) TearDownSuite(c *C) {
-	s.cancel()
 }
 
 // FIXME: remove after move into schedulers package
@@ -1160,15 +1166,17 @@ func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 
-func (s *testScheduleControllerSuite) TestController(c *C) {
-	tc, co, cleanup := prepare(nil, nil, nil, c)
+func TestController(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
 
-	c.Assert(tc.addLeaderRegion(1, 1), IsNil)
-	c.Assert(tc.addLeaderRegion(2, 2), IsNil)
+	re.NoError(tc.addLeaderRegion(1, 1))
+	re.NoError(tc.addLeaderRegion(2, 2))
 	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
 		counter:   oc,
@@ -1178,25 +1186,25 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	sc := newScheduleController(co, lb)
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
-		c.Assert(sc.GetInterval(), Equals, i)
-		c.Assert(sc.Schedule(), HasLen, 0)
+		re.Equal(i, sc.GetInterval())
+		re.Empty(sc.Schedule(false))
 	}
 	// limit = 2
 	lb.limit = 2
 	// count = 0
 	{
-		c.Assert(sc.AllowSchedule(), IsTrue)
+		re.True(sc.AllowSchedule(false))
 		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op1), Equals, 1)
+		re.Equal(1, oc.AddWaitingOperator(op1))
 		// count = 1
-		c.Assert(sc.AllowSchedule(), IsTrue)
+		re.True(sc.AllowSchedule(false))
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op2), Equals, 1)
+		re.Equal(1, oc.AddWaitingOperator(op2))
 		// count = 2
-		c.Assert(sc.AllowSchedule(), IsFalse)
-		c.Assert(oc.RemoveOperator(op1), IsTrue)
+		re.False(sc.AllowSchedule(false))
+		re.True(oc.RemoveOperator(op1))
 		// count = 1
-		c.Assert(sc.AllowSchedule(), IsTrue)
+		re.True(sc.AllowSchedule(false))
 	}
 
 	op11 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
@@ -1204,55 +1212,57 @@ func (s *testScheduleControllerSuite) TestController(c *C) {
 	{
 		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
 		op3.SetPriorityLevel(core.HighPriority)
-		c.Assert(oc.AddWaitingOperator(op11), Equals, 1)
-		c.Assert(sc.AllowSchedule(), IsFalse)
-		c.Assert(oc.AddWaitingOperator(op3), Equals, 1)
-		c.Assert(sc.AllowSchedule(), IsTrue)
-		c.Assert(oc.RemoveOperator(op3), IsTrue)
+		re.Equal(1, oc.AddWaitingOperator(op11))
+		re.False(sc.AllowSchedule(false))
+		re.Equal(1, oc.AddWaitingOperator(op3))
+		re.True(sc.AllowSchedule(false))
+		re.True(oc.RemoveOperator(op3))
 	}
 
 	// add a admin operator will remove old operator
 	{
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op2), Equals, 1)
-		c.Assert(sc.AllowSchedule(), IsFalse)
+		re.Equal(1, oc.AddWaitingOperator(op2))
+		re.False(sc.AllowSchedule(false))
 		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
 		op4.SetPriorityLevel(core.HighPriority)
-		c.Assert(oc.AddWaitingOperator(op4), Equals, 1)
-		c.Assert(sc.AllowSchedule(), IsTrue)
-		c.Assert(oc.RemoveOperator(op4), IsTrue)
+		re.Equal(1, oc.AddWaitingOperator(op4))
+		re.True(sc.AllowSchedule(false))
+		re.True(oc.RemoveOperator(op4))
 	}
 
 	// test wrong region id.
 	{
 		op5 := newTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
-		c.Assert(oc.AddWaitingOperator(op5), Equals, 0)
+		re.Equal(0, oc.AddWaitingOperator(op5))
 	}
 
 	// test wrong region epoch.
-	c.Assert(oc.RemoveOperator(op11), IsTrue)
+	re.True(oc.RemoveOperator(op11))
 	epoch := &metapb.RegionEpoch{
 		Version: tc.GetRegion(1).GetRegionEpoch().GetVersion() + 1,
 		ConfVer: tc.GetRegion(1).GetRegionEpoch().GetConfVer(),
 	}
 	{
 		op6 := newTestOperator(1, epoch, operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op6), Equals, 0)
+		re.Equal(0, oc.AddWaitingOperator(op6))
 	}
 	epoch.Version--
 	{
 		op6 := newTestOperator(1, epoch, operator.OpLeader)
-		c.Assert(oc.AddWaitingOperator(op6), Equals, 1)
-		c.Assert(oc.RemoveOperator(op6), IsTrue)
+		re.Equal(1, oc.AddWaitingOperator(op6))
+		re.True(oc.RemoveOperator(op6))
 	}
 }
 
-func (s *testScheduleControllerSuite) TestInterval(c *C) {
-	_, co, cleanup := prepare(nil, nil, nil, c)
+func TestInterval(t *testing.T) {
+	re := require.New(t)
+
+	_, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 
 	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	sc := newScheduleController(co, lb)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.
@@ -1260,15 +1270,15 @@ func (s *testScheduleControllerSuite) TestInterval(c *C) {
 	for _, n := range idleSeconds {
 		sc.nextInterval = schedulers.MinScheduleInterval
 		for totalSleep := time.Duration(0); totalSleep <= time.Second*time.Duration(n); totalSleep += sc.GetInterval() {
-			c.Assert(sc.Schedule(), HasLen, 0)
+			re.Empty(sc.Schedule(false))
 		}
-		c.Assert(sc.GetInterval(), Less, time.Second*time.Duration(n/2))
+		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
 	}
 }
 
-func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
@@ -1282,9 +1292,9 @@ func waitAddLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 	)
 }
 
-func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
@@ -1299,9 +1309,9 @@ func waitPromoteLearner(c *C, stream mockhbstream.HeartbeatStream, region *core.
 	)
 }
 
-func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
@@ -1315,9 +1325,9 @@ func waitRemovePeer(c *C, stream mockhbstream.HeartbeatStream, region *core.Regi
 	)
 }
 
-func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
+func waitTransferLeader(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
-	testutil.WaitUntil(c, func() bool {
+	testutil.Eventually(re, func() bool {
 		if res = stream.Recv(); res != nil {
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
@@ -1334,8 +1344,8 @@ func waitTransferLeader(c *C, stream mockhbstream.HeartbeatStream, region *core.
 	)
 }
 
-func waitNoResponse(c *C, stream mockhbstream.HeartbeatStream) {
-	testutil.WaitUntil(c, func() bool {
+func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream) {
+	testutil.Eventually(re, func() bool {
 		res := stream.Recv()
 		return res == nil
 	})

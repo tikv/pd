@@ -19,22 +19,13 @@ import "go.uber.org/goleak"
 // LeakOptions is used to filter the goroutines.
 var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mpoolDrain"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).tCompaction"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb/util.(*BufferPool).drain"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mCompaction"),
-	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).compactionError"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccResolverWrapper).watcher"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
 	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
-	goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
-	goleak.IgnoreTopFunction("runtime.goparkunlock"),
 	// natefinch/lumberjack#56, It's a goroutine leak bug. Another ignore option PR https://github.com/pingcap/tidb/pull/27405/
 	goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
 }

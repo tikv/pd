@@ -81,7 +81,7 @@ func doRequest(cmd *cobra.Command, prefix string, method string, customHeader ht
 
 	endpoints := getEndpoints(cmd)
 	err := tryURLs(cmd, endpoints, func(endpoint string) error {
-		return doGet(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, customHeader, b)
 	})
 	return resp, err
 }
@@ -95,7 +95,7 @@ func doRequestSingleEndpoint(cmd *cobra.Command, endpoint, prefix, method string
 	var resp string
 
 	err := requestURL(cmd, endpoint, func(endpoint string) error {
-		return doGet(endpoint, prefix, method, &resp, customHeader, b)
+		return do(endpoint, prefix, method, &resp, customHeader, b)
 	})
 	return resp, err
 }
@@ -198,8 +198,8 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	cmd.Println("Success!")
 }
 
-// doGet send a get request to server.
-func doGet(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
+// do send a request to server. Default is Get.
+func do(endpoint, prefix, method string, resp *string, customHeader http.Header, b *bodyOption) error {
 	var err error
 	url := endpoint + "/" + prefix
 	if method == "" {

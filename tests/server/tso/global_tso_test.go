@@ -19,15 +19,17 @@ package tso_test
 
 import (
 	"context"
-	"strings"
 	"sync"
+	"testing"
 	"time"
 
-	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
@@ -41,32 +43,19 @@ import (
 //    which will coordinate and synchronize a TSO with other Local TSO Allocator
 //    leaders.
 
-var _ = Suite(&testNormalGlobalTSOSuite{})
-
-type testNormalGlobalTSOSuite struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-}
-
-func (s *testNormalGlobalTSOSuite) SetUpSuite(c *C) {
-	s.ctx, s.cancel = context.WithCancel(context.Background())
-}
-
-func (s *testNormalGlobalTSOSuite) TearDownSuite(c *C) {
-	s.cancel()
-}
-
-func (s *testNormalGlobalTSOSuite) TestConcurrentlyReset(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1)
+func TestConcurrentlyReset(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
+	re.NoError(err)
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(cluster.RunInitialServers())
 
 	cluster.WaitLeader()
 	leader := cluster.GetServer(cluster.GetLeader())
-	c.Assert(leader, NotNil)
+	re.NotNil(leader)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -77,48 +66,48 @@ func (s *testNormalGlobalTSOSuite) TestConcurrentlyReset(c *C) {
 			for i := 0; i <= 100; i++ {
 				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
 				ts := uint64(physical << 18)
-				leader.GetServer().GetHandler().ResetTS(ts)
+				leader.GetServer().GetHandler().ResetTS(ts, false, false)
 			}
 		}()
 	}
 	wg.Wait()
 }
 
-func (s *testNormalGlobalTSOSuite) TestZeroTSOCount(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 1)
+func TestZeroTSOCount(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	c.Assert(err, IsNil)
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
 		DcLocation: tso.GlobalDCLocation,
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	tsoClient, err := grpcPDClient.Tso(ctx)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer tsoClient.CloseSend()
-	err = tsoClient.Send(req)
-	c.Assert(err, IsNil)
+	re.NoError(tsoClient.Send(req))
 	_, err = tsoClient.Recv()
-	c.Assert(err, NotNil)
+	re.Error(err)
 }
 
-func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 2)
-	c.Assert(err, IsNil)
+func TestRequestFollower(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
 	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 
 	var followerServer *tests.TestServer
@@ -127,79 +116,119 @@ func (s *testNormalGlobalTSOSuite) TestRequestFollower(c *C) {
 			followerServer = s
 		}
 	}
-	c.Assert(followerServer, NotNil)
+	re.NotNil(followerServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(c, followerServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer tsoClient.CloseSend()
 
 	start := time.Now()
-	err = tsoClient.Send(req)
-	c.Assert(err, IsNil)
+	re.NoError(tsoClient.Send(req))
 	_, err = tsoClient.Recv()
-	c.Assert(err, NotNil)
-	c.Assert(strings.Contains(err.Error(), "generate timestamp failed"), IsTrue)
+	re.Error(err)
+	re.Contains(err.Error(), "generate timestamp failed")
 
 	// Requesting follower should fail fast, or the unavailable time will be
 	// too long.
-	c.Assert(time.Since(start), Less, time.Second)
+	re.Less(time.Since(start), time.Second)
 }
 
 // In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
 // This test is used to simulate this situation and verify that the retry mechanism.
-func (s *testNormalGlobalTSOSuite) TestDelaySyncTimestamp(c *C) {
-	cluster, err := tests.NewTestCluster(s.ctx, 2)
-	c.Assert(err, IsNil)
+func TestDelaySyncTimestamp(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
 	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	c.Assert(err, IsNil)
+	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 
 	var leaderServer, nextLeaderServer *tests.TestServer
 	leaderServer = cluster.GetServer(cluster.GetLeader())
-	c.Assert(leaderServer, NotNil)
+	re.NotNil(leaderServer)
 	for _, s := range cluster.GetServers() {
 		if s.GetConfig().Name != cluster.GetLeader() {
 			nextLeaderServer = s
 		}
 	}
-	c.Assert(nextLeaderServer, NotNil)
+	re.NotNil(nextLeaderServer)
 
-	grpcPDClient := testutil.MustNewGrpcClient(c, nextLeaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
 		Count:      1,
 		DcLocation: tso.GlobalDCLocation,
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	c.Assert(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`), IsNil)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
-	c.Assert(nextLeaderServer.WaitLeader(), IsTrue)
+	re.True(nextLeaderServer.WaitLeader())
 
 	ctx = grpcutil.BuildForwardContext(ctx, nextLeaderServer.GetAddr())
 	tsoClient, err := grpcPDClient.Tso(ctx)
-	c.Assert(err, IsNil)
+	re.NoError(err)
 	defer tsoClient.CloseSend()
-	err = tsoClient.Send(req)
-	c.Assert(err, IsNil)
+	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
-	c.Assert(err, IsNil)
-	c.Assert(checkAndReturnTimestampResponse(c, req, resp), NotNil)
-	failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp")
+	re.NoError(err)
+	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+}
+
+func TestLogicalOverflow(t *testing.T) {
+	re := require.New(t)
+
+	runCase := func(updateInterval time.Duration) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+		})
+		defer cluster.Destroy()
+		re.NoError(err)
+		re.NoError(cluster.RunInitialServers())
+		cluster.WaitLeader()
+
+		leaderServer := cluster.GetServer(cluster.GetLeader())
+		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+		clusterID := leaderServer.GetClusterID()
+
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+
+		begin := time.Now()
+		for i := 0; i < 2; i += 1 { // the 2nd request may (but not must) overflow, as max logical interval is 262144
+			req := &pdpb.TsoRequest{
+				Header:     testutil.NewRequestHeader(clusterID),
+				Count:      150000,
+				DcLocation: tso.GlobalDCLocation,
+			}
+			re.NoError(tsoClient.Send(req))
+			_, err = tsoClient.Recv()
+			re.NoError(err)
+		}
+		elapse := time.Since(begin)
+		if updateInterval >= 20*time.Millisecond { // on small interval, the physical may update before overflow
+			re.GreaterOrEqual(elapse, updateInterval)
+		}
+		re.Less(elapse, updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+	}
+
+	for _, updateInterval := range []int{1, 5, 30, 50} {
+		runCase(time.Duration(updateInterval) * time.Millisecond)
+	}
 }

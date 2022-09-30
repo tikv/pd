@@ -16,8 +16,8 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +25,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -43,15 +45,20 @@ var (
 	pdAddr                      = flag.String("pd", "", "pd address")
 	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
 	caseName                    = flag.String("case", "", "case name")
-	serverLogLevel              = flag.String("serverLog", "fatal", "pd server log level")
-	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level")
-	simLogFile                  = flag.String("simLogFile", "", "simulator log file")
+	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")
+	simLogLevel                 = flag.String("simLog", "info", "simulator log level")
+	simLogFile                  = flag.String("log-file", "", "simulator log file")
 	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
 	storeNum                    = flag.Int("storeNum", 0, "storeNum")
 	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
+	statusAddress               = flag.String("status-addr", "0.0.0.0:20180", "status address")
 )
 
 func main() {
+	// wait PD start. Otherwise it will happen error when getting cluster ID.
+	time.Sleep(3 * time.Second)
+	// ignore some undefined flag
+	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
@@ -61,19 +68,6 @@ func main() {
 		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
-	if *caseName == "" {
-		if *pdAddr != "" {
-			simutil.Logger.Fatal("need to specify one config name")
-		}
-		for simCase := range cases.CaseMap {
-			run(simCase)
-		}
-	} else {
-		run(*caseName)
-	}
-}
-
-func run(simCase string) {
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
 	var meta toml.MetaData
 	var err error
@@ -85,12 +79,29 @@ func run(simCase string) {
 	if err = simConfig.Adjust(&meta); err != nil {
 		simutil.Logger.Fatal("failed to adjust simulator configuration", zap.Error(err))
 	}
+	if len(*caseName) == 0 {
+		*caseName = simConfig.CaseName
+	}
 
+	if *caseName == "" {
+		if *pdAddr != "" {
+			simutil.Logger.Fatal("need to specify one config name")
+		}
+		for simCase := range cases.CaseMap {
+			run(simCase, simConfig)
+		}
+	} else {
+		run(*caseName, simConfig)
+	}
+}
+
+func run(simCase string, simConfig *simulator.SimConfig) {
 	if *pdAddr != "" {
+		go runMetrics()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
-		err = local.Run()
+		err := local.Run()
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
@@ -102,6 +113,11 @@ func run(simCase string) {
 		}
 		simStart(local.GetAddr(), simCase, simConfig, clean)
 	}
+}
+
+func runMetrics() {
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(*statusAddress, nil)
 }
 
 // NewSingleServer creates a pd server for simulator.
@@ -146,7 +162,6 @@ func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, cle
 	if err != nil {
 		simutil.Logger.Fatal("simulator prepare error", zap.Error(err))
 	}
-
 	tickInterval := simConfig.SimTickInterval.Duration
 
 	tick := time.NewTicker(tickInterval)

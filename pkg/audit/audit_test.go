@@ -59,7 +59,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	defer ts.Close()
 
 	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", nil)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
 	info.Component = "user1"
@@ -77,8 +77,8 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
-	time.Sleep(1 * time.Second)
-	req, _ = http.NewRequest("GET", ts.URL, nil)
+	time.Sleep(time.Second)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL, nil)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -94,7 +94,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
 	defer os.Remove(fname)
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
@@ -112,7 +112,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		info := requestutil.GetRequestInfo(req)
@@ -126,7 +126,7 @@ func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
 	defer os.Remove(fname)
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
 		info := requestutil.GetRequestInfo(req)

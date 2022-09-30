@@ -44,8 +44,8 @@ func TestDefault(t *testing.T) {
 	re.Equal("pd", rules[0].GroupID)
 	re.Equal("default", rules[0].ID)
 	re.Equal(0, rules[0].Index)
-	re.Len(rules[0].StartKey, 0)
-	re.Len(rules[0].EndKey, 0)
+	re.Empty(rules[0].StartKey)
+	re.Empty(rules[0].EndKey)
 	re.Equal(Voter, rules[0].Role)
 	re.Equal([]string{"zone", "rack", "host"}, rules[0].LocationLabels)
 }

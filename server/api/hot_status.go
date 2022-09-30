@@ -62,11 +62,11 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 	}
 }
 
-// @Tags hotspot
-// @Summary List the hot write regions.
-// @Produce json
-// @Success 200 {object} statistics.StoreHotPeersInfos
-// @Router /hotspot/regions/write [get]
+// @Tags     hotspot
+// @Summary  List the hot write regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Router   /hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
 	storeIDs := r.URL.Query()["store_id"]
 	if len(storeIDs) < 1 {
@@ -98,11 +98,11 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 	h.rd.JSON(w, http.StatusOK, rc.GetHotWriteRegions(ids...))
 }
 
-// @Tags hotspot
-// @Summary List the hot read regions.
-// @Produce json
-// @Success 200 {object} statistics.StoreHotPeersInfos
-// @Router /hotspot/regions/read [get]
+// @Tags     hotspot
+// @Summary  List the hot read regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Router   /hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
 	storeIDs := r.URL.Query()["store_id"]
 	if len(storeIDs) < 1 {
@@ -134,11 +134,11 @@ func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Requ
 	h.rd.JSON(w, http.StatusOK, rc.GetHotReadRegions(ids...))
 }
 
-// @Tags hotspot
-// @Summary List the hot stores.
-// @Produce json
-// @Success 200 {object} HotStoreStats
-// @Router /hotspot/stores [get]
+// @Tags     hotspot
+// @Summary  List the hot stores.
+// @Produce  json
+// @Success  200  {object}  HotStoreStats
+// @Router   /hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
 	stats := HotStoreStats{
 		BytesWriteStats: make(map[uint64]float64),
@@ -169,14 +169,14 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
-// @Tags hotspot
-// @Summary List the history hot regions.
-// @Accept json
-// @Produce json
-// @Success 200 {object} storage.HistoryHotRegions
-// @Failure 400 {string} string "The input is invalid."
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /hotspot/regions/history [get]
+// @Tags     hotspot
+// @Summary  List the history hot regions.
+// @Accept   json
+// @Produce  json
+// @Success  200  {object}  storage.HistoryHotRegions
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/regions/history [get]
 func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()

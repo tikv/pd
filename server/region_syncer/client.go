@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -119,10 +120,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
-		storage := s.server.GetStorage()
+		regionStorage := s.server.GetStorage()
 		log.Info("region syncer start load region")
 		start := time.Now()
-		err := storage.LoadRegionsOnce(ctx, bc.CheckAndPutRegion)
+		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
 		log.Info("region syncer finished load region", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
 			log.Warn("failed to load regions.", errs.ZapError(err))
@@ -229,13 +230,13 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region.QueryStats = queryStats[i]
 					}
 					if saveKV {
-						err = storage.SaveRegion(r)
+						err = regionStorage.SaveRegion(r)
 					}
 					if err == nil {
 						s.history.Record(region)
 					}
 					for _, old := range overlaps {
-						_ = storage.DeleteRegion(old.GetMeta())
+						_ = regionStorage.DeleteRegion(old.GetMeta())
 					}
 				}
 			}
