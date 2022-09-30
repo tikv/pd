@@ -285,12 +285,14 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	brief := fmt.Sprintf("create witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	return NewOperator(desc, "", region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	brief := fmt.Sprintf("promote to non-witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
+	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
 
 // CreateMovePeerAndPromoteWitnessToVoterOperator creates an operator that replaces an old peer with a new peer, and promote a witness to voter.
