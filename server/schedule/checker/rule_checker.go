@@ -234,11 +234,14 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
-		/* TODO: enable this
+		/* TODO: enable this after the pr  balance witness merged
 		if newPeer.IsWitness {
 			return operator.CreateMoveWitnessOperator("replace-rule-"+status+"-witness-peer", c.cluster, region, peer.StoreId, newPeer.StoreId, operator.OpWitness)
 		}
 		*/
+		if witness == nil {
+			return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+		}
 		return operator.CreateMovePeerAndPromoteWitnessToVoterOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, witness.StoreId)
 	}
 	op, err := createOp()
