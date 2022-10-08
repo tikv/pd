@@ -782,6 +782,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
+		streamLoopTimer.Reset(c.option.timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
@@ -792,18 +793,19 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
+					continue streamChoosingLoop
+				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
 				case <-streamLoopTimer.C:
-					streamLoopTimer.Reset(c.option.timeout)
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
-				case <-time.After(time.Second):
+				case <-time.After(retryInterval):
 					continue streamChoosingLoop
 				}
 			}
@@ -900,7 +902,7 @@ type connectionContext struct {
 	cancel context.CancelFunc
 }
 
-func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
+func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.allowTSOFollowerProxy(dc) {
@@ -908,7 +910,9 @@ func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, con
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+		return false
 	}
+	return true
 }
 
 // tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
