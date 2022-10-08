@@ -141,6 +141,9 @@ func (c *coordinator) patrolRegions() {
 		c.checkWaitingRegions()
 
 		key, regions = c.checkRegions(key)
+		if len(regions) == 0 {
+			continue
+		}
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
@@ -268,6 +271,8 @@ func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
 		c.opController.AddWaitingOperator(ops...)
 		c.checkers.RemoveWaitingRegion(id)
 		c.checkers.RemoveSuspectRegion(id)
+	} else {
+		c.checkers.AddWaitingRegion(region)
 	}
 }
 
