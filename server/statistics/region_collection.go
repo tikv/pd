@@ -38,9 +38,13 @@ const (
 	EmptyRegion
 	OversizedRegion
 	UndersizedRegion
+	NoLeaderRegion
 )
 
 const nonIsolation = "none"
+
+// ClearThreshold indicates when to clean non-existent regions.
+const ClearThreshold = 10
 
 // RegionInfo is used to record the status of region.
 type RegionInfo struct {
@@ -54,11 +58,12 @@ type RegionStatistics struct {
 	sync.RWMutex
 	opt                *config.PersistOptions
 	stats              map[RegionStatisticType]map[uint64]*RegionInfo
-	offlineStats       map[RegionStatisticType]map[uint64]*core.RegionInfo
+	OfflineStats       map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index              map[uint64]RegionStatisticType
 	offlineIndex       map[uint64]RegionStatisticType
 	ruleManager        *placement.RuleManager
 	storeConfigManager *config.StoreConfigManager
+	Count              int
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
@@ -68,9 +73,10 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 		ruleManager:        ruleManager,
 		storeConfigManager: storeConfigManager,
 		stats:              make(map[RegionStatisticType]map[uint64]*RegionInfo),
-		offlineStats:       make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
+		OfflineStats:       make(map[RegionStatisticType]map[uint64]*core.RegionInfo),
 		index:              make(map[uint64]RegionStatisticType),
 		offlineIndex:       make(map[uint64]RegionStatisticType),
+		Count:              0,
 	}
 	r.stats[MissPeer] = make(map[uint64]*RegionInfo)
 	r.stats[ExtraPeer] = make(map[uint64]*RegionInfo)
@@ -81,12 +87,13 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.stats[OversizedRegion] = make(map[uint64]*RegionInfo)
 	r.stats[UndersizedRegion] = make(map[uint64]*RegionInfo)
 
-	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[DownPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
-	r.offlineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[DownPeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[PendingPeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[LearnerPeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[OfflinePeer] = make(map[uint64]*core.RegionInfo)
+	r.OfflineStats[NoLeaderRegion] = make(map[uint64]*core.RegionInfo)
 	return r
 }
 
@@ -114,7 +121,7 @@ func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) 
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
-	for _, r := range r.offlineStats[typ] {
+	for _, r := range r.OfflineStats[typ] {
 		res = append(res, r.Clone())
 	}
 	return res
@@ -131,7 +138,7 @@ func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID
 func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, regionID uint64) {
 	for typ := RegionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
 		if deleteIndex&typ != 0 {
-			delete(r.offlineStats[typ], regionID)
+			delete(r.OfflineStats[typ], regionID)
 		}
 	}
 }
@@ -212,7 +219,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	for typ, c := range conditions {
 		if c {
 			if isRemoving && typ < EmptyRegion {
-				r.offlineStats[typ][regionID] = region
+				r.OfflineStats[typ][regionID] = region
 				offlinePeerTypeIndex |= typ
 			}
 			info := r.stats[typ][regionID]
@@ -241,7 +248,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 
 	if isRemoving {
-		r.offlineStats[OfflinePeer][regionID] = region
+		r.OfflineStats[OfflinePeer][regionID] = region
 		offlinePeerTypeIndex |= OfflinePeer
 	}
 
@@ -283,18 +290,18 @@ func (r *RegionStatistics) Collect() {
 	regionStatusGauge.WithLabelValues("oversized-region-count").Set(float64(len(r.stats[OversizedRegion])))
 	regionStatusGauge.WithLabelValues("undersized-region-count").Set(float64(len(r.stats[UndersizedRegion])))
 
-	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
-	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))
-	offlineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.offlineStats[DownPeer])))
-	offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.offlineStats[PendingPeer])))
-	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
-	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
+	OfflineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.OfflineStats[MissPeer])))
+	OfflineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.OfflineStats[ExtraPeer])))
+	OfflineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.OfflineStats[DownPeer])))
+	OfflineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.OfflineStats[PendingPeer])))
+	OfflineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.OfflineStats[LearnerPeer])))
+	OfflineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.OfflineStats[OfflinePeer])))
 }
 
 // Reset resets the metrics of the regions' status.
 func (r *RegionStatistics) Reset() {
 	regionStatusGauge.Reset()
-	offlineRegionStatusGauge.Reset()
+	OfflineRegionStatusGauge.Reset()
 }
 
 // LabelStatistics is the statistics of the level of labels.

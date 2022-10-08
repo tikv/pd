@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"math/rand"
 	"sync"
 	"testing"
@@ -1349,4 +1350,54 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 		res := stream.Recv()
 		return res == nil
 	})
+}
+
+func TestNoLeaderRegions(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	rs := statistics.NewRegionStatistics(tc.GetOpts(), tc.RuleManager, tc.StoreConfigManager)
+	endTimestamp := time.Now().UnixNano()
+	regions := []*core.RegionInfo{
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id: 1,
+			},
+			&metapb.Peer{
+				Id:      1,
+				StoreId: 1,
+			},
+			core.WithInterval(&pdpb.TimeInterval{
+				StartTimestamp: uint64(endTimestamp - tc.GetOpts().GetMaxStoreDownTime().Nanoseconds() - 10),
+				EndTimestamp:   uint64(endTimestamp - tc.GetOpts().GetMaxStoreDownTime().Nanoseconds()),
+			}),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id: 2,
+			},
+			&metapb.Peer{
+				Id:      2,
+				StoreId: 2,
+			},
+			core.WithInterval(&pdpb.TimeInterval{
+				StartTimestamp: uint64(endTimestamp - 10),
+				EndTimestamp:   uint64(endTimestamp),
+			}),
+		),
+	}
+	tc.GetBasicCluster().PutRegion(regions[0])
+
+	observeAbnormalRegions(tc, rs, regions)
+	re.Len(rs.GetOfflineRegionStatsByType(statistics.NoLeaderRegion), 1)
+	for i := 0; i < statistics.ClearThreshold; i++ {
+		collectAndClean(rs, tc)
+	}
+	re.Len(rs.GetOfflineRegionStatsByType(statistics.NoLeaderRegion), 1)
+	tc.GetBasicCluster().RemoveRegion(regions[0])
+	for i := 0; i < statistics.ClearThreshold; i++ {
+		collectAndClean(rs, tc)
+	}
+	re.Len(rs.GetOfflineRegionStatsByType(statistics.NoLeaderRegion), 0)
 }

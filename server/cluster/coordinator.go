@@ -144,6 +144,9 @@ func (c *coordinator) patrolRegions() {
 			continue
 		}
 
+		// Records the region if it is in abnormal state.
+		observeAbnormalRegions(c.cluster, c.cluster.regionStats, regions)
+
 		for _, region := range regions {
 			// Skips the region if there is already a pending operator.
 			if c.opController.GetOperator(region.GetID()) != nil {
@@ -170,6 +173,7 @@ func (c *coordinator) patrolRegions() {
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
+			collectAndClean(c.cluster.regionStats, c.cluster)
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
@@ -286,6 +290,42 @@ func (c *coordinator) checkWaitingRegions() {
 		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
 			c.checkers.RemoveWaitingRegion(region.GetID())
+		}
+	}
+}
+
+// observeAbnormalRegions verifies a region's state, recording it if needed.
+func observeAbnormalRegions(cluster schedule.Cluster, rs *statistics.RegionStatistics, regions []*core.RegionInfo) {
+	now := time.Now().UnixNano()
+	expireTime := cluster.GetOpts().GetMaxStoreDownTime().Nanoseconds()
+	for _, region := range regions {
+		regionID := region.GetID()
+		// check down region
+		if now-int64(region.GetInterval().GetEndTimestamp()) >= expireTime {
+			_, exist := rs.OfflineStats[statistics.NoLeaderRegion][regionID]
+			if !exist {
+				rs.OfflineStats[statistics.NoLeaderRegion][regionID] = region
+			}
+		}
+	}
+}
+
+// collectAndClean collects the metrics of abnormal regions' states and clean non-existent regions.
+func collectAndClean(rs *statistics.RegionStatistics, cluster schedule.Cluster) {
+	statistics.OfflineRegionStatusGauge.WithLabelValues("no-leader-region-count").Set(float64(len(rs.OfflineStats[statistics.NoLeaderRegion])))
+	rs.Count++
+	if rs.Count == statistics.ClearThreshold {
+		rs.Count = 0
+		clearNotExistRegions(rs, cluster)
+	}
+}
+
+func clearNotExistRegions(rs *statistics.RegionStatistics, cluster schedule.Cluster) {
+	bc := cluster.GetBasicCluster()
+	for _, region := range rs.OfflineStats[statistics.NoLeaderRegion] {
+		regionID := region.GetID()
+		if bc.GetRegion(regionID) == nil {
+			delete(rs.OfflineStats[statistics.NoLeaderRegion], regionID)
 		}
 	}
 }

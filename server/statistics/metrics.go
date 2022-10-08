@@ -41,7 +41,8 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
-	offlineRegionStatusGauge = prometheus.NewGaugeVec(
+	// OfflineRegionStatusGauge will be used to record the abnormal regions.
+	OfflineRegionStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "regions",
@@ -190,7 +191,7 @@ func init() {
 	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
-	prometheus.MustRegister(offlineRegionStatusGauge)
+	prometheus.MustRegister(OfflineRegionStatusGauge)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)
