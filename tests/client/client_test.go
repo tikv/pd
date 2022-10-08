@@ -360,11 +360,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	cli := setupCli(re, ctx, endpoints)
 
 	var wg sync.WaitGroup
-
-	// test resign pd leader or stop pd leader
-	wg.Add(1 + 1)
 	var maxUnavailableTime, leaderReadyTime time.Time
-	go func() {
+	getTsoFunc := func() {
 		defer wg.Done()
 		var lastTS uint64
 		for i := 0; i < tsoRequestRound; i++ {
@@ -380,7 +377,11 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 			re.Less(lastTS, ts)
 			lastTS = ts
 		}
-	}()
+	}
+
+	// test resign pd leader or stop pd leader
+	wg.Add(1 + 1)
+	go getTsoFunc()
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetServer(cluster.GetLeader())
@@ -390,29 +391,12 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		cluster.RunServers([]*tests.TestServer{leader})
 	}()
 	wg.Wait()
-	t.Log(maxUnavailableTime, leaderReadyTime)
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 
 	// test kill pd leader pod or network of leader is unreachable
 	wg.Add(1 + 1)
 	maxUnavailableTime, leaderReadyTime = time.Time{}, time.Time{}
-	go func() {
-		defer wg.Done()
-		var lastTS uint64
-		for i := 0; i < tsoRequestRound; i++ {
-			var physical, logical int64
-			var ts uint64
-			physical, logical, err = cli.GetTS(context.Background())
-			ts = tsoutil.ComposeTS(physical, logical)
-			if err != nil {
-				maxUnavailableTime = time.Now()
-				continue
-			}
-			re.NoError(err)
-			re.Less(lastTS, ts)
-			lastTS = ts
-		}
-	}()
+	go getTsoFunc()
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetServer(cluster.GetLeader())
@@ -423,7 +407,6 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		leaderReadyTime = time.Now()
 	}()
 	wg.Wait()
-	t.Log(maxUnavailableTime, leaderReadyTime)
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 }
 
