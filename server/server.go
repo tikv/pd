@@ -1348,7 +1348,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	// maintain the PD leadership, after this, TSO can be service.
-	go s.member.KeepLeader(ctx)
+	s.member.KeepLeader(ctx)
 	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
 
 	alllocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
