@@ -372,7 +372,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	if op != nil {
 		scatterCounter.WithLabelValues("success", "").Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 	}
 	return op
 }

@@ -186,7 +186,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	if err != nil {
 		return nil, err
 	}
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.High)
 	return op, nil
 }
 
@@ -235,7 +235,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.High)
 	return op, nil
 }
 

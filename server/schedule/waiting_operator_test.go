@@ -42,12 +42,12 @@ func addOperators(wop WaitingOperator) {
 	op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(2)},
 	}...)
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.High)
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(3)},
 	}...)
-	op.SetPriorityLevel(core.LowPriority)
+	op.SetPriorityLevel(core.Low)
 	wop.PutOperator(op)
 }
 
@@ -101,7 +101,7 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 			operator.RemovePeer{FromStore: uint64(3)},
 		}...)
 		op.SetDesc("testOperatorHigh")
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 		rb.PutOperator(op)
 
 		for i := 0; i < 2; i++ {
