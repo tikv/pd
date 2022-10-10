@@ -34,11 +34,11 @@ var (
 	compressionRatio         = int64(2)
 )
 
-type snapAction string
+type snapAction int
 
 const (
-	Generate snapAction = "Generate"
-	Receive             = "Receive"
+	Generate = iota
+	Receive
 )
 
 type snapStatus int
@@ -446,6 +446,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 
 	// store should Generate/Receive snapshot by chunk size.
+	// todo: the process of snapshot is single thread, the later snapshot task must wait the first one.
 	for n.limiter.AllowN(int(chunkSize)) {
 		stat.remainSize -= chunkSize
 	}

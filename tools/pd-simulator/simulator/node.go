@@ -91,7 +91,8 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		cancel()
 		return nil, err
 	}
-	speed := config.StoreIOMBPerSecond * units.MiB
+	ratio := int64(time.Second) / config.SimTickInterval.Milliseconds()
+	speed := config.StoreIOMBPerSecond * units.MiB * ratio
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
