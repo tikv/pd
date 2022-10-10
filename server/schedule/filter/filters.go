@@ -29,7 +29,7 @@ import (
 
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector,
-	counter *FilterCounter) []*core.StoreInfo {
+	counter *Counter) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
@@ -53,7 +53,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector,
-	counter *FilterCounter) []*core.StoreInfo {
+	counter *Counter) []*core.StoreInfo {
 	if len(filters) == 0 {
 		return stores
 	}
@@ -292,7 +292,7 @@ type StoreStateFilter struct {
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Reason is used to distinguish the reason of store state filter
-	Reason storeStateReason
+	Reason filterType
 }
 
 // Scope returns the scheduler or the checker which the filter acts on.
@@ -302,7 +302,7 @@ func (f *StoreStateFilter) Scope() string {
 
 // Type returns the type of the Filter.
 func (f *StoreStateFilter) Type() filterType {
-	return filterType(int(storeStateFilterType) + int(f.Reason))
+	return f.Reason
 }
 
 // conditionFunc defines condition to determine a store should be selected.
@@ -311,93 +311,93 @@ type conditionFunc func(*config.PersistOptions, *core.StoreInfo) *plan.Status
 
 func (f *StoreStateFilter) isRemoved(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.IsRemoved() {
-		f.Reason = tombstone
+		f.Reason = storeStateTombstoneFilterType
 		return statusStoreRemoved
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.DownTime() > opt.GetMaxStoreDownTime() {
-		f.Reason = down
+		f.Reason = storeStateDownFilterType
 		return statusStoreDown
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 
 	return statusOK
 }
 
 func (f *StoreStateFilter) isRemoving(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.IsRemoving() {
-		f.Reason = offline
+		f.Reason = storeStateOfflineFilterType
 		return statusStoresRemoving
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) pauseLeaderTransfer(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !store.AllowLeaderTransfer() {
-		f.Reason = pauseLeader
+		f.Reason = storeStatePauseLeaderFilterType
 		return statusStoreRejectLeader
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.EvictedAsSlowStore() {
-		f.Reason = slowStore
+		f.Reason = storeStateSlowFilterType
 		return statusStoreRejectLeader
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) isDisconnected(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsDisconnected() {
-		f.Reason = disconnected
+		f.Reason = storeStateDisconnectedFilterType
 		return statusStoreDisconnected
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) isBusy(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsBusy() {
-		f.Reason = busy
+		f.Reason = storeStateBusyFilterType
 		return statusStoreBusy
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer) {
-		f.Reason = exceedRemoveLimit
+		f.Reason = storeStateExceedRemoveLimitFilterType
 		return statusStoreRemoveLimit
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) exceedAddLimit(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer) {
-		f.Reason = exceedAddLimit
+		f.Reason = storeStateExceedAddLimitFilterType
 		return statusStoreAddLimit
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount()) {
-		f.Reason = tooManySnapshot
+		f.Reason = storeStateTooManySnapshotFilterType
 		return statusStoreSnapshotThrottled
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
@@ -405,19 +405,19 @@ func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store
 	if !f.AllowTemporaryStates &&
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
-		f.Reason = tooManyPendingPeer
+		f.Reason = storeStateTooManyPendingPeerFilterType
 		return statusStorePendingPeerThrottled
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 
 func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if opts.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
-		f.Reason = rejectLeader
+		f.Reason = storeStateRejectLeaderFilterType
 		return statusStoreRejectLeader
 	}
-	f.Reason = ok
+	f.Reason = storeStateOKFilterType
 	return statusOK
 }
 

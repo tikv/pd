@@ -15,7 +15,6 @@
 package filter
 
 import (
-	"fmt"
 	"strconv"
 )
 
@@ -100,10 +99,22 @@ const (
 	isolationFilterType
 	regionScoreFilterType
 	idFilterType
-	// the following filters are used for store state, the other filter should be placed above it.
-	storeStateFilterType
 
-	filtersLen = iota + ReasonLen - 1
+	storeStateOKFilterType
+	storeStateTombstoneFilterType
+	storeStateDownFilterType
+	storeStateOfflineFilterType
+	storeStatePauseLeaderFilterType
+	storeStateSlowFilterType
+	storeStateDisconnectedFilterType
+	storeStateBusyFilterType
+	storeStateExceedRemoveLimitFilterType
+	storeStateExceedAddLimitFilterType
+	storeStateTooManySnapshotFilterType
+	storeStateTooManyPendingPeerFilterType
+	storeStateRejectLeaderFilterType
+
+	filtersLen
 )
 
 var filters = [filtersLen]string{
@@ -118,65 +129,33 @@ var filters = [filtersLen]string{
 	"isolation-filter",
 	"region-score-filter",
 	"idFilter",
-	"store-state",
-}
 
-type storeStateReason int
-
-const (
-	ok storeStateReason = iota
-	tombstone
-	down
-	offline
-	pauseLeader
-	slowStore
-	disconnected
-	busy
-	exceedRemoveLimit
-	exceedAddLimit
-	tooManySnapshot
-	tooManyPendingPeer
-	rejectLeader
-	ReasonLen
-)
-
-var storeStateReasons = [ReasonLen]string{
-	"",
-	"tombstone",
-	"down",
-	"offline",
-	"pause-leader",
-	"slow-leader",
-	"disconnected",
-	"busy",
-	"exceed-remove-limit",
-	"exceed-add-limit",
-	"too-many-snapshot",
-	"too-many-pending-peer",
-	"reject-leader",
-}
-
-// String implements fmt.Stringer interface.
-func (r storeStateReason) String() string {
-	if r < ReasonLen {
-		return storeStateReasons[r]
-	}
-	return "unknown"
+	"store-state-ok-filter",
+	"store-state-tombstone-filter",
+	"store-state-down-filter",
+	"store-state-offline-filter",
+	"store-state-pause-leader-filter",
+	"store-state-slow-filter",
+	"store-state-disconnect-filter",
+	"store-state-busy-filter",
+	"store-state-exceed-remove-limit-filter",
+	"store-state-exceed-add-limit-filter",
+	"store-state-too-many-snapshots-filter",
+	"store-state-too-many-pending-peers-filter",
+	"store-state-reject-leader-filter",
 }
 
 // String implements fmt.Stringer interface.
 func (f filterType) String() string {
-	if f < storeStateFilterType {
+	if f < filtersLen {
 		return filters[f]
 	}
-	if int(f) < int(filtersLen) {
-		return fmt.Sprintf("%s-%s-filter", filters[storeStateFilterType], storeStateReasons[f-storeStateFilterType])
-	}
+
 	return "unknown"
 }
 
 // FilterCounter records the filter counter.
-type FilterCounter struct {
+type Counter struct {
 	scope string
 	// record filter counter for each store.
 	// [action][type][sourceID][targetID]count
@@ -185,7 +164,7 @@ type FilterCounter struct {
 }
 
 // NewFilterCounter creates a FilterCounter.
-func NewFilterCounter(scope string) *FilterCounter {
+func NewFilterCounter(scope string) *Counter {
 	counter := make([][]map[uint64]map[uint64]int, ActionLen)
 	for i := range counter {
 		counter[i] = make([]map[uint64]map[uint64]int, filtersLen)
@@ -193,11 +172,11 @@ func NewFilterCounter(scope string) *FilterCounter {
 			counter[i][k] = make(map[uint64]map[uint64]int)
 		}
 	}
-	return &FilterCounter{counter: counter, scope: scope}
+	return &Counter{counter: counter, scope: scope}
 }
 
 // Add adds the filter counter.
-func (c *FilterCounter) inc(action action, filterType filterType, sourceID uint64, targetID uint64) {
+func (c *Counter) inc(action action, filterType filterType, sourceID uint64, targetID uint64) {
 	if _, ok := c.counter[action][filterType][sourceID]; !ok {
 		c.counter[action][filterType][sourceID] = make(map[uint64]int)
 	}
@@ -205,7 +184,7 @@ func (c *FilterCounter) inc(action action, filterType filterType, sourceID uint6
 }
 
 // Flush flushes the counter to the metrics.
-func (c *FilterCounter) Flush() {
+func (c *Counter) Flush() {
 	for i, actions := range c.counter {
 		actionName := action(i).String()
 		for j, counters := range actions {

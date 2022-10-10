@@ -183,7 +183,7 @@ type balanceLeaderScheduler struct {
 	opController  *schedule.OperatorController
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
-	filterCounter *filter.FilterCounter
+	filterCounter *filter.Counter
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on

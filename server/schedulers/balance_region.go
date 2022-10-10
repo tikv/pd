@@ -77,7 +77,7 @@ type balanceRegionScheduler struct {
 	opController  *schedule.OperatorController
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
-	filterCounter *filter.FilterCounter
+	filterCounter *filter.Counter
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on

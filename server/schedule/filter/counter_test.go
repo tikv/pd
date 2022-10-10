@@ -26,8 +26,7 @@ func TestString(t *testing.T) {
 		filterType int
 		expected   string
 	}{
-		{int(storeStateFilterType), "store-state--filter"},
-		{int(storeStateFilterType + 1), "store-state-tombstone-filter"},
+		{int(storeStateTombstoneFilterType), "store-state-tombstone-filter"},
 		{int(filtersLen - 1), "store-state-reject-leader-filter"},
 		{int(filtersLen), "unknown"},
 	}
