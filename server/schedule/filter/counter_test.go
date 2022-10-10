@@ -35,3 +35,15 @@ func TestString(t *testing.T) {
 		re.Equal(data.expected, filterType(data.filterType).String())
 	}
 }
+
+func TestCounter(t *testing.T) {
+	re := require.New(t)
+	counter := NewFilterCounter(BalanceLeader.String())
+	counter.inc(sourceFilter, storeStateTombstoneFilterType, 1, 2)
+	counter.inc(targetFilter, storeStateTombstoneFilterType, 1, 2)
+	re.Equal(counter.counter[sourceFilter][storeStateTombstoneFilterType][1][2], 1)
+	re.Equal(counter.counter[targetFilter][storeStateTombstoneFilterType][1][2], 1)
+	counter.Flush()
+	re.Equal(counter.counter[sourceFilter][storeStateTombstoneFilterType][1][2], 0)
+	re.Equal(counter.counter[targetFilter][storeStateTombstoneFilterType][1][2], 0)
+}
