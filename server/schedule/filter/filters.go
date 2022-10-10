@@ -302,7 +302,7 @@ func (f *StoreStateFilter) Scope() string {
 
 // Type returns the type of the Filter.
 func (f *StoreStateFilter) Type() filterType {
-	return filterType(int(StoreStateFilterType) + int(f.Reason))
+	return filterType(int(storeStateFilterType) + int(f.Reason))
 }
 
 // conditionFunc defines condition to determine a store should be selected.

@@ -26,9 +26,10 @@ func TestString(t *testing.T) {
 		filterType int
 		expected   string
 	}{
-		{int(StoreStateFilterType), "store-state--filter"},
-		{int(StoreStateFilterType + 1), "store-state-tombstone-filter"},
-		{int(FiltersLen - 1), "store-state-reject-leader-filter"},
+		{int(storeStateFilterType), "store-state--filter"},
+		{int(storeStateFilterType + 1), "store-state-tombstone-filter"},
+		{int(filtersLen - 1), "store-state-reject-leader-filter"},
+		{int(filtersLen), "unknown"},
 	}
 
 	for _, data := range testcases {

@@ -100,12 +100,13 @@ const (
 	isolationFilterType
 	regionScoreFilterType
 	idFilterType
-	StoreStateFilterType
+	// the following filters are used for store state, the other filter should be placed above it.
+	storeStateFilterType
 
-	FiltersLen = iota + ReasonLen - 1
+	filtersLen = iota + ReasonLen - 1
 )
 
-var filters = [FiltersLen]string{
+var filters = [filtersLen]string{
 	"exclude-filter",
 	"storage-threshold-filter",
 	"distinct-filter",
@@ -165,11 +166,11 @@ func (r storeStateReason) String() string {
 
 // String implements fmt.Stringer interface.
 func (f filterType) String() string {
-	if f < StoreStateFilterType {
+	if f < storeStateFilterType {
 		return filters[f]
 	}
-	if int(f) < int(FiltersLen) {
-		return fmt.Sprintf("%s-%s-filter", filters[StoreStateFilterType], storeStateReasons[f-StoreStateFilterType])
+	if int(f) < int(filtersLen) {
+		return fmt.Sprintf("%s-%s-filter", filters[storeStateFilterType], storeStateReasons[f-storeStateFilterType])
 	}
 	return "unknown"
 }
@@ -187,7 +188,7 @@ type FilterCounter struct {
 func NewFilterCounter(scope string) *FilterCounter {
 	counter := make([][]map[uint64]map[uint64]int, ActionLen)
 	for i := range counter {
-		counter[i] = make([]map[uint64]map[uint64]int, FiltersLen)
+		counter[i] = make([]map[uint64]map[uint64]int, filtersLen)
 		for k := range counter[i] {
 			counter[i][k] = make(map[uint64]map[uint64]int)
 		}
