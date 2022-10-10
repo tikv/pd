@@ -304,8 +304,13 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
+<<<<<<< HEAD
 	retryInterval          = 1 * time.Second
 	maxRetryTimes          = 5
+=======
+	retryInterval          = 500 * time.Millisecond
+	maxRetryTimes          = 6
+>>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -678,12 +683,11 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-		retryTimeConsuming time.Duration
-		err                error
-		streamAddr         string
-		stream             pdpb.PD_TsoClient
-		streamCtx          context.Context
-		cancel             context.CancelFunc
+		err        error
+		streamAddr string
+		stream     pdpb.PD_TsoClient
+		streamCtx  context.Context
+		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -740,6 +744,7 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+	streamLoopTimer := time.NewTimer(c.option.timeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -756,6 +761,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
+		streamLoopTimer.Reset(c.option.timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
@@ -766,6 +772,7 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
+<<<<<<< HEAD
 				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 				if retryTimeConsuming >= c.option.timeout {
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
@@ -774,16 +781,24 @@ tsoBatchLoop:
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					retryTimeConsuming = 0
 					continue tsoBatchLoop
+=======
+				if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
+					continue streamChoosingLoop
+>>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
-				case <-time.After(time.Second):
-					retryTimeConsuming += time.Second
-					continue
+				case <-streamLoopTimer.C:
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
+					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+					c.ScheduleCheckLeader()
+					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					continue tsoBatchLoop
+				case <-time.After(retryInterval):
+					continue streamChoosingLoop
 				}
 			}
-			retryTimeConsuming = 0
 			select {
 			case <-streamCtx.Done():
 				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
@@ -877,7 +892,7 @@ type connectionContext struct {
 	cancel context.CancelFunc
 }
 
-func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
+func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.allowTSOFollowerProxy(dc) {
@@ -885,7 +900,9 @@ func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, con
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+		return false
 	}
+	return true
 }
 
 // tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
@@ -901,6 +918,8 @@ func (c *client) tryConnect(
 		networkErrNum uint64
 		err           error
 		stream        pdpb.PD_TsoClient
+		url           string
+		cc            *grpc.ClientConn
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
 		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
@@ -916,9 +935,11 @@ func (c *client) tryConnect(
 			return true
 		})
 	}
-	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
+
 	for i := 0; i < maxRetryTimes; i++ {
+		c.ScheduleCheckLeader()
+		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {
