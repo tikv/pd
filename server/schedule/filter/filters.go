@@ -35,7 +35,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
 				if counter != nil {
-					counter.inc(sourceFilter, filters[i].Type(), s.GetID())
+					counter.inc(sourceFilter, filters[i].Type(), s.GetID(), 0)
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
 					filterCounter.WithLabelValues(sourceFilter.String(),
@@ -63,8 +63,13 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
+				cfilter, ok := filter.(comparingFilter)
+				sourceID := uint64(0)
+				if ok {
+					sourceID = cfilter.GetSourceStoreID()
+				}
 				if counter != nil {
-					counter.inc(targetFilter, filter.Type(), s.GetID())
+					counter.inc(targetFilter, filter.Type(), sourceID, s.GetID())
 				} else {
 					targetID := strconv.FormatUint(s.GetID(), 10)
 					filterCounter.WithLabelValues(targetFilter.String(), filter.Scope(), filter.Type().String(), targetID).Inc()
@@ -100,6 +105,13 @@ type Filter interface {
 	Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status
 }
 
+// comparingFilter is an interface to filter target store by comparing source and target stores
+type comparingFilter interface {
+	Filter
+	// GetSourceStoreID returns the source store when comparing.
+	GetSourceStoreID() uint64
+}
+
 // Target checks if store can pass all Filters as target store.
 func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
 	storeID := strconv.FormatUint(store.GetID(), 10)
@@ -107,7 +119,13 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 		status := filter.Target(opt, store)
 		if !status.IsOK() {
 			if status != statusStoreRemoved {
-				filterCounter.WithLabelValues(targetFilter.String(), filter.Scope(), filter.Type().String(), storeID).Inc()
+				cfilter, ok := filter.(comparingFilter)
+				targetID := storeID
+				sourceID := ""
+				if ok {
+					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+				}
+				filterCounter.WithLabelValues(targetFilter.String(), filter.Scope(), filter.Type().String(), sourceID, targetID).Inc()
 			}
 			return false
 		}

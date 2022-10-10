@@ -165,7 +165,7 @@ func (r storeStateReason) String() string {
 
 // String implements fmt.Stringer interface.
 func (f filterType) String() string {
-	if f <= idFilterType {
+	if f < StoreStateFilterType {
 		return filters[f]
 	}
 	if int(f) < int(FiltersLen) {
@@ -178,29 +178,29 @@ func (f filterType) String() string {
 type FilterCounter struct {
 	scope string
 	// record filter counter for each store.
-	// [action][type]<storeID->count>
-	// [source-filter][rule-fit-filter]<1->10>
-	counter [][]map[uint64]int
+	// [action][type][sourceID][targetID]count
+	// [source-filter][rule-fit-filter]<1->2><10>
+	counter [][]map[uint64]map[uint64]int
 }
 
 // NewFilterCounter creates a FilterCounter.
 func NewFilterCounter(scope string) *FilterCounter {
-	counter := make([][]map[uint64]int, ActionLen)
+	counter := make([][]map[uint64]map[uint64]int, ActionLen)
 	for i := range counter {
-		counter[i] = make([]map[uint64]int, FiltersLen)
+		counter[i] = make([]map[uint64]map[uint64]int, FiltersLen)
 		for k := range counter[i] {
-			counter[i][k] = make(map[uint64]int)
+			counter[i][k] = make(map[uint64]map[uint64]int)
 		}
 	}
 	return &FilterCounter{counter: counter, scope: scope}
 }
 
 // Add adds the filter counter.
-func (c *FilterCounter) inc(action action, filterType filterType, storeID uint64) {
-	if _, ok := c.counter[action][filterType][storeID]; !ok {
-		c.counter[action][filterType][storeID] = 0
+func (c *FilterCounter) inc(action action, filterType filterType, sourceID uint64, targetID uint64) {
+	if _, ok := c.counter[action][filterType][sourceID]; !ok {
+		c.counter[action][filterType][sourceID] = make(map[uint64]int)
 	}
-	c.counter[action][filterType][storeID]++
+	c.counter[action][filterType][sourceID][targetID]++
 }
 
 // Flush flushes the counter to the metrics.
@@ -209,11 +209,15 @@ func (c *FilterCounter) Flush() {
 		actionName := action(i).String()
 		for j, counters := range actions {
 			filterName := filterType(j).String()
-			for storeID, count := range counters {
-				if count > 0 {
-					filterCounter.WithLabelValues(actionName, c.scope, filterName, strconv.FormatUint(storeID, 10)).
-						Add(float64(count))
-					counters[storeID] = 0
+			for sourceID, count := range counters {
+				sourceIDStr := strconv.FormatUint(sourceID, 10)
+				for targetID, value := range count {
+					targetIDStr := strconv.FormatUint(sourceID, 10)
+					if value > 0 {
+						filterCounter.WithLabelValues(actionName, c.scope, filterName, sourceIDStr, targetIDStr).
+							Add(float64(value))
+						counters[sourceID][targetID] = 0
+					}
 				}
 			}
 		}
