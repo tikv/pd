@@ -55,6 +55,8 @@ var (
 )
 
 func main() {
+	// wait PD start. Otherwise it will happen error when getting cluster ID.
+	time.Sleep(3 * time.Second)
 	// ignore some undefined flag
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
@@ -115,6 +117,7 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 
 func runMetrics() {
 	http.Handle("/metrics", promhttp.Handler())
+	// nolint
 	http.ListenAndServe(*statusAddress, nil)
 }
 

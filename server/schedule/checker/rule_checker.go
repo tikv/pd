@@ -379,7 +379,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *R
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
-		extraFilters:   []filter.Filter{filter.NewLabelConstaintFilter(c.name, rule.LabelConstraints)},
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name, rule.LabelConstraints)},
 	}
 }
 

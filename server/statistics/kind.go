@@ -18,6 +18,50 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
+const (
+	// BytePriority indicates hot-region-scheduler prefer byte dim
+	BytePriority = "byte"
+	// KeyPriority indicates hot-region-scheduler prefer key dim
+	KeyPriority = "key"
+	// QueryPriority indicates hot-region-scheduler prefer query dim
+	QueryPriority = "query"
+)
+
+// Indicator dims.
+const (
+	ByteDim int = iota
+	KeyDim
+	QueryDim
+	DimLen
+)
+
+// StringToDim return dim according to string.
+func StringToDim(name string) int {
+	switch name {
+	case BytePriority:
+		return ByteDim
+	case KeyPriority:
+		return KeyDim
+	case QueryPriority:
+		return QueryDim
+	}
+	return ByteDim
+}
+
+// DimToString return string according to dim.
+func DimToString(dim int) string {
+	switch dim {
+	case ByteDim:
+		return BytePriority
+	case KeyDim:
+		return KeyPriority
+	case QueryDim:
+		return QueryPriority
+	default:
+		return ""
+	}
+}
+
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
 
@@ -159,10 +203,9 @@ func (rw RWType) Inverse() RWType {
 	switch rw {
 	case Write:
 		return Read
-	case Read:
+	default: // Case Read
 		return Write
 	}
-	return Read
 }
 
 // GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.

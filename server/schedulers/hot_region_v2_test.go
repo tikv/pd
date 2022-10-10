@@ -51,7 +51,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(2, 16*units.MiB*statistics.StoreHeartBeatReportInterval, 20*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -114,7 +114,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(2, 20*units.MiB*statistics.StoreHeartBeatReportInterval, 14*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -168,7 +168,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
-	hb.conf.WritePeerPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(2, 20*units.MiB*statistics.StoreHeartBeatReportInterval, 14*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -231,7 +231,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
-	hb.conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 
 	tc.UpdateStorageReadStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(2, 16*units.MiB*statistics.StoreHeartBeatReportInterval, 20*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -284,7 +284,7 @@ func TestSkipUniformStore(t *testing.T) {
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetRankFormulaVersion("v2")
-	hb.(*hotScheduler).conf.ReadPriorities = []string{BytePriority, KeyPriority}
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)

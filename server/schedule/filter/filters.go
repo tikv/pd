@@ -19,7 +19,6 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -27,20 +26,24 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
-	"go.uber.org/zap"
+)
+
+const (
+	filterSource = "filter-source"
+	filterTarget = "filter-target"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
 func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		sourceID := strconv.FormatUint(s.GetID(), 10)
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
-				sourceID := strconv.FormatUint(s.GetID(), 10)
-				targetID := ""
-				filterCounter.WithLabelValues("filter-source", s.GetAddress(),
-					sourceID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				filterCounter.WithLabelValues(filterSource, filters[i].Scope(), filters[i].Type(), sourceID, "").Inc()
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
@@ -51,19 +54,20 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 // SelectTargetStores selects stores that be selected as target store from the list.
 func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
+		targetID := strconv.FormatUint(s.GetID(), 10)
 		return slice.AllOf(filters, func(i int) bool {
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
 				cfilter, ok := filter.(comparingFilter)
-				targetID := strconv.FormatUint(s.GetID(), 10)
 				sourceID := ""
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
-				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
-					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				}
 				return false
 			}
 			return true
@@ -98,28 +102,8 @@ type comparingFilter interface {
 	GetSourceStoreID() uint64
 }
 
-// Source checks if store can pass all Filters as source store.
-func Source(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
-	storeAddress := store.GetAddress()
-	storeID := strconv.FormatUint(store.GetID(), 10)
-	for _, filter := range filters {
-		status := filter.Source(opt, store)
-		if !status.IsOK() {
-			if status != statusStoreRemoved {
-				sourceID := storeID
-				targetID := ""
-				filterCounter.WithLabelValues("filter-source", storeAddress,
-					sourceID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
-			}
-			return false
-		}
-	}
-	return true
-}
-
 // Target checks if store can pass all Filters as target store.
 func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter) bool {
-	storeAddress := store.GetAddress()
 	storeID := strconv.FormatUint(store.GetID(), 10)
 	for _, filter := range filters {
 		status := filter.Target(opt, store)
@@ -131,8 +115,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
-				filterCounter.WithLabelValues("filter-target", storeAddress,
-					targetID, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
+				filterCounter.WithLabelValues(filterTarget, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
 			}
 			return false
 		}
@@ -516,8 +499,8 @@ type labelConstraintFilter struct {
 	constraints []placement.LabelConstraint
 }
 
-// NewLabelConstaintFilter creates a filter that selects stores satisfy the constraints.
-func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint) Filter {
+// NewLabelConstraintFilter creates a filter that selects stores satisfy the constraints.
+func NewLabelConstraintFilter(scope string, constraints []placement.LabelConstraint) Filter {
 	return labelConstraintFilter{scope: scope, constraints: constraints}
 }
 
@@ -582,12 +565,13 @@ func (f *ruleFitFilter) Source(options *config.PersistOptions, store *core.Store
 	return statusOK
 }
 
+// Target filters stores when select them as schedule target.
+// It ensures after replace a peer with new one, the isolation level will not decrease and
+// the replaced store can match the source rule.
+// RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
+// but transfer role peer1 --> peer2, it will support.
 func (f *ruleFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	region := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(),
-		core.WithReplacePeerStore(f.srcStore, store.GetID()))
-	newFit := f.ruleManager.FitRegion(f.cluster, region)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcStore, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule
@@ -635,25 +619,7 @@ func (f *ruleLeaderFitFilter) Source(options *config.PersistOptions, store *core
 }
 
 func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	targetStoreID := store.GetID()
-	sourcePeer := f.region.GetStorePeer(f.srcLeaderStoreID)
-	targetPeer := f.region.GetStorePeer(targetStoreID)
-	newRegionOptions := []core.RegionCreateOption{core.WithLeader(targetPeer)}
-	if targetPeer == nil {
-		if !f.allowMoveLeader {
-			log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
-			return statusStoreNotMatchRule
-		}
-		newRegionOptions = []core.RegionCreateOption{
-			core.WithReplacePeerStore(f.srcLeaderStoreID, targetStoreID),
-			core.WithLeader(&metapb.Peer{Id: sourcePeer.GetId(), StoreId: targetStoreID}),
-		}
-	}
-	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
-		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...,
-	)
-	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
-	if placement.CompareRegionFit(f.oldFit, newFit) <= 0 {
+	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}
 	return statusStoreNotMatchRule

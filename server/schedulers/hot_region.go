@@ -545,6 +545,9 @@ func (bs *balanceSolver) isValid() bool {
 }
 
 func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
+	if !bs.enableExpectation() {
+		return "", false
+	}
 	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
@@ -971,6 +974,10 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f fun
 
 func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
+}
+
+func (bs *balanceSolver) enableExpectation() bool {
+	return bs.sche.conf.GetDstToleranceRatio() > 0 && bs.sche.conf.GetSrcToleranceRatio() > 0
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
@@ -1493,11 +1500,11 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 
 func stringToDim(name string) int {
 	switch name {
-	case BytePriority:
+	case statistics.BytePriority:
 		return statistics.ByteDim
-	case KeyPriority:
+	case statistics.KeyPriority:
 		return statistics.KeyDim
-	case QueryPriority:
+	case statistics.QueryPriority:
 		return statistics.QueryDim
 	}
 	return statistics.ByteDim
@@ -1506,11 +1513,11 @@ func stringToDim(name string) int {
 func dimToString(dim int) string {
 	switch dim {
 	case statistics.ByteDim:
-		return BytePriority
+		return statistics.BytePriority
 	case statistics.KeyDim:
-		return KeyPriority
+		return statistics.KeyPriority
 	case statistics.QueryDim:
-		return QueryPriority
+		return statistics.QueryPriority
 	default:
 		return ""
 	}

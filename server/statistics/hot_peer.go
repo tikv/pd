@@ -24,14 +24,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Indicator dims.
-const (
-	ByteDim int = iota
-	KeyDim
-	QueryDim
-	DimLen
-)
-
 type dimStat struct {
 	typ         RegionStatKind
 	rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
