@@ -21,20 +21,20 @@ import (
 type action int
 
 const (
-	sourceFilter action = iota
-	targetFilter
+	source action = iota
+	target
 
-	ActionLen
+	actionLen
 )
 
-var actions = [ActionLen]string{
+var actions = [actionLen]string{
 	"filter-source",
 	"filter-target",
 }
 
 // String implements fmt.Stringer interface.
 func (a action) String() string {
-	if a < ActionLen {
+	if a < actionLen {
 		return actions[a]
 	}
 	return "unknown"
@@ -88,31 +88,32 @@ func (s scope) String() string {
 type filterType int
 
 const (
-	excludedFilterType filterType = iota
-	storageThresholdFilterType
-	distinctScoreFilterType
-	labelConstraintFilterType
-	ruleFitFilterType
-	ruleLeaderFilterType
-	engineFilterType
-	specialUseFilterType
-	isolationFilterType
-	regionScoreFilterType
+	excluded filterType = iota
+	storageThreshold
+	distinctScore
+	labelConstraint
+	ruleFit
+	ruleLeader
+	engine
+	specialUse
+	isolation
+	regionScore
+	// used in test.
 	idFilterType
 
-	storeStateOKFilterType
-	storeStateTombstoneFilterType
-	storeStateDownFilterType
-	storeStateOfflineFilterType
-	storeStatePauseLeaderFilterType
-	storeStateSlowFilterType
-	storeStateDisconnectedFilterType
-	storeStateBusyFilterType
-	storeStateExceedRemoveLimitFilterType
-	storeStateExceedAddLimitFilterType
-	storeStateTooManySnapshotFilterType
-	storeStateTooManyPendingPeerFilterType
-	storeStateRejectLeaderFilterType
+	storeStateOK
+	storeStateTombstone
+	storeStateDown
+	storeStateOffline
+	storeStatePauseLeader
+	storeStateSlow
+	storeStateDisconnected
+	storeStateBusy
+	storeStateExceedRemoveLimit
+	storeStateExceedAddLimit
+	storeStateTooManySnapshot
+	storeStateTooManyPendingPeer
+	storeStateRejectLeader
 
 	filtersLen
 )
@@ -165,7 +166,7 @@ type Counter struct {
 
 // NewFilterCounter creates a FilterCounter.
 func NewFilterCounter(scope string) *Counter {
-	counter := make([][]map[uint64]map[uint64]int, ActionLen)
+	counter := make([][]map[uint64]map[uint64]int, actionLen)
 	for i := range counter {
 		counter[i] = make([]map[uint64]map[uint64]int, filtersLen)
 		for k := range counter[i] {

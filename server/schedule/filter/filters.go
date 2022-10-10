@@ -35,10 +35,10 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
 				if counter != nil {
-					counter.inc(sourceFilter, filters[i].Type(), s.GetID(), 0)
+					counter.inc(source, filters[i].Type(), s.GetID(), 0)
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
-					filterCounter.WithLabelValues(sourceFilter.String(),
+					filterCounter.WithLabelValues(source.String(),
 						sourceID, filters[i].Scope(), filters[i].Type().String()).Inc()
 				}
 				if collector != nil {
@@ -69,10 +69,11 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 					sourceID = cfilter.GetSourceStoreID()
 				}
 				if counter != nil {
-					counter.inc(targetFilter, filter.Type(), sourceID, s.GetID())
+					counter.inc(target, filter.Type(), sourceID, s.GetID())
 				} else {
-					targetID := strconv.FormatUint(s.GetID(), 10)
-					filterCounter.WithLabelValues(targetFilter.String(), filter.Scope(), filter.Type().String(), targetID).Inc()
+					targetIDStr := strconv.FormatUint(s.GetID(), 10)
+					sourceIDStr := strconv.FormatUint(sourceID, 10)
+					filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceIDStr, targetIDStr).Inc()
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -125,7 +126,7 @@ func Target(opt *config.PersistOptions, store *core.StoreInfo, filters []Filter)
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
-				filterCounter.WithLabelValues(targetFilter.String(), filter.Scope(), filter.Type().String(), sourceID, targetID).Inc()
+				filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceID, targetID).Inc()
 			}
 			return false
 		}
@@ -153,7 +154,7 @@ func (f *excludedFilter) Scope() string {
 }
 
 func (f *excludedFilter) Type() filterType {
-	return excludedFilterType
+	return excluded
 }
 
 func (f *excludedFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -183,7 +184,7 @@ func (f *storageThresholdFilter) Scope() string {
 }
 
 func (f *storageThresholdFilter) Type() filterType {
-	return storageThresholdFilterType
+	return storageThreshold
 }
 
 func (f *storageThresholdFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -251,7 +252,7 @@ func (f *distinctScoreFilter) Scope() string {
 }
 
 func (f *distinctScoreFilter) Type() filterType {
-	return distinctScoreFilterType
+	return distinctScore
 }
 
 func (f *distinctScoreFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo) *plan.Status {
@@ -311,93 +312,93 @@ type conditionFunc func(*config.PersistOptions, *core.StoreInfo) *plan.Status
 
 func (f *StoreStateFilter) isRemoved(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.IsRemoved() {
-		f.Reason = storeStateTombstoneFilterType
+		f.Reason = storeStateTombstone
 		return statusStoreRemoved
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) isDown(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.DownTime() > opt.GetMaxStoreDownTime() {
-		f.Reason = storeStateDownFilterType
+		f.Reason = storeStateDown
 		return statusStoreDown
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 
 	return statusOK
 }
 
 func (f *StoreStateFilter) isRemoving(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.IsRemoving() {
-		f.Reason = storeStateOfflineFilterType
+		f.Reason = storeStateOffline
 		return statusStoresRemoving
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) pauseLeaderTransfer(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !store.AllowLeaderTransfer() {
-		f.Reason = storeStatePauseLeaderFilterType
+		f.Reason = storeStatePauseLeader
 		return statusStoreRejectLeader
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if store.EvictedAsSlowStore() {
-		f.Reason = storeStateSlowFilterType
+		f.Reason = storeStateSlow
 		return statusStoreRejectLeader
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) isDisconnected(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsDisconnected() {
-		f.Reason = storeStateDisconnectedFilterType
+		f.Reason = storeStateDisconnected
 		return statusStoreDisconnected
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) isBusy(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsBusy() {
-		f.Reason = storeStateBusyFilterType
+		f.Reason = storeStateBusy
 		return statusStoreBusy
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer) {
-		f.Reason = storeStateExceedRemoveLimitFilterType
+		f.Reason = storeStateExceedRemoveLimit
 		return statusStoreRemoveLimit
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) exceedAddLimit(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer) {
-		f.Reason = storeStateExceedAddLimitFilterType
+		f.Reason = storeStateExceedAddLimit
 		return statusStoreAddLimit
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) tooManySnapshots(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > opt.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > opt.GetMaxSnapshotCount()) {
-		f.Reason = storeStateTooManySnapshotFilterType
+		f.Reason = storeStateTooManySnapshot
 		return statusStoreSnapshotThrottled
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
@@ -405,19 +406,19 @@ func (f *StoreStateFilter) tooManyPendingPeers(opt *config.PersistOptions, store
 	if !f.AllowTemporaryStates &&
 		opt.GetMaxPendingPeerCount() > 0 &&
 		store.GetPendingPeerCount() > int(opt.GetMaxPendingPeerCount()) {
-		f.Reason = storeStateTooManyPendingPeerFilterType
+		f.Reason = storeStateTooManyPendingPeer
 		return statusStorePendingPeerThrottled
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
 func (f *StoreStateFilter) hasRejectLeaderProperty(opts *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if opts.CheckLabelProperty(config.RejectLeader, store.GetLabels()) {
-		f.Reason = storeStateRejectLeaderFilterType
+		f.Reason = storeStateRejectLeader
 		return statusStoreRejectLeader
 	}
-	f.Reason = storeStateOKFilterType
+	f.Reason = storeStateOK
 	return statusOK
 }
 
@@ -521,7 +522,7 @@ func (f labelConstraintFilter) Scope() string {
 
 // Type returns the name of the filter.
 func (f labelConstraintFilter) Type() filterType {
-	return labelConstraintFilterType
+	return labelConstraint
 }
 
 // Source filters stores when select them as schedule source.
@@ -568,7 +569,7 @@ func (f *ruleFitFilter) Scope() string {
 }
 
 func (f *ruleFitFilter) Type() filterType {
-	return ruleFitFilterType
+	return ruleFit
 }
 
 func (f *ruleFitFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo) *plan.Status {
@@ -621,7 +622,7 @@ func (f *ruleLeaderFitFilter) Scope() string {
 }
 
 func (f *ruleLeaderFitFilter) Type() filterType {
-	return ruleLeaderFilterType
+	return ruleLeader
 }
 
 func (f *ruleLeaderFitFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo) *plan.Status {
@@ -676,7 +677,7 @@ func (f *engineFilter) Scope() string {
 }
 
 func (f *engineFilter) Type() filterType {
-	return engineFilterType
+	return engine
 }
 
 func (f *engineFilter) Source(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -719,7 +720,7 @@ func (f *specialUseFilter) Scope() string {
 }
 
 func (f *specialUseFilter) Type() filterType {
-	return specialUseFilterType
+	return specialUse
 }
 
 func (f *specialUseFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -793,7 +794,7 @@ func (f *isolationFilter) Scope() string {
 }
 
 func (f *isolationFilter) Type() filterType {
-	return isolationFilterType
+	return isolation
 }
 
 func (f *isolationFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -861,7 +862,7 @@ func (f *RegionScoreFilter) Scope() string {
 
 // Type types region score filter
 func (f *RegionScoreFilter) Type() filterType {
-	return regionScoreFilterType
+	return regionScore
 }
 
 // Source ignore source

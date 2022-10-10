@@ -26,7 +26,7 @@ func TestString(t *testing.T) {
 		filterType int
 		expected   string
 	}{
-		{int(storeStateTombstoneFilterType), "store-state-tombstone-filter"},
+		{int(storeStateTombstone), "store-state-tombstone-filter"},
 		{int(filtersLen - 1), "store-state-reject-leader-filter"},
 		{int(filtersLen), "unknown"},
 	}
@@ -34,16 +34,17 @@ func TestString(t *testing.T) {
 	for _, data := range testcases {
 		re.Equal(data.expected, filterType(data.filterType).String())
 	}
+	re.Equal(int(filtersLen), len(filters))
 }
 
 func TestCounter(t *testing.T) {
 	re := require.New(t)
 	counter := NewFilterCounter(BalanceLeader.String())
-	counter.inc(sourceFilter, storeStateTombstoneFilterType, 1, 2)
-	counter.inc(targetFilter, storeStateTombstoneFilterType, 1, 2)
-	re.Equal(counter.counter[sourceFilter][storeStateTombstoneFilterType][1][2], 1)
-	re.Equal(counter.counter[targetFilter][storeStateTombstoneFilterType][1][2], 1)
+	counter.inc(source, storeStateTombstone, 1, 2)
+	counter.inc(target, storeStateTombstone, 1, 2)
+	re.Equal(counter.counter[source][storeStateTombstone][1][2], 1)
+	re.Equal(counter.counter[target][storeStateTombstone][1][2], 1)
 	counter.Flush()
-	re.Equal(counter.counter[sourceFilter][storeStateTombstoneFilterType][1][2], 0)
-	re.Equal(counter.counter[targetFilter][storeStateTombstoneFilterType][1][2], 0)
+	re.Equal(counter.counter[source][storeStateTombstone][1][2], 0)
+	re.Equal(counter.counter[target][storeStateTombstone][1][2], 0)
 }
