@@ -39,9 +39,19 @@ func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo)
 }
 
 // SelectOneRegion selects one region that be selected from the list.
-func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.RegionInfo {
+func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
-		if slice.AllOf(filters, func(i int) bool { return filters[i].Select(r).IsOK() }) {
+		if len(filters) == 0 || slice.AllOf(filters,
+			func(i int) bool {
+				status := filters[i].Select(r)
+				if !status.IsOK() {
+					if collector != nil {
+						collector.Collect(plan.SetResource(r), plan.SetStatus(status))
+					}
+					return false
+				}
+				return true
+			}) {
 			return r
 		}
 	}
@@ -50,8 +60,8 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
-	// Return true if the region can be used to schedule.
-	Select(region *core.RegionInfo) plan.Status
+	// Return plan.Status show whether be filtered
+	Select(region *core.RegionInfo) *plan.Status
 }
 
 type regionPendingFilter struct {
@@ -62,7 +72,7 @@ func NewRegionPendingFilter() RegionFilter {
 	return &regionPendingFilter{}
 }
 
-func (f *regionPendingFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionPendingFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
@@ -77,7 +87,7 @@ func NewRegionDownFilter() RegionFilter {
 	return &regionDownFilter{}
 }
 
-func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
 	}
@@ -93,10 +103,10 @@ func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionReplicatedFilter{cluster: cluster}
 }
 
-func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
 		if !isRegionPlacementRuleSatisfied(f.cluster, region) {
-			return statusRegionRule
+			return statusRegionNotMatchRule
 		}
 		return statusOK
 	}
@@ -115,7 +125,7 @@ func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
-func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 	if !isEmptyRegionAllowBalance(f.cluster, region) {
 		return statusRegionEmpty
 	}

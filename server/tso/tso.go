@@ -44,6 +44,11 @@ const (
 	maxLogical = int64(1 << 18)
 	// MaxSuffixBits indicates the max number of suffix bits.
 	MaxSuffixBits = 4
+	// jetLagWarningThreshold is the warning threshold of jetLag in `timestampOracle.UpdateTimestamp`.
+	// In case of small `updatePhysicalInterval`, the `3 * updatePhysicalInterval` would also is small,
+	// and trigger unnecessary warnings about clock offset.
+	// It's an empirical value.
+	jetLagWarningThreshold = 150 * time.Millisecond
 )
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
@@ -125,10 +130,11 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 // in etcd with the value of 1.
 // Once we get a normal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
 // low bits of logical part from each DC looks like:
-//   global: xxxxxxxxxx00000000
-//     dc-1: xxxxxxxxxx00000001
-//     dc-2: xxxxxxxxxx00000010
-//     dc-3: xxxxxxxxxx00000011
+//
+//	global: xxxxxxxxxx00000000
+//	  dc-1: xxxxxxxxxx00000001
+//	  dc-2: xxxxxxxxxx00000010
+//	  dc-3: xxxxxxxxxx00000011
 func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int) int64 {
 	return rawLogical<<suffixBits + int64(t.suffix)
 }
@@ -237,7 +243,12 @@ func (t *timestampOracle) isInitialized() bool {
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 // When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
 // It's used to write MaxTS during the Global TSO synchronization whitout failing the writing as much as possible.
+// cannot set timestamp to one which >= current + maxResetTSGap
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
+	return t.resetUserTimestampInner(leadership, tso, ignoreSmaller, false)
+}
+
+func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if !leadership.Check() {
@@ -266,7 +277,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 	}
 	// do not update if physical time is too greater than prev
-	if physicalDifference >= t.maxResetTSGap().Milliseconds() {
+	if !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap().Milliseconds() {
 		tsoCounter.WithLabelValues("err_reset_large_ts", t.dcLocation).Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
@@ -288,10 +299,10 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 
 // UpdateTimestamp is used to update the timestamp.
 // This function will do two things:
-// 1. When the logical time is going to be used up, increase the current physical time.
-// 2. When the time window is not big enough, which means the saved etcd time minus the next physical time
-//    will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
-//    we also need to save the next physical time plus `TSOSaveInterval` into etcd.
+//  1. When the logical time is going to be used up, increase the current physical time.
+//  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
+//     will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
+//     we also need to save the next physical time plus `TSOSaveInterval` into etcd.
 //
 // Here is some constraints that this function must satisfy:
 // 1. The saved time is monotonically increasing.
@@ -316,7 +327,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	tsoCounter.WithLabelValues("save", t.dcLocation).Inc()
 
 	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
-	if jetLag > 3*t.updatePhysicalInterval {
+	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prevPhysical), zap.Time("now", now), zap.Duration("update-physical-interval", t.updatePhysicalInterval))
 		tsoCounter.WithLabelValues("slow_save", t.dcLocation).Inc()
 	}
@@ -380,7 +391,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
 		if resp.GetLogical() >= maxLogical {
-			log.Error("logical part outside of max logical interval, please check ntp time",
+			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow", t.dcLocation).Inc()

@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/errors"
 	"math"
 	"path"
 	"strconv"
@@ -25,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -45,8 +45,8 @@ import (
 const (
 	// GlobalDCLocation is the Global TSO Allocator's DC location label.
 	GlobalDCLocation            = "global"
-	checkStep                   = 1 * time.Minute
-	patrolStep                  = 1 * time.Second
+	checkStep                   = time.Minute
+	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
 	localTSOAllocatorEtcdPrefix = "lta"
@@ -55,7 +55,7 @@ const (
 
 var (
 	// PriorityCheck exported is only for test.
-	PriorityCheck = 1 * time.Minute
+	PriorityCheck = time.Minute
 )
 
 // AllocatorGroupFilter is used to select AllocatorGroup.
@@ -243,6 +243,25 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 		return DCLocationInfo{}, false
 	}
 	return infoPtr.clone(), true
+}
+
+// CleanUpDCLocation cleans up certain server's DCLocationInfo
+func (am *AllocatorManager) CleanUpDCLocation() error {
+	serverID := am.member.ID()
+	dcLocationKey := am.member.GetDCLocationPath(serverID)
+	// remove dcLocationKey from etcd
+	if resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpDelete(dcLocationKey)).
+		Commit(); err != nil {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	} else if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	log.Info("delete the dc-location key previously written in etcd",
+		zap.Uint64("server-id", serverID))
+	go am.ClusterDCLocationChecker()
+	return nil
 }
 
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,

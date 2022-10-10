@@ -17,7 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"reflect"
 	"sync/atomic"
@@ -104,7 +104,7 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
-// IsEnableRegionBucket return ture if the region bucket is enabled.
+// IsEnableRegionBucket return true if the region bucket is enabled.
 func (c *StoreConfig) IsEnableRegionBucket() bool {
 	if c == nil {
 		return false
@@ -230,7 +230,7 @@ func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

@@ -31,7 +31,7 @@ import (
 
 const (
 	requestTimeout  = 10 * time.Second
-	slowRequestTime = 1 * time.Second
+	slowRequestTime = time.Second
 )
 
 type etcdKVBase struct {

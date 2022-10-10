@@ -70,17 +70,17 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
+		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(region.Size),
-			core.SetApproximateKeys(region.Keys),
+			core.SetApproximateSize(int64(regionSize)),
+			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
-		regionSize := uint64(region.Size)
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(regionSize)
+			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
 		}
 	}
 
@@ -139,7 +139,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	if r.useTiDBEncodedKey {
 		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
 		if err != nil {
-			simutil.Logger.Fatal("generate TiDB encoded split key failed", zap.Error(err))
+			simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
 		}
 	} else {
 		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())

@@ -81,6 +81,11 @@ error = '''
 get TSO timeout
 '''
 
+["PD:cluster:ErrInvalidStoreID"]
+error = '''
+invalid store id %d, not found
+'''
+
 ["PD:cluster:ErrNotBootstrapped"]
 error = '''
 TiKV cluster not bootstrapped, please start TiKV first
@@ -169,6 +174,26 @@ start dashboard failed
 ["PD:dashboard:ErrDashboardStop"]
 error = '''
 stop dashboard failed
+'''
+
+["PD:diagnostic:ErrDiagnosticDisabled"]
+error = '''
+diagnostic is disabled
+'''
+
+["PD:diagnostic:ErrDiagnosticLoadPlan"]
+error = '''
+load plan failed
+'''
+
+["PD:diagnostic:ErrNoDiagnosticResult"]
+error = '''
+%v has no diagnostic result
+'''
+
+["PD:diagnostic:ErrSchedulerUndiagnosable"]
+error = '''
+%v hasn't supported diagnostic
 '''
 
 ["PD:dir:ErrReadDirName"]
@@ -604,6 +629,11 @@ scheduler existed
 ["PD:scheduler:ErrSchedulerNotFound"]
 error = '''
 scheduler not found
+'''
+
+["PD:scheduler:ErrSchedulerTiKVSplitDisabled"]
+error = '''
+tikv split region disabled
 '''
 
 ["PD:semver:ErrSemverNewVersion"]

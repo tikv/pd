@@ -22,10 +22,10 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -70,7 +70,8 @@ func TestHot(t *testing.T) {
 	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Second()
-	newStats := proto.Clone(ss.GetStoreStats()).(*pdpb.StoreStats)
+
+	newStats := typeutil.DeepClone(ss.GetStoreStats(), core.StoreStatsFactory)
 	bytesWritten := uint64(8 * units.MiB)
 	bytesRead := uint64(16 * units.MiB)
 	keysWritten := uint64(2000)
@@ -131,12 +132,12 @@ func TestHot(t *testing.T) {
 			switch hotType {
 			case "read":
 				loads := []float64{
-					statistics.RegionReadBytes:  float64(1000000000 * reportInterval),
-					statistics.RegionReadKeys:   float64(1000000000 * reportInterval),
-					statistics.RegionReadQuery:  float64(1000000000 * reportInterval),
-					statistics.RegionWriteBytes: 0,
-					statistics.RegionWriteKeys:  0,
-					statistics.RegionWriteQuery: 0,
+					statistics.RegionReadBytes:     float64(1000000000 * reportInterval),
+					statistics.RegionReadKeys:      float64(1000000000 * reportInterval),
+					statistics.RegionReadQueryNum:  float64(1000000000 * reportInterval),
+					statistics.RegionWriteBytes:    0,
+					statistics.RegionWriteKeys:     0,
+					statistics.RegionWriteQueryNum: 0,
 				}
 				leader := &metapb.Peer{
 					Id:      100 + regionIDCounter,

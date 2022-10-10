@@ -22,8 +22,10 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -331,6 +333,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
 	oldItem = newItem
+	oldItem.AntiCount = oldItem.defaultAntiCount()
 	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
 	re.Equal(1, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
@@ -362,7 +365,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 
 func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
-	byteRate := minHotThresholds[RegionReadBytes] * 2
+	byteRate := MinHotThresholds[RegionReadBytes] * 2
 	expectThreshold := byteRate * HotThresholdRatio
 	testMetrics(re, 120., byteRate, expectThreshold)
 	testMetrics(re, 60., byteRate, expectThreshold)
@@ -374,7 +377,7 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
-	re.GreaterOrEqual(byteRate, minHotThresholds[RegionReadBytes])
+	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		for {
@@ -387,10 +390,10 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 				thresholds: thresholds,
 				Loads:      make([]float64, DimLen),
 			}
-			newItem.Loads[RegionReadBytes] = byteRate
-			newItem.Loads[RegionReadKeys] = 0
+			newItem.Loads[ByteDim] = byteRate
+			newItem.Loads[KeyDim] = 0
 			oldItem = cache.getOldHotPeerStat(i, storeID)
-			if oldItem != nil && oldItem.rollingLoads[RegionReadBytes].isHot(thresholds[RegionReadBytes]) == true {
+			if oldItem != nil && oldItem.rollingLoads[ByteDim].isHot(thresholds[ByteDim]) == true {
 				break
 			}
 			item := cache.updateHotPeerStat(nil, newItem, oldItem, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
@@ -398,9 +401,9 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			re.Equal(minHotThresholds[RegionReadBytes], thresholds[RegionReadBytes])
+			re.Equal(MinHotThresholds[RegionReadBytes], thresholds[ByteDim])
 		} else {
-			re.Equal(expectThreshold, thresholds[RegionReadBytes])
+			re.Equal(expectThreshold, thresholds[ByteDim])
 		}
 	}
 }
@@ -560,7 +563,7 @@ func TestCacheInherit(t *testing.T) {
 	rets := checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
-			flow := ret.GetLoads()[RegionReadBytes]
+			flow := ret.Loads[ByteDim]
 			re.Equal(float64(region.GetBytesRead()/ReadReportInterval), flow)
 		}
 	}
@@ -577,7 +580,7 @@ func TestCacheInherit(t *testing.T) {
 	rets = checkAndUpdate(re, cache, region)
 	for _, ret := range rets {
 		if ret.actionType != Remove {
-			flow := ret.GetLoads()[RegionReadBytes]
+			flow := ret.Loads[ByteDim]
 			re.Equal(float64(newFlow/ReadReportInterval), flow)
 		}
 	}
@@ -589,7 +592,7 @@ type testMovingAverageCase struct {
 }
 
 func checkMovingAverage(re *require.Assertions, testCase *testMovingAverageCase) {
-	interval := 1 * time.Second
+	interval := time.Second
 	tm := movingaverage.NewTimeMedian(DefaultAotSize, DefaultWriteMfSize, interval)
 	var results []float64
 	for _, data := range testCase.report {
@@ -630,6 +633,38 @@ func TestUnstableData(t *testing.T) {
 	for _, testCase := range testCases {
 		checkMovingAverage(re, testCase)
 	}
+}
+
+// Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
+func TestHotPeerCacheTopN(t *testing.T) {
+	re := require.New(t)
+
+	cache := NewHotPeerCache(Write)
+	now := time.Now()
+	for id := uint64(99); id > 0; id-- {
+		meta := &metapb.Region{
+			Id:    id,
+			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
+		}
+		region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
+		for i := 0; i < 10; i++ {
+			start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
+			end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
+			newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
+				StartTimestamp: start,
+				EndTimestamp:   end,
+			}))
+			newPeer := core.NewPeerInfo(meta.Peers[0], region.GetLoads(), end-start)
+			stat := cache.checkPeerFlow(newPeer, newRegion)
+			if stat != nil {
+				cache.updateStat(stat)
+			}
+		}
+	}
+
+	re.Contains(cache.peersOfStore, uint64(1))
+	println(cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim))
+	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {

@@ -37,8 +37,8 @@ var (
 type snapAction string
 
 const (
-	generate snapAction = "generator"
-	receive             = "receive"
+	Generate snapAction = "Generate"
+	Receive             = "Receive"
 )
 
 type snapStatus int
@@ -89,8 +89,8 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 				// This two variables are used to simulate sending and receiving snapshot processes.
-				sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
-				receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
+				sendingStat:   newSnapshotState(region.GetApproximateSize(), Generate),
+				receivingStat: newSnapshotState(region.GetApproximateSize(), Receive),
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
@@ -121,7 +121,7 @@ type snapshotStat struct {
 }
 
 func newSnapshotState(size int64, action snapAction) *snapshotStat {
-	if action == receive {
+	if action == Receive {
 		size = size / compressionRatio
 	}
 	return &snapshotStat{
@@ -430,22 +430,22 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 		return true
 	}
 	if stat.status == pending {
-		if stat.action == generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+		if stat.action == Generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.action == receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
+		if stat.action == Receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
-		// If the statement is true, it will start to send or receive the snapshot.
-		if stat.action == generate {
+		// If the statement is true, it will start to send or Receive the snapshot.
+		if stat.action == Generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
 		}
 	}
 
-	// store should generate/receive snapshot by chunk size.
+	// store should Generate/Receive snapshot by chunk size.
 	for n.limiter.AllowN(int(chunkSize)) {
 		stat.remainSize -= chunkSize
 	}
@@ -456,7 +456,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
-		if stat.action == generate {
+		if stat.action == Generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--

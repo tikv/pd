@@ -470,7 +470,7 @@ func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
 	tc.UpdateStorageRatio(2, 0.1, 0.9)
 	tc.UpdateStoreRegionSize(2, 100*units.MiB)
 	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
-	tc.AddLabelsStore(4, 31, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(4, 51, map[string]string{"zone": "z3"})
 
 	tc.AddLeaderRegion(1, 1, 2, 3)
 	region := tc.GetRegion(1)

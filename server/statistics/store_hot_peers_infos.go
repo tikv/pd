@@ -35,36 +35,18 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 // GetHotStatus returns the hot status for a given type.
 func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
-	var stLoadInfosAsLeader map[uint64]*StoreLoadDetail
-	var stLoadInfosAsPeer map[uint64]*StoreLoadDetail
-	switch typ {
-	case Read:
-		stLoadInfosAsLeader = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Read, core.LeaderKind)
-		stLoadInfosAsPeer = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Read, core.RegionKind)
-	case Write:
-		stLoadInfosAsLeader = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Write, core.LeaderKind)
-		stLoadInfosAsPeer = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Write, core.RegionKind)
-	}
+	stLoadInfosAsLeader := SummaryStoresLoad(
+		stInfos,
+		storesLoads,
+		regionStats,
+		isTraceRegionFlow,
+		typ, core.LeaderKind)
+	stLoadInfosAsPeer := SummaryStoresLoad(
+		stInfos,
+		storesLoads,
+		regionStats,
+		isTraceRegionFlow,
+		typ, core.RegionKind)
 
 	asLeader := make(StoreHotPeersStat, len(stLoadInfosAsLeader))
 	asPeer := make(StoreHotPeersStat, len(stLoadInfosAsPeer))
@@ -143,7 +125,7 @@ func summaryStoresLoadByEngine(
 		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
 			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(GetRegionStatKind(rwTy, i))
+				peerLoadSum[i] += peer.Loads[i]
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}

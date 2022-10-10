@@ -55,6 +55,7 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
+	WitnessCount       int                `json:"witness_count"`
 	SlowScore          uint64             `json:"slow_score"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
@@ -93,6 +94,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:         store.GetRegionSize(),
+			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
@@ -295,6 +297,40 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+}
+
+// @Tags     store
+// @Summary  delete the store's label.
+// @Param    id    path  integer  true  "Store Id"
+// @Param    body  body  object   true  "Labels in json format"
+// @Produce  json
+// @Success  200  {string}  string  "The store's label is updated."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /store/{id}/label [delete]
+func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	vars := mux.Vars(r)
+	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
+	if errParse != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(errParse))
+		return
+	}
+
+	var labelKey string
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &labelKey); err != nil {
+		return
+	}
+	if err := config.ValidateLabelKey(labelKey); err != nil {
+		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
+		return
+	}
+	if err := rc.DeleteStoreLabel(storeID, labelKey); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("The label %s is deleted for store %d.", labelKey, storeID))
 }
 
 // FIXME: details of input json body params
