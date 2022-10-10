@@ -114,7 +114,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 3},
 	}
 	op := suite.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
-	suite.Equal(core.VeryHigh, op.GetPriorityLevel())
+	suite.Equal(core.Urgent, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Nil(op.Check(region))

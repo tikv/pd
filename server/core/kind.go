@@ -22,7 +22,7 @@ const (
 	Low PriorityLevel = iota
 	Medium
 	High
-	VeryHigh
+	Urgent
 )
 
 // ScheduleKind distinguishes resources and schedule policy.
