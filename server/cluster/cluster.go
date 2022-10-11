@@ -806,8 +806,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	})
 
 	var overlaps []*core.RegionInfo
-	c.Lock()
 	if saveCache {
+		c.Lock()
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
@@ -837,19 +837,18 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		for key := range storeMap {
 			c.updateStoreStatusLocked(key)
 		}
-		regionEventCounter.WithLabelValues("update_cache").Inc()
-	}
 
-	if !c.IsPrepared() && isNew {
-		c.coordinator.prepareChecker.collect(region)
+		c.Unlock()
+		regionEventCounter.WithLabelValues("update_cache").Inc()
 	}
 
 	if c.regionStats != nil {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
-	changedRegions := c.changedRegions
-	c.Unlock()
+	if !c.IsPrepared() && isNew {
+		c.coordinator.prepareChecker.collect(region)
+	}
 
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
@@ -877,7 +876,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if saveKV || needSync {
 		select {
-		case changedRegions <- region:
+		case c.changedRegions <- region:
 		default:
 		}
 	}
