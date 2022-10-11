@@ -146,18 +146,18 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts, collector)
-	stores = filter.SelectSourceStores(stores, s.filters, opts, collector)
+	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts)
+	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
 	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
-	sort.Slice(stores, func(i, j int) bool {
-		iOp := solver.GetOpInfluence(stores[i].GetID())
-		jOp := solver.GetOpInfluence(stores[j].GetID())
-		return stores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
-			stores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
+	sort.Slice(sourceStores, func(i, j int) bool {
+		iOp := solver.GetOpInfluence(sourceStores[i].GetID())
+		jOp := solver.GetOpInfluence(sourceStores[j].GetID())
+		return sourceStores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
+			sourceStores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
 	})
 
 	pendingFilter := filter.NewRegionPendingFilter()
@@ -173,10 +173,12 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 
 	solver.step++
 	var sourceIndex int
-	for sourceIndex, solver.source = range stores {
+
+	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
+	for sourceIndex, solver.source = range sourceStores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
 		solver.sourceScore = solver.sourceStoreScore()
-		if sourceIndex == len(stores)-1 {
+		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
 		for i := 0; i < retryLimit; i++ {
@@ -224,7 +226,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			solver.step++
-			if op := s.transferPeer(solver, collector, stores[sourceIndex+1:], faultTargets); op != nil {
+			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 				return []*operator.Operator{op}, collector.GetPlans()
@@ -238,10 +240,13 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores map[uint64]*plan.Status) *operator.Operator {
 	excludeTargets := solver.region.GetStoreIDs()
-	for _, store := range faultStores {
-		excludeTargets[store.GetID()] = struct{}{}
+	for storeID, status := range faultStores {
+		if collector != nil {
+			collector.Collect(plan.SetResource(solver.Cluster.GetStore(storeID)), plan.SetStatus(status))
+		}
+		excludeTargets[storeID] = struct{}{}
 	}
 	// the order of the filters should be sorted by the cost of the cpu overhead.
 	// the more expensive the filter is, the later it should be placed.
@@ -251,11 +256,11 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	}
 
 	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, filters...)
-
 	if len(candidates.Stores) != 0 {
 		solver.step++
 	}
 
+	// candidates are sorted by region score desc, so we pick the last store as target store.
 	for i := range candidates.Stores {
 		solver.target = candidates.Stores[len(candidates.Stores)-i-1]
 		solver.targetScore = solver.targetStoreScore()
