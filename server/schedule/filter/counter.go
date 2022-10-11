@@ -43,19 +43,31 @@ func (a action) String() string {
 type scope int
 
 const (
+	// BalanceLeader is the filter type for balance leader.
 	BalanceLeader scope = iota
+	// BalanceRegion is the filter type for balance region.
 	BalanceRegion
+	// HotRegion is the filter type for hot region.
 	BalanceHotRegion
+	// Replica is the filter type for replica.
 	Label
 
+	// EvictLeader is the filter type for evict leader.
 	EvictLeader
+	// RegionScatter is the filter type for scatter region.
 	RegionScatter
+	// ReplicaChecker is the filter type for replica.
 	ReplicaChecker
+	// RuleChecker is the filter type for rule.
 	RuleChecker
 
+	// GrantHotLeader is the filter type for grant hot leader.
 	GrantHotLeader
+	// ShuffleHotRegion is the filter type for shuffle hot region.
 	ShuffleHotRegion
+	// ShuffleRegion is the filter type for shuffle region.
 	ShuffleRegion
+	// RandomMerge is the filter type for random merge.
 	RandomMerge
 	ScopeLen
 )
@@ -155,7 +167,7 @@ func (f filterType) String() string {
 	return "unknown"
 }
 
-// FilterCounter records the filter counter.
+// Counter records the filter counter.
 type Counter struct {
 	scope string
 	// record filter counter for each store.
@@ -164,8 +176,8 @@ type Counter struct {
 	counter [][]map[uint64]map[uint64]int
 }
 
-// NewFilterCounter creates a FilterCounter.
-func NewFilterCounter(scope string) *Counter {
+// NewCounter creates a Counter.
+func NewCounter(scope string) *Counter {
 	counter := make([][]map[uint64]map[uint64]int, actionLen)
 	for i := range counter {
 		counter[i] = make([]map[uint64]map[uint64]int, filtersLen)

@@ -39,7 +39,7 @@ func TestString(t *testing.T) {
 
 func TestCounter(t *testing.T) {
 	re := require.New(t)
-	counter := NewFilterCounter(BalanceLeader.String())
+	counter := NewCounter(BalanceLeader.String())
 	counter.inc(source, storeStateTombstone, 1, 2)
 	counter.inc(target, storeStateTombstone, 1, 2)
 	re.Equal(counter.counter[source][storeStateTombstone][1][2], 1)

@@ -90,7 +90,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
-		filterCounter: filter.NewFilterCounter(filter.BalanceRegion.String()),
+		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)

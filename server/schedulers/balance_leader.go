@@ -198,7 +198,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		handler:       newBalanceLeaderHandler(conf),
 		opController:  opController,
 		counter:       balanceLeaderCounter,
-		filterCounter: filter.NewFilterCounter(filter.BalanceLeader.String()),
+		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
 	for _, option := range options {
 		option(s)
