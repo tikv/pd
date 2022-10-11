@@ -38,8 +38,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 					counter.inc(source, filters[i].Type(), s.GetID(), 0)
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
-					filterCounter.WithLabelValues(source.String(),
-						sourceID, filters[i].Scope(), filters[i].Type().String()).Inc()
+					filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
 				}
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
@@ -510,8 +509,8 @@ type labelConstraintFilter struct {
 	constraints []placement.LabelConstraint
 }
 
-// NewLabelConstaintFilter creates a filter that selects stores satisfy the constraints.
-func NewLabelConstaintFilter(scope string, constraints []placement.LabelConstraint) Filter {
+// NewLabelConstraintFilter creates a filter that selects stores satisfy the constraints.
+func NewLabelConstraintFilter(scope string, constraints []placement.LabelConstraint) Filter {
 	return labelConstraintFilter{scope: scope, constraints: constraints}
 }
 

@@ -21,6 +21,7 @@ const (
 	NotLeaderErr = "is not leader"
 	// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader.
 	MismatchLeaderErr = "mismatch leader id"
+	RetryTimeoutErr   = "retry timeout"
 )
 
 // client errors

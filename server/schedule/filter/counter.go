@@ -47,9 +47,9 @@ const (
 	BalanceLeader scope = iota
 	// BalanceRegion is the filter type for balance region.
 	BalanceRegion
-	// HotRegion is the filter type for hot region.
+	// BalanceHotRegion is the filter type for hot region.
 	BalanceHotRegion
-	// Replica is the filter type for replica.
+	// Label is the filter type for replica.
 	Label
 
 	// EvictLeader is the filter type for evict leader.
@@ -69,10 +69,10 @@ const (
 	ShuffleRegion
 	// RandomMerge is the filter type for random merge.
 	RandomMerge
-	ScopeLen
+	scopeLen
 )
 
-var scopes = [ScopeLen]string{
+var scopes = [scopeLen]string{
 	"balance-leader-scheduler",
 	"balance-region-scheduler",
 	"balance-hot-region-scheduler",
@@ -91,7 +91,7 @@ var scopes = [ScopeLen]string{
 
 // String implements fmt.Stringer interface.
 func (s scope) String() string {
-	if s >= ScopeLen {
+	if s >= scopeLen {
 		return "unknown"
 	}
 	return scopes[s]
