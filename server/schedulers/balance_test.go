@@ -1226,7 +1226,7 @@ func TestRandomMergeSchedule(t *testing.T) {
 	defer cancel()
 
 	opt := config.NewTestOptions()
-	// TODO: enable palcementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMergeScheduleLimit(1)
@@ -1262,7 +1262,7 @@ func TestScatterRangeBalance(t *testing.T) {
 	defer cancel()
 
 	opt := config.NewTestOptions()
-	// TODO: enable palcementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))

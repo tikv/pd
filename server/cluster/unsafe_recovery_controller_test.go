@@ -296,23 +296,13 @@ func TestFailed(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Nil(resp.RecoveryPlan)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		re.NotNil(resp.RecoveryPlan)
-		applyRecoveryPlan(re, storeID, reports, resp)
-	}
-
-	for storeID, report := range reports {
-		req := newStoreHeartbeat(storeID, report)
-		req.StoreReport = report
-		resp := &pdpb.StoreHeartbeatResponse{}
-		recoveryController.HandleStoreHeartbeat(req, resp)
-		applyRecoveryPlan(re, storeID, reports, resp)
+		re.Nil(resp.RecoveryPlan)
 	}
 	re.Equal(failed, recoveryController.GetStage())
 }
@@ -1065,10 +1055,8 @@ func TestTimeout(t *testing.T) {
 
 	time.Sleep(time.Second)
 	req := newStoreHeartbeat(1, nil)
+	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
-	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
-	req.StoreReport = &pdpb.StoreReport{Step: 2}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(failed, recoveryController.GetStage())
 }
@@ -1649,4 +1637,83 @@ func TestSplitPaused(t *testing.T) {
 	askBatchSplitReq := &pdpb.AskBatchSplitRequest{}
 	_, err = cluster.HandleAskBatchSplit(askBatchSplitReq)
 	re.Equal("[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running", err.Error())
+}
+
+func TestEpochComparsion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		re.Nil(cluster.PutStore(store.GetMeta()))
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	re.Nil(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 60, false))
+
+	reports := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("b"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 10, Version: 1},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
+
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("a"),
+						EndKey:      []byte(""),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 12, StoreId: 1}, {Id: 22, StoreId: 2}, {Id: 32, StoreId: 3}}}}},
+		}},
+	}
+
+	advanceUntilFinished(re, recoveryController, reports)
+	expects := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1002,
+						StartKey:    []byte("a"),
+						EndKey:      []byte(""),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 12, StoreId: 1}, {Id: 22, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 32, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1,
+						StartKey:    []byte(""),
+						EndKey:      []byte("a"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+						Peers: []*metapb.Peer{
+							{Id: 2, StoreId: 1}}}}},
+		}},
+	}
+	for storeID, report := range reports {
+		if expect, ok := expects[storeID]; ok {
+			re.Equal(expect.PeerReports, report.PeerReports)
+		} else {
+			re.Empty(len(report.PeerReports))
+		}
+	}
 }

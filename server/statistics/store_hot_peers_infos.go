@@ -35,36 +35,18 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 // GetHotStatus returns the hot status for a given type.
 func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
-	var stLoadInfosAsLeader map[uint64]*StoreLoadDetail
-	var stLoadInfosAsPeer map[uint64]*StoreLoadDetail
-	switch typ {
-	case Read:
-		stLoadInfosAsLeader = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Read, core.LeaderKind)
-		stLoadInfosAsPeer = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Read, core.RegionKind)
-	case Write:
-		stLoadInfosAsLeader = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Write, core.LeaderKind)
-		stLoadInfosAsPeer = SummaryStoresLoad(
-			stInfos,
-			storesLoads,
-			regionStats,
-			isTraceRegionFlow,
-			Write, core.RegionKind)
-	}
+	stLoadInfosAsLeader := SummaryStoresLoad(
+		stInfos,
+		storesLoads,
+		regionStats,
+		isTraceRegionFlow,
+		typ, core.LeaderKind)
+	stLoadInfosAsPeer := SummaryStoresLoad(
+		stInfos,
+		storesLoads,
+		regionStats,
+		isTraceRegionFlow,
+		typ, core.RegionKind)
 
 	asLeader := make(StoreHotPeersStat, len(stLoadInfosAsLeader))
 	asPeer := make(StoreHotPeersStat, len(stLoadInfosAsPeer))
