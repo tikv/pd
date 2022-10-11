@@ -348,7 +348,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
 		}
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(core.Urgent)
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
 		ops = append(ops, op)
 	}
