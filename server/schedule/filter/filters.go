@@ -64,8 +64,7 @@ func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *co
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
-				filterCounter.WithLabelValues("filter-target", s.GetAddress(),
-					targetID, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+				filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
@@ -102,6 +101,9 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 
 func filterStoresBy(stores []*core.StoreInfo, keepPred func(*core.StoreInfo) bool) (selected []*core.StoreInfo) {
 	for _, s := range stores {
+		if s == nil {
+			continue
+		}
 		if keepPred(s) {
 			selected = append(selected, s)
 		}
