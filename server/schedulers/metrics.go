@@ -118,7 +118,7 @@ var hotPeerHist = prometheus.NewHistogramVec(
 		Subsystem: "scheduler",
 		Name:      "hot_peer",
 		Help:      "Bucketed histogram of the scheduling hot peer.",
-		Buckets:   prometheus.ExponentialBuckets(1, 2, 20),
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 	}, []string{"type", "rw", "dim"})
 
 func init() {
