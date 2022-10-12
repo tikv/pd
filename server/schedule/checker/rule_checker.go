@@ -201,10 +201,10 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
-	leaderId := region.GetLeader().GetId()
+	leaderID := region.GetLeader().GetId()
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
-	if leaderId == peer.GetId() {
+	if leaderID == peer.GetId() {
 		minCount := uint64(math.MaxUint64)
 		for _, p := range region.GetPeers() {
 			count := c.record.getOfflineLeaderCount(p.GetStoreId())
@@ -226,7 +226,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 
 	var witness *metapb.Peer
 	for _, witness = range region.GetWitnesses() {
-		if witness.StoreId != peer.StoreId && witness.Id != leaderId {
+		if witness.StoreId != peer.StoreId && witness.Id != leaderID {
 			break
 		}
 	}
