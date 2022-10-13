@@ -38,6 +38,16 @@ const (
 	// DefaultFastExecutorRate is the slow rate of the operator executor.
 	// default:  0.1 s/Mb
 	DefaultFastExecutorRate = 0.1
+	// FastOperatorWaitTime is the duration that when an operator that is not marked
+	// `OpRegion` runs longer than it, the operator will be considered timeout.
+	// It should consider the duration of region heartbeat especially big cluster.
+	// The qps of handling region heartbeat is about 10k/s, and the region count in one store should less than 100k(10k*96MB*3=3TB),
+	// so the duration of every step should be bigger than 2*10s=20s at worst.
+	// In 50k regions cluster, the duration of every step is 15s at worst.
+	FastOperatorWaitTime = 60 * time.Second
+	// SlowOperatorWaitTime is the duration that when an operator marked `OpRegion`
+	// runs longer than it, the operator will be considered timeout.
+	SlowOperatorWaitTime = 10 * time.Minute
 )
 
 // OpStep describes the basic scheduling steps that can not be subdivided.
@@ -432,8 +442,9 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // Timeout returns true if the step is timeout.
+// The merge operator must wait for the first operator finished, so the executing duration must larger than add learner.
 func (mr MergeRegion) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)*10
+	return time.Since(start) > slowStepWaitDuration(regionSize)*2
 }
 
 // GetCmd returns the schedule command for heartbeat response.

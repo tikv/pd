@@ -895,6 +895,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			continue
 		}
 
+		transportDuration := time.Now().Unix() - int64(request.GetInterval().GetEndTimestamp())
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			resp := &pdpb.RegionHeartbeatResponse{
@@ -915,7 +916,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 		storeAddress := store.GetAddress()
-
+		regionHeartbeatTransportDuration.WithLabelValues(storeAddress, storeLabel).Observe(float64(transportDuration))
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 		regionHeartbeatLatency.WithLabelValues(storeAddress, storeLabel).Observe(float64(time.Now().Unix()) - float64(request.GetInterval().GetEndTimestamp()))
 
