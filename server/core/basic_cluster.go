@@ -157,10 +157,18 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (bc *BasicCluster) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
+func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
+	bc.Regions.mu.RLock()
+	leaderCount := bc.Regions.GetStoreLeaderCount(storeID)
+	regionCount := bc.Regions.GetStoreRegionCount(storeID)
+	witnessCount := bc.Regions.GetStoreWitnessCount(storeID)
+	pendingPeerCount := bc.Regions.GetStorePendingPeerCount(storeID)
+	leaderRegionSize := bc.Regions.GetStoreLeaderRegionSize(storeID)
+	regionSize := bc.Regions.GetStoreRegionSize(storeID)
+	bc.Regions.mu.RUnlock()
 	bc.Stores.mu.Lock()
 	defer bc.Stores.mu.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderSize, regionSize, witnessCount)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, witnessCount)
 }
 
 // PutStore put a store.
@@ -449,6 +457,38 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		return []*RegionInfo{region}
 	}
 	return bc.PutRegion(region)
+}
+
+// AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
+func (bc *BasicCluster) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
+	bc.Regions.mu.Lock()
+	defer bc.Regions.mu.Unlock()
+	var overlaps []*RegionInfo
+	origin := bc.Regions.GetRegion(region.GetID())
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		overlaps = bc.Regions.GetOverlaps(region)
+	}
+	for _, item := range overlaps {
+		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !isRegionRecreated(region) {
+			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
+		}
+	}
+
+	if origin == nil {
+		return bc.Regions.SetRegion(region), nil
+	}
+
+	r := region.GetRegionEpoch()
+	o := origin.GetRegionEpoch()
+	// TiKV reports term after v3.0
+	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
+	// Region meta is stale, return an error.
+	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !isRegionRecreated(region) {
+		return nil, errRegionIsStale(region.GetMeta(), origin.GetMeta())
+	}
+
+	return bc.Regions.SetRegion(region), nil
 }
 
 // PutRegion put a region.
