@@ -127,6 +127,7 @@ func TestReloadUpgrade2(t *testing.T) {
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
 	re.Equal("", newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
+	re.Equal("", newOpt.GetScheduleConfig().StoreLimitFormulaVersion)  // formulaVersion keep old value when reloading.
 }
 
 func TestValidation(t *testing.T) {

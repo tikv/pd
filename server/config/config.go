@@ -770,6 +770,11 @@ type ScheduleConfig struct {
 
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// StoreLimitFormulaVersion is used to control the formula used to control snapshot speed.
+	// v1: the old formula, which is based on the count.
+	// v2: the new formula, which is based on the TIKV io snap limit.
+	StoreLimitFormulaVersion string `toml:"store-limit-formula-version" json:"store-limit-formula-version"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -820,6 +825,8 @@ const (
 	defaultHotRegionsReservedDays      = 7
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+
+	defaultStoreLimitFormulaVersion = "v1"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -885,6 +892,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+	}
+
+	if !meta.IsDefined("store-limit-formula-version") && !reloading {
+		adjustString(&c.StoreLimitFormulaVersion, defaultStoreLimitFormulaVersion)
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)

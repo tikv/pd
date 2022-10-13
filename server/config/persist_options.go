@@ -479,9 +479,14 @@ func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
 }
 
-// GetRegionScoreFormulaVersion returns the formula version config.
+// GetRegionScoreFormulaVersion returns the formula version of region score.
 func (o *PersistOptions) GetRegionScoreFormulaVersion() string {
 	return o.GetScheduleConfig().RegionScoreFormulaVersion
+}
+
+// GetStoreLimitFormulaVersion returns the formula version of store limit.
+func (o *PersistOptions) GetStoreLimitFormulaVersion() string {
+	return o.GetScheduleConfig().StoreLimitFormulaVersion
 }
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.

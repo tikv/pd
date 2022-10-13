@@ -86,6 +86,11 @@ func (mc *Cluster) SetRegionScoreFormulaVersion(v string) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.RegionScoreFormulaVersion = v })
 }
 
+// SetStoreLimitFormulaVersion updates the store limit formula version .
+func (mc *Cluster) SetStoreLimitFormulaVersion(v string) {
+	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.StoreLimitFormulaVersion = v })
+}
+
 // SetLeaderScheduleLimit updates the LeaderScheduleLimit configuration.
 func (mc *Cluster) SetLeaderScheduleLimit(v int) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.LeaderScheduleLimit = uint64(v) })
