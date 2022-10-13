@@ -176,4 +176,4 @@ require (
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
 
-replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20221013042106-8304a4404a5c
+replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20221013064108-ef1a9987beff
