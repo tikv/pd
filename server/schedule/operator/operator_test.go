@@ -500,12 +500,12 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 		}, {
 			//case6: 10GB region will have 1000*10s for ChangePeerV2Enter, ChangePeerV2Leave.
 			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) + time.Second)),
+			start:      time.Now().Add(-(time.Second*(10*1000*6*2) + time.Second)),
 			regionSize: 10 * 1000,
 			expect:     true,
 		}, {
 			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) - time.Second)),
+			start:      time.Now().Add(-(time.Second*(10*1000*6*2) - time.Second)),
 			regionSize: 10 * 1000,
 			expect:     false,
 		},
