@@ -680,7 +680,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			}
 		}
 
-		if slowStore != nil {
+		if slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID {
 			resp.AwakenRegions = &pdpb.AwakenRegions{
 				ToAllRegions: true,
 			}
