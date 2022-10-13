@@ -27,7 +27,7 @@ func TestRandBuckets(t *testing.T) {
 	re := require.New(t)
 	rb := NewRandBuckets()
 	addOperators(rb)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < len(PriorityWeight); i++ {
 		op := rb.GetOperator()
 		re.NotNil(op)
 	}
@@ -61,7 +61,7 @@ func TestListOperator(t *testing.T) {
 	re := require.New(t)
 	rb := NewRandBuckets()
 	addOperators(rb)
-	re.Len(rb.ListOperator(), 4)
+	re.Len(rb.ListOperator(), len(PriorityWeight))
 }
 
 func TestRandomBucketsWithMergeRegion(t *testing.T) {
