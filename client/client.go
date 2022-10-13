@@ -304,13 +304,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-<<<<<<< HEAD
-	retryInterval          = 1 * time.Second
-	maxRetryTimes          = 5
-=======
 	retryInterval          = 500 * time.Millisecond
 	maxRetryTimes          = 6
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -772,25 +767,14 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-<<<<<<< HEAD
-				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-				if retryTimeConsuming >= c.option.timeout {
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
-					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.ScheduleCheckLeader()
-					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
-					retryTimeConsuming = 0
-					continue tsoBatchLoop
-=======
 				if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
 					continue streamChoosingLoop
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
 				case <-streamLoopTimer.C:
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs()
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.ScheduleCheckLeader()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
