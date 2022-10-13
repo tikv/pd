@@ -664,6 +664,28 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		ClusterVersion:    rc.GetClusterVersion(),
 	}
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+
+	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
+	{
+		var slowStore *core.StoreInfo
+
+		for _, store := range rc.GetStores() {
+			if store.IsRemoved() {
+				continue
+			}
+
+			if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
+				// Do nothing if there is more than one slow store.
+				slowStore = store
+			}
+		}
+
+		if slowStore != nil {
+			resp.AwakenRegions = &pdpb.AwakenRegions{
+				AllRegions: true,
+			}
+		}
+	}
 	return resp, nil
 }
 
