@@ -248,3 +248,27 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
 			5: plan.NewStatus(plan.StatusCreateOperatorFailed),
 		}))
 }
+
+func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult6() {
+	basePlan := NewBalanceSchedulerPlan()
+	collector := plan.NewCollector(basePlan)
+	collector.Collect(plan.SetResourceWithStep(suite.stores[0], 2), plan.SetStatus(plan.NewStatus(plan.StatusStoreDown)))
+	collector.Collect(plan.SetResourceWithStep(suite.stores[1], 2), plan.SetStatus(plan.NewStatus(plan.StatusStoreDown)))
+	collector.Collect(plan.SetResourceWithStep(suite.stores[2], 2), plan.SetStatus(plan.NewStatus(plan.StatusStoreDown)))
+	collector.Collect(plan.SetResourceWithStep(suite.stores[3], 2), plan.SetStatus(plan.NewStatus(plan.StatusStoreDown)))
+	collector.Collect(plan.SetResourceWithStep(suite.stores[4], 2), plan.SetStatus(plan.NewStatus(plan.StatusStoreDown)))
+	basePlan.source = suite.stores[0]
+	basePlan.step++
+	collector.Collect(plan.SetResource(suite.regions[0]), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
+	statuses, isNormal, err := BalancePlanSummary(collector.GetPlans())
+	suite.NoError(err)
+	suite.False(isNormal)
+	suite.True(suite.check(statuses,
+		map[uint64]*plan.Status{
+			1: plan.NewStatus(plan.StatusStoreDown),
+			2: plan.NewStatus(plan.StatusStoreDown),
+			3: plan.NewStatus(plan.StatusStoreDown),
+			4: plan.NewStatus(plan.StatusStoreDown),
+			5: plan.NewStatus(plan.StatusStoreDown),
+		}))
+}

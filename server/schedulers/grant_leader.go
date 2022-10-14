@@ -252,7 +252,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 			continue
 		}
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 		ops = append(ops, op)
 	}
 
