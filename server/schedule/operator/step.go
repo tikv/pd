@@ -40,10 +40,8 @@ const (
 	DefaultFastExecutorRate = 0.1
 	// FastOperatorWaitTime is the duration that when an operator that is not marked
 	// `OpRegion` runs longer than it, the operator will be considered timeout.
-	// It should consider the duration of region heartbeat especially big cluster.
-	// The qps of handling region heartbeat is about 10k/s, and the region count in one store should less than 100k(10k*96MB*3=3TB),
-	// so the duration of every step should be bigger than 2*10s=20s at worst.
-	// In 50k regions cluster, the duration of every step is 15s at worst.
+	// It should consider the latency of handling region heartbeat especially big cluster.
+	// The update duration of region heartbeat should be less than the region heartbeat interval(default 60s).
 	FastOperatorWaitTime = 60 * time.Second
 	// SlowOperatorWaitTime is the duration that when an operator marked `OpRegion`
 	// runs longer than it, the operator will be considered timeout.
