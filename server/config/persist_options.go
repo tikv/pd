@@ -541,14 +541,7 @@ func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
-	if v, ok := o.GetTTLData(enableLocationReplacement); ok {
-		result, err := strconv.ParseBool(v)
-		if err == nil {
-			return result
-		}
-		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().EnableLocationReplacement
+	return o.getTTLBoolOr(enableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.

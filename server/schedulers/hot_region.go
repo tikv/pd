@@ -1394,7 +1394,7 @@ func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID
 }
 
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.High)
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),

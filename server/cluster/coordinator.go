@@ -116,7 +116,10 @@ func (c *coordinator) patrolRegions() {
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
-	var key []byte
+	var (
+		key     []byte
+		regions []*core.RegionInfo
+	)
 	for {
 		select {
 		case <-timer.C:
@@ -137,33 +140,9 @@ func (c *coordinator) patrolRegions() {
 		// Check regions in the waiting list
 		c.checkWaitingRegions()
 
-		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
+		key, regions = c.checkRegions(key)
 		if len(regions) == 0 {
-			// Resets the scan key.
-			key = nil
 			continue
-		}
-
-		for _, region := range regions {
-			// Skips the region if there is already a pending operator.
-			if c.opController.GetOperator(region.GetID()) != nil {
-				continue
-			}
-
-			ops := c.checkers.CheckRegion(region)
-
-			key = region.GetEndKey()
-			if len(ops) == 0 {
-				continue
-			}
-
-			if !c.opController.ExceedStoreLimit(ops...) {
-				c.opController.AddWaitingOperator(ops...)
-				c.checkers.RemoveWaitingRegion(region.GetID())
-				c.checkers.RemoveSuspectRegion(region.GetID())
-			} else {
-				c.checkers.AddWaitingRegion(region)
-			}
 		}
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
@@ -174,6 +153,37 @@ func (c *coordinator) patrolRegions() {
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
+	}
+}
+
+func (c *coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
+	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	if len(regions) == 0 {
+		// Resets the scan key.
+		key = nil
+		return
+	}
+
+	for _, region := range regions {
+		c.tryAddOperators(region)
+		key = region.GetEndKey()
+	}
+	return
+}
+
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.checkers.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		c.tryAddOperators(region)
+	}
+}
+
+func (c *coordinator) checkWaitingRegions() {
+	items := c.checkers.GetWaitingRegions()
+	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
+	for _, item := range items {
+		region := c.cluster.GetRegion(item.Key)
+		c.tryAddOperators(region)
 	}
 }
 
@@ -199,29 +209,6 @@ func (c *coordinator) checkPriorityRegions() {
 	}
 	for _, v := range removes {
 		c.checkers.RemovePriorityRegions(v)
-	}
-}
-
-func (c *coordinator) checkSuspectRegions() {
-	for _, id := range c.checkers.GetSuspectRegions() {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveSuspectRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
-
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveSuspectRegion(region.GetID())
-		}
 	}
 }
 
@@ -264,29 +251,28 @@ func (c *coordinator) checkSuspectRanges() {
 	}
 }
 
-func (c *coordinator) checkWaitingRegions() {
-	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
-	for _, item := range items {
-		id := item.Key
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveWaitingRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
+func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
+	if region == nil {
+		// the region could be recent split, continue to wait.
+		return
+	}
+	id := region.GetID()
+	if c.opController.GetOperator(id) != nil {
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+		return
+	}
+	ops := c.checkers.CheckRegion(region)
+	if len(ops) == 0 {
+		return
+	}
 
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveWaitingRegion(region.GetID())
-		}
+	if !c.opController.ExceedStoreLimit(ops...) {
+		c.opController.AddWaitingOperator(ops...)
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+	} else {
+		c.checkers.AddWaitingRegion(region)
 	}
 }
 
