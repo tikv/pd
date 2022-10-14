@@ -100,7 +100,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex, body, tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 100)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
@@ -112,7 +112,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 100)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
@@ -123,14 +123,14 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 100)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)
 	suite.Equal("pending", result.Status)
 
 	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	time.Sleep(time.Millisecond * 50)
+	time.Sleep(time.Millisecond * 100)
 	result = &cluster.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	suite.NoError(err)

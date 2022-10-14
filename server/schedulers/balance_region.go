@@ -146,7 +146,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts)
+	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts, collector)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
@@ -240,13 +240,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores map[uint64]*plan.Status) *operator.Operator {
+func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Collector, dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := solver.region.GetStoreIDs()
-	for storeID, status := range faultStores {
-		if collector != nil {
-			collector.Collect(plan.SetResource(solver.Cluster.GetStore(storeID)), plan.SetStatus(status))
-		}
-		excludeTargets[storeID] = struct{}{}
+	for _, store := range faultStores {
+		excludeTargets[store.GetID()] = struct{}{}
 	}
 	// the order of the filters should be sorted by the cost of the cpu overhead.
 	// the more expensive the filter is, the later it should be placed.

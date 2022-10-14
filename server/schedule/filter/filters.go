@@ -41,7 +41,6 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
 				filterCounter.WithLabelValues(filterSource, filters[i].Scope(), filters[i].Type(), sourceID, "").Inc()
-
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
@@ -53,24 +52,26 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 }
 
 // SelectFaultTargetStores selects fault stores that can't be selected as target store from the list.
-func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions) map[uint64]*plan.Status {
-	target := make(map[uint64]*plan.Status)
-	for _, s := range stores {
+func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
+	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		targetID := strconv.FormatUint(s.GetID(), 10)
-		for _, filter := range filters {
-			status := filter.Target(opt, s)
+		return slice.AnyOf(filters, func(i int) bool {
+			status := filters[i].Target(opt, s)
 			if !status.IsOK() {
-				cfilter, ok := filter.(comparingFilter)
+				cfilter, ok := filters[i].(comparingFilter)
 				sourceID := ""
 				if ok {
 					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
 				}
-				filterCounter.WithLabelValues(filterTarget, filter.Scope(), filter.Type(), sourceID, targetID).Inc()
-				target[s.GetID()] = status
+				filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), targetID, sourceID).Inc()
+				if collector != nil {
+					collector.Collect(plan.SetResourceWithStep(s, 2), plan.SetStatus(status))
+				}
+				return true
 			}
-		}
-	}
-	return target
+			return false
+		})
+	})
 }
 
 // SelectTargetStores selects stores that be selected as target store from the list.

@@ -787,9 +787,9 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	// test region replicate not match
 	opt.SetMaxReplicas(3)
 	ops, plans := sb.Schedule(tc, true)
-	re.Len(plans, 100)
+	re.Greater(len(plans), 100)
 	re.Empty(ops)
-	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
+	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusStoreRemoving)
 
 	opt.SetMaxReplicas(1)
 	ops, plans = sb.Schedule(tc, true)
