@@ -8176,7 +8176,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Completed commands rate",
+          "title": "gRPC Completed commands rate",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -8274,7 +8274,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "99% Completed commands duration",
+          "title": "gRPC 99% Completed commands duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -8386,7 +8386,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Completed commands rate",
+          "title": "HTTP Completed commands rate",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -8484,7 +8484,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "99% Completed commands duration",
+          "title": "HTTP 99% Completed commands duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,
