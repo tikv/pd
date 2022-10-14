@@ -37,8 +37,8 @@ var (
 type snapAction int
 
 const (
-	Generate = iota
-	Receive
+	generate = iota
+	receive
 )
 
 type snapStatus int
@@ -89,8 +89,8 @@ func responseToTask(resp *pdpb.RegionHeartbeatResponse, r *RaftEngine) Task {
 				epoch:    epoch,
 				peer:     changePeer.GetPeer(),
 				// This two variables are used to simulate sending and receiving snapshot processes.
-				sendingStat:   newSnapshotState(region.GetApproximateSize(), Generate),
-				receivingStat: newSnapshotState(region.GetApproximateSize(), Receive),
+				sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
+				receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
 			}
 		}
 	} else if resp.GetTransferLeader() != nil {
@@ -121,8 +121,8 @@ type snapshotStat struct {
 }
 
 func newSnapshotState(size int64, action snapAction) *snapshotStat {
-	if action == Receive {
-		size = size / compressionRatio
+	if action == receive {
+		size /= compressionRatio
 	}
 	return &snapshotStat{
 		remainSize: size,
@@ -430,15 +430,15 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 		return true
 	}
 	if stat.status == pending {
-		if stat.action == Generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+		if stat.action == generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.action == Receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
+		if stat.action == receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
 		// If the statement is true, it will start to send or Receive the snapshot.
-		if stat.action == Generate {
+		if stat.action == generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
@@ -457,7 +457,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
-		if stat.action == Generate {
+		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--
