@@ -146,7 +146,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	faultTargets := filter.SelectFaultTargetStores(stores, s.filters, opts, collector)
+	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
@@ -177,7 +177,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.source = range sourceStores {
 		retryLimit := s.retryQuota.GetLimit(solver.source)
-		solver.sourceScore = solver.sourceStoreScore()
+		solver.sourceScore = solver.sourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
@@ -260,7 +260,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	// candidates are sorted by region score desc, so we pick the last store as target store.
 	for i := range candidates.Stores {
 		solver.target = candidates.Stores[len(candidates.Stores)-i-1]
-		solver.targetScore = solver.targetStoreScore()
+		solver.targetScore = solver.targetStoreScore(s.GetName())
 		regionID := solver.region.GetID()
 		sourceID := solver.source.GetID()
 		targetID := solver.target.GetID()

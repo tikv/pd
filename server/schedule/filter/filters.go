@@ -51,8 +51,8 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 	})
 }
 
-// SelectFaultTargetStores selects fault stores that can't be selected as target store from the list.
-func SelectFaultTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
+// SelectUnavailableTargetStores selects unavailable stores that can't be selected as target store from the list.
+func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.PersistOptions, collector *plan.Collector) []*core.StoreInfo {
 	return filterStoresBy(stores, func(s *core.StoreInfo) bool {
 		targetID := strconv.FormatUint(s.GetID(), 10)
 		return slice.AnyOf(filters, func(i int) bool {

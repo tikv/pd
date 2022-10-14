@@ -3941,7 +3941,7 @@
               "format": "time_series",
               "hide": true,
               "intervalFactor": 1,
-              "legendFormat": "tolerant-resource-{{source}}-{{target}}",
+              "legendFormat": "tolerant-resource",
               "refId": "E"
             }
           ],

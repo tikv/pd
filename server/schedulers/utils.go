@@ -80,7 +80,7 @@ func (p *solver) TargetMetricLabel() string {
 	return strconv.FormatUint(p.TargetStoreID(), 10)
 }
 
-func (p *solver) sourceStoreScore() float64 {
+func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	sourceID := p.source.GetID()
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
@@ -91,6 +91,10 @@ func (p *solver) sourceStoreScore() float64 {
 	}
 
 	opts := p.GetOpts()
+	if opts.IsDebugMetricsEnabled() {
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
+		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
+	}
 	var score float64
 	switch p.kind.Resource {
 	case core.LeaderKind:
@@ -103,7 +107,7 @@ func (p *solver) sourceStoreScore() float64 {
 	return score
 }
 
-func (p *solver) targetStoreScore() float64 {
+func (p *solver) targetStoreScore(scheduleName string) float64 {
 	targetID := p.target.GetID()
 	// to avoid schedule too much, if A's score less than B and C in small range,
 	// we want that A can be moved in one region not two
@@ -116,6 +120,9 @@ func (p *solver) targetStoreScore() float64 {
 	}
 
 	opts := p.GetOpts()
+	if opts.IsDebugMetricsEnabled() {
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
+	}
 	var score float64
 	switch p.kind.Resource {
 	case core.LeaderKind:
@@ -128,13 +135,14 @@ func (p *solver) targetStoreScore() float64 {
 	return score
 }
 
+// Both of the source store's score and target store's score should be calculated before calling this function.
+// It will not calculate the score again.
 func (p *solver) shouldBalance(scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
 	sourceID := p.source.GetID()
 	targetID := p.target.GetID()
-
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := p.sourceScore > p.targetScore
 

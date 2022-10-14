@@ -71,14 +71,14 @@ func TestInfluenceAmp(t *testing.T) {
 	basePlan := NewBalanceSchedulerPlan()
 	solver := newSolver(basePlan, kind, tc, influence)
 	solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(), solver.targetStoreScore()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.True(solver.shouldBalance(""))
 
 	// It will not schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
 	tc.AddRegionStore(1, int(100+influenceAmp+2))
 	solver.source = tc.GetStore(1)
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(), solver.targetStoreScore()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.False(solver.shouldBalance(""))
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
 }
@@ -159,7 +159,7 @@ func TestShouldBalance(t *testing.T) {
 		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 		solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-		solver.sourceScore, solver.targetScore = solver.sourceStoreScore(), solver.targetStoreScore()
+		solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 		re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 	}
 
@@ -173,7 +173,7 @@ func TestShouldBalance(t *testing.T) {
 			basePlan := NewBalanceSchedulerPlan()
 			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 			solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-			solver.sourceScore, solver.targetScore = solver.sourceStoreScore(), solver.targetStoreScore()
+			solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 			re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 		}
 	}
@@ -783,14 +783,15 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
-
+	tc.SetStoreUp(1)
 	// test region replicate not match
 	opt.SetMaxReplicas(3)
 	ops, plans := sb.Schedule(tc, true)
-	re.Greater(len(plans), 100)
+	re.Len(plans, 100)
 	re.Empty(ops)
-	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusStoreRemoving)
+	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
 
+	tc.SetStoreOffline(1)
 	opt.SetMaxReplicas(1)
 	ops, plans = sb.Schedule(tc, true)
 	re.NotEmpty(ops)
