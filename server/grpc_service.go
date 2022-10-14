@@ -681,6 +681,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}
 
 		if slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID {
+			log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID))
 			resp.AwakenRegions = &pdpb.AwakenRegions{
 				ToAllRegions: true,
 			}
