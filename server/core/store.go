@@ -15,6 +15,7 @@
 package core
 
 import (
+	"github.com/tikv/pd/server/config"
 	"math"
 	"strings"
 	"time"
@@ -290,9 +291,9 @@ func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
 // store of balance, 1 when it is the target, and 0 in the rest of cases.
 func (s *StoreInfo) RegionScore(version string, highSpaceRatio, lowSpaceRatio float64, delta int64) float64 {
 	switch version {
-	case "v2":
+	case config.VersionV2:
 		return s.regionScoreV2(delta, lowSpaceRatio)
-	case "v1":
+	case config.VersionV1:
 		fallthrough
 	default:
 		return s.regionScoreV1(highSpaceRatio, lowSpaceRatio, delta)

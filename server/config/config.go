@@ -811,7 +811,7 @@ const (
 	defaultTolerantSizeRatio         = 0
 	defaultLowSpaceRatio             = 0.8
 	defaultHighSpaceRatio            = 0.7
-	defaultRegionScoreFormulaVersion = "v2"
+	defaultRegionScoreFormulaVersion = VersionV2
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -826,7 +826,12 @@ const (
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
 
-	defaultStoreLimitFormulaVersion = "v1"
+	defaultStoreLimitFormulaVersion = VersionV1
+)
+
+const (
+	VersionV1 = "v1"
+	VersionV2 = "v2"
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -1270,7 +1275,8 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 
 // SetupLogger setup the logger.
 func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
+	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel), zap.AddCallerSkip(1))
+
 	if err != nil {
 		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
 	}

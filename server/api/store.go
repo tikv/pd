@@ -579,7 +579,8 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [get]
 func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
-	limits := h.GetScheduleConfig().StoreLimit
+	rc := getCluster(r)
+	limits := rc.GetAllStoreLimit()
 	includeTombstone := false
 	var err error
 	if includeStr := r.URL.Query().Get("include_tombstone"); includeStr != "" {
@@ -591,7 +592,6 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 	}
 	if !includeTombstone {
 		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
-		rc := getCluster(r)
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)
 			if store == nil || store.IsRemoved() {

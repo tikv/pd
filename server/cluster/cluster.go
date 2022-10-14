@@ -310,9 +310,9 @@ func (c *RaftCluster) runSyncConfig() {
 
 func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
 	for index := 0; index < len(stores); index++ {
-		// filter out the stores that are tiflash
 		store := stores[index]
-		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		// filter out the stores that are TIFlash
+		if store.IsTiFlash() {
 			continue
 		}
 
@@ -2231,39 +2231,49 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 	return c.minResolvedTS
 }
 
-func (c *RaftCluster) GetAllStoreLimit(version string) map[uint64]config.StoreLimitConfig {
-	c.RLock()
-	defer c.RUnlock()
-	return c.core.GetStore(id)
+// GetAllStoreLimit returns all store limit.
+func (c *RaftCluster) GetAllStoreLimit() map[uint64]config.StoreLimitConfig {
+	version := c.opt.GetStoreLimitFormulaVersion()
+	switch version {
+	case config.VersionV2:
+		return c.getAllStoreLimitV2()
+	case config.VersionV1:
+		fallthrough
+	default:
+		return c.getAllStoreLimit()
+	}
 }
 
-func (c *RaftCluster) GetAllStoreLimitV2() map[uint64]config.StoreLimitConfig {
+func (c *RaftCluster) getAllStoreLimitV2() map[uint64]config.StoreLimitConfig {
 	return nil
 }
 
 // GetAllStoreLimit returns all store limit.
-func (c *RaftCluster) GetAllStoreLimit() map[uint64]config.StoreLimitConfig {
+func (c *RaftCluster) getAllStoreLimit() map[uint64]config.StoreLimitConfig {
 	c.RLock()
 	defer c.RUnlock()
 	return c.opt.GetScheduleConfig().StoreLimit
 }
 
 // SetStoreLimitByVersion sets store limit by version.
-func (c *RaftCluster) SetStoreLimitByVersion(version string, storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	version := c.opt.GetStoreLimitFormulaVersion()
 	switch version {
-	case "v2":
-		return c.SetStoreLimitV2(storeID, ratePerMin)
+	case config.VersionV2:
+		return c.setStoreLimitV2(storeID, ratePerMin)
+	case config.VersionV1:
+		fallthrough
 	default:
-		return c.SetStoreLimit(storeID, typ, ratePerMin)
+		return c.setStoreLimit(storeID, typ, ratePerMin)
 	}
 }
 
-func (c *RaftCluster) SetStoreLimitV2(_ uint64, _ float64) error {
+func (c *RaftCluster) setStoreLimitV2(_ uint64, _ float64) error {
 	return nil
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
-func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+func (c *RaftCluster) setStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {

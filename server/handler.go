@@ -988,6 +988,12 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
+func (h *Handler) SetStoreLimitTTLV2(data string, value float64, ttl time.Duration) error {
+	return h.s.SaveTTLConfig(map[string]interface{}{
+		data: value,
+	}, ttl)
+}
+
 // IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()

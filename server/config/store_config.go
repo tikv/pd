@@ -48,6 +48,12 @@ var (
 // nolint
 type StoreConfig struct {
 	Coprocessor `json:"coprocessor"`
+	Server      ServerConfig `json:"server"`
+}
+
+type ServerConfig struct {
+	// SnapMaxWriteBytesPerSec is the max write bytes per second for snapshot.
+	SnapMaxWriteBytesPerSec string `json:"snap-max-write-bytes-per-sec"`
 }
 
 // Coprocessor is the config of coprocessor.
@@ -188,11 +194,15 @@ func (m *StoreConfigManager) ObserveConfig(address string) error {
 		return err
 	}
 	old := m.GetStoreConfig()
-	if cfg != nil && !reflect.DeepEqual(cfg, old) {
+	if cfg != nil && !reflect.DeepEqual(cfg.Coprocessor, old.Coprocessor) {
 		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()))
 		m.config.Store(cfg)
 	}
 	return nil
+}
+
+func (m *StoreConfigManager) UpdateConfig(address string, cfg *StoreConfig) error {
+
 }
 
 // GetStoreConfig returns the current store configuration.
@@ -222,8 +232,14 @@ func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
 	}
 }
 
+// UpdateConfig is used to update the TIKV config.
+func (s *TiKVConfigSource) UpdateConfig(statusAddress string, config *StoreConfig) error {
+	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
+
+}
+
 // GetConfig returns the store config from TiKV.
-func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) {
+func (s *TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) {
 	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
 	resp, err := s.client.Get(url)
 	if err != nil {
@@ -260,6 +276,9 @@ func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
 	config := &StoreConfig{
 		Coprocessor{
 			RegionMaxSize: "10MiB",
+		},
+		ServerConfig{
+			SnapMaxWriteBytesPerSec: "100MiB",
 		},
 	}
 	return config, nil
