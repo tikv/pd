@@ -391,14 +391,15 @@ func TestHotWithoutHotPeer(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	timestamp := uint64(time.Now().UnixNano())
+	load := 1024.0
 	for _, store := range stores {
 		for i := 0; i < 5; i++ {
 			err := leaderServer.GetServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreStats{
 				StoreId:      store.Id,
-				BytesRead:    10000,
-				KeysRead:     100,
-				BytesWritten: 10000,
-				KeysWritten:  100,
+				BytesRead:    uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysRead:     uint64(load * statistics.StoreHeartBeatReportInterval),
+				BytesWritten: uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysWritten:  uint64(load * statistics.StoreHeartBeatReportInterval),
 				Capacity:     1000 * units.MiB,
 				Available:    1000 * units.MiB,
 				Interval: &pdpb.TimeInterval{
@@ -412,12 +413,30 @@ func TestHotWithoutHotPeer(t *testing.T) {
 
 	// wait hot scheduler starts
 	time.Sleep(5000 * time.Millisecond)
-	args := []string{"-u", pdAddr, "hot", "write"}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	hotRegion := statistics.StoreHotPeersInfos{}
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &hotRegion))
-	re.Equal(hotRegion.AsLeader[1].Count, 0)
-	re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
-	re.Equal(10000.0, hotRegion.AsLeader[1].StoreByteRate)
+	{
+		args := []string{"-u", pdAddr, "hot", "read"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &hotRegion))
+		re.Equal(hotRegion.AsPeer[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
+		re.Equal(hotRegion.AsLeader[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsLeader[1].StoreByteRate)
+	}
+	{
+		args := []string{"-u", pdAddr, "hot", "write"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &hotRegion))
+		re.Equal(hotRegion.AsPeer[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
+		re.Equal(hotRegion.AsLeader[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
+	}
 }
