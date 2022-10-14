@@ -2231,6 +2231,37 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 	return c.minResolvedTS
 }
 
+func (c *RaftCluster) GetAllStoreLimit(version string) map[uint64]config.StoreLimitConfig {
+	c.RLock()
+	defer c.RUnlock()
+	return c.core.GetStore(id)
+}
+
+func (c *RaftCluster) GetAllStoreLimitV2() map[uint64]config.StoreLimitConfig {
+	return nil
+}
+
+// GetAllStoreLimit returns all store limit.
+func (c *RaftCluster) GetAllStoreLimit() map[uint64]config.StoreLimitConfig {
+	c.RLock()
+	defer c.RUnlock()
+	return c.opt.GetScheduleConfig().StoreLimit
+}
+
+// SetStoreLimitByVersion sets store limit by version.
+func (c *RaftCluster) SetStoreLimitByVersion(version string, storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	switch version {
+	case "v2":
+		return c.SetStoreLimitV2(storeID, ratePerMin)
+	default:
+		return c.SetStoreLimit(storeID, typ, ratePerMin)
+	}
+}
+
+func (c *RaftCluster) SetStoreLimitV2(_ uint64, _ float64) error {
+	return nil
+}
+
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	old := c.opt.GetScheduleConfig().Clone()
