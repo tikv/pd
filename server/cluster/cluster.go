@@ -1357,6 +1357,49 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
 }
 
+// NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
+func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) bool {
+	// TODO: Current checking strategy follows the rule that there
+	// is no more than one slowStore in this cluster. We should upate
+	// it in the future if RaftCluster could tolerate several slowStores.
+	var slowStore *core.StoreInfo
+
+	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			continue
+		}
+
+		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
+			// Do nothing if there is more than one slow store.
+			slowStore = store
+		}
+	}
+
+	return slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID && slowStore.NeedAwakenStore()
+}
+
+func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
+
+	if store.IsPhysicallyDestroyed() {
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(core.SetLastAwakenTime(lastAwakenTime))
+
+	return c.putStoreLocked(newStore)
+}
+
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()

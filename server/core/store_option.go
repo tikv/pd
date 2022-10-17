@@ -243,3 +243,9 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 		store.limiter[limitType] = storelimit.NewStoreLimit(ratePerSec[0], storelimit.RegionInfluence[limitType])
 	}
 }
+
+func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.lastAwakenTime = lastAwaken
+	}
+}
