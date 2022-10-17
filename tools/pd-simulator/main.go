@@ -117,6 +117,7 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 
 func runMetrics() {
 	http.Handle("/metrics", promhttp.Handler())
+	// nolint
 	http.ListenAndServe(*statusAddress, nil)
 }
 

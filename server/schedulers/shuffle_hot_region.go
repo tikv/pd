@@ -209,6 +209,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 			log.Debug("fail to create move leader operator", errs.ZapError(err))
 			return nil
 		}
+		op.SetPriorityLevel(core.Low)
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 		return []*operator.Operator{op}
 	}

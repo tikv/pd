@@ -1807,6 +1807,11 @@ func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
 	return nil
 }
 
+// SetHotPendingInfluenceMetrics sets pending influence in hot scheduler.
+func (c *RaftCluster) SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
+	hotPendingSum.WithLabelValues(storeLabel, rwTy, dim).Set(load)
+}
+
 func (c *RaftCluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	stores := c.GetStores()

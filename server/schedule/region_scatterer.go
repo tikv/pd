@@ -372,7 +372,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	if op != nil {
 		scatterCounter.WithLabelValues("success", "").Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 	}
 	return op
 }
@@ -405,7 +405,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	candidates := make([]uint64, 0)
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
-	for _, store := range r.cluster.GetStores() {
+	for _, store := range stores {
 		count := context.selectedPeer.TotalCountByStore(store.GetID())
 		if count > maxStoreTotalCount {
 			maxStoreTotalCount = count

@@ -138,7 +138,7 @@ func (ls *Leadership) Keep(ctx context.Context) {
 		return
 	}
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
-	ls.getLease().KeepAlive(ls.keepAliveCtx)
+	go ls.getLease().KeepAlive(ls.keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.

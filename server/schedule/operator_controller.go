@@ -831,6 +831,10 @@ func (oc *OperatorController) ExceedStoreLimit(ops ...*operator.Operator) bool {
 
 // exceedStoreLimitLocked returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
 func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) bool {
+	// The operator with Urgent priority, like admin operators, should ignore the store limit check.
+	if len(ops) != 0 && ops[0].GetPriorityLevel() == core.Urgent {
+		return false
+	}
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {

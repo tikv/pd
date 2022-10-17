@@ -104,7 +104,7 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	return uint64(c.Coprocessor.RegionMaxKeys)
 }
 
-// IsEnableRegionBucket return ture if the region bucket is enabled.
+// IsEnableRegionBucket return true if the region bucket is enabled.
 func (c *StoreConfig) IsEnableRegionBucket() bool {
 	if c == nil {
 		return false

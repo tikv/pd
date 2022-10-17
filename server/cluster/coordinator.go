@@ -116,7 +116,10 @@ func (c *coordinator) patrolRegions() {
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
-	var key []byte
+	var (
+		key     []byte
+		regions []*core.RegionInfo
+	)
 	for {
 		select {
 		case <-timer.C:
@@ -137,33 +140,9 @@ func (c *coordinator) patrolRegions() {
 		// Check regions in the waiting list
 		c.checkWaitingRegions()
 
-		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
+		key, regions = c.checkRegions(key)
 		if len(regions) == 0 {
-			// Resets the scan key.
-			key = nil
 			continue
-		}
-
-		for _, region := range regions {
-			// Skips the region if there is already a pending operator.
-			if c.opController.GetOperator(region.GetID()) != nil {
-				continue
-			}
-
-			ops := c.checkers.CheckRegion(region)
-
-			key = region.GetEndKey()
-			if len(ops) == 0 {
-				continue
-			}
-
-			if !c.opController.ExceedStoreLimit(ops...) {
-				c.opController.AddWaitingOperator(ops...)
-				c.checkers.RemoveWaitingRegion(region.GetID())
-				c.checkers.RemoveSuspectRegion(region.GetID())
-			} else {
-				c.checkers.AddWaitingRegion(region)
-			}
 		}
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
@@ -174,6 +153,37 @@ func (c *coordinator) patrolRegions() {
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
+	}
+}
+
+func (c *coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
+	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	if len(regions) == 0 {
+		// Resets the scan key.
+		key = nil
+		return
+	}
+
+	for _, region := range regions {
+		c.tryAddOperators(region)
+		key = region.GetEndKey()
+	}
+	return
+}
+
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.checkers.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		c.tryAddOperators(region)
+	}
+}
+
+func (c *coordinator) checkWaitingRegions() {
+	items := c.checkers.GetWaitingRegions()
+	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
+	for _, item := range items {
+		region := c.cluster.GetRegion(item.Key)
+		c.tryAddOperators(region)
 	}
 }
 
@@ -199,29 +209,6 @@ func (c *coordinator) checkPriorityRegions() {
 	}
 	for _, v := range removes {
 		c.checkers.RemovePriorityRegions(v)
-	}
-}
-
-func (c *coordinator) checkSuspectRegions() {
-	for _, id := range c.checkers.GetSuspectRegions() {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveSuspectRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
-
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveSuspectRegion(region.GetID())
-		}
 	}
 }
 
@@ -264,29 +251,28 @@ func (c *coordinator) checkSuspectRanges() {
 	}
 }
 
-func (c *coordinator) checkWaitingRegions() {
-	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
-	for _, item := range items {
-		id := item.Key
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveWaitingRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
+func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
+	if region == nil {
+		// the region could be recent split, continue to wait.
+		return
+	}
+	id := region.GetID()
+	if c.opController.GetOperator(id) != nil {
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+		return
+	}
+	ops := c.checkers.CheckRegion(region)
+	if len(ops) == 0 {
+		return
+	}
 
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveWaitingRegion(region.GetID())
-		}
+	if !c.opController.ExceedStoreLimit(ops...) {
+		c.opController.AddWaitingOperator(ops...)
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+	} else {
+		c.checkers.AddWaitingRegion(region)
 	}
 }
 
@@ -553,8 +539,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
 	collectHotMetrics(c.cluster, stores, statistics.Read)
-	// Collects pending influence.
-	collectPendingInfluence(stores)
 }
 
 func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
@@ -577,8 +561,8 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		stat, ok := status.AsLeader[storeID]
-		if ok {
+		stat, hasHotLeader := status.AsLeader[storeID]
+		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
@@ -590,8 +574,8 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
-		stat, ok = status.AsPeer[storeID]
-		if ok {
+		stat, hasHotPeer := status.AsPeer[storeID]
+		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
@@ -602,29 +586,18 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
-	}
-}
 
-func collectPendingInfluence(stores []*core.StoreInfo) {
-	pendings := statistics.GetPendingInfluence(stores)
-	for _, s := range stores {
-		storeAddress := s.GetAddress()
-		storeID := s.GetID()
-		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionReadBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.RegionReadKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_query_rate").Set(infl.Loads[statistics.RegionReadQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionWriteBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.RegionWriteKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_query_rate").Set(infl.Loads[statistics.RegionWriteQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
+		if !hasHotLeader && !hasHotPeer {
+			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
+				hotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			})
 		}
 	}
 }
 
 func (c *coordinator) resetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
+	hotPendingSum.Reset()
 }
 
 func (c *coordinator) shouldRun() bool {

@@ -993,7 +993,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
-// IsLeader return ture if this server is leader
+// IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
 }
