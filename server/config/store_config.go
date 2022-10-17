@@ -15,6 +15,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -201,8 +202,14 @@ func (m *StoreConfigManager) ObserveConfig(address string) error {
 	return nil
 }
 
-func (m *StoreConfigManager) UpdateConfig(address string, cfg *StoreConfig) error {
+// GetConfig returns the store config.
+func (m *StoreConfigManager) GetConfig(address string) (*StoreConfig, error) {
+	return m.source.GetConfig(address)
+}
 
+// UpdateConfig is used to update the config.
+func (m *StoreConfigManager) UpdateConfig(address string, cfg *StoreConfig) error {
+	return m.source.UpdateConfig(address, cfg)
 }
 
 // GetStoreConfig returns the current store configuration.
@@ -217,6 +224,7 @@ func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
 // Source is used to get the store config.
 type Source interface {
 	GetConfig(statusAddress string) (*StoreConfig, error)
+	UpdateConfig(statusAddress string, config *StoreConfig) error
 }
 
 // TiKVConfigSource is used to get the store config from TiKV.
@@ -234,8 +242,16 @@ func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
 
 // UpdateConfig is used to update the TIKV config.
 func (s *TiKVConfigSource) UpdateConfig(statusAddress string, config *StoreConfig) error {
+	if len(statusAddress) == 0 {
+		return fmt.Errorf("status address is empty")
+	}
 	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
-
+	body, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.Post(url, "application/json", bytes.NewBuffer(body))
+	return err
 }
 
 // GetConfig returns the store config from TiKV.
@@ -260,11 +276,20 @@ func (s *TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error)
 // FakeSource is used to test.
 type FakeSource struct {
 	whiteList []string
+	config    *StoreConfig
 }
 
 func newFakeSource(whiteList []string) *FakeSource {
 	return &FakeSource{
 		whiteList: whiteList,
+		config: &StoreConfig{
+			Coprocessor{
+				RegionMaxSize: "10MiB",
+			},
+			ServerConfig{
+				SnapMaxWriteBytesPerSec: "100MiB",
+			},
+		},
 	}
 }
 
@@ -273,13 +298,13 @@ func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
 	if !slice.Contains(f.whiteList, url) {
 		return nil, fmt.Errorf("[url:%s] is not in white list", url)
 	}
-	config := &StoreConfig{
-		Coprocessor{
-			RegionMaxSize: "10MiB",
-		},
-		ServerConfig{
-			SnapMaxWriteBytesPerSec: "100MiB",
-		},
+	return f.config, nil
+}
+
+func (f *FakeSource) UpdateConfig(url string, config *StoreConfig) error {
+	if !slice.Contains(f.whiteList, url) {
+		return fmt.Errorf("[url:%s] is not in white list", url)
 	}
-	return config, nil
+	f.config = config
+	return nil
 }

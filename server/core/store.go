@@ -15,6 +15,7 @@
 package core
 
 import (
+	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/server/config"
 	"math"
 	"strings"
@@ -190,7 +191,7 @@ func (s *StoreInfo) GetNodeState() metapb.NodeState {
 
 // GetStatusAddress returns the http address of the store.
 func (s *StoreInfo) GetStatusAddress() string {
-	return s.meta.GetStatusAddress()
+	return netutil.ResolveLoopBackAddr(s.meta.GetStatusAddress(), s.GetAddress())
 }
 
 // GetAddress returns the address of the store.

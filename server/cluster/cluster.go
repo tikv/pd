@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
@@ -321,7 +320,7 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 			continue
 		}
 		// it will try next store if the current store is failed.
-		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
+		address := stores[index].GetStatusAddress()
 		if err := manager.ObserveConfig(address); err != nil {
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
@@ -2245,7 +2244,21 @@ func (c *RaftCluster) GetAllStoreLimit() map[uint64]config.StoreLimitConfig {
 }
 
 func (c *RaftCluster) getAllStoreLimitV2() map[uint64]config.StoreLimitConfig {
-	return nil
+	limits := make(map[uint64]config.StoreLimitConfig)
+	for _, store := range c.GetStores() {
+		statusAddress := store.GetStatusAddress()
+		storeID := store.GetID()
+		cfg, err := c.storeConfigManager.GetConfig(statusAddress)
+		if err != nil {
+			log.Error("sync store config error", zap.Uint64("store-id", storeID), zap.Error(err))
+		}
+		rate := typeutil.ParseMBFromText(cfg.Server.SnapMaxWriteBytesPerSec, 100)
+		limits[storeID] = config.StoreLimitConfig{
+			AddPeer:    float64(rate),
+			RemovePeer: float64(rate),
+		}
+	}
+	return limits
 }
 
 // GetAllStoreLimit returns all store limit.
@@ -2255,7 +2268,7 @@ func (c *RaftCluster) getAllStoreLimit() map[uint64]config.StoreLimitConfig {
 	return c.opt.GetScheduleConfig().StoreLimit
 }
 
-// SetStoreLimitByVersion sets store limit by version.
+// SetStoreLimit sets store limit by version.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
 	version := c.opt.GetStoreLimitFormulaVersion()
 	switch version {
@@ -2268,7 +2281,14 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 	}
 }
 
-func (c *RaftCluster) setStoreLimitV2(_ uint64, _ float64) error {
+func (c *RaftCluster) setStoreLimitV2(storeID uint64, rate float64) error {
+	address := c.GetStore(storeID).GetStatusAddress()
+	config := &config.StoreConfig{
+		Server: config.ServerConfig{
+			SnapMaxWriteBytesPerSec: strconv.FormatFloat(rate, 'f', -1, 64) + "MiB",
+		},
+	}
+	c.storeConfigManager.UpdateConfig(address, config)
 	return nil
 }
 
