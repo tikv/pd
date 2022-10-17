@@ -211,72 +211,72 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 	return createResponse(addNode(ap.PeerID, ap.ToStore), useConfChangeV2)
 }
 
-// // BecomeWitness is an OpStep that makes a peer become a witness.
-// type BecomeWitness struct {
-// 	StoreID, PeerID uint64
-// }
+// BecomeWitness is an OpStep that makes a peer become a witness.
+type BecomeWitness struct {
+	StoreID, PeerID uint64
+}
 
-// // ConfVerChanged returns the delta value for version increased by this step.
-// func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
-// 	peer := region.GetStorePeer(bw.StoreID)
-// 	return typeutil.BoolToUint64(peer.GetId() == bw.PeerID)
-// }
+// ConfVerChanged returns the delta value for version increased by this step.
+func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(bw.StoreID)
+	return typeutil.BoolToUint64(peer.GetId() == bw.PeerID)
+}
 
-// func (bw BecomeWitness) String() string {
-// 	return fmt.Sprintf("change peer %v on store %v to witness", bw.PeerID, bw.StoreID)
-// }
+func (bw BecomeWitness) String() string {
+	return fmt.Sprintf("change peer %v on store %v to witness", bw.PeerID, bw.StoreID)
+}
 
-// // IsFinish checks if current step is finished.
-// func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
-// 	if peer := region.GetStorePeer(bw.StoreID); peer != nil {
-// 		if peer.GetId() != bw.PeerID {
-// 			log.Warn("obtain unexpected peer", zap.String("expect", bw.String()), zap.Uint64("obtain-learner", peer.GetId()))
-// 			return false
-// 		}
-// 		return peer.IsWitness
-// 	}
-// 	return false
-// }
+// IsFinish checks if current step is finished.
+func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
+	if peer := region.GetStorePeer(bw.StoreID); peer != nil {
+		if peer.GetId() != bw.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", bw.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
+		}
+		return peer.IsWitness
+	}
+	return false
+}
 
-// // CheckInProgress checks if the step is in the progress of advancing.
-// func (bw BecomeWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
-// 	if err := validateStore(ci, bw.StoreID); err != nil {
-// 		return err
-// 	}
-// 	peer := region.GetStorePeer(bw.StoreID)
-// 	if peer == nil || peer.GetId() != bw.PeerID {
-// 		return errors.New("peer does not exist")
-// 	}
-// 	return nil
-// }
+// CheckInProgress checks if the step is in the progress of advancing.
+func (bw BecomeWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, bw.StoreID); err != nil {
+		return err
+	}
+	peer := region.GetStorePeer(bw.StoreID)
+	if peer == nil || peer.GetId() != bw.PeerID {
+		return errors.New("peer does not exist")
+	}
+	return nil
+}
 
-// // Influence calculates the store difference that current step makes.
-// func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-// 	to := opInfluence.GetStoreInfluence(bw.StoreID)
+// Influence calculates the store difference that current step makes.
+func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
-// 	regionSize := region.GetApproximateSize()
-// 	to.WitnessCount += 1
-// 	to.RegionSize -= regionSize
-// 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
-// }
+	regionSize := region.GetApproximateSize()
+	to.WitnessCount += 1
+	to.RegionSize -= regionSize
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+}
 
-// // Timeout returns true if the step is timeout.
-// func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
-// 	return time.Since(start) > slowStepWaitDuration(regionSize)
-// }
+// Timeout returns true if the step is timeout.
+func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
+	return time.Since(start) > slowStepWaitDuration(regionSize)
+}
 
-// // GetCmd returns the schedule command for heartbeat response.
-// func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-// 	if !useConfChangeV2 {
-// 		// witness is only supported in v2
-// 		return nil
-// 	}
-// 	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
-// 		return addLearnerNode(bw.PeerID, bw.StoreID, true, useConfChangeV2)
-// 	} else {
-// 		return addNode(bw.PeerID, bw.StoreID, true, useConfChangeV2)
-// 	}
-// }
+// GetCmd returns the schedule command for heartbeat response.
+func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if !useConfChangeV2 {
+		// witness is only supported in v2
+		return nil
+	}
+	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
+		return createResponse(addLearnerNode(bw.PeerID, bw.StoreID), useConfChangeV2)
+	} else {
+		return createResponse(addNode(bw.PeerID, bw.StoreID), useConfChangeV2)
+	}
+}
 
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {

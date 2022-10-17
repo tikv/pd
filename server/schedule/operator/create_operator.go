@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/tikv/pd/pkg/logutil"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -110,12 +108,6 @@ func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.Reg
 		PromoteLearner{ToStore: sourceStoreID, PeerID: id},
 		BecomeWitness{StoreID: targetStoreID, PeerID: id},
 	), nil
-	// TODO: remove then add is a workaround for simplicity.
-	// return NewBuilder(desc, ci, region).
-	// 	RemovePeer(sourceStoreID).
-	// 	AddPeer(&metapb.Peer{StoreId: sourceStoreID}).
-	// 	BecomeWitness(targetStoreID).
-	// 	Build(kind)
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
