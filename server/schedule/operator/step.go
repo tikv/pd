@@ -247,7 +247,6 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 
 	regionSize := region.GetApproximateSize()
 	to.RegionSize -= regionSize
-	// TODO: Confirm no performance issues
 	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
@@ -264,7 +263,7 @@ func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *p
 	return createResponse(addNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
 }
 
-// BecomeNonWitness is an OpStep that makes a peer become a witness.
+// BecomeNonWitness is an OpStep that makes a peer become a non-witness.
 type BecomeNonWitness struct {
 	StoreID, PeerID uint64
 }

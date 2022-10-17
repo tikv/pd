@@ -303,8 +303,8 @@ func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "follower"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "leader"})
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "follower"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
 	suite.cluster.AddLeaderRegion(1, 1, 2)
 
@@ -325,6 +325,107 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
 	suite.Equal("add-rule-peer", op.Desc())
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness2() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Index:     100,
+		Override:  true,
+		Role:      placement.Voter,
+		Count:     1,
+		IsWitness: true,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "C", Op: "in", Values: []string{"voter"}},
+		},
+	})
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("fix-witness-peer", op.Desc())
+	suite.Equal(uint64(3), op.Step(0).(operator.BecomeWitness).StoreID)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	r := suite.cluster.GetRegion(1)
+	// set peer3 to witness
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
+
+	op := suite.rc.Check(r)
+	suite.NotNil(op)
+	suite.Equal("fix-non-witness-peer", op.Desc())
+	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"D": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	suite.cluster.SetStoreDown(2)
+	r := suite.cluster.GetRegion(1)
+	// set peer2 to down
+	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
+	// set peer3 to witness
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+	})
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Role:      placement.Voter,
+		Count:     1,
+		IsWitness: true,
+	})
+
+	op := suite.rc.Check(r)
+
+	suite.NotNil(op)
+	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
+	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
+	suite.Equal(uint64(2), op.Step(2).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(3), op.Step(3).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(3), op.Step(4).(operator.AddLearner).ToStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Index:     100,
+		Override:  true,
+		Role:      placement.Voter,
+		Count:     2,
+		IsWitness: true,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "A", Op: "In", Values: []string{"leader"}},
+		},
+	})
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
