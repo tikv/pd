@@ -63,6 +63,11 @@ func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	}
 }
 
+func (p *balanceSchedulerPlan) SetResourceWithStep(resource interface{}, step int) {
+	p.step = step
+	p.SetResource(resource)
+}
+
 func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	if p.step < step {
 		return 0
