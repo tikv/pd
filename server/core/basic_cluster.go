@@ -225,13 +225,14 @@ func (bc *BasicCluster) GetStoreRegions(storeID uint64) []*RegionInfo {
 // GetLeaderStoreByRegionID returns the leader store of the given region.
 func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 	bc.Regions.mu.RLock()
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	defer bc.Regions.mu.RUnlock()
 	region := bc.Regions.GetRegion(regionID)
 	if region == nil || region.GetLeader() == nil {
 		return nil
 	}
+	bc.Regions.mu.RUnlock()
+
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.RUnlock()
 	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
 }
 
@@ -400,15 +401,17 @@ func (bc *BasicCluster) getWriteRate(
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
 	bc.Regions.mu.RLock()
-	defer bc.Regions.mu.RUnlock()
-	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+	storeLeaderWriteRate := bc.Regions.GetStoreLeaderWriteRate
+	bc.Regions.mu.RUnlock()
+	return bc.getWriteRate(storeLeaderWriteRate)
 }
 
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
 	bc.Regions.mu.RLock()
-	defer bc.Regions.mu.RUnlock()
-	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
+	storeWriteRate := bc.Regions.GetStoreWriteRate
+	bc.Regions.mu.RUnlock()
+	return bc.getWriteRate(storeWriteRate)
 }
 
 func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
