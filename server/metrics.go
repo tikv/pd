@@ -142,7 +142,7 @@ var (
 			Name:      "audit_handling_seconds",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component"})
+		}, []string{"service", "method", "component", "ip"})
 )
 
 func init() {

@@ -182,7 +182,7 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 // each store
 func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule.Cluster) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence()
+	h.summaryPendingInfluence(cluster)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
@@ -223,7 +223,7 @@ func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *hotScheduler) summaryPendingInfluence() {
+func (h *hotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
 	for id, p := range h.regionPendings {
 		from := h.stInfos[p.from]
 		to := h.stInfos[p.to]
@@ -248,6 +248,14 @@ func (h *hotScheduler) summaryPendingInfluence() {
 			to.AddInfluence(&p.origin, weight)
 		}
 	}
+	for storeID, info := range h.stInfos {
+		storeLabel := strconv.FormatUint(storeID, 10)
+		if infl := info.PendingSum; infl != nil {
+			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
+				cluster.SetHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
+			})
+		}
+	}
 }
 
 func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
@@ -262,6 +270,9 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	h.regionPendings[regionID] = influence
 
 	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
+	statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
+		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), statistics.DimToString(dim)).Observe(infl.Loads[kind])
+	})
 	return true
 }
 
