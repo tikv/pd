@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/btree"
 )
 
 type simpleBucketItem struct {
@@ -35,8 +34,8 @@ func newSimpleBucketItem(startKey, endKey []byte) *simpleBucketItem {
 }
 
 // Less returns true if the start key of the item is less than the start key of the argument.
-func (s *simpleBucketItem) Less(than btree.Item) bool {
-	return bytes.Compare(s.GetStartKey(), than.(RangeItem).GetStartKey()) < 0
+func (s *simpleBucketItem) Less(than RangeItem) bool {
+	return bytes.Compare(s.GetStartKey(), than.GetStartKey()) < 0
 }
 
 // StartKey returns the start key of the item.
