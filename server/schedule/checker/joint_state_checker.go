@@ -55,7 +55,7 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 		if op.Len() > 1 {
 			checkerCounter.WithLabelValues("joint_state_checker", "transfer-leader").Inc()
 		}
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 	}
 	return op
 }

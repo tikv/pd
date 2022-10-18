@@ -177,7 +177,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
 		if store == nil || store.IsRemoved() {
-			// Previous slow store had been removed, remove the sheduler and check
+			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Uint64("store-id", store.GetID()))
