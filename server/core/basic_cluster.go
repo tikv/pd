@@ -227,6 +227,7 @@ func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 	bc.Regions.mu.RLock()
 	region := bc.Regions.GetRegion(regionID)
 	if region == nil || region.GetLeader() == nil {
+		bc.Regions.mu.RUnlock()
 		return nil
 	}
 	bc.Regions.mu.RUnlock()
