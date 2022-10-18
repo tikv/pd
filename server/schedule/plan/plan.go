@@ -23,6 +23,10 @@ type Plan interface {
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	SetResource(interface{})
+	// SetResourceWithStep is used to set resource for specific step.
+	// The meaning of step is different for different plans.
+	// Such as balancePlan, pickSource = 0, pickRegion = 1, pickTarget = 2
+	SetResourceWithStep(resource interface{}, step int)
 	SetStatus(*Status)
 }
 
@@ -81,5 +85,12 @@ func SetStatus(status *Status) Option {
 func SetResource(resource interface{}) Option {
 	return func(plan Plan) {
 		plan.SetResource(resource)
+	}
+}
+
+// SetResourceWithStep is used to generate Resource for plan
+func SetResourceWithStep(resource interface{}, step int) Option {
+	return func(plan Plan) {
+		plan.SetResourceWithStep(resource, step)
 	}
 }

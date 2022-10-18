@@ -208,6 +208,15 @@ func (rw RWType) Inverse() RWType {
 	}
 }
 
+// ForeachRegionStats foreach all region stats of read and write.
+func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
+	for _, rwTy := range []RWType{Read, Write} {
+		for dim, kind := range rwTy.RegionStats() {
+			f(rwTy, dim, kind)
+		}
+	}
+}
+
 // GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
 func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
 	deltaLoads := peer.GetLoads()
