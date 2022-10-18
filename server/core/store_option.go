@@ -244,6 +244,7 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	}
 }
 
+// SetLastAwakenTime sets last awaken time for the store.
 func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.lastAwakenTime = lastAwaken

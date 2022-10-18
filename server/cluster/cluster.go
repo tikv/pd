@@ -1374,10 +1374,11 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) bool {
 			slowStore = store
 		}
 	}
-
-	return slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID && slowStore.NeedAwakenStore()
+	store := c.GetStore(storeID)
+	return slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID && store.NeedAwakenStore()
 }
 
+// UpdateAwakenStoreTime updates the last awaken time for the store.
 func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
 	c.Lock()
 	defer c.Unlock()
