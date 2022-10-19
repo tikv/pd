@@ -336,6 +336,39 @@ func WithPromoteLearner(peerID uint64) RegionCreateOption {
 	}
 }
 
+// WithPromoteLearnerEnter promotes the learner to the joint enter stage.
+func WithPromoteLearnerEnter(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.Role = metapb.PeerRole_IncomingVoter
+			}
+		}
+	}
+}
+
+// WithDemoteVoter demotes the voter.
+func WithDemoteVoter(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.Role = metapb.PeerRole_Learner
+			}
+		}
+	}
+}
+
+// WithDemoteVoterEnter demotes the voter to the joint enter stage.
+func WithDemoteVoterEnter(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.Role = metapb.PeerRole_DemotingVoter
+			}
+		}
+	}
+}
+
 // WithReplacePeerStore replaces a peer's storeID with another ID.
 func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
