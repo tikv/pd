@@ -451,15 +451,20 @@ func (r *removePeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegio
 		return nil, false
 	}
 	// Step 2: Remove Peer
+	engine.schedulerStats.taskStats.incRemovePeer(region.GetID())
 	newRegion = region.Clone(
 		core.WithIncConfVer(),
 		core.WithRemoveStorePeer(r.peer.GetStoreId()),
 		removePendingPeer(region, r.peer),
 		removeDownPeers(region, r.peer))
 	isFinished = true
-	// analysis
-	if analysis.GetTransferCounter().IsValid {
-		analysis.GetTransferCounter().AddSource(region.GetID(), r.peer.GetStoreId())
+
+	if store := engine.conn.Nodes[r.peer.GetStoreId()]; store != nil {
+		store.decUsedSize(uint64(region.GetApproximateSize()))
+		// analysis
+		if analysis.GetTransferCounter().IsValid {
+			analysis.GetTransferCounter().AddSource(region.GetID(), r.peer.GetStoreId())
+		}
 	}
 
 	return
