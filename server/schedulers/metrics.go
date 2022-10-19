@@ -46,7 +46,7 @@ var tolerantResourceStatus = prometheus.NewGaugeVec(
 		Subsystem: "scheduler",
 		Name:      "tolerant_resource",
 		Help:      "Store status for schedule",
-	}, []string{"scheduler", "source", "target"})
+	}, []string{"scheduler"})
 
 var balanceLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -109,8 +109,17 @@ var hotPendingStatus = prometheus.NewGaugeVec(
 		Namespace: "pd",
 		Subsystem: "scheduler",
 		Name:      "hot_pending",
-		Help:      "Counter of direction of balance related schedulers.",
+		Help:      "Pending influence status in hot region scheduler.",
 	}, []string{"type", "source", "target"})
+
+var hotPeerHist = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_peer",
+		Help:      "Bucketed histogram of the scheduling hot peer.",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
+	}, []string{"type", "rw", "dim"})
 
 func init() {
 	prometheus.MustRegister(schedulerCounter)
@@ -125,4 +134,5 @@ func init() {
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
+	prometheus.MustRegister(hotPeerHist)
 }
