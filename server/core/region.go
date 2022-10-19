@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/rangetree"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
@@ -1160,6 +1161,27 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
+	start := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	_, startIndex := r.tree.tree.GetWithIndex(start)
+	var endIndex int
+	var item rangetree.RangeItem
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = r.tree.tree.Len() - 1
+	} else {
+		item, endIndex = r.tree.tree.GetWithIndex(end)
+		// it should return the endIndex - 1 if the endKey is the startKey of a region.
+		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
+			endIndex--
+		}
+	}
+	return endIndex - startIndex + 1
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
@@ -1171,7 +1193,7 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 		if limit > 0 && len(res) >= limit {
 			return false
 		}
-		res = append(res, r.GetRegion(region.GetID()))
+		res = append(res, region)
 		return true
 	})
 	return res

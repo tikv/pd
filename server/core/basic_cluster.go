@@ -449,6 +449,13 @@ func (bc *BasicCluster) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	return bc.Regions.GetPrevRegionByKey(regionKey)
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (bc *BasicCluster) GetRangeCount(startKey, endKey []byte) int {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRangeCount(startKey, endKey)
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {

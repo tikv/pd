@@ -1978,6 +1978,13 @@ func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.Region
 	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
 }
 
+// GetRangeCount returns the number of regions in the range.
+func (c *RaftCluster) GetRangeCount(startKey, endKey []byte) *statistics.RegionStats {
+	stats := &statistics.RegionStats{}
+	stats.Count = c.core.GetRangeCount(startKey, endKey)
+	return stats
+}
+
 // GetStoresStats returns stores' statistics from cluster.
 // And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
 func (c *RaftCluster) GetStoresStats() *statistics.StoresStats {
