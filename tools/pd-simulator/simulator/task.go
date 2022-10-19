@@ -67,11 +67,14 @@ func responseToTask(engine *RaftEngine, resp *pdpb.RegionHeartbeatResponse) *Tas
 	case resp.GetChangePeerV2() != nil:
 		cps := resp.GetChangePeerV2().GetChanges()
 		if len(cps) == 0 {
+			// leave joint state
 			desc = fmt.Sprintf("leave joint state for region %d", regionID)
 			op = &changePeerV2Leave{}
 		} else if len(cps) == 1 {
+			// original ChangePeer
 			op, desc = changePeerToOperator(region, cps[0])
 		} else {
+			// enter joint state, it can only contain PromoteLearner and DemoteVoter.
 			subDesc := make([]string, 0, len(cps))
 			cp2 := &changePeerV2Enter{}
 			for _, cp := range cps {
@@ -94,7 +97,9 @@ func responseToTask(engine *RaftEngine, resp *pdpb.RegionHeartbeatResponse) *Tas
 		}
 	case resp.GetTransferLeader() != nil:
 		fromPeerStoreID := region.GetLeader().GetStoreId()
+		// When this field is included, it means that TiKV needs to decide the optimal Leader by itself.
 		toPeers := resp.GetTransferLeader().GetPeers()
+		// When no Peers are included, use Peer to build Peers of length 1.
 		if len(toPeers) == 0 {
 			toPeers = []*metapb.Peer{resp.GetTransferLeader().GetPeer()}
 		}
@@ -255,9 +260,14 @@ type transferLeader struct {
 
 func (t *transferLeader) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
-	toPeer := t.toPeers[0]
-	if region.GetPeer(toPeer.GetId()) == nil {
+	toPeer := t.toPeers[0] // TODO: Support selection logic
+	if peer := region.GetPeer(toPeer.GetId()); peer == nil || peer.GetRole() != toPeer.GetRole() || core.IsLearner(peer) {
 		return
+	}
+	if toPeer.GetRole() == metapb.PeerRole_DemotingVoter {
+		simutil.Logger.Error("set demoting-voter as leader",
+			zap.Uint64("region-id", region.GetID()),
+			zap.String("peer", toPeer.String()))
 	}
 
 	newRegion = region.Clone(core.WithLeader(toPeer))
@@ -267,6 +277,9 @@ func (t *transferLeader) tick(engine *RaftEngine, region *core.RegionInfo) (newR
 
 func checkAndCreateChangePeerOption(engine *RaftEngine, region *core.RegionInfo,
 	peer *metapb.Peer, from, to metapb.PeerRole) []core.RegionCreateOption {
+	// `from` and `to` need to satisfy the combination in switch.
+
+	// check `from` Role
 	if peer.GetRole() != from {
 		simutil.Logger.Error(
 			"unexpected role",
@@ -274,18 +287,23 @@ func checkAndCreateChangePeerOption(engine *RaftEngine, region *core.RegionInfo,
 			zap.String("expected", from.String()))
 		return nil
 	}
-
+	// Leader cannot be demoted
+	if (to == metapb.PeerRole_DemotingVoter || to == metapb.PeerRole_Learner) && region.GetLeader().GetId() == peer.GetId() {
+		simutil.Logger.Error("demote leader", zap.String("region", region.GetMeta().String()))
+		return nil
+	}
+	// create option
 	opts := []core.RegionCreateOption{core.WithIncConfVer()}
 	switch to {
-	case metapb.PeerRole_Voter:
+	case metapb.PeerRole_Voter: // Learner/IncomingVoter -> Voter
 		engine.schedulerStats.taskStats.incPromoteLearner(region.GetID())
 		return append(opts, core.WithPromoteLearner(peer.GetId()))
-	case metapb.PeerRole_Learner:
+	case metapb.PeerRole_Learner: // Voter/DemotingVoter -> Learner
 		engine.schedulerStats.taskStats.incDemoteVoter(region.GetID())
 		return append(opts, core.WithDemoteVoter(peer.GetId()))
-	case metapb.PeerRole_IncomingVoter:
+	case metapb.PeerRole_IncomingVoter: // Learner -> IncomingVoter, only in joint state
 		return append(opts, core.WithPromoteLearnerEnter(peer.GetId()))
-	case metapb.PeerRole_DemotingVoter:
+	case metapb.PeerRole_DemotingVoter: // Voter -> DemotingVoter, only in joint state
 		return append(opts, core.WithDemoteVoterEnter(peer.GetId()))
 	default:
 		return nil
