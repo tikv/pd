@@ -86,7 +86,7 @@ func responseToTask(engine *RaftEngine, resp *pdpb.RegionHeartbeatResponse) *Tas
 					cp2.promoteLearners = append(cp2.promoteLearners, peer)
 				case *demoteVoter:
 					subDesc = append(subDesc, fmt.Sprintf("demote peer %+v", peer))
-					cp2.demoteVoters = append(cp2.demoteVoters, cp.GetPeer())
+					cp2.demoteVoters = append(cp2.demoteVoters, peer)
 				default:
 					simutil.Logger.Error("cannot exec AddPeer or RemovePeer when using joint state")
 					return nil
