@@ -138,29 +138,27 @@ func changePeerToOperator(region *core.RegionInfo, cp *pdpb.ChangePeer) (operato
 	peer := cp.GetPeer()
 	switch cp.GetChangeType() {
 	case eraftpb.ConfChangeType_AddNode:
-		if region.GetPeer(peer.GetId()) == nil {
-			return &addPeer{
-				peer:          peer,
-				size:          region.GetApproximateSize(),
-				keys:          region.GetApproximateKeys(),
-				sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
-				receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
-			}, fmt.Sprintf("add voter %+v for region %d", peer, regionID)
-		} else {
+		if region.GetPeer(peer.GetId()) != nil {
 			return &promoteLearner{peer: peer}, fmt.Sprintf("promote learner %+v for region %d", peer, regionID)
 		}
+		return &addPeer{
+			peer:          peer,
+			size:          region.GetApproximateSize(),
+			keys:          region.GetApproximateKeys(),
+			sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
+			receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
+		}, fmt.Sprintf("add voter %+v for region %d", peer, regionID)
 	case eraftpb.ConfChangeType_AddLearnerNode:
-		if region.GetPeer(peer.GetId()) == nil {
-			return &addPeer{
-				peer:          peer,
-				size:          region.GetApproximateSize(),
-				keys:          region.GetApproximateKeys(),
-				sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
-				receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
-			}, fmt.Sprintf("add learner %+v for region %d", peer, regionID)
-		} else {
+		if region.GetPeer(peer.GetId()) != nil {
 			return &demoteVoter{peer: peer}, fmt.Sprintf("demote voter %+v for region %d", peer, regionID)
 		}
+		return &addPeer{
+			peer:          peer,
+			size:          region.GetApproximateSize(),
+			keys:          region.GetApproximateKeys(),
+			sendingStat:   newSnapshotState(region.GetApproximateSize(), generate),
+			receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
+		}, fmt.Sprintf("add learner %+v for region %d", peer, regionID)
 	case eraftpb.ConfChangeType_RemoveNode:
 		return &removePeer{
 			peer:  peer,
@@ -178,6 +176,7 @@ type operator interface {
 	tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool)
 }
 
+// Task running in node.
 type Task struct {
 	operator
 	desc       string
@@ -186,14 +185,17 @@ type Task struct {
 	isFinished bool
 }
 
+// Desc returns the description of the Task.
 func (t *Task) Desc() string {
 	return t.desc
 }
 
+// RegionID returns the region-id of the Task.
 func (t *Task) RegionID() uint64 {
 	return t.regionID
 }
 
+// Step execute once on the Task.
 func (t *Task) Step(engine *RaftEngine) (isFinished bool) {
 	if t.isFinished {
 		return true
