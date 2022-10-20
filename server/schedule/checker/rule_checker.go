@@ -243,6 +243,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		if witness == nil {
 			return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 		}
+		newPeer.IsWitness = true
 		return operator.CreateMovePeerAndPromoteWitnessToVoterOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, witness.StoreId)
 	}
 	op, err := createOp()
