@@ -201,10 +201,9 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
-	leaderID := region.GetLeader().GetId()
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
-	if leaderID == peer.GetId() {
+	if region.GetLeader().GetId() == peer.GetId() {
 		minCount := uint64(math.MaxUint64)
 		for _, p := range region.GetPeers() {
 			count := c.record.getOfflineLeaderCount(p.GetStoreId())
@@ -224,27 +223,11 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		}
 	}
 
-	var witness *metapb.Peer
-	for _, witness = range region.GetWitnesses() {
-		if witness.StoreId != peer.StoreId && witness.Id != leaderID {
-			break
-		}
-	}
-
 	createOp := func() (*operator.Operator, error) {
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
-		/* TODO: enable this after the pr balance witness merged
-		if newPeer.IsWitness {
-			return operator.CreateMoveWitnessOperator("replace-rule-"+status+"-witness-peer", c.cluster, region, peer.StoreId, newPeer.StoreId, operator.OpWitness)
-		}
-		*/
-		if witness == nil {
-			return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
-		}
-		newPeer.IsWitness = true
-		return operator.CreateMovePeerAndPromoteWitnessToVoterOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, witness.StoreId)
+		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
 	op, err := createOp()
 	if err != nil {

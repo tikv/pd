@@ -302,12 +302,3 @@ func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.
 	brief := fmt.Sprintf("promote to non-witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
 	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
 }
-
-// CreateMovePeerAndPromoteWitnessToVoterOperator creates an operator that replaces an old peer with a new peer, and promote a witness to voter.
-func CreateMovePeerAndPromoteWitnessToVoterOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, witnessStore uint64) (*Operator, error) {
-	return NewBuilder(desc, ci, region).
-		RemovePeer(oldStore).
-		AddPeer(peer).
-		BecomeNonWitness(witnessStore).
-		Build(kind)
-}
