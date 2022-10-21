@@ -384,17 +384,18 @@ func (bc *BasicCluster) getWriteRate(
 	f func(storeID uint64) (bytesRate, keysRate float64),
 ) (storeIDs []uint64, bytesRates, keysRates []float64) {
 	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
 	count := len(bc.Stores.stores)
 	storeIDs = make([]uint64, 0, count)
+	for _, store := range bc.Stores.stores {
+		storeIDs = append(storeIDs, store.GetID())
+	}
+	bc.Stores.mu.RUnlock()
 	bytesRates = make([]float64, 0, count)
 	keysRates = make([]float64, 0, count)
-	for _, store := range bc.Stores.stores {
-		id := store.GetID()
+	for _, id := range storeIDs {
 		bc.Regions.mu.RLock()
 		bytesRate, keysRate := f(id)
 		bc.Regions.mu.RUnlock()
-		storeIDs = append(storeIDs, id)
 		bytesRates = append(bytesRates, bytesRate)
 		keysRates = append(keysRates, keysRate)
 	}
@@ -411,9 +412,7 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
-func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
-	bc.Regions.mu.RLock()
-	defer bc.Regions.mu.RUnlock()
+func (bc *BasicCluster) getRelevantRegionsLocked(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
 	origin = bc.Regions.GetRegion(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		overlaps = bc.Regions.GetOverlaps(region)
@@ -425,7 +424,13 @@ func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionIn
 
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
-	origin, overlaps := bc.getRelevantRegions(region)
+	bc.Regions.mu.RLock()
+	origin, overlaps := bc.getRelevantRegionsLocked(region)
+	bc.Regions.mu.RUnlock()
+	return bc.check(region, origin, overlaps)
+}
+
+func (bc *BasicCluster) check(region, origin *RegionInfo, overlaps []*RegionInfo) (*RegionInfo, error) {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
@@ -463,31 +468,11 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 func (bc *BasicCluster) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	bc.Regions.mu.Lock()
 	defer bc.Regions.mu.Unlock()
-	var overlaps []*RegionInfo
-	origin := bc.Regions.GetRegion(region.GetID())
-	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		overlaps = bc.Regions.GetOverlaps(region)
+	origin, overlaps := bc.getRelevantRegionsLocked(region)
+	_, err := bc.check(region, origin, overlaps)
+	if err != nil {
+		return nil, err
 	}
-	for _, item := range overlaps {
-		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
-		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
-			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
-		}
-	}
-
-	if origin == nil {
-		return bc.Regions.SetRegion(region), nil
-	}
-
-	r := region.GetRegionEpoch()
-	o := origin.GetRegionEpoch()
-	// TiKV reports term after v3.0
-	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
-	// Region meta is stale, return an error.
-	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
-		return nil, errRegionIsStale(region.GetMeta(), origin.GetMeta())
-	}
-
 	return bc.Regions.SetRegion(region), nil
 }
 
