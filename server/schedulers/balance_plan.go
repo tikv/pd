@@ -74,11 +74,23 @@ func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	}
 	switch step {
 	case pickSource:
-		return p.source.GetID()
+		if p.source != nil {
+			return p.source.GetID()
+		} else {
+			return 0
+		}
 	case pickRegion:
-		return p.region.GetID()
+		if p.region != nil {
+			return p.region.GetID()
+		} else {
+			return 0
+		}
 	case pickTarget:
-		return p.target.GetID()
+		if p.target != nil {
+			return p.target.GetID()
+		} else {
+			return 0
+		}
 	}
 	return 0
 }
@@ -117,7 +129,7 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 	var storeStatusCounter map[uint64]map[plan.Status]int
 	// statusCounter is used to count the number of status which is regarded as best status of each store
 	statusCounter := make(map[uint64]plan.Status)
-	maxStep := -1
+	storeMaxStep := make(map[uint64]int)
 	normal := true
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
@@ -129,16 +141,6 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		if step > pickTarget {
 			step = pickTarget
 		}
-		if step > maxStep {
-			storeStatusCounter = make(map[uint64]map[plan.Status]int)
-			maxStep = step
-			normal = true
-		} else if step < maxStep {
-			continue
-		}
-		if !p.status.IsNormal() {
-			normal = false
-		}
 		var store uint64
 		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
 		// and consider the failure as the status of source store.
@@ -146,6 +148,16 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 			store = p.source.GetID()
 		} else {
 			store = p.GetResource(step)
+		}
+		maxStep := storeMaxStep[store]
+		if step > maxStep {
+			storeStatusCounter = make(map[uint64]map[plan.Status]int)
+			storeMaxStep[store] = step
+		} else if step < maxStep {
+			continue
+		}
+		if !p.status.IsNormal() {
+			normal = false
 		}
 		if _, ok := storeStatusCounter[store]; !ok {
 			storeStatusCounter[store] = make(map[plan.Status]int)

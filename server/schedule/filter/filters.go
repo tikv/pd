@@ -40,9 +40,11 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
-				filterCounter.WithLabelValues(filterSource, filters[i].Scope(), filters[i].Type(), sourceID, "").Inc()
-				if collector != nil {
-					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if status != statusStoreRemoved {
+					filterCounter.WithLabelValues(filterSource, filters[i].Scope(), filters[i].Type(), sourceID, "").Inc()
+					if collector != nil {
+						collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+					}
 				}
 				return false
 			}
@@ -58,14 +60,16 @@ func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, o
 		return slice.AnyOf(filters, func(i int) bool {
 			status := filters[i].Target(opt, s)
 			if !status.IsOK() {
-				cfilter, ok := filters[i].(comparingFilter)
-				sourceID := ""
-				if ok {
-					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
-				}
-				filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), targetID, sourceID).Inc()
-				if collector != nil {
-					collector.Collect(plan.SetResourceWithStep(s, 2), plan.SetStatus(status))
+				if status != statusStoreRemoved {
+					cfilter, ok := filters[i].(comparingFilter)
+					sourceID := ""
+					if ok {
+						sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+					}
+					filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), targetID, sourceID).Inc()
+					if collector != nil {
+						collector.Collect(plan.SetResourceWithStep(s, 2), plan.SetStatus(status))
+					}
 				}
 				return true
 			}
@@ -82,14 +86,16 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
-				cfilter, ok := filter.(comparingFilter)
-				sourceID := ""
-				if ok {
-					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
-				}
-				filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
-				if collector != nil {
-					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+				if status != statusStoreRemoved {
+					cfilter, ok := filter.(comparingFilter)
+					sourceID := ""
+					if ok {
+						sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+					}
+					filterCounter.WithLabelValues(filterTarget, filters[i].Scope(), filters[i].Type(), sourceID, targetID).Inc()
+					if collector != nil {
+						collector.Collect(plan.SetResource(s), plan.SetStatus(status))
+					}
 				}
 				return false
 			}
