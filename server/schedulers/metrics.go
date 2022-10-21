@@ -46,7 +46,7 @@ var tolerantResourceStatus = prometheus.NewGaugeVec(
 		Subsystem: "scheduler",
 		Name:      "tolerant_resource",
 		Help:      "Store status for schedule",
-	}, []string{"scheduler", "source", "target"})
+	}, []string{"scheduler"})
 
 var balanceLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
