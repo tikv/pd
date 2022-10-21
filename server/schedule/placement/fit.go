@@ -385,7 +385,7 @@ func newRuleFit(rule *Rule, peers []*fitPeer) *RuleFit {
 	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
-		if !p.matchRoleStrict(rule.Role) {
+		if !p.matchRoleStrict(rule.Role) || p.IsWitness != rule.IsWitness {
 			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
 		}
 	}
