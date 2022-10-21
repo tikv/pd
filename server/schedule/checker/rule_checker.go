@@ -33,11 +33,12 @@ import (
 )
 
 var (
-	errNoStoreToAdd       = errors.New("no store to add peer")
-	errNoStoreToReplace   = errors.New("no store to replace peer")
-	errPeerCannotBeLeader = errors.New("peer cannot be leader")
-	errNoNewLeader        = errors.New("no new leader")
-	errRegionNoLeader     = errors.New("region no leader")
+	errNoStoreToAdd        = errors.New("no store to add peer")
+	errNoStoreToReplace    = errors.New("no store to replace peer")
+	errPeerCannotBeLeader  = errors.New("peer cannot be leader")
+	errPeerCannotBeWitness = errors.New("peer cannot be witness")
+	errNoNewLeader         = errors.New("no new leader")
+	errRegionNoLeader      = errors.New("region no leader")
 )
 
 const maxPendingListLen = 100000
@@ -181,7 +182,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToAdd
 	}
-	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 	if err != nil {
 		return nil, err
@@ -199,7 +200,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole()}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -266,6 +267,24 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		checkerCounter.WithLabelValues("rule_checker", "demote-voter-role").Inc()
 		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
 	}
+	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
+		return nil, errPeerCannotBeWitness
+	}
+	if !core.IsWitness(peer) && rf.Rule.IsWitness {
+		lv := "set-voter-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-witness"
+		}
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
+	} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
+		lv := "set-voter-non-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-non-witness"
+		}
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
+	}
 	return nil, nil
 }
 
@@ -308,7 +327,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		return nil, nil
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
-	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole()}
+	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 }
 
