@@ -749,42 +749,42 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
-	var overlaps []*RegionInfo
+	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		overlaps = r.tree.getOverlaps(region)
+		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	_, err := check(region, origin, overlaps)
+	_, _, err := check(region, origin, ols)
 	if err != nil {
 		r.t.Unlock()
 		return nil, err
 	}
-	origin, overlaps, rangeChanged := r.setRegionLocked(region)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
-func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
+func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*regionItem) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		overlaps = r.tree.getOverlaps(region)
+		overlaps = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	return
 }
 
-func check(region, origin *RegionInfo, overlaps []*RegionInfo) (*RegionInfo, error) {
+func check(region, origin *RegionInfo, overlaps []*regionItem) (*RegionInfo, []*regionItem, error) {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
-			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
+			return nil, nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
 	if origin == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	r := region.GetRegionEpoch()
@@ -793,29 +793,20 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) (*RegionInfo, err
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
 	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
-		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
+		return origin, nil, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
-	return origin, nil
-}
-
-// SetRegion sets the RegionInfo to regionTree and regionMap, also update leaders and followers by region peers
-// overlaps: Other regions that overlap with the specified region, excluding itself.
-func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
-	r.t.Lock()
-	defer r.t.Unlock()
-	_, overlaps, _ := r.setRegionLocked(region)
-	return overlaps
+	return origin, overlaps, nil
 }
 
 // SetRegionWithUpdate sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
-func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
-	return r.setRegionLocked(region)
+	return r.setRegionLocked(region, withOverlaps, ol...)
 }
 
-func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
 	var (
 		item   *regionItem // Pointer to the *RegionInfo of this ID.
 		origin *RegionInfo
@@ -829,6 +820,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
 			// Because the regionItem is reused, there is no need to delete it in the regionMap.
+			for i, o := range ol {
+				if o.GetID() == region.GetID() {
+					ol = append(ol[:i], ol[i+1:]...)
+				}
+			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
@@ -847,8 +843,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 
 	var overlaps []*RegionInfo
 	if rangeChanged {
-		// It has been removed and all information needs to be updated again.
-		overlaps = r.tree.update(item)
+		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
 			o := r.getRegionLocked(old.GetID())
 			// Remove from tree and regions.
@@ -860,7 +855,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 }
 
 // UpdateSubTree updates the subtree.
-func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*RegionInfo, rangeChanged bool) {
+func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
@@ -875,7 +870,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*Regi
 		}
 	}
 	if rangeChanged {
-		for _, re := range toRemove {
+		for _, re := range overlaps {
 			r.removeRegionFromSubTreeLocked(re)
 		}
 	}
@@ -890,7 +885,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*Regi
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		store.update(item)
+		store.update(item, false)
 	}
 
 	// Add to leaders and followers.
@@ -952,10 +947,10 @@ func (r *RegionsInfo) TreeLen() int {
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
+func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*regionItem {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	return r.tree.getOverlaps(region)
+	return r.tree.overlaps(&regionItem{RegionInfo: region})
 }
 
 // RemoveRegion removes RegionInfo from regionTree and regionMap

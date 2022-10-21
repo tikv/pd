@@ -275,7 +275,7 @@ func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
-	return r.regionsInfo.SetRegion(region)
+	return r.regionsInfo.SetRegion(region, false)
 }
 
 // GetRegionByKey searches the RegionInfo from regionTree

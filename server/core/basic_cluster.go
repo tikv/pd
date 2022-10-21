@@ -224,25 +224,27 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 /* Regions write operations */
 
 // PreCheckPutRegion checks if the region is valid to put.
-func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
+func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*regionItem, error) {
 	origin, overlaps := bc.RegionsInfo.GetRelevantRegions(region)
 	return check(region, origin, overlaps)
 }
 
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
-	origin, err := bc.PreCheckPutRegion(region)
+	origin, ols, err := bc.PreCheckPutRegion(region)
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
 		return []*RegionInfo{region}
 	}
-	return bc.PutRegion(region)
+	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region, true, ols...)
+	bc.RegionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
 }
 
 // PutRegion put a region.
 func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region, false)
 	bc.RegionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }

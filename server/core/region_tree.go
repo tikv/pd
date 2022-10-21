@@ -80,17 +80,6 @@ func (t *regionTree) length() int {
 	return t.tree.Len()
 }
 
-// getOverlaps gets the regions which are overlapped with the specified region range.
-func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
-	item := &regionItem{RegionInfo: region}
-	result := t.overlaps(item)
-	overlaps := make([]*RegionInfo, len(result))
-	for i, r := range result {
-		overlaps[i] = r.RegionInfo
-	}
-	return overlaps
-}
-
 // GetOverlaps returns the range items that has some intersections with the given items.
 func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 	// note that Find() gets the last item that is less or equal than the item.
@@ -118,14 +107,17 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(item *regionItem) []*RegionInfo {
+func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
 	region := item.RegionInfo
-	t.totalSize += region.approximateSize
-	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalSize += item.GetApproximateSize()
+	regionWriteBytesRate, regionWriteKeysRate := item.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 
-	overlaps := t.overlaps(item)
+	if !withOverlaps {
+		overlaps = t.overlaps(item)
+	}
+
 	for _, old := range overlaps {
 		t.tree.Delete(old)
 	}
