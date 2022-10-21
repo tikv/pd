@@ -595,6 +595,8 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -732,6 +734,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
 	re.NoError(err)
 
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -794,6 +797,8 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	old := pendingAmpFactor
 	pendingAmpFactor = 0.0
 	defer func() {
@@ -885,6 +890,8 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	tc.SetEnablePlacementRules(true)
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
+
 	tc.SetHotRegionCacheHitsThreshold(0)
 	key, err := hex.DecodeString("")
 	re.NoError(err)
@@ -1088,6 +1095,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -1120,6 +1128,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
@@ -1177,6 +1186,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	// For test
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	hb.(*hotScheduler).conf.GreatDecRatio = 0.99
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
@@ -1936,6 +1946,8 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
 
 	hb, err = schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	re.NoError(err)
 
 	// assert loose store picking
@@ -1980,6 +1992,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	re.NoError(err)
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.0)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.0)
+	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -2084,7 +2097,7 @@ func TestCompatibility(t *testing.T) {
 	// default
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
-		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// config error value
@@ -2093,7 +2106,7 @@ func TestCompatibility(t *testing.T) {
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{statistics.QueryPriority, statistics.BytePriority, statistics.KeyPriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
-		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	// low version
@@ -2135,7 +2148,7 @@ func TestCompatibility(t *testing.T) {
 	re.False(hb.(*hotScheduler).conf.lastQuerySupported) // it will updated after scheduling
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
-		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
@@ -2148,12 +2161,12 @@ func TestCompatibilityConfig(t *testing.T) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 
-	// From new or 3.x cluster
+	// From new or 3.x cluster, it will use new config
 	hb, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
-		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 
@@ -2163,7 +2176,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{statistics.QueryDim, statistics.ByteDim},
-		{statistics.KeyDim, statistics.ByteDim},
+		{statistics.QueryDim, statistics.ByteDim},
 		{statistics.ByteDim, statistics.KeyDim},
 	})
 
@@ -2211,6 +2224,18 @@ func TestCompatibilityConfig(t *testing.T) {
 	})
 }
 
+func checkPriority(re *require.Assertions, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {
+	readSolver := newBalanceSolver(hb, tc, statistics.Read, transferLeader)
+	writeLeaderSolver := newBalanceSolver(hb, tc, statistics.Write, transferLeader)
+	writePeerSolver := newBalanceSolver(hb, tc, statistics.Write, movePeer)
+	re.Equal(dims[0][0], readSolver.firstPriority)
+	re.Equal(dims[0][1], readSolver.secondPriority)
+	re.Equal(dims[1][0], writeLeaderSolver.firstPriority)
+	re.Equal(dims[1][1], writeLeaderSolver.secondPriority)
+	re.Equal(dims[2][0], writePeerSolver.firstPriority)
+	re.Equal(dims[2][1], writePeerSolver.secondPriority)
+}
+
 func TestConfigValidation(t *testing.T) {
 	re := require.New(t)
 
@@ -2246,7 +2271,7 @@ func TestConfigValidation(t *testing.T) {
 	// rank-formula-version
 	// default
 	hc = initHotRegionScheduleConfig()
-	re.Equal("v1", hc.GetRankFormulaVersion())
+	re.Equal("v2", hc.GetRankFormulaVersion())
 	// v1
 	hc.RankFormulaVersion = "v1"
 	err = hc.valid()
@@ -2283,18 +2308,6 @@ func TestConfigValidation(t *testing.T) {
 	hc.ForbidRWType = "test"
 	err = hc.valid()
 	re.Error(err)
-}
-
-func checkPriority(re *require.Assertions, hb *hotScheduler, tc *mockcluster.Cluster, dims [3][2]int) {
-	readSolver := newBalanceSolver(hb, tc, statistics.Read, transferLeader)
-	writeLeaderSolver := newBalanceSolver(hb, tc, statistics.Write, transferLeader)
-	writePeerSolver := newBalanceSolver(hb, tc, statistics.Write, movePeer)
-	re.Equal(dims[0][0], readSolver.firstPriority)
-	re.Equal(dims[0][1], readSolver.secondPriority)
-	re.Equal(dims[1][0], writeLeaderSolver.firstPriority)
-	re.Equal(dims[1][1], writeLeaderSolver.secondPriority)
-	re.Equal(dims[2][0], writePeerSolver.firstPriority)
-	re.Equal(dims[2][1], writePeerSolver.secondPriority)
 }
 
 type maxZombieDurTestCase struct {
