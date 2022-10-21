@@ -109,9 +109,6 @@ const (
 	engine
 	specialUse
 	isolation
-	regionScore
-	// used in test.
-	idFilterType
 
 	storeStateOK
 	storeStateTombstone
@@ -140,8 +137,6 @@ var filters = [filtersLen]string{
 	"engine-filter",
 	"special-use-filter",
 	"isolation-filter",
-	"region-score-filter",
-	"idFilter",
 
 	"store-state-ok-filter",
 	"store-state-tombstone-filter",

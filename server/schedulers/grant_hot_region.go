@@ -388,5 +388,6 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 	} else {
 		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
+	op.SetPriorityLevel(core.High)
 	return
 }

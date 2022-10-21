@@ -128,7 +128,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
 		return nil, nil
 	}
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.Low)
 	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	return []*operator.Operator{op}, nil
 }

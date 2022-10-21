@@ -124,7 +124,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		return nil, nil
 	}
 	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
-	op.SetPriorityLevel(core.HighPriority)
+	op.SetPriorityLevel(core.Low)
 	return []*operator.Operator{op}, nil
 }
 

@@ -63,6 +63,7 @@ type Rule struct {
 	EndKey           []byte            `json:"-"`                           // range end key
 	EndKeyHex        string            `json:"end_key"`                     // hex format end key, for marshal/unmarshal
 	Role             PeerRoleType      `json:"role"`                        // expected role of the peers
+	IsWitness        bool              `json:"is_witness"`                  // when it is true, it means the role is also a witness
 	Count            int               `json:"count"`                       // expected count of the peers
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
