@@ -362,3 +362,85 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	c.Assert(e, IsNil)
 	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
 }
+
+func TestHotWithoutHotPeer(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	for _, store := range stores {
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+	}
+	timestamp := uint64(time.Now().UnixNano())
+	load := 1024.0
+	for _, store := range stores {
+		for i := 0; i < 5; i++ {
+			err := leaderServer.GetServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreStats{
+				StoreId:      store.Id,
+				BytesRead:    uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysRead:     uint64(load * statistics.StoreHeartBeatReportInterval),
+				BytesWritten: uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysWritten:  uint64(load * statistics.StoreHeartBeatReportInterval),
+				Capacity:     1000 * units.MiB,
+				Available:    1000 * units.MiB,
+				Interval: &pdpb.TimeInterval{
+					StartTimestamp: timestamp + uint64(i*statistics.StoreHeartBeatReportInterval),
+					EndTimestamp:   timestamp + uint64((i+1)*statistics.StoreHeartBeatReportInterval)},
+			})
+			re.NoError(err)
+		}
+	}
+	defer cluster.Destroy()
+
+	// wait hot scheduler starts
+	time.Sleep(5000 * time.Millisecond)
+	{
+		args := []string{"-u", pdAddr, "hot", "read"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &hotRegion))
+		re.Equal(hotRegion.AsPeer[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
+		re.Equal(hotRegion.AsLeader[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsLeader[1].StoreByteRate)
+	}
+	{
+		args := []string{"-u", pdAddr, "hot", "write"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &hotRegion))
+		re.Equal(hotRegion.AsPeer[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
+		re.Equal(hotRegion.AsLeader[1].Count, 0)
+		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
+	}
+}
