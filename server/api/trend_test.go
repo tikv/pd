@@ -39,9 +39,9 @@ func TestTrend(t *testing.T) {
 	}
 
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
-	region4 := newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, 1)
-	region5 := newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, 1)
-	region6 := newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, 1)
+	region4 := newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, nil, 1)
+	region5 := newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, []uint64{2}, 1)
+	region6 := newRegionInfo(6, "b", "", 2, 2, []uint64{1, 2}, nil, nil, 1)
 	mustRegionHeartbeat(re, svr, region4)
 	mustRegionHeartbeat(re, svr, region5)
 	mustRegionHeartbeat(re, svr, region6)
@@ -57,6 +57,8 @@ func TestTrend(t *testing.T) {
 	op, err := svr.GetHandler().GetOperator(5)
 	re.NoError(err)
 	re.NotNil(op)
+	re.True(op.Step(0).(operator.AddLearner).IsWitness)
+
 	newPeerID := op.Step(0).(operator.AddLearner).PeerID
 	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region5)
@@ -97,20 +99,34 @@ func TestTrend(t *testing.T) {
 	}
 }
 
-func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, leaderStore uint64) *core.RegionInfo {
+func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, witnesses []uint64, leaderStore uint64) *core.RegionInfo {
 	var (
 		peers  = make([]*metapb.Peer, 0, len(voters)+len(learners))
 		leader *metapb.Peer
 	)
 	for _, id := range voters {
-		p := &metapb.Peer{Id: 10 + id, StoreId: id}
+		witness := false
+		for _, wid := range witnesses {
+			if id == wid {
+				witness = true
+				break
+			}
+		}
+		p := &metapb.Peer{Id: 10 + id, StoreId: id, IsWitness: witness}
 		if id == leaderStore {
 			leader = p
 		}
 		peers = append(peers, p)
 	}
 	for _, id := range learners {
-		p := &metapb.Peer{Id: 10 + id, StoreId: id, Role: metapb.PeerRole_Learner}
+		witness := false
+		for _, wid := range witnesses {
+			if id == wid {
+				witness = true
+				break
+			}
+		}
+		p := &metapb.Peer{Id: 10 + id, StoreId: id, Role: metapb.PeerRole_Learner, IsWitness: witness}
 		peers = append(peers, p)
 	}
 	return core.NewRegionInfo(
