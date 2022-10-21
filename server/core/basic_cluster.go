@@ -391,7 +391,9 @@ func (bc *BasicCluster) getWriteRate(
 	keysRates = make([]float64, 0, count)
 	for _, store := range bc.Stores.stores {
 		id := store.GetID()
+		bc.Regions.mu.RLock()
 		bytesRate, keysRate := f(id)
+		bc.Regions.mu.RUnlock()
 		storeIDs = append(storeIDs, id)
 		bytesRates = append(bytesRates, bytesRate)
 		keysRates = append(keysRates, keysRate)
@@ -401,18 +403,12 @@ func (bc *BasicCluster) getWriteRate(
 
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	bc.Regions.mu.RLock()
-	storeLeaderWriteRate := bc.Regions.GetStoreLeaderWriteRate
-	bc.Regions.mu.RUnlock()
-	return bc.getWriteRate(storeLeaderWriteRate)
+	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
 }
 
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	bc.Regions.mu.RLock()
-	storeWriteRate := bc.Regions.GetStoreWriteRate
-	bc.Regions.mu.RUnlock()
-	return bc.getWriteRate(storeWriteRate)
+	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
 }
 
 func (bc *BasicCluster) getRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
@@ -432,7 +428,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 	origin, overlaps := bc.getRelevantRegions(region)
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
-		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !isRegionRecreated(region) {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
 			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
@@ -445,7 +441,7 @@ func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, erro
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
-	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !isRegionRecreated(region) {
+	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
 		return origin, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
@@ -474,7 +470,7 @@ func (bc *BasicCluster) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionIn
 	}
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
-		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !isRegionRecreated(region) {
+		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
 			return nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
@@ -488,7 +484,7 @@ func (bc *BasicCluster) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionIn
 	// TiKV reports term after v3.0
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
-	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !isRegionRecreated(region) {
+	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
 		return nil, errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 

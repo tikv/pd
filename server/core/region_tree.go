@@ -273,7 +273,7 @@ func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 		}
 		index := rand.Intn(endIndex-startIndex) + startIndex
 		region := t.tree.GetAt(index).(*regionItem).region
-		if isInvolved(region, startKey, endKey) {
+		if region.isInvolved(startKey, endKey) {
 			return region
 		}
 	}
