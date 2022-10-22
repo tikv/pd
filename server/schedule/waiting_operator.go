@@ -22,7 +22,7 @@ import (
 )
 
 // PriorityWeight is used to represent the weight of different priorities of operators.
-var PriorityWeight = []float64{1.0, 4.0, 9.0}
+var PriorityWeight = []float64{1.0, 4.0, 9.0, 16.0}
 
 // WaitingOperator is an interface of waiting operators.
 type WaitingOperator interface {
