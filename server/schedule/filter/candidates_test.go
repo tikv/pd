@@ -49,7 +49,7 @@ func idComparer2(a, b *core.StoreInfo) int {
 type idFilter func(uint64) bool
 
 func (f idFilter) Scope() string    { return "idFilter" }
-func (f idFilter) Type() filterType { return idFilterType }
+func (f idFilter) Type() filterType { return filterType(0) }
 func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
