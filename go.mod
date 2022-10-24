@@ -176,4 +176,8 @@ require (
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
 
-replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20221021065225-479b84261d0b
+// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
+// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
+// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
+// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20221024070618-f22a9ab27142
