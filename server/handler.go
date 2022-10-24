@@ -629,7 +629,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 		return err
 	}
 
-	newPeer := &metapb.Peer{StoreId: toStoreID, Role: oldPeer.GetRole()}
+	newPeer := &metapb.Peer{StoreId: toStoreID, Role: oldPeer.GetRole(), IsWitness: oldPeer.GetIsWitness()}
 	op, err := operator.CreateMovePeerOperator("admin-move-peer", c, region, operator.OpAdmin, fromStoreID, newPeer)
 	if err != nil {
 		log.Debug("fail to create move peer operator", errs.ZapError(err))
@@ -988,7 +988,7 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	}, ttl)
 }
 
-// IsLeader return ture if this server is leader
+// IsLeader return true if this server is leader
 func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
 }

@@ -18,6 +18,7 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/syncutil"
@@ -67,6 +68,9 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region 
 
 	peers := newFitPeer(f.regionStores, region, fit.Peers, replaceFitPeerOpt(srcStoreID, dstStore))
 	score := isolationScore(peers, fit.Rule.LocationLabels)
+	for _, peer := range peers {
+		fitPeerPool.Put(peer)
+	}
 	return fit.IsolationScore <= score
 }
 
@@ -215,28 +219,26 @@ func replaceFitPeerOpt(srcStoreID uint64, dstStore *core.StoreInfo) fitPeerOpt {
 func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer, opts ...fitPeerOpt) []*fitPeer {
 	peers := make([]*fitPeer, len(fitPeers))
 	for i, p := range fitPeers {
-		peer := &fitPeer{
-			Peer:     p,
-			store:    getStoreByID(stores, p.GetStoreId()),
-			isLeader: region.GetLeader().GetId() == p.GetId(),
-		}
+		peer := fitPeerPool.Get().(*fitPeer)
+		peer.Peer = p
+		peer.store = getStoreByID(stores, p.GetStoreId())
+		peer.isLeader = region.GetLeader().GetId() == p.GetId()
 		for _, opt := range opts {
 			opt(peer)
 		}
 		peers[i] = peer
 	}
+	return peers
+}
+
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
+	peers := newFitPeer(stores, region, region.GetPeers())
 	// Sort peers to keep the match result deterministic.
 	sort.Slice(peers, func(i, j int) bool {
 		// Put healthy peers in front of priority to fit healthy peers.
 		si, sj := stateScore(region, peers[i].GetId()), stateScore(region, peers[j].GetId())
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
-	return peers
-}
-
-func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule) *fitWorker {
-	peers := newFitPeer(stores, region, region.GetPeers())
-
 	return &fitWorker{
 		stores:        stores,
 		bestFit:       RegionFit{RuleFits: make([]*RuleFit, len(rules))},
@@ -383,7 +385,7 @@ func newRuleFit(rule *Rule, peers []*fitPeer) *RuleFit {
 	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
-		if !p.matchRoleStrict(rule.Role) {
+		if !p.matchRoleStrict(rule.Role) || p.IsWitness != rule.IsWitness {
 			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
 		}
 	}
@@ -395,6 +397,12 @@ type fitPeer struct {
 	store    *core.StoreInfo
 	isLeader bool
 	selected bool
+}
+
+var fitPeerPool = sync.Pool{
+	New: func() interface{} {
+		return new(fitPeer)
+	},
 }
 
 func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {

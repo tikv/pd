@@ -139,7 +139,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	if r.useTiDBEncodedKey {
 		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
 		if err != nil {
-			simutil.Logger.Fatal("generate TiDB encoded split key failed", zap.Error(err))
+			simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
 		}
 	} else {
 		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())

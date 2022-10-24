@@ -23,7 +23,7 @@ var (
 			Subsystem: "schedule",
 			Name:      "filter",
 			Help:      "Counter of the filter",
-		}, []string{"action", "address", "store", "scope", "type", "source", "target"})
+		}, []string{"action", "scope", "type", "source", "target"})
 )
 
 func init() {

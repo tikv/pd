@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -74,6 +75,15 @@ func TestScheduler(t *testing.T) {
 		return ""
 	}
 
+	mightExec := func(args []string, v interface{}) {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		if v == nil {
+			return
+		}
+		json.Unmarshal(output, v)
+	}
+
 	mustUsage := func(args []string) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
@@ -100,10 +110,13 @@ func TestScheduler(t *testing.T) {
 		re.Equal(expectedConfig, configInfo)
 	}
 
-	checkSchedulerDescibeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
-		time.Sleep(time.Millisecond * 50)
+	checkSchedulerDescribeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
 		result := make(map[string]interface{})
-		mustExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+		testutil.Eventually(re, func() bool {
+			mightExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+			return len(result) != 0
+		}, testutil.WithTickInterval(50*time.Millisecond))
+
 		re.Equal(expectedStatus, result["status"])
 		re.Equal(expectedSummary, result["summary"])
 	}
@@ -130,7 +143,7 @@ func TestScheduler(t *testing.T) {
 
 	echo := mustExec([]string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerDescibeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
+	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
 
 	// scheduler delete command
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
@@ -141,7 +154,7 @@ func TestScheduler(t *testing.T) {
 	}
 	checkSchedulerCommand(args, expected)
 
-	checkSchedulerDescibeCommand("balance-region-scheduler", "disabled", "")
+	checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
 
 	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler"}
 
@@ -184,7 +197,6 @@ func TestScheduler(t *testing.T) {
 		}
 		checkSchedulerCommand(args, expected)
 
-		// check the compactily
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
@@ -306,7 +318,7 @@ func TestScheduler(t *testing.T) {
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
-		"rank-formula-version":       "v1",
+		"rank-formula-version":       "v2",
 	}
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
@@ -421,12 +433,12 @@ func TestScheduler(t *testing.T) {
 	checkSchedulerWithStatusCommand(nil, "paused", []string{
 		"balance-leader-scheduler",
 	})
-	checkSchedulerDescibeCommand("balance-leader-scheduler", "paused", "")
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "paused", "")
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	checkSchedulerWithStatusCommand(nil, "paused", nil)
-	checkSchedulerDescibeCommand("balance-leader-scheduler", "normal", "")
+	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
 
 	// set label scheduler to disabled manually.
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)
