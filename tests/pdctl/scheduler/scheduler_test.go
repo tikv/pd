@@ -318,7 +318,7 @@ func TestScheduler(t *testing.T) {
 		"write-peer-priorities":      []interface{}{"byte", "key"},
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
-		"rank-formula-version":       "v1",
+		"rank-formula-version":       "v2",
 	}
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
