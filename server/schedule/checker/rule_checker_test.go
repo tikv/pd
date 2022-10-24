@@ -719,7 +719,54 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	suite.Nil(suite.rc.Check(region))
 }
 
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses() {
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	suite.cluster.SetStoreDown(2)
+	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-11 * time.Minute).UnixNano()
+	r := suite.cluster.GetRegion(1)
+	// set peer2 to down
+	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 600}}))
+	suite.Nil(suite.rc.Check(r))
+}
+
+func (suite *ruleCheckerTestSuite) TestFixDownWitnessPeer() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	suite.cluster.SetStoreDown(2)
+	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-11 * time.Minute).UnixNano()
+	r := suite.cluster.GetRegion(1)
+	// set peer2 to down
+	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 600}}))
+	// set peer2 to witness
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+	})
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Role:      placement.Voter,
+		Count:     1,
+		IsWitness: true,
+	})
+	suite.Nil(suite.rc.Check(r))
+
+	suite.cluster.GetStore(2).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
+	suite.Nil(suite.rc.Check(r))
+}
+
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
@@ -754,7 +801,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses() {
 	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
 }
 
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses2() {
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness2() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
@@ -787,7 +834,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses2() {
 	suite.Nil(op)
 }
 
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses3() {
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness3() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
@@ -827,7 +874,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses3() {
 	suite.Equal(uint64(2), op.Step(2).(operator.RemovePeer).FromStore)
 }
 
-func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitnesses4() {
+func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness4() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})

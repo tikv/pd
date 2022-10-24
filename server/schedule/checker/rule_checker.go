@@ -166,9 +166,10 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
 					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
 				}
+			} else {
+				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
+				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
-			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 		}
 		if c.isPendingPeer(region, peer) {
 			if witness, ok := c.hasAvailableWitness(region, peer); ok {
