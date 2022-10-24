@@ -404,6 +404,8 @@ type PromoteLearner struct {
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
+// It is also used by ChangePeerV2Leave. Since there are currently four roles,
+// we need to confirm whether it is a Voter, not a DemotingVoter, etc.
 func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStoreVoter(pl.ToStore)
 	return typeutil.BoolToUint64(peer.GetId() == pl.PeerID && peer.GetRole() == metapb.PeerRole_Voter)
@@ -413,7 +415,7 @@ func (pl PromoteLearner) String() string {
 	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
 
-// IsFinish checks if current step is finished.
+// IsFinish checks if current step is finished. It is also used by ChangePeerV2Leave.
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreVoter(pl.ToStore); peer != nil {
 		if peer.GetId() != pl.PeerID {
