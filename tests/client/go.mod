@@ -24,6 +24,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VividCortex/mysqlerr v1.0.0 // indirect
 	github.com/Xeoncross/go-aesctr-with-hmac v0.0.0-20200623134604-12b17a7ff502 // indirect
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/aws/aws-sdk-go v1.35.3 // indirect
 	github.com/benbjohnson/clock v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -160,6 +161,7 @@ replace (
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace (
 	github.com/golang/protobuf v1.5.2 => github.com/golang/protobuf v1.3.4
+	github.com/pingcap/kvproto v0.0.0-20221014081430-26e28e6a281a => github.com/lhy1024/kvproto v0.0.0-20221024130613-3aad200d3d1c
 	google.golang.org/grpc v1.43.0 => google.golang.org/grpc v1.26.0
 	google.golang.org/protobuf v1.26.0 => github.com/golang/protobuf v1.3.4
 )

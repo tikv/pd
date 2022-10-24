@@ -130,6 +130,11 @@ type Client interface {
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 
+	//GetExternalTimestamp returns external timestamp
+	GetExternalTimestamp(ctx context.Context) (uint64, error)
+	//SetExternalTimestamp sets external timestamp
+	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
+
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// Close closes the client.
@@ -1883,6 +1888,30 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 		}
 	}()
 	return globalConfigWatcherCh, err
+}
+
+func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
+	resp, err := c.getClient().GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{})
+	if err != nil {
+		return 0, err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return 0, errors.Errorf("[pd]" + resErr.Message)
+	}
+	return resp.GetTimestamp(), nil
+}
+
+func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
+	resp, err := c.getClient().SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{Timestamp: timestamp})
+	if err != nil {
+		return err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return nil
 }
 
 func (c *client) respForErr(observer prometheus.Observer, start time.Time, err error, header *pdpb.ResponseHeader) error {

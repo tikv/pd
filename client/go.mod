@@ -14,3 +14,5 @@ require (
 	go.uber.org/zap v1.20.0
 	google.golang.org/grpc v1.43.0
 )
+
+replace github.com/pingcap/kvproto v0.0.0-20220818063303-5c20f55db5ad => github.com/lhy1024/kvproto v0.0.0-20221024130613-3aad200d3d1c
