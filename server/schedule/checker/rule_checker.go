@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
@@ -151,13 +152,29 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
+		if c.isOfflinePeer(peer) {
+			if witness, ok := c.hasAvailableWitness(region, peer); ok {
+				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
+				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+			}
+			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
+			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+		}
 		if c.isDownPeer(region, peer) {
+			if c.isStoreDownTimeUnderMaxDownTime(peer.GetStoreId()) {
+				if witness, ok := c.hasAvailableWitness(region, peer); ok {
+					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
+					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+				}
+			}
 			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 		}
-		if c.isOfflinePeer(peer) {
-			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+		if c.isPendingPeer(region, peer) {
+			if witness, ok := c.hasAvailableWitness(region, peer); ok {
+				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
+				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+			}
 		}
 	}
 	// fix loose matched peers.
@@ -200,7 +217,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: true}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -364,20 +381,23 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
 	for _, stats := range region.GetDownPeers() {
-		if stats.GetPeer().GetId() != peer.GetId() {
-			continue
+		if stats.GetPeer().GetId() == peer.GetId() {
+			return true
 		}
-		storeID := peer.GetStoreId()
-		store := c.cluster.GetStore(storeID)
-		if store == nil {
-			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
-			return false
+	}
+	return false
+}
+
+func (c *RuleChecker) isStoreDownTimeUnderMaxDownTime(storeID uint64) bool {
+	store := c.cluster.GetStore(storeID)
+	return store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime()
+}
+
+func (c *RuleChecker) isPendingPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
+	for _, pending := range region.GetPendingPeers() {
+		if pending.GetId() == peer.GetId() {
+			return true
 		}
-		// Only consider the state of the Store, not `stats.DownSeconds`.
-		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		return true
 	}
 	return false
 }
@@ -389,6 +409,28 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 		return false
 	}
 	return !store.IsPreparing() && !store.IsServing()
+}
+
+func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {
+	witnesses := region.GetWitnesses()
+	if len(witnesses) == 0 {
+		return nil, false
+	}
+	isAvailable := func(downPeers []*pdpb.PeerStats, witness *metapb.Peer) bool {
+		for _, stats := range downPeers {
+			if stats.GetPeer().GetId() == witness.GetId() {
+				return false
+			}
+		}
+		return c.cluster.GetStore(witness.GetStoreId()) != nil
+	}
+	downPeers := region.GetDownPeers()
+	for _, witness := range witnesses {
+		if witness.GetId() != peer.GetId() && isAvailable(downPeers, witness) {
+			return witness, true
+		}
+	}
+	return nil, false
 }
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {
