@@ -130,9 +130,9 @@ type Client interface {
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 
-	//GetExternalTimestamp returns external timestamp
+	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
-	//SetExternalTimestamp sets external timestamp
+	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
 	// KeyspaceClient manages keyspace metadata.

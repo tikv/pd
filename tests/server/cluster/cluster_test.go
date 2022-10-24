@@ -1498,5 +1498,4 @@ func TestExternalTimestamp(t *testing.T) {
 		re.NoError(err)
 		re.Equal(ts, resp2.GetTimestamp())
 	}
-
 }
