@@ -573,6 +573,20 @@ func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
 }
 
+func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
+	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
+}
+
+func (r *RegionInfo) isRegionRecreated() bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we exclude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -1287,10 +1301,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	}
 
 	return strings.Join(ret, ", ")
-}
-
-func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
-	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
 // String converts slice of bytes to string without copy.
