@@ -25,7 +25,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20221014081430-26e28e6a281a
+	github.com/pingcap/kvproto v0.0.0-20221025081741-d5d4d8586e1c
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20220728104842-3743e533b594
@@ -180,4 +180,3 @@ require (
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
-replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20221024070618-f22a9ab27142
