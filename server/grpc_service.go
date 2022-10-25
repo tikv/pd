@@ -2041,13 +2041,8 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		return nil, err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.SetExternalTimestampResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-
 	timestamp := request.GetTimestamp()
-	if err := rc.SetExternalTimestamp(timestamp); err != nil {
+	if err := s.SetExternalTS(timestamp); err != nil {
 		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
 	}
 	log.Debug("set external timestamp",
@@ -2073,11 +2068,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		return nil, err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetExternalTimestampResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-	timestamp := rc.GetExternalTimestamp()
+	timestamp := s.GetExternalTS()
 	return &pdpb.GetExternalTimestampResponse{
 		Header:    s.header(),
 		Timestamp: timestamp,

@@ -26,16 +26,16 @@ type ExternalTimestamp struct {
 	ExternalTimestamp uint64 `json:"external_timestamp"`
 }
 
-// ExternalTimestampStorage defines the storage operations on the external timestamp.
-type ExternalTimestampStorage interface {
-	LoadExternalTimestamp() (uint64, error)
-	SaveExternalTimestamp(timestamp uint64) error
+// ExternalTSStorage defines the storage operations on the external timestamp.
+type ExternalTSStorage interface {
+	LoadExternalTS() (uint64, error)
+	SaveExternalTS(timestamp uint64) error
 }
 
-var _ ExternalTimestampStorage = (*StorageEndpoint)(nil)
+var _ ExternalTSStorage = (*StorageEndpoint)(nil)
 
-// LoadExternalTimestamp loads the external timestamp from storage.
-func (se *StorageEndpoint) LoadExternalTimestamp() (uint64, error) {
+// LoadExternalTS loads the external timestamp from storage.
+func (se *StorageEndpoint) LoadExternalTS() (uint64, error) {
 	value, err := se.Load(ExternalTimestampPath())
 	if err != nil || value == "" {
 		return 0, err
@@ -47,8 +47,8 @@ func (se *StorageEndpoint) LoadExternalTimestamp() (uint64, error) {
 	return timestamp, nil
 }
 
-// SaveExternalTimestamp saves the external timestamp.
-func (se *StorageEndpoint) SaveExternalTimestamp(timestamp uint64) error {
+// SaveExternalTS saves the external timestamp.
+func (se *StorageEndpoint) SaveExternalTS(timestamp uint64) error {
 	value := strconv.FormatUint(timestamp, 16)
 	return se.Save(ExternalTimestampPath(), value)
 }

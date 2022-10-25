@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -43,6 +44,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -1495,6 +1497,35 @@ func TestExternalTimestamp(t *testing.T) {
 			Header: testutil.NewRequestHeader(clusterID),
 		}
 		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
+
+	{ // case3: set external timestamp larger than global ts
+		req := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      1,
+			DcLocation: tso.GlobalDCLocation,
+		}
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+		re.NoError(tsoClient.Send(req))
+		resp, err := tsoClient.Recv()
+		re.NoError(err)
+		globalTS := tsoutil.GenerateTS(resp.Timestamp)
+
+		req2 := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: globalTS + 1,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+
+		req3 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req3)
 		re.NoError(err)
 		re.Equal(ts, resp2.GetTimestamp())
 	}

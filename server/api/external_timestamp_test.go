@@ -24,18 +24,18 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-type ExternalTimestampTestSuite struct {
+type ExternalTSTestSuite struct {
 	suite.Suite
 	svr     *server.Server
 	cleanup cleanUpFunc
 	url     string
 }
 
-func TestExternalTimestampTestSuite(t *testing.T) {
-	suite.Run(t, new(ExternalTimestampTestSuite))
+func TestExternalTSTestSuite(t *testing.T) {
+	suite.Run(t, new(ExternalTSTestSuite))
 }
 
-func (suite *ExternalTimestampTestSuite) SetupSuite() {
+func (suite *ExternalTSTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
@@ -51,24 +51,29 @@ func (suite *ExternalTimestampTestSuite) SetupSuite() {
 	mustRegionHeartbeat(re, suite.svr, r2)
 }
 
-func (suite *ExternalTimestampTestSuite) TearDownSuite() {
+func (suite *ExternalTSTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func (suite *ExternalTimestampTestSuite) TestExternalTimestamp() {
+func (suite *ExternalTSTestSuite) TestExternalTimestamp() {
 	// case: set external timestamp
-	rc := suite.svr.GetRaftCluster()
 	ts := uint64(233)
-	err := rc.SetExternalTimestamp(ts)
+	err := suite.svr.SetExternalTS(ts)
 	suite.NoError(err)
-	suite.checkExternalTimestamp(ts)
-	// case2: set external smaller timestamp
-	err = rc.SetExternalTimestamp(ts - 1)
+	suite.checkExternalTS(ts)
+	// case2: set smaller external timestamp is invalid
+	err = suite.svr.SetExternalTS(ts - 1)
 	suite.Error(err)
-	suite.checkExternalTimestamp(ts)
+	suite.checkExternalTS(ts)
+	// case3: external ts should be less than global ts.
+	globalTS, err := suite.svr.GetGlobalTS()
+	suite.NoError(err)
+	err = suite.svr.SetExternalTS(globalTS + 1)
+	suite.Error(err)
+	suite.checkExternalTS(ts)
 }
 
-func (suite *ExternalTimestampTestSuite) checkExternalTimestamp(timestamp uint64) {
+func (suite *ExternalTSTestSuite) checkExternalTS(timestamp uint64) {
 	res, err := testDialClient.Get(suite.url)
 	suite.NoError(err)
 	defer res.Body.Close()
@@ -76,4 +81,7 @@ func (suite *ExternalTimestampTestSuite) checkExternalTimestamp(timestamp uint64
 	err = apiutil.ReadJSON(res.Body, resp)
 	suite.NoError(err)
 	suite.Equal(timestamp, resp.ExternalTimestamp)
+	ts, err := suite.svr.GetRaftCluster().GetStorage().LoadExternalTS()
+	suite.NoError(err)
+	suite.Equal(timestamp, ts)
 }

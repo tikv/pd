@@ -352,7 +352,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// min resolved ts API
 	externalTimestampHandler := newExternalTimestampHandler(svr, rd)
-	registerFunc(clusterRouter, "/external-timestamp", externalTimestampHandler.GetExternalTimestamp, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/external-timestamp", externalTimestampHandler.GetExternalTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)

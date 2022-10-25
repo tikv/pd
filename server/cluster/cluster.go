@@ -119,7 +119,7 @@ type RaftCluster struct {
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
 	minResolvedTS      uint64
-	externalTimeStamp  uint64
+	externalTS         uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -272,6 +272,10 @@ func (c *RaftCluster) Start(s Server) error {
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
+	c.externalTS, err = c.storage.LoadExternalTS()
+	if err != nil {
+		log.Error("load external timestamp meets error", zap.Error(err))
+	}
 
 	c.wg.Add(8)
 	go c.runCoordinator()
@@ -2238,34 +2242,22 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 	return c.minResolvedTS
 }
 
-// GetExternalTimestamp returns the external timestamp.
-func (c *RaftCluster) GetExternalTimestamp() uint64 {
+// GetExternalTS returns the external timestamp.
+func (c *RaftCluster) GetExternalTS() uint64 {
 	c.RLock()
 	defer c.RUnlock()
 	if !c.isInitialized() {
-		// TODO: whether it is accepted?
 		return math.MaxUint64
 	}
-	return c.externalTimeStamp
+	return c.externalTS
 }
 
-// SetExternalTimestamp sets the external timestamp.
-func (c *RaftCluster) SetExternalTimestamp(timestamp uint64) error {
+// SetExternalTS sets the external timestamp.
+func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 	c.Lock()
 	defer c.Unlock()
-	if !c.isInitialized() {
-		desc := "the cluster is not initialized"
-		log.Error(desc)
-		return errors.New(desc)
-	}
-	if timestamp <= c.externalTimeStamp {
-		desc := "the external timestamp is less than now"
-		log.Error(desc, zap.Uint64("request", timestamp), zap.Uint64("current", c.externalTimeStamp))
-		return errors.New(desc)
-	}
-	// TODO: Do we need to ensure that it is larger than global ts?
-	c.externalTimeStamp = timestamp
-	c.storage.SaveExternalTimestamp(timestamp)
+	c.externalTS = timestamp
+	c.storage.SaveExternalTS(timestamp)
 	return nil
 }
 

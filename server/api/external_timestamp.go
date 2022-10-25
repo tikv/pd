@@ -44,12 +44,9 @@ type externalTimestamp struct {
 // @Success  200  {array}   ExternalTimestamp
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /external-timestamp [get]
-func (h *externalTimestampHandler) GetExternalTimestamp(w http.ResponseWriter, r *http.Request) {
-	c := h.svr.GetRaftCluster()
-	value := c.GetExternalTimestamp()
+func (h *externalTimestampHandler) GetExternalTS(w http.ResponseWriter, r *http.Request) {
+	value := h.svr.GetExternalTS()
 	h.rd.JSON(w, http.StatusOK, externalTimestamp{
 		ExternalTimestamp: value,
 	})
 }
-
-//TODO: Do we need to add a set api?

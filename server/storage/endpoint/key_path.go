@@ -114,7 +114,6 @@ func MinResolvedTSPath() string {
 
 // ExternalTimestampPath returns the external timestamp path.
 func ExternalTimestampPath() string {
-	// todo: do we need `slot`?
 	return path.Join(clusterPath, externalTimeStamp)
 }
 
