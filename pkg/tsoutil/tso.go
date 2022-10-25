@@ -27,7 +27,7 @@ const (
 
 // ParseTS parses the ts to (physical,logical).
 func ParseTS(ts uint64) (time.Time, uint64) {
-	logical, physical := ParseTSUint64(ts)
+	physical, logical := ParseTSUint64(ts)
 	physicalTime := time.Unix(int64(physical/1000), int64(physical)%1000*time.Millisecond.Nanoseconds())
 	return physicalTime, logical
 }
