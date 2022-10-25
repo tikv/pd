@@ -643,25 +643,25 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 	for i, region := range regions {
 		// region does not exist.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is updated.
@@ -671,13 +671,13 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		)
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		c.Assert(cluster.processRegionHeartbeat(stale), NotNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// Add a down peer.
@@ -689,69 +689,69 @@ func (s *testClusterInfoSuite) TestRegionHeartbeat(c *C) {
 		}))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Add a pending peer.
 		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Clear down peers.
 		region = region.Clone(core.WithDownPeers(nil))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Clear pending peers.
 		region = region.Clone(core.WithPendingPeers(nil))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Remove peers.
 		origin = region
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 		checkRegionsKV(c, cluster.storage, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Change ApproximateSize.
 		region = region.Clone(core.SetApproximateSize(144))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Change ApproximateKeys.
 		region = region.Clone(core.SetApproximateKeys(144000))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
 		regions[i] = region
 		c.Assert(cluster.processRegionHeartbeat(region), IsNil)
-		checkRegions(c, cluster.core.Regions, regions[:i+1])
+		checkRegions(c, cluster.core.Regions.RegionsInfo, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -1538,7 +1538,7 @@ func (s *testRegionsInfoSuite) Test(c *C) {
 	_, opts, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	tc := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cache := tc.core.Regions
+	cache := tc.core.Regions.RegionsInfo
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
