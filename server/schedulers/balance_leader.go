@@ -413,7 +413,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
-		schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 		if op = creator(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
@@ -540,6 +539,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.step++
 	defer func() { solver.step-- }()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(l.GetName()), solver.targetStoreScore(l.GetName())
 	if !solver.shouldBalance(l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		if collector != nil {
