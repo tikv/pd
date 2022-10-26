@@ -51,7 +51,7 @@ var (
 // NewRegionCommand returns a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   `region <region_id> [-jq="<query string>"]`,
+		Use:   `region <region_id> [--jq="<query string>"]`,
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
@@ -354,10 +354,12 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|learner-peer|pending-peer|offline-peer|empty-region|oversized-region|undersized-region|hist-size|hist-keys]",
+		Use:   `check [miss-peer|extra-peer|down-peer|learner-peer|pending-peer|offline-peer|empty-region|oversized-region|undersized-region|hist-size|hist-keys] [--jq="<query string>"]`,
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}
+
+	r.Flags().String("jq", "", "jq query")
 	return r
 }
 
@@ -394,6 +396,11 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
 	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
+		return
+	}
+
 	cmd.Println(r)
 }
 
