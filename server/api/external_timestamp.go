@@ -26,7 +26,7 @@ type externalTimestampHandler struct {
 	rd  *render.Render
 }
 
-func newExternalTimestampHandler(svr *server.Server, rd *render.Render) *externalTimestampHandler {
+func newExternalTSHandler(svr *server.Server, rd *render.Render) *externalTimestampHandler {
 	return &externalTimestampHandler{
 		svr: svr,
 		rd:  rd,

@@ -5,7 +5,6 @@ go 1.18
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
-	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/axw/gocov v1.0.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
@@ -26,7 +25,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20221014081430-26e28e6a281a
+	github.com/pingcap/kvproto v0.0.0-20221026112947-f8d61344b172
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20220728104842-3743e533b594
@@ -176,5 +175,3 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
-
-replace github.com/pingcap/kvproto v0.0.0-20221014081430-26e28e6a281a => github.com/lhy1024/kvproto v0.0.0-20221024130613-3aad200d3d1c

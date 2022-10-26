@@ -1467,6 +1467,7 @@ func TestExternalTimestamp(t *testing.T) {
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	id := leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(100 * time.Millisecond)
 
 	ts := uint64(233)
 	{ // case1: set external timestamp
