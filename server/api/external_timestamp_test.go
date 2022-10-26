@@ -17,6 +17,7 @@ package api
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
@@ -49,6 +50,7 @@ func (suite *ExternalTSTestSuite) SetupSuite() {
 	mustRegionHeartbeat(re, suite.svr, r1)
 	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"))
 	mustRegionHeartbeat(re, suite.svr, r2)
+	time.Sleep(100 * time.Millisecond)
 }
 
 func (suite *ExternalTSTestSuite) TearDownSuite() {
