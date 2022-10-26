@@ -62,7 +62,7 @@ func TestTrend(t *testing.T) {
 	newPeerID := op.Step(0).(operator.AddLearner).PeerID
 	region5 = region5.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region5)
-	region5 = region5.Clone(core.WithPromoteLearner(newPeerID), core.WithRemoveStorePeer(2), core.WithIncConfVer())
+	region5 = region5.Clone(core.WithRole(newPeerID, metapb.PeerRole_Voter), core.WithRemoveStorePeer(2), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region5)
 
 	op, err = svr.GetHandler().GetOperator(6)
@@ -71,7 +71,7 @@ func TestTrend(t *testing.T) {
 	newPeerID = op.Step(0).(operator.AddLearner).PeerID
 	region6 = region6.Clone(core.WithAddPeer(&metapb.Peer{Id: newPeerID, StoreId: 3, Role: metapb.PeerRole_Learner}), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region6)
-	region6 = region6.Clone(core.WithPromoteLearner(newPeerID), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
+	region6 = region6.Clone(core.WithRole(newPeerID, metapb.PeerRole_Voter), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region6)
 
 	var trend Trend

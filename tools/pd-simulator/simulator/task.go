@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2017 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -295,21 +295,17 @@ func checkAndCreateChangePeerOption(engine *RaftEngine, region *core.RegionInfo,
 		return nil
 	}
 	// create option
-	opts := []core.RegionCreateOption{core.WithIncConfVer()}
 	switch to {
 	case metapb.PeerRole_Voter: // Learner/IncomingVoter -> Voter
 		engine.schedulerStats.taskStats.incPromoteLearner(region.GetID())
-		return append(opts, core.WithPromoteLearner(peer.GetId()))
 	case metapb.PeerRole_Learner: // Voter/DemotingVoter -> Learner
 		engine.schedulerStats.taskStats.incDemoteVoter(region.GetID())
-		return append(opts, core.WithDemoteVoter(peer.GetId()))
 	case metapb.PeerRole_IncomingVoter: // Learner -> IncomingVoter, only in joint state
-		return append(opts, core.WithPromoteLearnerEnter(peer.GetId()))
 	case metapb.PeerRole_DemotingVoter: // Voter -> DemotingVoter, only in joint state
-		return append(opts, core.WithDemoteVoterEnter(peer.GetId()))
 	default:
 		return nil
 	}
+	return []core.RegionCreateOption{core.WithRole(peer.GetId(), to), core.WithIncConfVer()}
 }
 
 type promoteLearner struct {
