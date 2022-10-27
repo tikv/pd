@@ -15,13 +15,16 @@
 package placement
 
 import (
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
 	"math"
 	"math/bits"
 	"sort"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/server/core"
 )
+
+const replicaBaseScore = 100
 
 // RegionFit is the result of fitting a region's peers to rule list.
 // All peers are divided into corresponding rules according to the matching
@@ -52,7 +55,7 @@ func (f *RegionFit) IsCached() bool {
 }
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
-func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region *core.RegionInfo) bool {
+func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	// check the target store is fit all constraints.
 	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
@@ -64,7 +67,7 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region 
 		return true
 	}
 
-	stores := f.regionStores
+	stores := fit.stores
 	i := 0
 	var source *core.StoreInfo
 	for ; i < len(stores); i++ {
@@ -76,7 +79,7 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region 
 	}
 	score := isolationStoreScore(stores, fit.Rule.LocationLabels)
 	// restore the source store.
-	stores[i] = source
+	fit.stores[i] = source
 	return fit.IsolationScore <= score
 }
 
@@ -134,6 +137,8 @@ type RuleFit struct {
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
+	// stores is the stores that the peers are placed in.s
+	stores []*core.StoreInfo
 }
 
 // IsSatisfied returns if the rule is properly satisfied.
@@ -357,6 +362,7 @@ func newRuleFit(rule *Rule, peers []*fitPeer) *RuleFit {
 	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
+		rf.stores = append(rf.stores, p.store)
 		if !p.matchRoleStrict(rule.Role) || p.IsWitness != rule.IsWitness {
 			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
 		}
@@ -390,11 +396,9 @@ func isolationStoreScore(stores []*core.StoreInfo, labels []string) float64 {
 	if len(labels) == 0 || len(stores) <= 1 {
 		return 0
 	}
-	const replicaBaseScore = 100
 	for i := range stores {
 		store1 := stores[i]
-		for j := range stores[i+1:] {
-			store2 := stores[j]
+		for _, store2 := range stores[i+1:] {
 			if index := store1.CompareLocation(store2, labels); index != -1 {
 				score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
 			}
@@ -414,7 +418,6 @@ func isolationScore(peers []*fitPeer, labels []string) float64 {
 	// here because it is kind of hot path.
 	// After Go supports generics, we will be enable to do some refactor and
 	// reuse `core.DistinctScore`.
-	const replicaBaseScore = 100
 	for i, p1 := range peers {
 		for _, p2 := range peers[i+1:] {
 			if index := p1.store.CompareLocation(p2.store, labels); index != -1 {

@@ -147,7 +147,7 @@ func TestReplace(t *testing.T) {
 		}
 		rf := fitRegion(stores.GetStores(), region, rules)
 		rf.regionStores = stores.GetStores()
-		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID), region), tc.ok)
+		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID)), tc.ok)
 	}
 }
 
