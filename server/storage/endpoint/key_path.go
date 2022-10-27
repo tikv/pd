@@ -41,6 +41,9 @@ const (
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
 	regionPathPrefix           = "raft/r"
+
+	// we use uint64 to represent ID, the max length of uint64 is 20.
+	keyLen = 20
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -81,12 +84,12 @@ func RegionPath(regionID uint64) string {
 	buf.WriteString(regionPathPrefix)
 	buf.WriteString("/")
 	s := strconv.FormatUint(regionID, 10)
-	if len(s) > 20 {
-		s = s[len(s)-20:]
+	if len(s) > keyLen {
+		s = s[len(s)-keyLen:]
 	} else {
-		b := make([]byte, 20)
-		diff := 20 - len(s)
-		for i := 0; i < 20; i++ {
+		b := make([]byte, keyLen)
+		diff := keyLen - len(s)
+		for i := 0; i < keyLen; i++ {
 			if i < diff {
 				b[i] = 48
 			} else {
