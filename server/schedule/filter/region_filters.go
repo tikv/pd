@@ -95,6 +95,7 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
+// RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
 	cluster regionHealthCluster
 	fit     *placement.RegionFit
