@@ -76,9 +76,10 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 	}
 
 	var overlaps []RangeItem
+	endKey := item.GetEndKey()
 	r.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
 		over := i.(RangeItem)
-		if len(item.GetEndKey()) > 0 && bytes.Compare(item.GetEndKey(), over.GetStartKey()) <= 0 {
+		if len(endKey) > 0 && bytes.Compare(endKey, over.GetStartKey()) <= 0 {
 			return false
 		}
 		overlaps = append(overlaps, over)

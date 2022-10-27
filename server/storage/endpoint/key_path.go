@@ -17,6 +17,8 @@ package endpoint
 import (
 	"fmt"
 	"path"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -38,6 +40,10 @@ const (
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
+	regionPathPrefix           = "raft/r"
+
+	// we use uint64 to represent ID, the max length of uint64 is 20.
+	keyLen = 20
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -74,7 +80,27 @@ func storeRegionWeightPath(storeID uint64) string {
 
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
-	return path.Join(clusterPath, "r", fmt.Sprintf("%020d", regionID))
+	var buf strings.Builder
+	buf.WriteString(regionPathPrefix)
+	buf.WriteString("/")
+	s := strconv.FormatUint(regionID, 10)
+	if len(s) > keyLen {
+		s = s[len(s)-keyLen:]
+	} else {
+		b := make([]byte, keyLen)
+		diff := keyLen - len(s)
+		for i := 0; i < keyLen; i++ {
+			if i < diff {
+				b[i] = 48
+			} else {
+				b[i] = s[i-diff]
+			}
+		}
+		s = string(b)
+	}
+	buf.WriteString(s)
+
+	return buf.String()
 }
 
 func ruleKeyPath(ruleKey string) string {
