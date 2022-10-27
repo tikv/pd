@@ -15,14 +15,12 @@
 package placement
 
 import (
-	"math"
-	"math/bits"
-	"sort"
-	"sync"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
+	"math"
+	"math/bits"
+	"sort"
 )
 
 // RegionFit is the result of fitting a region's peers to rule list.
@@ -66,11 +64,19 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo, region 
 		return true
 	}
 
-	peers := newFitPeer(f.regionStores, region, fit.Peers, replaceFitPeerOpt(srcStoreID, dstStore))
-	score := isolationScore(peers, fit.Rule.LocationLabels)
-	for _, peer := range peers {
-		fitPeerPool.Put(peer)
+	stores := f.regionStores
+	i := 0
+	var source *core.StoreInfo
+	for ; i < len(stores); i++ {
+		if stores[i].GetID() == srcStoreID {
+			source = stores[i]
+			stores[i] = dstStore
+			break
+		}
 	}
+	score := isolationStoreScore(stores, fit.Rule.LocationLabels)
+	// restore the source store.
+	stores[i] = source
 	return fit.IsolationScore <= score
 }
 
@@ -114,27 +120,6 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 // GetRegionStores returns region's stores
 func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
-}
-
-// CompareRegionFit determines the superiority of 2 fits.
-// It returns 1 when the first fit result is better.
-func CompareRegionFit(a, b *RegionFit) int {
-	for i := range a.RuleFits {
-		if i >= len(b.RuleFits) {
-			break
-		}
-		if cmp := compareRuleFit(a.RuleFits[i], b.RuleFits[i]); cmp != 0 {
-			return cmp
-		}
-	}
-	switch {
-	case len(a.OrphanPeers) < len(b.OrphanPeers):
-		return 1
-	case len(a.OrphanPeers) > len(b.OrphanPeers):
-		return -1
-	default:
-		return 0
-	}
 }
 
 // RuleFit is the result of fitting status of a Rule.
@@ -206,26 +191,13 @@ type fitWorker struct {
 	exit          bool
 }
 
-type fitPeerOpt func(peer *fitPeer)
-
-func replaceFitPeerOpt(srcStoreID uint64, dstStore *core.StoreInfo) fitPeerOpt {
-	return func(peer *fitPeer) {
-		if peer.Peer.GetStoreId() == srcStoreID {
-			peer.store = dstStore
-		}
-	}
-}
-
-func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer, opts ...fitPeerOpt) []*fitPeer {
+func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer) []*fitPeer {
 	peers := make([]*fitPeer, len(fitPeers))
 	for i, p := range fitPeers {
-		peer := fitPeerPool.Get().(*fitPeer)
+		peer := &fitPeer{}
 		peer.Peer = p
 		peer.store = getStoreByID(stores, p.GetStoreId())
 		peer.isLeader = region.GetLeader().GetId() == p.GetId()
-		for _, opt := range opts {
-			opt(peer)
-		}
 		peers[i] = peer
 	}
 	return peers
@@ -399,12 +371,6 @@ type fitPeer struct {
 	selected bool
 }
 
-var fitPeerPool = sync.Pool{
-	New: func() interface{} {
-		return new(fitPeer)
-	},
-}
-
 func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	switch role {
 	case Voter: // Voter matches either Leader or Follower.
@@ -417,6 +383,24 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 		return core.IsLearner(p.Peer)
 	}
 	return false
+}
+
+func isolationStoreScore(stores []*core.StoreInfo, labels []string) float64 {
+	var score float64
+	if len(labels) == 0 || len(stores) <= 1 {
+		return 0
+	}
+	const replicaBaseScore = 100
+	for i := range stores {
+		store1 := stores[i]
+		for j := range stores[i+1:] {
+			store2 := stores[j]
+			if index := store1.CompareLocation(store2, labels); index != -1 {
+				score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
+			}
+		}
+	}
+	return score
 }
 
 func isolationScore(peers []*fitPeer, labels []string) float64 {
