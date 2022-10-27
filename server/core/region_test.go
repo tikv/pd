@@ -401,7 +401,7 @@ func regionInfo(id uint64) *RegionInfo {
 func check(re *require.Assertions, rm regionMap, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
-		re.Equal(id, rm.Get(id).region.GetID())
+		re.Equal(id, rm.Get(id).GetID())
 	}
 	// Check Len.
 	re.Equal(len(ids), rm.Len())
@@ -412,7 +412,7 @@ func check(re *require.Assertions, rm regionMap, ids ...uint64) {
 	}
 	set1 := make(map[uint64]struct{})
 	for _, r := range rm {
-		set1[r.region.GetID()] = struct{}{}
+		set1[r.GetID()] = struct{}{}
 	}
 	re.Equal(expect, set1)
 }
