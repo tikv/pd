@@ -1177,8 +1177,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 
 // GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
 func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
-	start := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
-	end := &regionItem{region: &RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
