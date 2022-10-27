@@ -15,10 +15,10 @@
 package endpoint
 
 import (
-	"bytes"
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -41,7 +41,6 @@ const (
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
 	regionPathPrefix           = "raft/r"
-	prefix                     = "00000000000000000000"
 )
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -78,11 +77,25 @@ func storeRegionWeightPath(storeID uint64) string {
 
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
-	buf := new(bytes.Buffer)
+	var buf strings.Builder
 	buf.WriteString(regionPathPrefix)
 	buf.WriteString("/")
-	b := strconv.AppendUint([]byte(prefix), regionID, 10)
-	buf.WriteString(string(b[len(b)-20:]))
+	s := strconv.FormatUint(regionID, 10)
+	if len(s) > 20 {
+		s = s[len(s)-20:]
+	} else {
+		b := make([]byte, 20)
+		diff := 20 - len(s)
+		for i := 0; i < 20; i++ {
+			if i < diff {
+				b[i] = 48
+			} else {
+				b[i] = s[i-diff]
+			}
+		}
+		s = string(b)
+	}
+	buf.WriteString(s)
 
 	return buf.String()
 }
