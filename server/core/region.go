@@ -703,7 +703,7 @@ func (rm regionMap) Get(id uint64) *regionItem {
 // If the regionItem already exists, it will be overwritten.
 // Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
 func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
-	item := &regionItem{region: region}
+	item := &regionItem{RegionInfo: region}
 	rm[region.GetID()] = item
 	return item
 }
@@ -739,7 +739,7 @@ func NewRegionsInfo() *RegionsInfo {
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	if item := r.regions.Get(regionID); item != nil {
-		return item.region
+		return item.RegionInfo
 	}
 	return nil
 }
@@ -751,7 +751,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	rangeChanged := true // This Region is new, or its range has changed.
 	if item = r.regions.Get(region.GetID()); item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin := item.region
+		origin := item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
@@ -766,14 +766,14 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
 			// Update the RegionInfo in the regionItem.
-			item.region = region
+			item.RegionInfo = region
 			return
 		}
 		// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
 		// Update the RegionInfo in the regionItem.
-		item.region = region
+		item.RegionInfo = region
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
 		item = r.regions.AddNew(region)
@@ -964,7 +964,7 @@ func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, item.region)
+		regions = append(regions, item.RegionInfo)
 	}
 	return regions
 }
@@ -1028,7 +1028,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, typeutil.DeepClone(item.region.meta, RegionFactory))
+		regions = append(regions, typeutil.DeepClone(item.meta, RegionFactory))
 	}
 	return regions
 }
@@ -1111,7 +1111,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(region).region
+		return leaders.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1119,7 +1119,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 // GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(region).region
+		return followers.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1237,11 +1237,11 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	p, n := r.tree.getAdjacentRegions(region)
 	var prev, next *RegionInfo
 	// check key to avoid key range hole
-	if p != nil && bytes.Equal(p.region.GetEndKey(), region.GetStartKey()) {
-		prev = r.GetRegion(p.region.GetID())
+	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
+		prev = r.GetRegion(p.GetID())
 	}
-	if n != nil && bytes.Equal(region.GetEndKey(), n.region.GetStartKey()) {
-		next = r.GetRegion(n.region.GetID())
+	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
+		next = r.GetRegion(n.GetID())
 	}
 	return prev, next
 }

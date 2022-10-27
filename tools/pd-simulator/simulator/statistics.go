@@ -23,20 +23,22 @@ import (
 
 type taskStatistics struct {
 	syncutil.RWMutex
-	addPeer        map[uint64]int
+	addVoter       map[uint64]int
 	removePeer     map[uint64]int
 	addLearner     map[uint64]int
 	promoteLeaner  map[uint64]int
+	demoteVoter    map[uint64]int
 	transferLeader map[uint64]map[uint64]int
 	mergeRegion    int
 }
 
 func newTaskStatistics() *taskStatistics {
 	return &taskStatistics{
-		addPeer:        make(map[uint64]int),
+		addVoter:       make(map[uint64]int),
 		removePeer:     make(map[uint64]int),
 		addLearner:     make(map[uint64]int),
 		promoteLeaner:  make(map[uint64]int),
+		demoteVoter:    make(map[uint64]int),
 		transferLeader: make(map[uint64]map[uint64]int),
 	}
 }
@@ -45,10 +47,11 @@ func (t *taskStatistics) getStatistics() map[string]int {
 	t.RLock()
 	defer t.RUnlock()
 	stats := make(map[string]int)
-	addPeer := getSum(t.addPeer)
+	addVoter := getSum(t.addVoter)
 	removePeer := getSum(t.removePeer)
 	addLearner := getSum(t.addLearner)
-	promoteLeaner := getSum(t.promoteLeaner)
+	promoteLearner := getSum(t.promoteLeaner)
+	demoteVoter := getSum(t.demoteVoter)
 
 	var transferLeader int
 	for _, to := range t.transferLeader {
@@ -57,32 +60,39 @@ func (t *taskStatistics) getStatistics() map[string]int {
 		}
 	}
 
-	stats["Add Peer (task)"] = addPeer
+	stats["Add Voter (task)"] = addVoter
 	stats["Remove Peer (task)"] = removePeer
 	stats["Add Learner (task)"] = addLearner
-	stats["Promote Learner (task)"] = promoteLeaner
+	stats["Promote Learner (task)"] = promoteLearner
+	stats["Demote Voter (task)"] = demoteVoter
 	stats["Transfer Leader (task)"] = transferLeader
 	stats["Merge Region (task)"] = t.mergeRegion
 
 	return stats
 }
 
-func (t *taskStatistics) incAddPeer(regionID uint64) {
+func (t *taskStatistics) incAddVoter(regionID uint64) {
 	t.Lock()
 	defer t.Unlock()
-	t.addPeer[regionID]++
+	t.addVoter[regionID]++
 }
 
-func (t *taskStatistics) incAddLeaner(regionID uint64) {
+func (t *taskStatistics) incAddLearner(regionID uint64) {
 	t.Lock()
 	defer t.Unlock()
 	t.addLearner[regionID]++
 }
 
-func (t *taskStatistics) incPromoteLeaner(regionID uint64) {
+func (t *taskStatistics) incPromoteLearner(regionID uint64) {
 	t.Lock()
 	defer t.Unlock()
 	t.promoteLeaner[regionID]++
+}
+
+func (t *taskStatistics) incDemoteVoter(regionID uint64) {
+	t.Lock()
+	defer t.Unlock()
+	t.demoteVoter[regionID]++
 }
 
 func (t *taskStatistics) incRemovePeer(regionID uint64) {
@@ -97,16 +107,16 @@ func (t *taskStatistics) incMergeRegion() {
 	t.mergeRegion++
 }
 
-func (t *taskStatistics) incTransferLeader(fromPeerID, toPeerID uint64) {
+func (t *taskStatistics) incTransferLeader(fromPeerStoreID, toPeerStoreID uint64) {
 	t.Lock()
 	defer t.Unlock()
-	_, ok := t.transferLeader[fromPeerID]
+	_, ok := t.transferLeader[fromPeerStoreID]
 	if ok {
-		t.transferLeader[fromPeerID][toPeerID]++
+		t.transferLeader[fromPeerStoreID][toPeerStoreID]++
 	} else {
 		m := make(map[uint64]int)
-		m[toPeerID]++
-		t.transferLeader[fromPeerID] = m
+		m[toPeerStoreID]++
+		t.transferLeader[fromPeerStoreID] = m
 	}
 }
 
