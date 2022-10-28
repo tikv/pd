@@ -31,11 +31,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
-<<<<<<< HEAD
-=======
+
 	"github.com/tikv/pd/pkg/rangetree"
-	"github.com/tikv/pd/pkg/typeutil"
->>>>>>> 224923e92 (api: using index to replace tree scan if only returns count  (#5610))
 	"go.uber.org/zap"
 )
 

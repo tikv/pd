@@ -140,25 +140,6 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
 		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
 	}
-<<<<<<< HEAD
-	res, err := testDialClient.Get(statsURL)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, statsAll)
-
-	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
-	res, err = testDialClient.Get(statsURL + args)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats = &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, statsAll)
-=======
->>>>>>> 224923e92 (api: using index to replace tree scan if only returns count  (#5610))
 
 	stats23 := &statistics.RegionStats{
 		Count:            2,
@@ -173,16 +154,6 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
 
-<<<<<<< HEAD
-	args = fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("a"), url.QueryEscape("x"))
-	res, err = testDialClient.Get(statsURL + args)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats = &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, stats23)
-=======
 	testdata := []struct {
 		startKey string
 		endKey   string
@@ -208,16 +179,15 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		for _, query := range []string{"", "count"} {
 			args := fmt.Sprintf("?start_key=%s&end_key=%s&%s", data.startKey, data.endKey, query)
 			res, err := testDialClient.Get(statsURL + args)
-			suite.NoError(err)
+			c.Assert(err, IsNil)
 			defer res.Body.Close()
 			stats := &statistics.RegionStats{}
 			err = apiutil.ReadJSON(res.Body, stats)
-			suite.NoError(err)
-			suite.Equal(data.expect.Count, stats.Count)
+			c.Assert(err, IsNil)
+			c.Assert(stats.Count, DeepEquals, data.expect.Count)
 			if query != "count" {
-				suite.Equal(data.expect, stats)
+				c.Assert(stats, DeepEquals, data.expect)
 			}
 		}
 	}
->>>>>>> 224923e92 (api: using index to replace tree scan if only returns count  (#5610))
 }
