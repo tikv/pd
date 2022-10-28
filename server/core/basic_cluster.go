@@ -302,6 +302,52 @@ func (bc *BasicCluster) GetAverageRegionSize() int64 {
 	return bc.Regions.GetAverageRegionSize()
 }
 
+<<<<<<< HEAD
+=======
+// GetRegionByKey searches RegionInfo from regionTree.
+func (bc *BasicCluster) GetRegionByKey(regionKey []byte) *RegionInfo {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetRegionByKey(regionKey)
+}
+
+// GetPrevRegionByKey searches previous RegionInfo from regionTree.
+func (bc *BasicCluster) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetPrevRegionByKey(regionKey)
+}
+
+// ScanRange scans regions intersecting [start key, end key), returns at most
+// `limit` regions. limit <= 0 means no limit.
+func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.ScanRange(startKey, endKey, limit)
+}
+
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (bc *BasicCluster) GetRangeCount(startKey, endKey []byte) int {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetRangeCount(startKey, endKey)
+}
+
+// GetOverlaps returns the regions which are overlapped with the specified region range.
+func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetOverlaps(region)
+}
+
+// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
+func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
+}
+
+>>>>>>> 224923e92 (api: using index to replace tree scan if only returns count  (#5610))
 func (bc *BasicCluster) getWriteRate(
 	f func(storeID uint64) (bytesRate, keysRate float64),
 ) (storeIDs []uint64, bytesRates, keysRates []float64) {
