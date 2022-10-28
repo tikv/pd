@@ -54,10 +54,6 @@ type StoreConfig struct {
 	RegionBucketSizeMB uint64 `json:"_"`
 }
 
-func (cfg *StoreConfig) Equal(other *StoreConfig) bool {
-	return reflect.DeepEqual(cfg.Coprocessor, other.Coprocessor)
-}
-
 // Coprocessor is the config of coprocessor.
 type Coprocessor struct {
 	// RegionMaxSize is the max size of a region, if the region size is larger than this value, region will be
@@ -69,6 +65,11 @@ type Coprocessor struct {
 	RegionSplitKeys    int    `json:"region-split-keys"`
 	EnableRegionBucket bool   `json:"enable-region-bucket"`
 	RegionBucketSize   string `json:"region-bucket-size"`
+}
+
+// Equal returns true if the two configs are equal.
+func (c *StoreConfig) Equal(other *StoreConfig) bool {
+	return reflect.DeepEqual(c.Coprocessor, other.Coprocessor)
 }
 
 // String implements fmt.Stringer interface.
@@ -109,7 +110,7 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 	if c == nil || c.RegionMaxKeys == 0 {
 		return defaultRegionMaxKey
 	}
-	return uint64(c.Coprocessor.RegionMaxKeys)
+	return uint64(c.RegionMaxKeys)
 }
 
 // IsEnableRegionBucket return true if the region bucket is enabled.
