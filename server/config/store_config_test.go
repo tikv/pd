@@ -67,6 +67,11 @@ func TestUpdateConfig(t *testing.T) {
 	manager.ObserveConfig("tidb.com")
 	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
 
+	// case2: the config should not update if config is same expect some ignore field.
+	c, err := manager.source.GetConfig("tidb.com")
+	re.NoError(err)
+	re.True(manager.GetStoreConfig().Equal(c))
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,

@@ -48,6 +48,14 @@ var (
 // nolint
 type StoreConfig struct {
 	Coprocessor `json:"coprocessor"`
+
+	RegionMaxSizeMB    uint64 `json:"_"`
+	RegionSplitSizeMB  uint64 `json:"_"`
+	RegionBucketSizeMB uint64 `json:"_"`
+}
+
+func (cfg *StoreConfig) Equal(other *StoreConfig) bool {
+	return reflect.DeepEqual(cfg.Coprocessor, other.Coprocessor)
 }
 
 // Coprocessor is the config of coprocessor.
@@ -74,23 +82,23 @@ func (c *StoreConfig) String() string {
 
 // GetRegionMaxSize returns the max region size in MB
 func (c *StoreConfig) GetRegionMaxSize() uint64 {
-	if c == nil || len(c.Coprocessor.RegionMaxSize) == 0 {
+	if c == nil || len(c.RegionMaxSize) == 0 {
 		return defaultRegionMaxSize
 	}
-	return typeutil.ParseMBFromText(c.Coprocessor.RegionMaxSize, defaultRegionMaxSize)
+	return c.RegionMaxSizeMB
 }
 
 // GetRegionSplitSize returns the region split size in MB
 func (c *StoreConfig) GetRegionSplitSize() uint64 {
-	if c == nil || len(c.Coprocessor.RegionSplitSize) == 0 {
+	if c == nil || len(c.RegionSplitSize) == 0 {
 		return defaultRegionSplitSize
 	}
-	return typeutil.ParseMBFromText(c.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
+	return c.RegionSplitSizeMB
 }
 
 // GetRegionSplitKeys returns the region split keys
 func (c *StoreConfig) GetRegionSplitKeys() uint64 {
-	if c == nil || c.Coprocessor.RegionSplitKeys == 0 {
+	if c == nil || c.RegionSplitKeys == 0 {
 		return defaultRegionSplitKey
 	}
 	return uint64(c.Coprocessor.RegionSplitKeys)
@@ -98,7 +106,7 @@ func (c *StoreConfig) GetRegionSplitKeys() uint64 {
 
 // GetRegionMaxKeys returns the region split keys
 func (c *StoreConfig) GetRegionMaxKeys() uint64 {
-	if c == nil || c.Coprocessor.RegionMaxKeys == 0 {
+	if c == nil || c.RegionMaxKeys == 0 {
 		return defaultRegionMaxKey
 	}
 	return uint64(c.Coprocessor.RegionMaxKeys)
@@ -117,10 +125,10 @@ func (c *StoreConfig) GetRegionBucketSize() uint64 {
 	if c == nil || !c.Coprocessor.EnableRegionBucket {
 		return 0
 	}
-	if len(c.Coprocessor.RegionBucketSize) == 0 {
+	if len(c.RegionBucketSize) == 0 {
 		return defaultBucketSize
 	}
-	return typeutil.ParseMBFromText(c.Coprocessor.RegionBucketSize, defaultBucketSize)
+	return c.RegionBucketSizeMB
 }
 
 // CheckRegionSize return error if the smallest region's size is less than mergeSize
@@ -188,8 +196,11 @@ func (m *StoreConfigManager) ObserveConfig(address string) error {
 		return err
 	}
 	old := m.GetStoreConfig()
-	if cfg != nil && !reflect.DeepEqual(cfg, old) {
+	if cfg != nil && !old.Equal(cfg) {
 		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()))
+		cfg.RegionMaxSizeMB = typeutil.ParseMBFromText(cfg.RegionMaxSize, defaultRegionMaxSize)
+		cfg.RegionSplitSizeMB = typeutil.ParseMBFromText(cfg.RegionSplitSize, defaultRegionSplitSize)
+		cfg.RegionBucketSizeMB = typeutil.ParseMBFromText(cfg.RegionBucketSize, defaultBucketSize)
 		m.config.Store(cfg)
 	}
 	return nil
@@ -257,10 +268,7 @@ func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
 	if !slice.Contains(f.whiteList, url) {
 		return nil, fmt.Errorf("[url:%s] is not in white list", url)
 	}
-	config := &StoreConfig{
-		Coprocessor{
-			RegionMaxSize: "10MiB",
-		},
-	}
+	config := &StoreConfig{}
+	config.RegionMaxSize = "10MiB"
 	return config, nil
 }
