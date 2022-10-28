@@ -63,7 +63,6 @@ func GetRootCmd() *cobra.Command {
 		command.NewPluginCommand(),
 		command.NewServiceGCSafepointCommand(),
 		command.NewMinResolvedTSCommand(),
-		command.NewExternalTimestampCommand(),
 		command.NewCompletionCommand(),
 		command.NewUnsafeCommand(),
 	)
