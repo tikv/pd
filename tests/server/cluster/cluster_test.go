@@ -1249,6 +1249,8 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 		}
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
+
+	time.Sleep(50 * time.Millisecond)
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 
@@ -1278,6 +1280,7 @@ func TestMinResolvedTS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
@@ -1377,6 +1380,7 @@ func TestMinResolvedTS(t *testing.T) {
 	checkMinResolvedTS(re, rc, store3TS)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
 	checkMinResolvedTS(re, rc, store5TS)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 // See https://github.com/tikv/pd/issues/4941

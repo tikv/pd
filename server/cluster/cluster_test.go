@@ -691,14 +691,15 @@ func TestRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
-
 	n, np := uint64(3), uint64(3)
-
+	cluster.wg.Add(1)
+	go cluster.runUpdateStoreStats()
 	stores := newTestStores(3, "2.0.0")
 	regions := newTestRegions(n, n, np)
 
@@ -856,11 +857,12 @@ func TestRegionHeartbeat(t *testing.T) {
 		}
 	}
 
-	for _, store := range cluster.core.Stores.GetStores() {
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
+	time.Sleep(50 * time.Millisecond)
+	for _, store := range cluster.GetStores() {
+		re.Equal(cluster.core.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
+		re.Equal(cluster.core.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
+		re.Equal(cluster.core.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
+		re.Equal(cluster.core.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
 	}
 
 	// Test with storage.
@@ -912,6 +914,7 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 		re.Equal(overlapRegion.GetMeta(), region)
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func TestRegionFlowChanged(t *testing.T) {
@@ -1320,6 +1323,7 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1329,6 +1333,8 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	for _, s := range stores {
 		re.NoError(tc.putStoreLocked(s))
 	}
+	tc.RaftCluster.wg.Add(1)
+	go tc.RaftCluster.runUpdateStoreStats()
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -1349,10 +1355,13 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	}
 	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
 	re.NoError(tc.processRegionHeartbeat(origin))
+	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
 	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
 	re.NoError(tc.processRegionHeartbeat(newRegion))
+	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func TestTopologyWeight(t *testing.T) {
@@ -1947,7 +1956,7 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 
 func checkPendingPeerCount(expect []int, cluster *RaftCluster, re *require.Assertions) {
 	for i, e := range expect {
-		s := cluster.core.Stores.GetStore(uint64(i + 1))
+		s := cluster.GetStore(uint64(i + 1))
 		re.Equal(e, s.GetPendingPeerCount())
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	tu "github.com/tikv/pd/pkg/testutil"
@@ -31,6 +32,7 @@ func TestTrend(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)
 	defer cleanup()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	server.MustWaitLeader(re, []*server.Server{svr})
 
 	mustBootstrapCluster(re, svr)
@@ -73,6 +75,7 @@ func TestTrend(t *testing.T) {
 	mustRegionHeartbeat(re, svr, region6)
 	region6 = region6.Clone(core.WithRole(newPeerID, metapb.PeerRole_Voter), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region6)
+	time.Sleep(50 * time.Millisecond)
 
 	var trend Trend
 	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
@@ -97,6 +100,7 @@ func TestTrend(t *testing.T) {
 	for _, history := range trend.History.Entries {
 		re.Equal(expectHistory[trendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}], history.Count)
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, voters []uint64, learners []uint64, witnesses []uint64, leaderStore uint64) *core.RegionInfo {
