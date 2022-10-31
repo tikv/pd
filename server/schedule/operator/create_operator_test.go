@@ -237,6 +237,43 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			true,
 			nil,
 		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			[]*metapb.Peer{
+				{Id: 4, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			OpMerge | OpRegion,
+			false,
+			[]OpStep{
+				AddLearner{ToStore: 3},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+				},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 3}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+				},
+				RemovePeer{FromStore: 2},
+			},
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			[]*metapb.Peer{
+				{Id: 4, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			true,
+			nil,
+		},
 	}
 
 	for _, testCase := range testCases {
