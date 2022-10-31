@@ -1042,6 +1042,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "hot-region"},
 	{Type: "split-bucket"},
+	{Type: "transfer-leader"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.

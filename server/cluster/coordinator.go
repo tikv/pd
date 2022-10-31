@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -965,4 +966,12 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
+}
+
+func (c *coordinator) CheckTransferLeader(region *core.RegionInfo) {
+	if s, ok := c.schedulers[schedulers.TransferLeaderName]; ok {
+		if schedulers.NeedTransferLeader(region) {
+			schedulers.RecvRegionInfo(s.Scheduler) <- region
+		}
+	}
 }
