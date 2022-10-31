@@ -76,21 +76,18 @@ func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	case pickSource:
 		if p.source != nil {
 			return p.source.GetID()
-		} else {
-			return 0
 		}
+		return 0
 	case pickRegion:
 		if p.region != nil {
 			return p.region.GetID()
-		} else {
-			return 0
 		}
+		return 0
 	case pickTarget:
 		if p.target != nil {
 			return p.target.GetID()
-		} else {
-			return 0
 		}
+		return 0
 	}
 	return 0
 }
@@ -126,7 +123,7 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 // BalancePlanSummary is used to summarize for BalancePlan
 func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
-	var storeStatusCounter map[uint64]map[plan.Status]int
+	storeStatusCounter := make(map[uint64]map[plan.Status]int)
 	// statusCounter is used to count the number of status which is regarded as best status of each store
 	statusCounter := make(map[uint64]plan.Status)
 	storeMaxStep := make(map[uint64]int)
@@ -149,18 +146,18 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		} else {
 			store = p.GetResource(step)
 		}
-		maxStep := storeMaxStep[store]
+		maxStep, ok := storeMaxStep[store]
+		if !ok {
+			maxStep = -1
+		}
 		if step > maxStep {
-			storeStatusCounter = make(map[uint64]map[plan.Status]int)
+			storeStatusCounter[store] = make(map[plan.Status]int)
 			storeMaxStep[store] = step
 		} else if step < maxStep {
 			continue
 		}
 		if !p.status.IsNormal() {
 			normal = false
-		}
-		if _, ok := storeStatusCounter[store]; !ok {
-			storeStatusCounter[store] = make(map[plan.Status]int)
 		}
 		storeStatusCounter[store][*p.status]++
 	}
