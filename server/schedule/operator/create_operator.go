@@ -158,8 +158,9 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId: p.GetStoreId(),
-				Role:    p.GetRole(),
+				StoreId:   p.GetStoreId(),
+				Role:      p.GetRole(),
+				IsWitness: p.GetIsWitness(),
 			}
 		}
 		matchOp, err := NewBuilder("", ci, source).
@@ -196,7 +197,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) || core.IsWitness(pb) != core.IsWitness(pa) {
 			return false
 		}
 	}
