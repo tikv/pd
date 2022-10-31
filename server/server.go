@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/systimemon"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -1677,4 +1678,39 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 // RecoverAllocID recover alloc id. set current base id to input id
 func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 	return s.idAllocator.SetBase(id)
+}
+
+// GetGlobalTS returns global tso.
+func (s *Server) GetGlobalTS() (uint64, error) {
+	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
+	if err != nil {
+		return 0, err
+	}
+	return tsoutil.GenerateTS(ts), nil
+}
+
+// GetExternalTS returns external timestamp.
+func (s *Server) GetExternalTS() uint64 {
+	return s.GetRaftCluster().GetExternalTS()
+}
+
+// SetExternalTS returns external timestamp.
+func (s *Server) SetExternalTS(externalTS uint64) error {
+	globalTS, err := s.GetGlobalTS()
+	if err != nil {
+		return err
+	}
+	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
+		desc := "the external timestamp should not be larger than global ts"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
+		return errors.New(desc)
+	}
+	currentExternalTS := s.GetRaftCluster().GetExternalTS()
+	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
+		desc := "the external timestamp should be larger than now"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
+		return errors.New(desc)
+	}
+	s.GetRaftCluster().SetExternalTS(externalTS)
+	return nil
 }
