@@ -34,6 +34,7 @@ const (
 	customScheduleConfigPath   = "scheduler_config"
 	gcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
+	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
 	keyspaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
@@ -132,9 +133,14 @@ func gcSafePointServicePath(serviceID string) string {
 	return path.Join(gcSafePointPath(), "service", serviceID)
 }
 
-// MinResolvedTSPath returns the min resolved ts path
+// MinResolvedTSPath returns the min resolved ts path.
 func MinResolvedTSPath() string {
 	return path.Join(clusterPath, minResolvedTS)
+}
+
+// ExternalTimestampPath returns the external timestamp path.
+func ExternalTimestampPath() string {
+	return path.Join(clusterPath, externalTimeStamp)
 }
 
 // KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.

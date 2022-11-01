@@ -366,6 +366,13 @@ func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionI
 	return bc.Regions.ScanRange(startKey, endKey, limit)
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (bc *BasicCluster) GetRangeCount(startKey, endKey []byte) int {
+	bc.Regions.mu.RLock()
+	defer bc.Regions.mu.RUnlock()
+	return bc.Regions.GetRangeCount(startKey, endKey)
+}
+
 // GetOverlaps returns the regions which are overlapped with the specified region range.
 func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	bc.Regions.mu.RLock()
