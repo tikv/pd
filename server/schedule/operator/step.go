@@ -55,7 +55,7 @@ type OpStep interface {
 	IsFinish(region *core.RegionInfo) bool
 	CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
-	Timeout(start time.Time, regionSize int64) bool
+	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse
 }
 
@@ -120,8 +120,8 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 }
 
 // Timeout returns true if the step is timeout.
-func (tl TransferLeader) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (tl TransferLeader) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -192,8 +192,8 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 }
 
 // Timeout returns true if the step is timeout.
-func (ap AddPeer) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > slowStepWaitDuration(regionSize)
+func (ap AddPeer) Timeout(regionSize int64) time.Duration {
+	return slowStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -266,8 +266,8 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns true if the step is timeout.
-func (al AddLearner) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > slowStepWaitDuration(regionSize)
+func (al AddLearner) Timeout(regionSize int64) time.Duration {
+	return slowStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -318,8 +318,8 @@ func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionI
 func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
-func (pl PromoteLearner) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (pl PromoteLearner) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -379,8 +379,8 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns true if the step is timeout.
-func (rp RemovePeer) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (rp RemovePeer) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -441,8 +441,8 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 
 // Timeout returns true if the step is timeout.
 // The merge operator must wait for the first operator finished, so the executing duration must larger than add learner.
-func (mr MergeRegion) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > slowStepWaitDuration(regionSize)*2
+func (mr MergeRegion) Timeout(regionSize int64) time.Duration {
+	return slowStepWaitDuration(regionSize) * 2
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -495,8 +495,8 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, _ *core.RegionInfo) err
 }
 
 // Timeout returns true if the step is timeout.
-func (sr SplitRegion) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (sr SplitRegion) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -537,8 +537,8 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Timeout returns true if the step is timeout.
-func (dv DemoteVoter) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (dv DemoteVoter) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -660,9 +660,9 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.Reg
 func (cpe ChangePeerV2Enter) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
-func (cpe ChangePeerV2Enter) Timeout(start time.Time, regionSize int64) bool {
+func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
 	count := uint64(len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) + 1
-	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
+	return fastStepWaitDuration(regionSize) * time.Duration(count)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -805,9 +805,9 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.Reg
 func (cpl ChangePeerV2Leave) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
 // Timeout returns true if the step is timeout.
-func (cpl ChangePeerV2Leave) Timeout(start time.Time, regionSize int64) bool {
+func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
 	count := uint64(len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) + 1
-	return time.Since(start) > fastStepWaitDuration(regionSize)*time.Duration(count)
+	return fastStepWaitDuration(regionSize) * time.Duration(count)
 }
 
 // GetCmd returns the schedule command for heartbeat response.

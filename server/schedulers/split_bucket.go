@@ -248,7 +248,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
-			pdpb.CheckPolicy_USEKEY, splitKey)
+			pdpb.CheckPolicy_USEKEY, plan.cluster.GetOpts().GetOperatorTimeoutOffset(), splitKey)
 		if err != nil {
 			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
 			return nil

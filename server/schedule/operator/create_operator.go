@@ -17,6 +17,7 @@ package operator
 import (
 	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -114,7 +115,7 @@ func CreateMoveLeaderOperator(desc string, ci ClusterInformer, region *core.Regi
 }
 
 // CreateSplitRegionOperator creates an operator that splits a region.
-func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, keys [][]byte) (*Operator, error) {
+func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind, policy pdpb.CheckPolicy, offset time.Duration, keys [][]byte) (*Operator, error) {
 	if core.IsInJointState(region.GetPeers()...) {
 		return nil, errors.Errorf("cannot split region which is in joint state")
 	}
@@ -133,7 +134,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), offset, step)
 	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey()))
 	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey()))
 	return op, nil
@@ -171,9 +172,10 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		IsPassive:  false,
 	})
 
+	offset := ci.GetOpts().GetOperatorTimeoutOffset()
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, source.GetApproximateSize(), steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, target.GetApproximateSize(), MergeRegion{
+	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind|OpMerge, source.GetApproximateSize(), offset, steps...)
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind|OpMerge, target.GetApproximateSize(), offset, MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -280,5 +282,6 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 	}
 
 	b.execChangePeerV2(false, true)
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
+
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), ci.GetOpts().GetOperatorTimeoutOffset(), b.steps...), nil
 }

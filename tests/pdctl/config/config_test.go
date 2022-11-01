@@ -136,6 +136,10 @@ func TestConfig(t *testing.T) {
 	re.Equal(20*10000, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
 	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
+	args = []string{"-u", pdAddr, "config", "set", "operator-timeout-offset", "10s"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.Equal("10s", svr.GetScheduleConfig().OperatorTimeoutOffset.String())
+
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)

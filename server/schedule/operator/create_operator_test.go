@@ -142,7 +142,7 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 			EndKey:   testCase.endKey,
 			Peers:    testCase.originPeers,
 		}, testCase.originPeers[0])
-		op, err := CreateSplitRegionOperator("test", region, 0, testCase.policy, testCase.keys)
+		op, err := CreateSplitRegionOperator("test", region, 0, testCase.policy, 0, testCase.keys)
 		if testCase.expectedError {
 			suite.Error(err)
 			continue
@@ -873,7 +873,7 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 		},
 	}
 	for _, testCase := range testCases {
-		suite.T().Log((testCase.name))
+		suite.T().Log(testCase.name)
 		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers}, testCase.originPeers[0])
 		op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, testCase.targetPeerRoles)
 

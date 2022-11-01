@@ -770,6 +770,9 @@ type ScheduleConfig struct {
 
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// OperatorTimeoutOffset is the offset of operator timeout, default is 0.
+	OperatorTimeoutOffset typeutil.Duration `toml:"operator-timeout-offset" json:"operator-timeout-offset"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -796,6 +799,7 @@ const (
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
 	defaultEnableDiagnostic          = false
+	defaultOperatorTimeoutOffset     = 0 * time.Second
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -880,6 +884,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
+
+	if !meta.IsDefined("operator-timeout-offset") {
+		adjustDuration(&c.OperatorTimeoutOffset, defaultOperatorTimeoutOffset)
 	}
 
 	// new cluster:v2, old cluster:v1

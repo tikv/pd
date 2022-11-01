@@ -50,13 +50,19 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
+	totalDuration    time.Duration
 }
 
 // NewOperator creates a new operator.
-func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
+func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64,
+	offset time.Duration, steps ...OpStep) *Operator {
 	level := core.Medium
 	if kind&OpAdmin != 0 {
 		level = core.Urgent
+	}
+	duration := offset.Seconds()
+	for _, v := range steps {
+		duration += v.Timeout(approximateSize).Seconds()
 	}
 	return &Operator{
 		desc:            desc,
@@ -70,6 +76,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
+		totalDuration:   time.Duration(duration) * time.Second,
 	}
 }
 
@@ -223,10 +230,8 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	if startTime, step := o.getCurrentTimeAndStep(); step != nil {
-		return o.status.CheckStepTimeout(startTime, step, o.ApproximateSize)
-	}
-	return false
+	return o.status.CheckStepTimeout(o.totalDuration)
+
 }
 
 // Len returns the operator's steps count.
@@ -425,5 +430,5 @@ func NewTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKi
 	if len(steps) == 0 {
 		steps = []OpStep{ChangePeerV2Leave{}}
 	}
-	return NewOperator(mockDesc, mockBrief, regionID, regionEpoch, kind, mockRegionSize, steps...)
+	return NewOperator(mockDesc, mockBrief, regionID, regionEpoch, kind, mockRegionSize, 0, steps...)
 }

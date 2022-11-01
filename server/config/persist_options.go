@@ -284,6 +284,18 @@ func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
 	o.SetScheduleConfig(v)
 }
 
+// GetOperatorTimeoutOffset returns the offset of operator timeout.
+func (o *PersistOptions) GetOperatorTimeoutOffset() time.Duration {
+	return o.GetScheduleConfig().OperatorTimeoutOffset.Duration
+}
+
+// SetOperatorTimeoutOffset to set the offset of operator timeout.
+func (o *PersistOptions) SetOperatorTimeoutOffset(offset time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.OperatorTimeoutOffset = typeutil.NewDuration(offset)
+	o.SetScheduleConfig(v)
+}
+
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()

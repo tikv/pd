@@ -135,7 +135,7 @@ func TestCheckStepTimeout(t *testing.T) {
 		// Timeout and status changed
 		trk := NewOpStatusTracker()
 		trk.To(STARTED)
-		re.Equal(v.status == TIMEOUT, trk.CheckStepTimeout(v.start, v.step, 0))
+		re.Equal(v.status == TIMEOUT, trk.CheckStepTimeout(SlowOperatorWaitTime))
 		re.Equal(v.status, trk.Status())
 	}
 }

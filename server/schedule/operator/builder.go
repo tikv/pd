@@ -370,7 +370,8 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 		return nil, b.err
 	}
 
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, b.steps...), nil
+	offset := b.GetOpts().GetOperatorTimeoutOffset()
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, b.approximateSize, offset, b.steps...), nil
 }
 
 // Initialize intermediate states.
