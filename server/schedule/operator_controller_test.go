@@ -638,7 +638,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 		suite.Equal(2, stream.MsgLength())
 
 		region4 := region3.Clone(
-			core.WithPromoteLearner(3),
+			core.WithRole(3, metapb.PeerRole_Voter),
 			core.WithIncConfVer(),
 		)
 		suite.True(steps[1].IsFinish(region4))
