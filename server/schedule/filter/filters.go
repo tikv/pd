@@ -34,16 +34,14 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 		return slice.AllOf(filters, func(i int) bool {
 			status := filters[i].Source(opt, s)
 			if !status.IsOK() {
-				if status != statusStoreRemoved {
-					if counter != nil {
-						counter.inc(source, filters[i].Type(), s.GetID(), 0)
-					} else {
-						sourceID := strconv.FormatUint(s.GetID(), 10)
-						filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
-					}
-					if collector != nil {
-						collector.Collect(plan.SetResource(s), plan.SetStatus(status))
-					}
+				if counter != nil {
+					counter.inc(source, filters[i].Type(), s.GetID(), 0)
+				} else {
+					sourceID := strconv.FormatUint(s.GetID(), 10)
+					filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
+				}
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
 				return false
 			}
@@ -60,22 +58,20 @@ func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, o
 		return slice.AnyOf(filters, func(i int) bool {
 			status := filters[i].Target(opt, s)
 			if !status.IsOK() {
-				if status != statusStoreRemoved {
-					cfilter, ok := filters[i].(comparingFilter)
-					sourceID := uint64(0)
-					if ok {
-						sourceID = cfilter.GetSourceStoreID()
-					}
-					if counter != nil {
-						counter.inc(target, filters[i].Type(), sourceID, s.GetID())
-					} else {
-						filterCounter.WithLabelValues(target.String(), filters[i].Scope(), filters[i].Type().String(),
-							strconv.FormatUint(sourceID, 10), targetID).Inc()
-					}
+				cfilter, ok := filters[i].(comparingFilter)
+				sourceID := uint64(0)
+				if ok {
+					sourceID = cfilter.GetSourceStoreID()
+				}
+				if counter != nil {
+					counter.inc(target, filters[i].Type(), sourceID, s.GetID())
+				} else {
+					filterCounter.WithLabelValues(target.String(), filters[i].Scope(), filters[i].Type().String(),
+						strconv.FormatUint(sourceID, 10), targetID).Inc()
+				}
 
-					if collector != nil {
-						collector.Collect(plan.SetResourceWithStep(s, 2), plan.SetStatus(status))
-					}
+				if collector != nil {
+					collector.Collect(plan.SetResourceWithStep(s, 2), plan.SetStatus(status))
 				}
 				return true
 			}
@@ -96,22 +92,20 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 			filter := filters[i]
 			status := filter.Target(opt, s)
 			if !status.IsOK() {
-				if status != statusStoreRemoved {
-					cfilter, ok := filter.(comparingFilter)
-					sourceID := uint64(0)
-					if ok {
-						sourceID = cfilter.GetSourceStoreID()
-					}
-					if counter != nil {
-						counter.inc(target, filter.Type(), sourceID, s.GetID())
-					} else {
-						targetIDStr := strconv.FormatUint(s.GetID(), 10)
-						sourceIDStr := strconv.FormatUint(sourceID, 10)
-						filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceIDStr, targetIDStr).Inc()
-					}
-					if collector != nil {
-						collector.Collect(plan.SetResource(s), plan.SetStatus(status))
-					}
+				cfilter, ok := filter.(comparingFilter)
+				sourceID := uint64(0)
+				if ok {
+					sourceID = cfilter.GetSourceStoreID()
+				}
+				if counter != nil {
+					counter.inc(target, filter.Type(), sourceID, s.GetID())
+				} else {
+					targetIDStr := strconv.FormatUint(s.GetID(), 10)
+					sourceIDStr := strconv.FormatUint(sourceID, 10)
+					filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceIDStr, targetIDStr).Inc()
+				}
+				if collector != nil {
+					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
 				return false
 			}
