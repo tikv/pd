@@ -317,9 +317,6 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 	wg.Wait()
 }
 
-<<<<<<< HEAD
-func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
-=======
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	re := require.New(t)
@@ -387,7 +384,6 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",

@@ -320,13 +320,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-<<<<<<< HEAD
-	retryInterval          = 1 * time.Second
-	maxRetryTimes          = 5
-=======
 	retryInterval          = 500 * time.Millisecond
 	maxRetryTimes          = 6
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
