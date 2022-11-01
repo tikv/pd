@@ -280,13 +280,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-<<<<<<< HEAD
-	retryInterval          = 1 * time.Second
-	maxRetryTimes          = 5
-=======
 	retryInterval          = 500 * time.Millisecond
 	maxRetryTimes          = 6
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -658,19 +653,10 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-<<<<<<< HEAD
-		retryTimeConsuming time.Duration
-		err                error
-		streamAddr         string
-		stream             pdpb.PD_TsoClient
-		cancel             context.CancelFunc
-=======
 		err        error
 		streamAddr string
 		stream     pdpb.PD_TsoClient
-		streamCtx  context.Context
 		cancel     context.CancelFunc
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -727,11 +713,7 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
-<<<<<<< HEAD
-=======
 	streamLoopTimer := time.NewTimer(c.option.timeout)
-tsoBatchLoop:
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 	for {
 		select {
 		case <-dispatcherCtx.Done():
@@ -746,24 +728,22 @@ tsoBatchLoop:
 		// Check stream and retry if necessary.
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			if retryTimeConsuming >= c.option.timeout {
-				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
-				retryTimeConsuming = 0
+			if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
 				continue
 			}
 			select {
 			case <-dispatcherCtx.Done():
 				return
-			case <-time.After(time.Second):
-				retryTimeConsuming += time.Second
+			case <-streamLoopTimer.C:
+				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+				c.ScheduleCheckLeader()
+				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
+				continue
+			case <-time.After(retryInterval):
 				continue
 			}
 		}
-		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
@@ -773,48 +753,6 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
-<<<<<<< HEAD
-=======
-		streamLoopTimer.Reset(c.option.timeout)
-		// Choose a stream to send the TSO gRPC request.
-	streamChoosingLoop:
-		for {
-			connectionCtx := c.chooseStream(&connectionCtxs)
-			if connectionCtx != nil {
-				streamAddr, stream, streamCtx, cancel = connectionCtx.streamAddr, connectionCtx.stream, connectionCtx.ctx, connectionCtx.cancel
-			}
-			// Check stream and retry if necessary.
-			if stream == nil {
-				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-				if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
-					continue streamChoosingLoop
-				}
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				case <-streamLoopTimer.C:
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
-					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.ScheduleCheckLeader()
-					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
-					continue tsoBatchLoop
-				case <-time.After(retryInterval):
-					continue streamChoosingLoop
-				}
-			}
-			select {
-			case <-streamCtx.Done():
-				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
-				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
-				connectionCtxs.Delete(streamAddr)
-				cancel()
-				stream = nil
-				continue
-			default:
-				break streamChoosingLoop
-			}
-		}
->>>>>>> d50e5fe43 (client: fix Stream timeout logic (#5551))
 		done := make(chan struct{})
 		dl := deadline{
 			timer:  time.After(c.option.timeout),
