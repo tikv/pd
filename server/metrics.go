@@ -118,17 +118,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	// it records the time cost of the region heartbeat request transported between tikv and pd.
-	// the total handler duration is the sum of the transport duration and the handle duration.
-	regionHeartbeatTransportDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "region_heartbeat_transport_seconds",
-			Help:      "Bucketed histogram of processing time (s) of region heartbeat request transport.",
-			Buckets:   prometheus.LinearBuckets(0, 1, 100), // 0s~100s
-		}, []string{"address", "store"})
-
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
