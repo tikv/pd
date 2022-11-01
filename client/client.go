@@ -280,8 +280,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = 1 * time.Second
-	maxRetryTimes          = 5
+	retryInterval          = 500 * time.Millisecond
+	maxRetryTimes          = 6
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -653,11 +653,10 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-		retryTimeConsuming time.Duration
-		err                error
-		streamAddr         string
-		stream             pdpb.PD_TsoClient
-		cancel             context.CancelFunc
+		err        error
+		streamAddr string
+		stream     pdpb.PD_TsoClient
+		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -714,6 +713,7 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+	streamLoopTimer := time.NewTimer(c.option.timeout)
 	for {
 		select {
 		case <-dispatcherCtx.Done():
@@ -728,24 +728,22 @@ func (c *client) handleDispatcher(
 		// Check stream and retry if necessary.
 		if stream == nil {
 			log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-			c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			if retryTimeConsuming >= c.option.timeout {
-				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
-				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-				c.ScheduleCheckLeader()
-				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
-				retryTimeConsuming = 0
+			if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
 				continue
 			}
 			select {
 			case <-dispatcherCtx.Done():
 				return
-			case <-time.After(time.Second):
-				retryTimeConsuming += time.Second
+			case <-streamLoopTimer.C:
+				err = errs.ErrClientCreateTSOStream.FastGenByArgs()
+				log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+				c.ScheduleCheckLeader()
+				c.revokeTSORequest(errors.WithStack(err), tbc.tsoRequestCh)
+				continue
+			case <-time.After(retryInterval):
 				continue
 			}
 		}
-		retryTimeConsuming = 0
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
@@ -835,7 +833,7 @@ type connectionContext struct {
 	cancel context.CancelFunc
 }
 
-func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
+func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.allowTSOFollowerProxy(dc) {
@@ -843,7 +841,9 @@ func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, con
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+		return false
 	}
+	return true
 }
 
 // tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
@@ -859,6 +859,8 @@ func (c *client) tryConnect(
 		networkErrNum uint64
 		err           error
 		stream        pdpb.PD_TsoClient
+		url           string
+		cc            *grpc.ClientConn
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
 		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
@@ -874,9 +876,11 @@ func (c *client) tryConnect(
 			return true
 		})
 	}
-	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
+
 	for i := 0; i < maxRetryTimes; i++ {
+		c.ScheduleCheckLeader()
+		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {
