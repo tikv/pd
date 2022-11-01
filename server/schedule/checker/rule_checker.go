@@ -152,14 +152,6 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
-		if c.isOfflinePeer(peer) {
-			if witness, ok := c.hasAvailableWitness(region, peer); ok {
-				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
-			}
-			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
-		}
 		if c.isDownPeer(region, peer) {
 			if c.isStoreDownTimeUnderMaxDownTime(peer.GetStoreId()) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
@@ -170,6 +162,14 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
+		}
+		if c.isOfflinePeer(peer) {
+			if witness, ok := c.hasAvailableWitness(region, peer); ok {
+				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
+				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+			}
+			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
+			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 		}
 		if c.isPendingPeer(region, peer) {
 			if witness, ok := c.hasAvailableWitness(region, peer); ok {
@@ -383,6 +383,12 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
 	for _, stats := range region.GetDownPeers() {
 		if stats.GetPeer().GetId() == peer.GetId() {
+			storeID := peer.GetStoreId()
+			store := c.cluster.GetStore(storeID)
+			if store == nil {
+				log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+				return false
+			}
 			return true
 		}
 	}
