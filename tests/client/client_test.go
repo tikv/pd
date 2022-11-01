@@ -318,16 +318,13 @@ func (s *clientTestSuite) TestTSOFollowerProxy(c *C) {
 }
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
-func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
+func (s *clientTestSuite) TestUnavailableTimeAfterLeaderIsReady(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
 	defer cluster.Destroy()
 
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	endpoints := s.runServer(c, cluster)
+	cli := setupCli(c, s.ctx, endpoints)
 
 	var wg sync.WaitGroup
 	var maxUnavailableTime, leaderReadyTime time.Time
@@ -343,8 +340,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 				maxUnavailableTime = time.Now()
 				continue
 			}
-			re.NoError(err)
-			re.Less(lastTS, ts)
+			c.Assert(err, IsNil)
+			c.Assert(lastTS, Less, ts)
 			lastTS = ts
 		}
 	}
@@ -361,7 +358,10 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		cluster.RunServers([]*tests.TestServer{leader})
 	}()
 	wg.Wait()
-	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+	c.Assert(maxUnavailableTime.Unix(), LessEqual, leaderReadyTime.Add(1*time.Second).Unix())
+	if maxUnavailableTime.Unix() == leaderReadyTime.Add(1*time.Second).Unix() {
+		c.Assert(maxUnavailableTime.Nanosecond(), Less, leaderReadyTime.Add(1*time.Second).Nanosecond())
+	}
 
 	// test kill pd leader pod or network of leader is unreachable
 	wg.Add(1 + 1)
@@ -370,20 +370,20 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		leader := cluster.GetServer(cluster.GetLeader())
-		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+		c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"), IsNil)
 		leader.Stop()
 		cluster.WaitLeader()
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+		c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
 		leaderReadyTime = time.Now()
 	}()
 	wg.Wait()
-	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+	c.Assert(maxUnavailableTime.Unix(), LessEqual, leaderReadyTime.Add(1*time.Second).Unix())
+	if maxUnavailableTime.Unix() == leaderReadyTime.Add(1*time.Second).Unix() {
+		c.Assert(maxUnavailableTime.Nanosecond(), Less, leaderReadyTime.Add(1*time.Second).Nanosecond())
+	}
 }
 
-func TestGlobalAndLocalTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func (s *clientTestSuite) TestGlobalAndLocalTSO(c *C) {
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
