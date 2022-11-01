@@ -334,6 +334,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	targetLeader := r.selectAvailableLeaderStore(group, region, targetPeers, r.ordinaryEngine)
 	if targetLeader == 0 {
 		scatterCounter.WithLabelValues("no-leader", "").Inc()
+		fmt.Println("no-leader")
 		return nil
 	}
 
@@ -447,16 +448,11 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceSto
 }
 
 // selectAvailableLeaderStore select the target leader store from the candidates. The candidates would be collected by
-// the existed peers store depended on the leader counts in the group level.
+// the existed peers store depended on the leader counts in the group level. Please use this func before scatter spacial engines.
 func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
-	leader := region.GetLeader()
-	if leader == nil {
-		log.Error("failed to get the region leader", zap.Uint64("region-id", region.GetID()), errs.ZapError(errs.ErrLeaderNil))
-		return 0
-	}
-	sourceStore := r.cluster.GetStore(leader.GetStoreId())
+	sourceStore := r.cluster.GetStore(region.GetLeader().GetStoreId())
 	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", leader.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
+		log.Error("failed to get the store", zap.Uint64("store-id", region.GetLeader().GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 		return 0
 	}
 	leaderCandidateStores := make([]uint64, 0)
@@ -466,10 +462,6 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 		store := r.cluster.GetStore(storeID)
 		if store == nil {
 			return 0
-		}
-		engine := store.GetLabelValue(core.EngineKey)
-		if len(engine) >= 1 {
-			continue
 		}
 		if filter == nil || filter.Target(r.cluster.GetOpts(), store).IsOK() {
 			leaderCandidateStores = append(leaderCandidateStores, storeID)
