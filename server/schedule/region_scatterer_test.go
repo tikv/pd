@@ -533,6 +533,75 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
 
+func TestRegionHasLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 8 stores.
+	voterCount := 6
+	storeCount := 8
+	for i := uint64(1); i <= 6; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z1"})
+	}
+	for i := uint64(7); i <= 8; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
+	}
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z1"},
+			},
+		},
+	})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z2"},
+			},
+		},
+	})
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		scatterer.Scatter(tc.AddRegionWithLearner(uint64(i), uint64(1), []uint64{uint64(2), uint64(3)}, []uint64{7}), fmt.Sprintf("t%d", i))
+	}
+	checkLeader := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= uint64(storeCount); i++ {
+			count := ss.TotalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		re.LessOrEqual(max-min, uint64(2))
+		for i := uint64(voterCount) + 1; i <= uint64(storeCount); i++ {
+			count := ss.TotalCountByStore(i)
+			re.LessOrEqual(count, uint64(0))
+		}
+	}
+	checkLeader(scatterer.ordinaryEngine.selectedLeader)
+}
+
 // TestSelectedStores tests if the peer count has changed due to the picking strategy.
 // Ref https://github.com/tikv/pd/issues/4565
 func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
