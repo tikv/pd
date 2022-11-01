@@ -29,11 +29,13 @@ type StoreLoadDetail struct {
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
+	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
+		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
-			StoreByteRate:  0.0,
-			StoreKeyRate:   0.0,
-			StoreQueryRate: 0.0,
+			StoreByteRate:  storeByteRate,
+			StoreKeyRate:   storeKeyRate,
+			StoreQueryRate: storeQueryRate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
@@ -51,8 +53,6 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			queryRate += peer.Loads[QueryDim]
 		}
 	}
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
-		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 
 	return &HotPeersStat{
 		TotalBytesRate: byteRate,
@@ -142,18 +142,6 @@ func (s *StoreSummaryInfo) IsTiFlash() bool {
 // SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
 func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 	s.isTiFlash = true
-}
-
-// GetPendingInfluence returns the current pending influence.
-func GetPendingInfluence(stores []*core.StoreInfo) map[uint64]*Influence {
-	stInfos := SummaryStoreInfos(stores)
-	ret := make(map[uint64]*Influence, len(stInfos))
-	for id, info := range stInfos {
-		if info.PendingSum != nil {
-			ret[id] = info.PendingSum
-		}
-	}
-	return ret
 }
 
 // StoreLoad records the current load.

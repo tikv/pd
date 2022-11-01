@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -42,13 +43,13 @@ type Node struct {
 	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
-	tasks                    map[uint64]Task
+	tasks                    map[uint64]*Task
 	client                   Client
 	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
-	ioRate                   int64
+	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
 }
 
@@ -90,15 +91,17 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		cancel()
 		return nil, err
 	}
+	ratio := int64(time.Second) / config.SimTickInterval.Milliseconds()
+	speed := config.StoreIOMBPerSecond * units.MiB * ratio
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
 		client:                   client,
 		ctx:                      ctx,
 		cancel:                   cancel,
-		tasks:                    make(map[uint64]Task),
+		tasks:                    make(map[uint64]*Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
-		ioRate:                   config.StoreIOMBPerSecond * units.MiB,
+		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
 	}, nil
 }
@@ -122,7 +125,7 @@ func (n *Node) receiveRegionHeartbeat() {
 	for {
 		select {
 		case resp := <-n.receiveRegionHeartbeatCh:
-			task := responseToTask(resp, n.raftEngine)
+			task := responseToTask(n.raftEngine, resp)
 			if task != nil {
 				n.AddTask(task)
 			}
@@ -153,9 +156,8 @@ func (n *Node) stepTask() {
 	n.Lock()
 	defer n.Unlock()
 	for _, task := range n.tasks {
-		task.Step(n.raftEngine)
-		if task.IsFinished() {
-			simutil.Logger.Debug("task finished",
+		if isFinished := task.Step(n.raftEngine); isFinished {
+			simutil.Logger.Debug("task status",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
 				zap.String("task", task.Desc()))
@@ -243,7 +245,7 @@ func (n *Node) reportRegionChange() {
 }
 
 // AddTask adds task in this node.
-func (n *Node) AddTask(task Task) {
+func (n *Node) AddTask(task *Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {

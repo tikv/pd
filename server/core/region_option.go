@@ -325,12 +325,12 @@ func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	}
 }
 
-// WithPromoteLearner promotes the learner.
-func WithPromoteLearner(peerID uint64) RegionCreateOption {
+// WithRole changes the role.
+func WithRole(peerID uint64, role metapb.PeerRole) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
 			if p.GetId() == peerID {
-				p.Role = metapb.PeerRole_Voter
+				p.Role = role
 			}
 		}
 	}

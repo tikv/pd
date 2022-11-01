@@ -59,7 +59,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.EnableAudit)
+	suite.True(sc.EnableAudit)
 
 	ms := map[string]interface{}{
 		"enable-audit":      "true",

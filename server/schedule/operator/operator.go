@@ -231,7 +231,6 @@ func (o *Operator) CheckTimeout() bool {
 		return false
 	}
 	return o.status.CheckStepTimeout(o.totalDuration)
-
 }
 
 // Len returns the operator's steps count.

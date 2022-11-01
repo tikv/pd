@@ -138,6 +138,7 @@ func TestConfig(t *testing.T) {
 
 	args = []string{"-u", pdAddr, "config", "set", "operator-timeout-offset", "10s"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
 	re.Equal("10s", svr.GetScheduleConfig().OperatorTimeoutOffset.String())
 
 	// config show replication
