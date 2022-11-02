@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/server/storage"
 )
 
-func TestTransferLeader(t *testing.T) {
+func TestTransferWitnessLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -45,7 +45,7 @@ func TestTransferLeader(t *testing.T) {
 	// Add regions 1 with leader in stores 1
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	sl, err := schedule.CreateScheduler(TransferLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
@@ -55,14 +55,14 @@ func TestTransferLeader(t *testing.T) {
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 }
 
-func TestTransferLeaderWithUnhealthyPeer(t *testing.T) {
+func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	sl, err := schedule.CreateScheduler(TransferLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	// Add stores 1, 2, 3

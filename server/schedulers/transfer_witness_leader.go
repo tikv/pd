@@ -27,27 +27,27 @@ import (
 )
 
 const (
-	// TransferLeaderName is transfer leader scheduler name.
-	TransferLeaderName = "transfer-leader-scheduler"
-	// TransferLeaderType is transfer leader scheduler type.
-	TransferLeaderType = "transfer-leader"
-	// TransferLeaderBatchSize is the number of operators to to transfer
+	// TransferWitnessLeaderName is transfer witness leader scheduler name.
+	TransferWitnessLeaderName = "transfer-witness-leader-scheduler"
+	// TransferWitnessLeaderType is transfer witness leader scheduler type.
+	TransferWitnessLeaderType = "transfer-witness-leader"
+	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
-	TransferLeaderBatchSize = 3
-	// TransferLeaderRecvMaxRegionSize is the max number of region can receive
+	TransferWitnessLeaderBatchSize = 3
+	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
-	TransferLeaderRecvMaxRegionSize = 1000
+	TransferWitnessLeaderRecvMaxRegionSize = 1000
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(TransferLeaderType, func(args []string) schedule.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(TransferWitnessLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			return nil
 		}
 	})
 
-	schedule.RegisterScheduler(TransferLeaderType, func(opController *schedule.OperatorController, _ endpoint.ConfigStorage, _ schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		return newTransferLeaderScheduler(opController), nil
+	schedule.RegisterScheduler(TransferWitnessLeaderType, func(opController *schedule.OperatorController, _ endpoint.ConfigStorage, _ schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		return newTransferWitnessLeaderScheduler(opController), nil
 	})
 }
 
@@ -56,23 +56,24 @@ type transferLeaderScheduler struct {
 	regions chan *core.RegionInfo
 }
 
-// newTransferLeaderScheduler creates an admin scheduler that transfers leader of a region.
-func newTransferLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
+// newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
+func newTransferWitnessLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	return &transferLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
-		regions:       make(chan *core.RegionInfo, TransferLeaderRecvMaxRegionSize),
+		regions:       make(chan *core.RegionInfo, TransferWitnessLeaderRecvMaxRegionSize),
 	}
 }
 
 func (s *transferLeaderScheduler) GetName() string {
-	return TransferLeaderName
+	return TransferWitnessLeaderName
 }
 
 func (s *transferLeaderScheduler) GetType() string {
-	return TransferLeaderType
+	return TransferWitnessLeaderType
 }
 
 func (s *transferLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+	// TODO: make sure the restriction is reasonable
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -82,15 +83,15 @@ func (s *transferLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 
 func (s *transferLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	return s.scheduleTransferLeaderBatch(s.GetName(), s.GetType(), cluster, TransferLeaderBatchSize), nil
+	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, TransferWitnessLeaderBatchSize), nil
 }
 
-func (s *transferLeaderScheduler) scheduleTransferLeaderBatch(name, typ string, cluster schedule.Cluster, batchSize int) []*operator.Operator {
+func (s *transferLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster schedule.Cluster, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
-			op, err := s.scheduleTransferLeader(name, typ, cluster, region)
+			op, err := s.scheduleTransferWitnessLeader(name, typ, cluster, region)
 			if err != nil {
 				log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 				continue
@@ -107,7 +108,7 @@ func (s *transferLeaderScheduler) scheduleTransferLeaderBatch(name, typ string, 
 	return ops
 }
 
-func (s *transferLeaderScheduler) scheduleTransferLeader(name, typ string, cluster schedule.Cluster, region *core.RegionInfo) (*operator.Operator, error) {
+func (s *transferLeaderScheduler) scheduleTransferWitnessLeader(name, typ string, cluster schedule.Cluster, region *core.RegionInfo) (*operator.Operator, error) {
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -133,7 +134,7 @@ func (s *transferLeaderScheduler) scheduleTransferLeader(name, typ string, clust
 	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
 }
 
-func NeedTransferLeader(region *core.RegionInfo) bool {
+func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
 	return region.GetLeader().IsWitness
 }
 

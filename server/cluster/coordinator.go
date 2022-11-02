@@ -968,10 +968,14 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 	return s.GetDelayUntil(), nil
 }
 
-func (c *coordinator) CheckTransferLeader(region *core.RegionInfo) {
-	if s, ok := c.schedulers[schedulers.TransferLeaderName]; ok {
-		if schedulers.NeedTransferLeader(region) {
-			schedulers.RecvRegionInfo(s.Scheduler) <- region
+func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
+	if s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]; ok {
+		if schedulers.NeedTransferWitnessLeader(region) {
+			select {
+			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
+			default:
+				log.Warn("transfer witness leader recv region channel full", zap.Uint64("drop region-id", region.GetID()))
+			}
 		}
 	}
 }
