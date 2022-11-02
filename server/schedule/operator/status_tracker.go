@@ -120,7 +120,7 @@ func (trk *OpStatusTracker) CheckStepTimeout(duration time.Duration) bool {
 	trk.rw.Lock()
 	defer trk.rw.Unlock()
 	if trk.current == STARTED {
-		start := trk.ReachTimeOf(STARTED)
+		start := trk.getTime(STARTED)
 		if time.Since(start) < duration {
 			return false
 		}
