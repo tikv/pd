@@ -49,6 +49,21 @@ groups:
       value: '{{ $value }}'
       summary: PD_cluster_lost_connect_tikv_nums
 
+  - alert: PD_cluster_unhealthy_tikv_nums
+    expr: (sum ( pd_cluster_status{type="store_unhealth_count"} ) by (instance)
+      > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+    for: 1m
+    labels:
+      env: ENV_LABELS_ENV
+      expr: (sum ( pd_cluster_status{type="store_unhealth_count"} ) by (instance)
+        > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
+      level: warning
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{
+        $value }}'
+      summary: PD_cluster_unhealth_tikv_nums
+      value: '{{ $value }}'
+
   - alert: PD_cluster_low_space
     expr: (sum(pd_cluster_status{type="store_low_space_count"}) by (instance) > 0) and (sum(etcd_server_is_leader) by (instance) > 0)
     for: 1m

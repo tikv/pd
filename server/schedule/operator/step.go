@@ -142,6 +142,7 @@ func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *
 type AddPeer struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -159,6 +160,9 @@ func (ap AddPeer) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreVoter(ap.ToStore); peer != nil {
 		if peer.GetId() != ap.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", ap.String()), zap.Uint64("obtain-voter", peer.GetId()))
+			return false
+		}
+		if peer.GetIsWitness() != ap.IsWitness {
 			return false
 		}
 		return region.GetPendingVoter(peer.GetId()) == nil
@@ -203,13 +207,132 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 		// The newly added peer is pending.
 		return nil
 	}
-	return createResponse(addNode(ap.PeerID, ap.ToStore), useConfChangeV2)
+	return createResponse(addNode(ap.PeerID, ap.ToStore, ap.IsWitness), useConfChangeV2)
+}
+
+// BecomeWitness is an OpStep that makes a peer become a witness.
+type BecomeWitness struct {
+	StoreID, PeerID uint64
+}
+
+// ConfVerChanged returns the delta value for version increased by this step.
+func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(bw.StoreID)
+	return typeutil.BoolToUint64(peer.GetId() == bw.PeerID)
+}
+
+func (bw BecomeWitness) String() string {
+	return fmt.Sprintf("change peer %v on store %v to witness", bw.PeerID, bw.StoreID)
+}
+
+// IsFinish checks if current step is finished.
+func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
+	if peer := region.GetStorePeer(bw.StoreID); peer != nil {
+		if peer.GetId() != bw.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", bw.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
+		}
+		return peer.IsWitness
+	}
+	return false
+}
+
+// CheckInProgress checks if the step is in the progress of advancing.
+func (bw BecomeWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, bw.StoreID); err != nil {
+		return err
+	}
+	peer := region.GetStorePeer(bw.StoreID)
+	if peer == nil || peer.GetId() != bw.PeerID {
+		return errors.New("peer does not exist")
+	}
+	return nil
+}
+
+// Influence calculates the store difference that current step makes.
+func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(bw.StoreID)
+
+	regionSize := region.GetApproximateSize()
+	to.RegionSize -= regionSize
+	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
+}
+
+// Timeout returns true if the step is timeout.
+func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
+	return time.Since(start) > fastStepWaitDuration(regionSize)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
+		return createResponse(addLearnerNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
+	}
+	return createResponse(addNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
+}
+
+// BecomeNonWitness is an OpStep that makes a peer become a non-witness.
+type BecomeNonWitness struct {
+	StoreID, PeerID uint64
+}
+
+// ConfVerChanged returns the delta value for version increased by this step.
+func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(bn.StoreID)
+	return typeutil.BoolToUint64(peer.GetId() == bn.PeerID)
+}
+
+func (bn BecomeNonWitness) String() string {
+	return fmt.Sprintf("change peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
+}
+
+// IsFinish checks if current step is finished.
+func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
+	if peer := region.GetStorePeer(bn.StoreID); peer != nil {
+		if peer.GetId() != bn.PeerID {
+			log.Warn("obtain unexpected peer", zap.String("expect", bn.String()), zap.Uint64("obtain-non-witness", peer.GetId()))
+			return false
+		}
+		return region.GetPendingPeer(peer.GetId()) == nil && !peer.IsWitness
+	}
+	return false
+}
+
+// CheckInProgress checks if the step is in the progress of advancing.
+func (bn BecomeNonWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	if err := validateStore(ci, bn.StoreID); err != nil {
+		return err
+	}
+	peer := region.GetStorePeer(bn.StoreID)
+	if peer == nil || peer.GetId() != bn.PeerID {
+		return errors.New("peer does not exist")
+	}
+	return nil
+}
+
+// Influence calculates the store difference that current step makes.
+func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	to := opInfluence.GetStoreInfluence(bn.StoreID)
+
+	regionSize := region.GetApproximateSize()
+	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+}
+
+// Timeout returns true if the step is timeout
+func (bn BecomeNonWitness) Timeout(start time.Time, regionSize int64) bool {
+	return time.Since(start) > slowStepWaitDuration(regionSize)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	return createResponse(addLearnerNode(bn.PeerID, bn.StoreID, false), useConfChangeV2)
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
 type AddLearner struct {
 	ToStore, PeerID uint64
 	IsLightWeight   bool
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -227,6 +350,9 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(al.ToStore); peer != nil {
 		if peer.GetId() != al.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", al.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
+		}
+		if peer.GetIsWitness() != al.IsWitness {
 			return false
 		}
 		return region.GetPendingLearner(peer.GetId()) == nil
@@ -276,31 +402,34 @@ func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb
 		// The newly added peer is pending.
 		return nil
 	}
-	return createResponse(addLearnerNode(al.PeerID, al.ToStore), useConfChangeV2)
+	return createResponse(addLearnerNode(al.PeerID, al.ToStore, al.IsWitness), useConfChangeV2)
 }
 
 // PromoteLearner is an OpStep that promotes a region learner peer to normal voter.
 type PromoteLearner struct {
 	ToStore, PeerID uint64
+	IsWitness       bool
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
+// It is also used by ChangePeerV2Leave. Since there are currently four roles,
+// we need to confirm whether it is a Voter, not a DemotingVoter, etc.
 func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStoreVoter(pl.ToStore)
-	return typeutil.BoolToUint64(peer.GetId() == pl.PeerID)
+	return typeutil.BoolToUint64(peer.GetId() == pl.PeerID && peer.GetRole() == metapb.PeerRole_Voter)
 }
 
 func (pl PromoteLearner) String() string {
 	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
 }
 
-// IsFinish checks if current step is finished.
+// IsFinish checks if current step is finished. It is also used by ChangePeerV2Leave.
 func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreVoter(pl.ToStore); peer != nil {
 		if peer.GetId() != pl.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		return peer.GetId() == pl.PeerID
+		return peer.GetId() == pl.PeerID && peer.GetRole() == metapb.PeerRole_Voter
 	}
 	return false
 }
@@ -324,7 +453,7 @@ func (pl PromoteLearner) Timeout(regionSize int64) time.Duration {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	return createResponse(addNode(pl.PeerID, pl.ToStore), useConfChangeV2)
+	return createResponse(addNode(pl.PeerID, pl.ToStore, pl.IsWitness), useConfChangeV2)
 }
 
 // RemovePeer is an OpStep that removes a region peer.
@@ -513,16 +642,22 @@ func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdp
 // Note: It is not an OpStep, only a sub step in ChangePeerV2Enter and ChangePeerV2Leave.
 type DemoteVoter struct {
 	ToStore, PeerID uint64
+	IsWitness       bool
 }
 
 func (dv DemoteVoter) String() string {
-	return fmt.Sprintf("demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
+	info := "non-witness"
+	if dv.IsWitness {
+		info = "witness"
+	}
+	return fmt.Sprintf("demote voter peer %v on store %v to %v learner", dv.PeerID, dv.ToStore, info)
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
-func (dv DemoteVoter) ConfVerChanged(region *core.RegionInfo) bool {
-	peer := region.GetStoreLearner(dv.ToStore)
-	return peer.GetId() == dv.PeerID
+func (dv DemoteVoter) ConfVerChanged(region *core.RegionInfo) uint64 {
+	peer := region.GetStorePeer(dv.ToStore)
+	// the demoting peer may be removed later.
+	return typeutil.BoolToUint64(peer == nil || (peer.GetId() == dv.PeerID && peer.GetRole() == metapb.PeerRole_Learner))
 }
 
 // IsFinish checks if current step is finished.
@@ -530,8 +665,12 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 	if peer := region.GetStoreLearner(dv.ToStore); peer != nil {
 		if peer.GetId() != dv.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
+			return false
 		}
-		return peer.GetId() == dv.PeerID
+		if peer.IsWitness != dv.IsWitness {
+			return false
+		}
+		return region.GetPendingLearner(peer.GetId()) == nil
 	}
 	return false
 }
@@ -543,7 +682,7 @@ func (dv DemoteVoter) Timeout(regionSize int64) time.Duration {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (dv DemoteVoter) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	return createResponse(addLearnerNode(dv.PeerID, dv.ToStore), useConfChangeV2)
+	return createResponse(addLearnerNode(dv.PeerID, dv.ToStore, dv.IsWitness), useConfChangeV2)
 }
 
 // ChangePeerV2Enter is an OpStep that uses joint consensus to request all PromoteLearner and DemoteVoter.
@@ -573,7 +712,8 @@ func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
-		peer := region.GetStoreVoter(dv.ToStore)
+		peer := region.GetStorePeer(dv.ToStore)
+		// the demoting peer may be removed later.
 		if peer != nil && (peer.GetId() != dv.PeerID || !core.IsLearnerOrDemotingVoter(peer)) {
 			return 0
 		}
@@ -588,16 +728,16 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 		if peer != nil && peer.GetId() != pl.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
 		}
-		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_IncomingVoter {
+		if peer.GetId() != pl.PeerID || !core.IsVoterOrIncomingVoter(peer) {
 			return false
 		}
 	}
 	for _, dv := range cpe.DemoteVoters {
-		peer := region.GetStoreVoter(dv.ToStore)
+		peer := region.GetStorePeer(dv.ToStore)
 		if peer != nil && peer.GetId() != dv.PeerID {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 		}
-		if peer.GetId() != dv.PeerID || peer.GetRole() != metapb.PeerRole_DemotingVoter {
+		if peer.GetId() != dv.PeerID || !core.IsLearnerOrDemotingVoter(peer) {
 			return false
 		}
 	}
@@ -613,12 +753,10 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.Reg
 			return errors.New("peer does not exist")
 		}
 		switch peer.GetRole() {
-		case metapb.PeerRole_Learner:
+		case metapb.PeerRole_Learner, metapb.PeerRole_Voter:
 			notInJointState = true
 		case metapb.PeerRole_IncomingVoter:
 			inJointState = true
-		case metapb.PeerRole_Voter:
-			return errors.New("peer already is a voter")
 		case metapb.PeerRole_DemotingVoter:
 			return errors.New("cannot promote a demoting voter")
 		default:
@@ -631,12 +769,10 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.Reg
 			return errors.New("peer does not exist")
 		}
 		switch peer.GetRole() {
-		case metapb.PeerRole_Voter:
+		case metapb.PeerRole_Voter, metapb.PeerRole_Learner:
 			notInJointState = true
 		case metapb.PeerRole_DemotingVoter:
 			inJointState = true
-		case metapb.PeerRole_Learner:
-			return errors.New("peer already is a learner")
 		case metapb.PeerRole_IncomingVoter:
 			return errors.New("cannot demote a incoming voter")
 		default:
@@ -706,13 +842,12 @@ func (cpl ChangePeerV2Leave) String() string {
 // ConfVerChanged returns the delta value for version increased by this step.
 func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
 	for _, pl := range cpl.PromoteLearners {
-		peer := region.GetStoreVoter(pl.ToStore)
-		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
+		if pl.ConfVerChanged(region) == 0 {
 			return 0
 		}
 	}
 	for _, dv := range cpl.DemoteVoters {
-		if region.GetStorePeer(dv.PeerID) != nil && !dv.ConfVerChanged(region) {
+		if dv.ConfVerChanged(region) == 0 {
 			return 0
 		}
 	}
@@ -722,11 +857,7 @@ func (cpl ChangePeerV2Leave) ConfVerChanged(region *core.RegionInfo) uint64 {
 // IsFinish checks if current step is finished.
 func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 	for _, pl := range cpl.PromoteLearners {
-		peer := region.GetStoreVoter(pl.ToStore)
-		if peer != nil && peer.GetId() != pl.PeerID {
-			log.Warn("obtain unexpected peer", zap.String("expect", pl.String()), zap.Uint64("obtain-voter", peer.GetId()))
-		}
-		if peer.GetId() != pl.PeerID || peer.GetRole() != metapb.PeerRole_Voter {
+		if !pl.IsFinish(region) {
 			return false
 		}
 	}
@@ -850,24 +981,26 @@ func fastStepWaitDuration(regionSize int64) time.Duration {
 	return wait
 }
 
-func addNode(id, storeID uint64) *pdpb.ChangePeer {
+func addNode(id, storeID uint64, isWitness bool) *pdpb.ChangePeer {
 	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddNode,
 		Peer: &metapb.Peer{
-			Id:      id,
-			StoreId: storeID,
-			Role:    metapb.PeerRole_Voter,
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Voter,
+			IsWitness: isWitness,
 		},
 	}
 }
 
-func addLearnerNode(id, storeID uint64) *pdpb.ChangePeer {
+func addLearnerNode(id, storeID uint64, isWitness bool) *pdpb.ChangePeer {
 	return &pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
 		Peer: &metapb.Peer{
-			Id:      id,
-			StoreId: storeID,
-			Role:    metapb.PeerRole_Learner,
+			Id:        id,
+			StoreId:   storeID,
+			Role:      metapb.PeerRole_Learner,
+			IsWitness: isWitness,
 		},
 	}
 }

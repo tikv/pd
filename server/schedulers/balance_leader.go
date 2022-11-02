@@ -177,12 +177,13 @@ func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.R
 type balanceLeaderScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	name         string
-	conf         *balanceLeaderSchedulerConfig
-	handler      http.Handler
-	opController *schedule.OperatorController
-	filters      []filter.Filter
-	counter      *prometheus.CounterVec
+	name          string
+	conf          *balanceLeaderSchedulerConfig
+	handler       http.Handler
+	opController  *schedule.OperatorController
+	filters       []filter.Filter
+	counter       *prometheus.CounterVec
+	filterCounter *filter.Counter
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
@@ -197,6 +198,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		handler:       newBalanceLeaderHandler(conf),
 		opController:  opController,
 		counter:       balanceLeaderCounter,
+		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
 	for _, option := range options {
 		option(s)
@@ -363,8 +365,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.LeaderScore(solver.kind.Policy, solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts(), collector), false, scoreFunc)
-	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts(), nil), true, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts(), collector, l.filterCounter), false, scoreFunc)
+	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts(), nil, l.filterCounter), true, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -392,6 +394,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			}
 		}
 	}
+	l.filterCounter.Flush()
 	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result, collector.GetPlans()
 }
@@ -413,7 +416,6 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLea
 	}
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
-		schedulerCounter.WithLabelValues(l.GetName(), "total").Inc()
 		if op = creator(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
@@ -473,7 +475,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector)
+	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector, l.filterCounter)
 	leaderSchedulePolicy := opts.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(targets[i].GetID())
@@ -523,7 +525,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{solver.target}).
-		FilterTarget(opts, nil, finalFilters...).
+		FilterTarget(opts, nil, l.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))
@@ -540,6 +542,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.step++
 	defer func() { solver.step-- }()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(l.GetName()), solver.targetStoreScore(l.GetName())
 	if !solver.shouldBalance(l.GetName()) {
 		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
 		if collector != nil {

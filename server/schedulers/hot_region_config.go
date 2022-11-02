@@ -44,7 +44,7 @@ const (
 
 var defaultPrioritiesConfig = prioritiesConfig{
 	read:        []string{statistics.QueryPriority, statistics.BytePriority},
-	writeLeader: []string{statistics.KeyPriority, statistics.BytePriority},
+	writeLeader: []string{statistics.QueryPriority, statistics.BytePriority},
 	writePeer:   []string{statistics.BytePriority, statistics.KeyPriority},
 }
 
@@ -73,7 +73,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		DstToleranceRatio:      1.05, // Tolerate 5% difference
 		StrictPickingStore:     true,
 		EnableForTiFlash:       true,
-		RankFormulaVersion:     "", // Use default value when it is "". Depends on getRankFormulaVersionLocked.
+		RankFormulaVersion:     "v2",
 		ForbidRWType:           "none",
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
@@ -305,7 +305,7 @@ func (conf *hotRegionSchedulerConfig) getRankFormulaVersionLocked() string {
 	switch conf.RankFormulaVersion {
 	case "v2":
 		return "v2"
-	default:
+	default: // Use "v1" when it is ""
 		return "v1"
 	}
 }
