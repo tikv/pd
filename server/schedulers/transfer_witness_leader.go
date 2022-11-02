@@ -135,6 +135,9 @@ func (s *transferLeaderScheduler) scheduleTransferWitnessLeader(name, typ string
 }
 
 func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
+	if region == nil || region.GetLeader() == nil {
+		return false
+	}
 	return region.GetLeader().IsWitness
 }
 

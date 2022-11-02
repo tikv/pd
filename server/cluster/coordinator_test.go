@@ -859,6 +859,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
 	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
@@ -877,7 +878,7 @@ func TestRemoveScheduler(t *testing.T) {
 	co.run()
 	re.Empty(co.schedulers)
 	// the option remains default scheduler
-	re.Len(co.cluster.opt.GetSchedulers(), 4)
+	re.Len(co.cluster.opt.GetSchedulers(), 5)
 	co.stop()
 	co.wg.Wait()
 }
