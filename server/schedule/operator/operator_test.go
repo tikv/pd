@@ -136,10 +136,9 @@ func (suite *operatorTestSuite) TestOperator() {
 	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
 	suite.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-2*FastOperatorWaitTime+time.Second))
 	suite.False(op.CheckTimeout())
-	op.stepsTime[op.currentStep-1] = op.GetReachTimeOf(STARTED).Unix()
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-2*FastOperatorWaitTime-time.Second))
 	suite.True(op.CheckTimeout())
 	res, err := json.Marshal(op)
 	suite.NoError(err)
@@ -159,7 +158,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	suite.True(op.status.To(STARTED))
 	suite.True(op.status.To(TIMEOUT))
 	suite.False(op.CheckSuccess())
-	suite.False(op.CheckTimeout())
+	suite.True(op.CheckTimeout())
 }
 
 func (suite *operatorTestSuite) TestInfluence() {
@@ -374,7 +373,7 @@ func (suite *operatorTestSuite) TestCheck() {
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
 		suite.Equal(STARTED, op.Status())
-		op.stepsTime[op.currentStep-1] = time.Now().Add(-SlowOperatorWaitTime).Unix()
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime-2*FastOperatorWaitTime))
 		suite.NotNil(op.Check(region))
 		suite.Equal(TIMEOUT, op.Status())
 	}

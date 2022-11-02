@@ -259,8 +259,8 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 }
 
 // Timeout returns true if the step is timeout.
-func (bw BecomeWitness) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > fastStepWaitDuration(regionSize)
+func (bw BecomeWitness) Timeout(regionSize int64) time.Duration {
+	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -319,8 +319,8 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 }
 
 // Timeout returns true if the step is timeout
-func (bn BecomeNonWitness) Timeout(start time.Time, regionSize int64) bool {
-	return time.Since(start) > slowStepWaitDuration(regionSize)
+func (bn BecomeNonWitness) Timeout(regionSize int64) time.Duration {
+	return slowStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.

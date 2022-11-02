@@ -50,7 +50,7 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
-	MaxDuration      time.Duration
+	maxDuration      time.Duration
 }
 
 // NewOperator creates a new operator.
@@ -75,7 +75,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
-		MaxDuration:     time.Duration(maxDuration) * time.Second,
+		maxDuration:     time.Duration(maxDuration) * time.Second,
 	}
 }
 
@@ -229,8 +229,7 @@ func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	return o.status.CheckStepTimeout(o.MaxDuration)
-
+	return o.status.CheckStepTimeout(o.maxDuration)
 }
 
 // Len returns the operator's steps count.
