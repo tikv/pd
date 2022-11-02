@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/rangetree"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
@@ -573,6 +574,20 @@ func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
 }
 
+func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
+	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
+}
+
+func (r *RegionInfo) isRegionRecreated() bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we exclude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
 type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
@@ -688,7 +703,7 @@ func (rm regionMap) Get(id uint64) *regionItem {
 // If the regionItem already exists, it will be overwritten.
 // Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
 func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
-	item := &regionItem{region: region}
+	item := &regionItem{RegionInfo: region}
 	rm[region.GetID()] = item
 	return item
 }
@@ -724,7 +739,7 @@ func NewRegionsInfo() *RegionsInfo {
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 	if item := r.regions.Get(regionID); item != nil {
-		return item.region
+		return item.RegionInfo
 	}
 	return nil
 }
@@ -736,7 +751,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	rangeChanged := true // This Region is new, or its range has changed.
 	if item = r.regions.Get(region.GetID()); item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin := item.region
+		origin := item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
@@ -751,14 +766,14 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
 			// Update the RegionInfo in the regionItem.
-			item.region = region
+			item.RegionInfo = region
 			return
 		}
 		// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
 		// Update the RegionInfo in the regionItem.
-		item.region = region
+		item.RegionInfo = region
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
 		item = r.regions.AddNew(region)
@@ -949,7 +964,7 @@ func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
 	regions := make([]*RegionInfo, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, item.region)
+		regions = append(regions, item.RegionInfo)
 	}
 	return regions
 }
@@ -1013,7 +1028,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	regions := make([]*metapb.Region, 0, r.regions.Len())
 	for _, item := range r.regions {
-		regions = append(regions, typeutil.DeepClone(item.region.meta, RegionFactory))
+		regions = append(regions, typeutil.DeepClone(item.meta, RegionFactory))
 	}
 	return regions
 }
@@ -1096,7 +1111,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(region).region
+		return leaders.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1104,7 +1119,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 // GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(region).region
+		return followers.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1160,6 +1175,27 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	_, startIndex := r.tree.tree.GetWithIndex(start)
+	var endIndex int
+	var item rangetree.RangeItem
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = r.tree.tree.Len() - 1
+	} else {
+		item, endIndex = r.tree.tree.GetWithIndex(end)
+		// it should return the endIndex - 1 if the endKey is the startKey of a region.
+		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
+			endIndex--
+		}
+	}
+	return endIndex - startIndex + 1
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
@@ -1171,7 +1207,7 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 		if limit > 0 && len(res) >= limit {
 			return false
 		}
-		res = append(res, r.GetRegion(region.GetID()))
+		res = append(res, region)
 		return true
 	})
 	return res
@@ -1201,11 +1237,11 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	p, n := r.tree.getAdjacentRegions(region)
 	var prev, next *RegionInfo
 	// check key to avoid key range hole
-	if p != nil && bytes.Equal(p.region.GetEndKey(), region.GetStartKey()) {
-		prev = r.GetRegion(p.region.GetID())
+	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
+		prev = r.GetRegion(p.GetID())
 	}
-	if n != nil && bytes.Equal(region.GetEndKey(), n.region.GetStartKey()) {
-		next = r.GetRegion(n.region.GetID())
+	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
+		next = r.GetRegion(n.GetID())
 	}
 	return prev, next
 }
@@ -1287,10 +1323,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	}
 
 	return strings.Join(ret, ", ")
-}
-
-func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
-	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
 // String converts slice of bytes to string without copy.

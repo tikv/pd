@@ -135,7 +135,13 @@ func TestRuleFitFilter(t *testing.T) {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
+
+	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
+	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
 }
 
 func TestStoreStateFilter(t *testing.T) {
@@ -210,26 +216,26 @@ func TestStoreStateFilterReason(t *testing.T) {
 	check := func(store *core.StoreInfo, testCases []testCase) {
 		for _, testCase := range testCases {
 			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
 			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
 		}
 	}
 
 	// No reason catched
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 	testCases := []testCase{
-		{2, "", ""},
+		{2, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
-		{0, "disconnected", "disconnected"},
-		{1, "", ""},
-		{2, "disconnected", "disconnected"},
-		{3, "", ""},
+		{0, "store-state-disconnect-filter", "store-state-disconnect-filter"},
+		{1, "store-state-ok-filter", "store-state-ok-filter"},
+		{2, "store-state-disconnect-filter", "store-state-disconnect-filter"},
+		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
@@ -237,10 +243,10 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, "", ""},
-		{1, "busy", "busy"},
-		{2, "busy", "busy"},
-		{3, "", ""},
+		{0, "store-state-ok-filter", "store-state-ok-filter"},
+		{1, "store-state-busy-filter", "store-state-busy-filter"},
+		{2, "store-state-busy-filter", "store-state-busy-filter"},
+		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 }

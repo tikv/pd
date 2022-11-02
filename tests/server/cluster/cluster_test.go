@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -43,6 +44,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -1438,4 +1440,94 @@ func TestTransferLeaderBack(t *testing.T) {
 	// check store count
 	re.Equal(meta, rc.GetMetaCluster())
 	re.Equal(3, rc.GetStoreCount())
+}
+
+func TestExternalTimestamp(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	store := &metapb.Store{
+		Id:      1,
+		Version: "v6.0.0",
+		Address: "127.0.0.1:" + strconv.Itoa(int(1)),
+	}
+	resp, err := putStore(grpcPDClient, clusterID, store)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(100 * time.Millisecond)
+
+	ts := uint64(233)
+	{ // case1: set external timestamp
+		req := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: ts,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+
+		req2 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
+
+	{ // case2: set external timestamp less than now
+		req := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: ts - 1,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+
+		req2 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
+
+	{ // case3: set external timestamp larger than global ts
+		req := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      1,
+			DcLocation: tso.GlobalDCLocation,
+		}
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+		re.NoError(tsoClient.Send(req))
+		resp, err := tsoClient.Recv()
+		re.NoError(err)
+		globalTS := tsoutil.GenerateTS(resp.Timestamp)
+
+		req2 := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: globalTS + 1,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+
+		req3 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req3)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
 }
