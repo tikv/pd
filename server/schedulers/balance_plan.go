@@ -72,22 +72,14 @@ func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	if p.step < step {
 		return 0
 	}
+	// Please use with care. Add a nil check if need in the future
 	switch step {
 	case pickSource:
-		if p.source != nil {
-			return p.source.GetID()
-		}
-		return 0
+		return p.source.GetID()
 	case pickRegion:
-		if p.region != nil {
-			return p.region.GetID()
-		}
-		return 0
+		return p.region.GetID()
 	case pickTarget:
-		if p.target != nil {
-			return p.target.GetID()
-		}
-		return 0
+		return p.target.GetID()
 	}
 	return 0
 }
