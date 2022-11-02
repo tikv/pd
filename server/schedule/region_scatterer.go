@@ -457,7 +457,7 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 	}
 	leaderCandidateStores := make([]uint64, 0)
 	// use PlacementLeaderSafeguard for con follower and learner in rule
-	filter := filter.NewPlacementLeaderSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, false /*allowMoveLeader*/)
+	filter := filter.NewPlacementLeaderSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, true /*allowMoveLeader*/)
 	for storeID := range peers {
 		store := r.cluster.GetStore(storeID)
 		if store == nil {

@@ -585,7 +585,7 @@ func TestRegionHasLearner(t *testing.T) {
 	check := func(ss *selectedStores) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
-		for i := uint64(1); i <= uint64(max); i++ {
+		for i := uint64(1); i <= max; i++ {
 			count := ss.TotalCountByStore(i)
 			if count > max {
 				max = count
@@ -600,7 +600,7 @@ func TestRegionHasLearner(t *testing.T) {
 	checkLeader := func(ss *selectedStores) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
-		for i := uint64(1); i <= uint64(voterCount); i++ {
+		for i := uint64(1); i <= voterCount; i++ {
 			count := ss.TotalCountByStore(i)
 			if count > max {
 				max = count
@@ -609,8 +609,9 @@ func TestRegionHasLearner(t *testing.T) {
 				min = count
 			}
 		}
-		re.LessOrEqual(max-min, uint64(2))
-		for i := uint64(voterCount) + 1; i <= uint64(storeCount); i++ {
+		re.LessOrEqual(max-2, uint64(regionCount)/voterCount)
+		re.LessOrEqual(min-1, uint64(regionCount)/voterCount)
+		for i := voterCount + 1; i <= storeCount; i++ {
 			count := ss.TotalCountByStore(i)
 			re.LessOrEqual(count, uint64(0))
 		}
