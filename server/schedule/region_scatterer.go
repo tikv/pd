@@ -340,7 +340,6 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	targetLeader := r.selectAvailableLeaderStore(group, region, targetPeers, r.ordinaryEngine)
 	if targetLeader == 0 {
 		scatterCounter.WithLabelValues("no-leader", "").Inc()
-		fmt.Println("no-leader")
 		return nil
 	}
 
@@ -466,7 +465,7 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 		return 0
 	}
 	leaderCandidateStores := make([]uint64, 0)
-	// use PlacementLeaderSafeguard for con follower and learner in rule
+	// use PlacementLeaderSafeguard for filtering follower and learner in rule
 	filter := filter.NewPlacementLeaderSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, true /*allowMoveLeader*/)
 	for storeID := range peers {
 		store := r.cluster.GetStore(storeID)
