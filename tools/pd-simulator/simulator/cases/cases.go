@@ -29,7 +29,6 @@ type Store struct {
 	Status       metapb.StoreState
 	Labels       []*metapb.StoreLabel
 	Capacity     uint64
-	Available    uint64
 	LeaderWeight float32
 	RegionWeight float32
 	Version      string

@@ -67,7 +67,6 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		StoreStats: pdpb.StoreStats{
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
-			Available: uint64(config.RaftStore.Available),
 			StartTime: uint32(time.Now().Unix()),
 		},
 	}

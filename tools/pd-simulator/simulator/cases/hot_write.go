@@ -32,11 +32,10 @@ func newHotWrite() *Case {
 	// Initialize the cluster
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        IDAllocator.nextID(),
-			Status:    metapb.StoreState_Up,
-			Capacity:  1 * units.TiB,
-			Available: 900 * units.GiB,
-			Version:   "2.1.0",
+			ID:       IDAllocator.nextID(),
+			Status:   metapb.StoreState_Up,
+			Capacity: 1 * units.TiB,
+			Version:  "2.1.0",
 		})
 	}
 

@@ -35,23 +35,12 @@ func newRedundantBalanceRegion() *Case {
 	}
 
 	for i := 0; i < storeNum; i++ {
-		if i%2 == 1 {
-			simCase.Stores = append(simCase.Stores, &Store{
-				ID:        IDAllocator.nextID(),
-				Status:    metapb.StoreState_Up,
-				Capacity:  1 * units.TiB,
-				Available: 980 * units.GiB,
-				Version:   "2.1.0",
-			})
-		} else {
-			simCase.Stores = append(simCase.Stores, &Store{
-				ID:        IDAllocator.nextID(),
-				Status:    metapb.StoreState_Up,
-				Capacity:  1 * units.TiB,
-				Available: 1 * units.TiB,
-				Version:   "2.1.0",
-			})
-		}
+		simCase.Stores = append(simCase.Stores, &Store{
+			ID:       IDAllocator.nextID(),
+			Status:   metapb.StoreState_Up,
+			Capacity: 1 * units.TiB,
+			Version:  "2.1.0",
+		})
 	}
 
 	for i := 0; i < regionNum; i++ {

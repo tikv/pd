@@ -74,6 +74,8 @@ func (d *Driver) Prepare() error {
 	d.raftEngine = NewRaftEngine(d.simCase, d.conn, d.simConfig)
 	d.eventRunner = NewEventRunner(d.simCase.Events, d.raftEngine)
 
+	d.updateNodeAvailable()
+
 	// Bootstrap.
 	store, region, err := d.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
@@ -217,4 +219,10 @@ func (d *Driver) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Region,
 		return nil, nil, errors.Errorf("bootstrap store %v not found", region.GetLeader().GetStoreId())
 	}
 	return store.Store, region.GetMeta(), nil
+}
+
+func (d *Driver) updateNodeAvailable() {
+	for storeID, n := range d.conn.Nodes {
+		n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
+	}
 }
