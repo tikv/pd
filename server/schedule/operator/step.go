@@ -32,12 +32,12 @@ import (
 )
 
 const (
-	// DefaultSlowExecutorRate is the fast rate of the operator executor.
+	// DefaultSlowExecutorRate is the fast rate of the step executor.
 	// default: 6 s/Mb
 	DefaultSlowExecutorRate = 6
-	// DefaultFastExecutorRate is the slow rate of the operator executor.
-	// default:  0.1 s/Mb
-	DefaultFastExecutorRate = 0.1
+	// DefaultFastExecutorRate is the slow rate of the step executor.
+	// default:  0.6 s/Mb
+	DefaultFastExecutorRate = 0.6
 	// FastStepWaitTime is the duration that the OpStep may take.
 	// there are some steps that may take a short time, such as transfer leader, remove peer etc.
 	// It should consider the latency of handling region heartbeat especially big cluster.
@@ -190,7 +190,7 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 	}
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
+		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
 	return nil
 }
@@ -370,7 +370,7 @@ func (al AddLearner) CheckInProgress(ci ClusterInformer, region *core.RegionInfo
 		return nil
 	}
 	if peer.GetId() != al.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
+		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
 	if !core.IsLearner(peer) {
 		return errors.New("peer already is a voter")

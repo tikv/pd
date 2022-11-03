@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -451,7 +452,7 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 			// case3:  10GB region will have 1000s to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
 			regionSize: 10 * 1000,
-			expect:     time.Second * (1000),
+			expect:     time.Second * (10 * 1000 * 0.6),
 		}, {
 			// case4: 10MB will have at lease FastStepWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
@@ -462,17 +463,18 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
 				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
 			regionSize: 10 * 1000,
-			expect:     time.Second * (3000),
+			expect:     time.Second * (10 * 1000 * 0.6 * 3),
 		}, {
 			//case6: 10GB region will have 1000*10s for ChangePeerV2Enter, ChangePeerV2Leave.
 			step:       []OpStep{MergeRegion{}},
 			regionSize: 10 * 1000,
-			expect:     time.Second * (10 * 1000 * 6 * 2),
+			expect:     time.Second * (10 * 1000 * 0.6 * 10),
 		},
 	}
-	for _, v := range testData {
+	for i, v := range testData {
+		fmt.Printf("case:%d\n", i)
 		for _, step := range v.step {
-			suite.Equal(step.Timeout(v.regionSize), v.expect)
+			suite.Equal(v.expect, step.Timeout(v.regionSize))
 		}
 	}
 }
