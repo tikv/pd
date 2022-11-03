@@ -969,6 +969,8 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 }
 
 func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
+	c.RLock()
+	defer c.RUnlock()
 	if s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]; ok {
 		if schedulers.NeedTransferWitnessLeader(region) {
 			select {
