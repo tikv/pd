@@ -63,37 +63,10 @@ type Case struct {
 	Labels  typeutil.StringSlice
 }
 
-// IDAllocator is used to alloc unique ID.
-type idAllocator struct {
-	id uint64
-}
-
-// nextID gets the next unique ID.
-func (a *idAllocator) nextID() uint64 {
-	a.id++
-	return a.id
-}
-
-// ResetID resets the IDAllocator.
-func (a *idAllocator) ResetID() {
-	a.id = 0
-}
-
-// GetID gets the current ID.
-func (a *idAllocator) GetID() uint64 {
-	return a.id
-}
-
-// IDAllocator is used to alloc unique ID.
-var IDAllocator idAllocator
-
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
 	"redundant-balance-region":  newRedundantBalanceRegion,
-	"add-nodes":                 newAddNodes,
-	"add-nodes-dynamic":         newAddNodesDynamic,
-	"delete-nodes":              newDeleteNodes,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,

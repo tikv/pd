@@ -95,8 +95,7 @@ func main() {
 
 func run(simCase string, simConfig *sc.SimConfig) {
 	if *pdAddr != "" {
-		go runHTTPServer()
-		simStart(*pdAddr, simCase, simConfig)
+		simStart(*pdAddr, *statusAddress, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
 		err := local.Run()
@@ -109,7 +108,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		simStart(local.GetAddr(), simCase, simConfig, clean)
+		simStart(local.GetAddr(), "", simCase, simConfig, clean)
 	}
 }
 
@@ -159,7 +158,7 @@ func cleanServer(cfg *config.Config) {
 
 func simStart(pdAddr string, simCase string, simConfig *sc.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
-	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
+	driver, err := simulator.NewDriver(pdAddr, statusAddress, simCase, simConfig)
 	if err != nil {
 		simutil.Logger.Fatal("create driver error", zap.Error(err))
 	}

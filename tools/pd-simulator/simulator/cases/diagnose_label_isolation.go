@@ -34,7 +34,7 @@ func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 	num1, num2 := 3, 1
 	storeNum, regionNum := num1+num2, 200
 	for i := 0; i < num1; i++ {
-		id := IDAllocator.nextID()
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
@@ -42,18 +42,18 @@ func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 		})
 	}
 	simCase.Stores = append(simCase.Stores, &Store{
-		ID:     IDAllocator.nextID(),
+		ID:     simutil.IDAllocator.NextID(),
 		Status: metapb.StoreState_Up,
 	})
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%num1 + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%num1 + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%num1 + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -96,17 +96,17 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 	num1, num2 := 2, 2
 	storeNum, regionNum := num1+num2, 300
 	for i := 0; i < num1; i++ {
-		id := IDAllocator.nextID()
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
 		})
 	}
-	id := IDAllocator.GetID() + 1
+	id := simutil.IDAllocator.GetID() + 1
 	for i := 0; i < num2; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 			Labels: []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
 		})
@@ -114,12 +114,12 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%num1 + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%num1 + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%num2 + num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%num1 + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%num2 + num1 + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -161,7 +161,7 @@ func newLabelIsolation2(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 5, 200
 	for i := 0; i < storeNum; i++ {
-		id := IDAllocator.nextID()
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
@@ -175,12 +175,12 @@ func newLabelIsolation2(_ *sc.SimConfig) *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%storeNum + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,

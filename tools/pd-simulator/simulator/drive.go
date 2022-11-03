@@ -16,6 +16,8 @@ package simulator
 
 import (
 	"context"
+	"net/http"
+	"net/http/pprof"
 	"path"
 	"strconv"
 	"sync"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
@@ -35,20 +38,21 @@ import (
 
 // Driver promotes the cluster status change.
 type Driver struct {
-	wg          sync.WaitGroup
-	pdAddr      string
-	simCase     *cases.Case
-	client      Client
-	tickCount   int64
-	eventRunner *EventRunner
-	raftEngine  *RaftEngine
-	conn        *Connection
-	simConfig   *config.SimConfig
-	pdConfig    *config.PDConfig
+	wg            sync.WaitGroup
+	pdAddr        string
+	statusAddress string
+	simCase       *cases.Case
+	client        Client
+	tickCount     int64
+	eventRunner   *EventRunner
+	raftEngine    *RaftEngine
+	conn          *Connection
+	simConfig     *config.SimConfig
+	pdConfig      *config.PDConfig
 }
 
 // NewDriver returns a driver.
-func NewDriver(pdAddr string, caseName string, simConfig *config.SimConfig) (*Driver, error) {
+func NewDriver(pdAddr, statusAddress, caseName string, simConfig *config.SimConfig) (*Driver, error) {
 	simCase := cases.NewCase(caseName, simConfig)
 	if simCase == nil {
 		return nil, errors.Errorf("failed to create case %s", caseName)
@@ -57,10 +61,11 @@ func NewDriver(pdAddr string, caseName string, simConfig *config.SimConfig) (*Dr
 	pdConfig.PlacementRules = simCase.Rules
 	pdConfig.LocationLabels = simCase.Labels
 	return &Driver{
-		pdAddr:    pdAddr,
-		simCase:   simCase,
-		simConfig: simConfig,
-		pdConfig:  pdConfig,
+		pdAddr:        pdAddr,
+		statusAddress: statusAddress,
+		simCase:       simCase,
+		simConfig:     simConfig,
+		pdConfig:      pdConfig,
 	}, nil
 }
 
@@ -77,6 +82,9 @@ func (d *Driver) Prepare() error {
 
 	d.updateNodeAvailable()
 
+	if d.statusAddress != "" {
+		go d.runHTTPServer()
+	}
 	// Bootstrap.
 	store, region, err := d.GetBootstrapInfo(d.raftEngine)
 	if err != nil {
@@ -95,7 +103,7 @@ func (d *Driver) Prepare() error {
 
 	// Setup alloc id.
 	// TODO: This is a hack way. Once we have reset alloc ID API, we need to replace it.
-	maxID := cases.IDAllocator.GetID()
+	maxID := simutil.IDAllocator.GetID()
 	requestTimeout := 10 * time.Second
 	etcdTimeout := 3 * time.Second
 	etcdClient, err := clientv3.New(clientv3.Config{
@@ -123,7 +131,7 @@ func (d *Driver) Prepare() error {
 			return errors.WithStack(err)
 		}
 		if id > maxID {
-			cases.IDAllocator.ResetID()
+			simutil.IDAllocator.ResetID()
 			break
 		}
 	}
@@ -225,4 +233,21 @@ func (d *Driver) updateNodeAvailable() {
 			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
 		}
 	}
+}
+
+func (d *Driver) runHTTPServer() {
+	http.Handle("/metrics", promhttp.Handler())
+	// profile API
+	http.HandleFunc("/pprof/profile", pprof.Profile)
+	http.HandleFunc("/pprof/trace", pprof.Trace)
+	http.HandleFunc("/pprof/symbol", pprof.Symbol)
+	http.Handle("/pprof/heap", pprof.Handler("heap"))
+	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
+	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
+	http.Handle("/pprof/block", pprof.Handler("block"))
+	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
+	eventHandler := newEventHandler(d.eventRunner)
+	http.HandleFunc("/event", eventHandler.createEvent)
+	// nolint
+	http.ListenAndServe(d.statusAddress, nil)
 }
