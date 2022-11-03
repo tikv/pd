@@ -36,7 +36,7 @@ func newRedundantBalanceRegion() *Case {
 
 	for i := 0; i < storeNum; i++ {
 		s := &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		}
 		if i%2 == 1 {
@@ -47,12 +47,12 @@ func newRedundantBalanceRegion() *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%storeNum + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,

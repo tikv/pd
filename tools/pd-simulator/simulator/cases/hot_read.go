@@ -33,7 +33,7 @@ func newHotRead() *Case {
 	// Initialize the cluster
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
@@ -41,12 +41,12 @@ func newHotRead() *Case {
 	for i := 0; i < storeNum*regionNum/3; i++ {
 		storeIDs := rand.Perm(storeNum)
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(storeIDs[0] + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(storeIDs[1] + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
