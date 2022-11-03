@@ -1351,8 +1351,13 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 
 // NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
 func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bool, slowStoreIDs []uint64) {
-	needAwaken = false
+	store := c.GetStore(storeID)
+	// We just return AwakenRegions messages to those Serving stores which need to be awaken.
+	if store.IsPreparing() || store.IsRemoving() || store.IsSlow() || !store.NeedAwakenStore() {
+		return false, nil
+	}
 
+	needAwaken = false
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
 			continue
@@ -1365,9 +1370,7 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 			slowStoreIDs = append(slowStoreIDs, store.GetID())
 		}
 	}
-	store := c.GetStore(storeID)
-	// We just return AwakenRegions messages to those stores which need to be awaken.
-	return needAwaken && store.NeedAwakenStore(), slowStoreIDs
+	return needAwaken, slowStoreIDs
 }
 
 // UpdateAwakenStoreTime updates the last awaken time for the store.
