@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
 const (
@@ -32,12 +33,12 @@ const (
 	defaultSimTickInterval = 100 * time.Millisecond
 	// store
 	defaultStoreIOMBPerSecond = 40
-	defaultStoreVersion       = "2.1.0"
 	defaultStoreHeartbeat     = 10 * time.Second
 	defaultRegionHeartbeat    = 1 * time.Minute
 	defaultRegionSplitKeys    = 960000
 	defaultRegionSplitSize    = 96 * units.MiB
-	defaultCapacity           = 3000 * units.GiB
+	defaultCapacity           = 1 * units.TiB
+	defaultExtraUsedSpace     = 0
 	// server
 	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
@@ -63,6 +64,7 @@ type SimConfig struct {
 // RaftStore the configuration for raft store.
 type RaftStore struct {
 	Capacity                typeutil.ByteSize `toml:"capacity" json:"capacity"`
+	ExtraUsedSpace          typeutil.ByteSize `toml:"extra-used-space" json:"extra-used-space"`
 	RegionHeartBeatInterval typeutil.Duration `toml:"pd-heartbeat-tick-interval" json:"pd-heartbeat-tick-interval"`
 	StoreHeartBeatInterval  typeutil.Duration `toml:"pd-store-heartbeat-tick-interval" json:"pd-store-heartbeat-tick-interval"`
 }
@@ -124,10 +126,11 @@ func adjustByteSize(v *typeutil.ByteSize, defValue typeutil.ByteSize) {
 func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	adjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
 	adjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
-	adjustString(&sc.StoreVersion, defaultStoreVersion)
+	adjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
 	adjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
 	adjustDuration(&sc.RaftStore.StoreHeartBeatInterval, defaultStoreHeartbeat)
 	adjustByteSize(&sc.RaftStore.Capacity, defaultCapacity)
+	adjustByteSize(&sc.RaftStore.ExtraUsedSpace, defaultExtraUsedSpace)
 	adjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
 	adjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
 

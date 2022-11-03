@@ -29,10 +29,8 @@ func newRegionSplit() *Case {
 	storeNum := getStoreNum()
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:       uint64(i),
-			Status:   metapb.StoreState_Up,
-			Capacity: 1 * units.TiB,
-			Version:  "2.1.0",
+			ID:     uint64(i),
+			Status: metapb.StoreState_Up,
 		})
 	}
 	peers := []*metapb.Peer{
