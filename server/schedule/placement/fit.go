@@ -67,19 +67,8 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 		return true
 	}
 
-	stores := fit.stores
-	i := 0
-	var source *core.StoreInfo
-	for ; i < len(stores); i++ {
-		if stores[i].GetID() == srcStoreID {
-			source = stores[i]
-			stores[i] = dstStore
-			break
-		}
-	}
-	score := isolationStoreScore(stores, fit.Rule.LocationLabels)
+	score := isolationStoreScore(srcStoreID, dstStore, fit.stores, fit.Rule.LocationLabels)
 	// restore the source store.
-	fit.stores[i] = source
 	return fit.IsolationScore <= score
 }
 
@@ -391,14 +380,20 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	return false
 }
 
-func isolationStoreScore(stores []*core.StoreInfo, labels []string) float64 {
+func isolationStoreScore(srcStoreID uint64, dstStore *core.StoreInfo, stores []*core.StoreInfo, labels []string) float64 {
 	var score float64
 	if len(labels) == 0 || len(stores) <= 1 {
 		return 0
 	}
 	for i := range stores {
 		store1 := stores[i]
+		if store1.GetID() == srcStoreID {
+			store1 = dstStore
+		}
 		for _, store2 := range stores[i+1:] {
+			if store2.GetID() == srcStoreID {
+				store2 = dstStore
+			}
 			if index := store1.CompareLocation(store2, labels); index != -1 {
 				score += math.Pow(replicaBaseScore, float64(len(labels)-index-1))
 			}

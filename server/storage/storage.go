@@ -39,6 +39,7 @@ type Storage interface {
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
+	endpoint.ExternalTSStorage
 	endpoint.KeySpaceGCSafePointStorage
 	endpoint.KeyspaceStorage
 }

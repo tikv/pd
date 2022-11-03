@@ -1125,6 +1125,15 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 	return maxTSO, nil
 }
 
+// GetGlobalTSO returns global tso.
+func (am *AllocatorManager) GetGlobalTSO() (*pdpb.Timestamp, error) {
+	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
+	if err != nil {
+		return nil, err
+	}
+	return globalAllocator.(*GlobalTSOAllocator).getCurrentTSO()
+}
+
 func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {
 	am.localAllocatorConn.RLock()
 	defer am.localAllocatorConn.RUnlock()

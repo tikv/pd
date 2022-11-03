@@ -74,7 +74,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 	suite.regions = []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		newRegionInfo(3, "t", "x", 0, 0, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
 		newRegionInfo(4, "x", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
@@ -104,11 +104,12 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 
 	// it can merge if the max region size of the store is greater than the target region size.
 	config := suite.cluster.GetStoreConfig()
-	config.RegionMaxSize = "10Gib"
+	config.RegionMaxSize = "144MiB"
+	config.RegionMaxSizeMB = 10 * 1024
 
 	ops = suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
-	config.RegionMaxSize = "144Mib"
+	config.RegionMaxSizeMB = 144
 	ops = suite.mc.Check(suite.regions[2])
 	suite.Nil(ops)
 	// change the size back
