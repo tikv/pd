@@ -134,6 +134,7 @@ func (s *transferLeaderScheduler) scheduleTransferWitnessLeader(name, typ string
 	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
 }
 
+// NeedTransferWitnessLeader is used to judge if the region's leader is a witness
 func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
 	if region == nil || region.GetLeader() == nil {
 		return false
@@ -141,6 +142,7 @@ func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
 	return region.GetLeader().IsWitness
 }
 
+// RecvRegionInfo is used to return a writable channel to recv region info from other places
 func RecvRegionInfo(s schedule.Scheduler) chan<- *core.RegionInfo {
 	return s.(*transferLeaderScheduler).regions
 }
