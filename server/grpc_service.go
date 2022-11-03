@@ -667,7 +667,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
 	if needAwaken, slowStoreIDs := rc.NeedAwakenAllRegionsInStore(storeID); needAwaken {
-		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID))
+		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Reflect("slow-stores", slowStoreIDs))
 		err := rc.UpdateAwakenStoreTime(storeID, time.Now())
 		if err != nil {
 			log.Warn("failed to awaken hibernated regions in store", zap.Uint64("store-id", storeID))
