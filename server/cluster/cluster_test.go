@@ -1748,6 +1748,35 @@ func TestCheckStaleRegion(t *testing.T) {
 	re.Error(checkStaleRegion(region.GetMeta(), origin.GetMeta()))
 }
 
+func TestAwakenStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	n := uint64(3)
+	stores := newTestStores(n, "6.0.0")
+	re.False(stores[0].NeedAwakenStore())
+	for _, store := range stores {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	for i := uint64(1); i <= n; i++ {
+		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
+		re.False(needAwaken)
+	}
+
+	now := time.Now()
+	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-31*time.Second)))
+	re.NoError(cluster.putStoreLocked(store4))
+	store1 := cluster.GetStore(1)
+	re.True(store1.NeedAwakenStore())
+	re.NoError(cluster.UpdateAwakenStoreTime(1, now))
+	store1 = cluster.GetStore(1)
+	re.False(store1.NeedAwakenStore())
+}
+
 type testCluster struct {
 	*RaftCluster
 }
