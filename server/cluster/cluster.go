@@ -1351,26 +1351,23 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 
 // NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
 func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bool, slowStoreIDs []uint64) {
-	// TODO: Current checking strategy follows the rule that there
-	// is no more than one slowStore in this cluster. We should upate
-	// it in the future if RaftCluster could tolerate several slowStores.
-	var slowStore *core.StoreInfo
+	needAwaken = false
 
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
 			continue
 		}
 
-		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
-			// Do nothing if there is more than one slow store.
-			slowStore = store
+		// We will filter out heartbeat requests from slowStores.
+		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() &&
+			store.GetStoreStats().GetStoreId() != storeID {
+			needAwaken = true
 			slowStoreIDs = append(slowStoreIDs, store.GetID())
 		}
 	}
 	store := c.GetStore(storeID)
-	// We will filter out heartbeat requests from slowStores, and just return
-	// AwakenRegions message to those stores in normal state.
-	return slowStore != nil && slowStore.GetStoreStats().GetStoreId() != storeID && store.NeedAwakenStore(), slowStoreIDs
+	// We just return AwakenRegions messages to those stores which need to be awaken.
+	return needAwaken && store.NeedAwakenStore(), slowStoreIDs
 }
 
 // UpdateAwakenStoreTime updates the last awaken time for the store.

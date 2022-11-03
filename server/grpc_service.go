@@ -672,9 +672,6 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if err != nil {
 			log.Warn("failed to awaken hibernated regions in store", zap.Uint64("store-id", storeID))
 		} else {
-			if slowStoreIDs == nil {
-				slowStoreIDs = make([]uint64, 0)
-			}
 			resp.AwakenRegions = &pdpb.AwakenRegions{
 				AbnormalStores: slowStoreIDs,
 			}
