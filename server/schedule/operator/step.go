@@ -569,9 +569,9 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // Timeout returns duration that current step may take.
-// The merge operator must wait for the first operator finished, so the executing duration must larger than add learner.
+// The merge step need more time to finish but less than slow step.
 func (mr MergeRegion) Timeout(regionSize int64) time.Duration {
-	return slowStepWaitDuration(regionSize) * 2
+	return fastStepWaitDuration(regionSize) * 10
 }
 
 // GetCmd returns the schedule command for heartbeat response.

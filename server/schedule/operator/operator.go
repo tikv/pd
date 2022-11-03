@@ -79,6 +79,11 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 	}
 }
 
+// Sync some attribute with the given operator.
+func (o *Operator) Sync(other *Operator) {
+	o.maxDuration = other.maxDuration
+}
+
 func (o *Operator) String() string {
 	stepStrs := make([]string, len(o.steps))
 	for i := range o.steps {
