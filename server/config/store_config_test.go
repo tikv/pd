@@ -26,6 +26,7 @@ import (
 
 func TestTiKVConfig(t *testing.T) {
 	re := require.New(t)
+	m := NewStoreConfigManager(nil)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -40,7 +41,7 @@ func TestTiKVConfig(t *testing.T) {
     	}}`
 		var config StoreConfig
 		re.NoError(json.Unmarshal([]byte(body), &config))
-
+		m.update(&config)
 		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
 		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
 		re.Equal(15*units.GiB/units.MiB, int(config.GetRegionMaxSize()))
@@ -84,6 +85,7 @@ func TestUpdateConfig(t *testing.T) {
 
 func TestParseConfig(t *testing.T) {
 	re := require.New(t)
+	m := NewStoreConfigManager(nil)
 	body := `
 {
 "coprocessor":{
@@ -104,6 +106,7 @@ func TestParseConfig(t *testing.T) {
 
 	var config StoreConfig
 	re.NoError(json.Unmarshal([]byte(body), &config))
+	m.update(&config)
 	re.Equal(uint64(96), config.GetRegionBucketSize())
 }
 

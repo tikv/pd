@@ -199,12 +199,16 @@ func (m *StoreConfigManager) ObserveConfig(address string) error {
 	old := m.GetStoreConfig()
 	if cfg != nil && !old.Equal(cfg) {
 		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()))
-		cfg.RegionMaxSizeMB = typeutil.ParseMBFromText(cfg.RegionMaxSize, defaultRegionMaxSize)
-		cfg.RegionSplitSizeMB = typeutil.ParseMBFromText(cfg.RegionSplitSize, defaultRegionSplitSize)
-		cfg.RegionBucketSizeMB = typeutil.ParseMBFromText(cfg.RegionBucketSize, defaultBucketSize)
-		m.config.Store(cfg)
+		m.update(cfg)
 	}
 	return nil
+}
+
+func (m *StoreConfigManager) update(cfg *StoreConfig) {
+	cfg.RegionMaxSizeMB = typeutil.ParseMBFromText(cfg.RegionMaxSize, defaultRegionMaxSize)
+	cfg.RegionSplitSizeMB = typeutil.ParseMBFromText(cfg.RegionSplitSize, defaultRegionSplitSize)
+	cfg.RegionBucketSizeMB = typeutil.ParseMBFromText(cfg.RegionBucketSize, defaultBucketSize)
+	m.config.Store(cfg)
 }
 
 // GetStoreConfig returns the current store configuration.

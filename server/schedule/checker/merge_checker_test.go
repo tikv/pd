@@ -104,11 +104,12 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 
 	// it can merge if the max region size of the store is greater than the target region size.
 	config := suite.cluster.GetStoreConfig()
-	config.RegionMaxSize = "10Gib"
+	config.RegionMaxSize = "144MiB"
+	config.RegionMaxSizeMB = 10 * 1024
 
 	ops = suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
-	config.RegionMaxSize = "144Mib"
+	config.RegionMaxSizeMB = 144
 	ops = suite.mc.Check(suite.regions[2])
 	suite.Nil(ops)
 	// change the size back
