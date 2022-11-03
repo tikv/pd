@@ -122,7 +122,7 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	oc.SetOperator(op2)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
-	operator.SetOperatorStatusReachTime(op1, operator.STARTED, time.Now().Add(-operator.SlowOperatorWaitTime-operator.FastOperatorWaitTime))
+	operator.SetOperatorStatusReachTime(op1, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
@@ -246,7 +246,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 		suite.True(oc.checkAddOperator(false, op))
 		op.Start()
-		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowOperatorWaitTime-operator.FastOperatorWaitTime))
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
 		suite.True(op.CheckTimeout())
 		suite.False(oc.checkAddOperator(false, op))
 	}
