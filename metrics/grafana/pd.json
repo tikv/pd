@@ -7736,10 +7736,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\"}[1m])) by (store, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\"}[1m])) by (source, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
+              "legendFormat": "{{scope}}-store-{{source}}-{{type}}",
               "metric": "pd_scheduler_event_count",
               "refId": "A",
               "step": 4
@@ -7832,10 +7832,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\"}[1m])) by (store, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\"}[1m])) by (target, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{scope}}-store-{{store}}-{{type}}",
+              "legendFormat": "{{scope}}-store-{{target}}-{{type}}",
               "metric": "pd_scheduler_event_count",
               "refId": "A",
               "step": 4
