@@ -119,9 +119,15 @@ func (t *testOperatorControllerSuite) TestOperatorStatus(c *C) {
 	oc.SetOperator(op1)
 	c.Assert(op2.Start(), IsTrue)
 	oc.SetOperator(op2)
+<<<<<<< HEAD
 	c.Assert(oc.GetOperatorStatus(1).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	c.Assert(oc.GetOperatorStatus(2).Status, Equals, pdpb.OperatorStatus_RUNNING)
 	operator.SetOperatorStatusReachTime(op1, operator.STARTED, time.Now().Add(-10*time.Minute))
+=======
+	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
+	operator.SetOperatorStatusReachTime(op1, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
@@ -243,9 +249,15 @@ func (t *testOperatorControllerSuite) TestCheckAddUnexpectedStatus(c *C) {
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 		c.Assert(oc.checkAddOperator(false, op), IsTrue)
 		op.Start()
+<<<<<<< HEAD
 		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowOperatorWaitTime))
 		c.Assert(op.CheckTimeout(), IsTrue)
 		c.Assert(oc.checkAddOperator(false, op), IsFalse)
+=======
+		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+		suite.True(op.CheckTimeout())
+		suite.False(oc.checkAddOperator(false, op))
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	}
 }
 

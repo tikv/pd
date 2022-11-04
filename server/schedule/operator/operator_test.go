@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -117,10 +118,18 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	c.Assert(op.GetPriorityLevel(), Equals, core.HighPriority)
 	s.checkSteps(c, op, steps)
 	op.Start()
+<<<<<<< HEAD
 	c.Assert(op.Check(region), IsNil)
 	c.Assert(op.Status(), Equals, SUCCESS)
 	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsFalse)
+=======
+	suite.Nil(op.Check(region))
+
+	suite.Equal(SUCCESS, op.Status())
+	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-time.Second))
+	suite.False(op.CheckTimeout())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OpStep{
@@ -131,6 +140,7 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op = s.newTestOperator(1, OpLeader|OpRegion, steps...)
 	s.checkSteps(c, op, steps)
 	op.Start()
+<<<<<<< HEAD
 	c.Assert(op.Check(region), Equals, RemovePeer{FromStore: 2})
 	c.Assert(atomic.LoadInt32(&op.currentStep), Equals, int32(2))
 	c.Assert(op.CheckTimeout(), IsFalse)
@@ -139,6 +149,15 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	op.stepsTime[op.currentStep-1] = op.GetReachTimeOf(STARTED).Unix()
 	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
+=======
+	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
+	suite.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
+	suite.False(op.CheckTimeout())
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
+	suite.False(op.CheckTimeout())
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowStepWaitTime-2*FastStepWaitTime-time.Second))
+	suite.True(op.CheckTimeout())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	res, err := json.Marshal(op)
 	c.Assert(err, IsNil)
 	c.Assert(len(res), Equals, len(op.String())+2)
@@ -147,17 +166,30 @@ func (s *testOperatorSuite) TestOperator(c *C) {
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = s.newTestOperator(1, OpLeader, steps...)
 	op.Start()
+<<<<<<< HEAD
 	c.Assert(op.CheckTimeout(), IsFalse)
 	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
 	c.Assert(op.CheckTimeout(), IsTrue)
+=======
+	suite.False(op.CheckTimeout())
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
+	suite.True(op.CheckTimeout())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 
 	// case2: check timeout operator will return false not panic.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1, FromStore: 4})
 	op.currentStep = 1
+<<<<<<< HEAD
 	c.Assert(op.status.To(STARTED), IsTrue)
 	c.Assert(op.status.To(TIMEOUT), IsTrue)
 	c.Assert(op.CheckSuccess(), IsFalse)
 	c.Assert(op.CheckTimeout(), IsFalse)
+=======
+	suite.True(op.status.To(STARTED))
+	suite.True(op.status.To(TIMEOUT))
+	suite.False(op.CheckSuccess())
+	suite.True(op.CheckTimeout())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 }
 
 func (s *testOperatorSuite) TestInfluence(c *C) {
@@ -309,9 +341,15 @@ func (s *testOperatorSuite) TestCheckTimeout(c *C) {
 		c.Assert(op.Status(), Equals, CREATED)
 		c.Assert(op.Start(), IsTrue)
 		op.currentStep = int32(len(op.steps))
+<<<<<<< HEAD
 		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime))
 		c.Assert(op.CheckTimeout(), IsFalse)
 		c.Assert(op.Status(), Equals, SUCCESS)
+=======
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime))
+		suite.False(op.CheckTimeout())
+		suite.Equal(SUCCESS, op.Status())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	}
 }
 
@@ -366,6 +404,7 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
+<<<<<<< HEAD
 		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
@@ -373,6 +412,15 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		op.stepsTime[op.currentStep-1] = time.Now().Add(-SlowOperatorWaitTime).Unix()
 		c.Assert(op.Check(region), NotNil)
 		c.Assert(op.Status(), Equals, TIMEOUT)
+=======
+		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
+		suite.True(op.Start())
+		suite.NotNil(op.Check(region))
+		suite.Equal(STARTED, op.Status())
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-2*FastStepWaitTime))
+		suite.NotNil(op.Check(region))
+		suite.Equal(TIMEOUT, op.Status())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	}
 	{
 		region := s.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
@@ -381,6 +429,7 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
+<<<<<<< HEAD
 		op := s.newTestOperator(1, OpLeader|OpRegion, steps...)
 		c.Assert(op.Start(), IsTrue)
 		c.Assert(op.Check(region), NotNil)
@@ -389,6 +438,16 @@ func (s *testOperatorSuite) TestCheck(c *C) {
 		region = s.newTestRegion(1, 1, [2]uint64{1, 1})
 		c.Assert(op.Check(region), IsNil)
 		c.Assert(op.Status(), Equals, SUCCESS)
+=======
+		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
+		suite.True(op.Start())
+		suite.NotNil(op.Check(region))
+		suite.Equal(STARTED, op.Status())
+		op.status.setTime(STARTED, time.Now().Add(-SlowStepWaitTime))
+		region = suite.newTestRegion(1, 1, [2]uint64{1, 1})
+		suite.Nil(op.Check(region))
+		suite.Equal(SUCCESS, op.Status())
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 	}
 }
 
@@ -432,83 +491,51 @@ func (s *testOperatorSuite) TestOpStepTimeout(c *C) {
 	testdata := []struct {
 		step       []OpStep
 		regionSize int64
-		start      time.Time
-		expect     bool
+		expect     time.Duration
 	}{
 		{
 			// case1: 10GB region will have 60,000s to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
 			regionSize: 10 * 1000,
-			start:      time.Now().Add(-(time.Second*(6*10*1000) + time.Second)),
-			expect:     true,
-		},
-		{
-			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10 * 1000,
-			start:      time.Now().Add(-(time.Second*(6*10*1000) - time.Second)),
-			expect:     false,
+			expect:     time.Second * (6 * 10 * 1000),
 		}, {
-			// case2: 10MB region will have at least SlowOperatorWaitTime(10min) to executor.
+			// case2: 10MB region will have at least SlowStepWaitTime(10min) to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
 			regionSize: 10,
-			start:      time.Now().Add(-(SlowOperatorWaitTime + time.Second)),
-			expect:     true,
-		}, {
-			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10,
-			start:      time.Now().Add(-(time.Second*(6*10) - time.Second)),
-			expect:     false,
+			expect:     SlowStepWaitTime,
 		}, {
 			// case3:  10GB region will have 1000s to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(time.Second*(1000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
+			expect:     time.Second * (10 * 1000 * 0.6),
 		}, {
+			// case4: 10MB will have at lease FastStepWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(time.Second*(1000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
-		}, {
-			// case4: 10MB will have at lease FastOperatorWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
-			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(FastOperatorWaitTime + time.Second)),
 			regionSize: 10,
-			expect:     true,
-		}, {
-			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(FastOperatorWaitTime - time.Second)),
-			regionSize: 10,
-			expect:     false,
+			expect:     FastStepWaitTime,
 		}, {
 			// case5: 10GB region will have 1000*3 for ChangePeerV2Enter, ChangePeerV2Leave.
 			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
 				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-			start:      time.Now().Add(-(time.Second*(3000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
-		}, {
-			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
-				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-			start:      time.Now().Add(-(time.Second*(3000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
+			expect:     time.Second * (10 * 1000 * 0.6 * 3),
 		}, {
 			//case6: 10GB region will have 1000*10s for ChangePeerV2Enter, ChangePeerV2Leave.
 			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
-		}, {
-			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
+			expect:     time.Second * (10 * 1000 * 0.6 * 10),
 		},
 	}
+<<<<<<< HEAD
 	for _, v := range testdata {
 		for _, step := range v.step {
 			c.Assert(v.expect, Equals, step.Timeout(v.start, v.regionSize))
+=======
+	for i, v := range testData {
+		fmt.Printf("case:%d\n", i)
+		for _, step := range v.step {
+			suite.Equal(v.expect, step.Timeout(v.regionSize))
+>>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 		}
 	}
 }
