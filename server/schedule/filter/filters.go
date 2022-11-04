@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -25,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
+	"go.uber.org/zap"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
@@ -662,7 +664,13 @@ func (f *ruleLeaderFitFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo
 	return statusOK
 }
 
-func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+	targetStoreID := store.GetID()
+	targetPeer := f.region.GetStorePeer(targetStoreID)
+	if targetPeer == nil && !f.allowMoveLeader {
+		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
+		return statusStoreNotMatchRule
+	}
 	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}

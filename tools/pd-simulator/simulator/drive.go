@@ -16,14 +16,19 @@ package simulator
 
 import (
 	"context"
+	"path"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -86,7 +91,28 @@ func (d *Driver) Prepare() error {
 	}
 
 	// Setup alloc id.
+	// TODO: This is a hack way. Once we have reset alloc ID API, we need to replace it.
 	maxID := cases.IDAllocator.GetID()
+	requestTimeout := 10 * time.Second
+	etcdTimeout := 3 * time.Second
+	etcdClient, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{d.pdAddr},
+		DialTimeout: etcdTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
+	clusterID := d.client.GetClusterID(ctx)
+	rootPath := path.Join("/pd", strconv.FormatUint(clusterID, 10))
+	allocIDPath := path.Join(rootPath, "alloc_id")
+	_, err = etcdClient.Put(ctx, allocIDPath, string(typeutil.Uint64ToBytes(maxID+1000)))
+	if err != nil {
+		cancel()
+		return err
+	}
+	cancel()
+
 	for {
 		var id uint64
 		id, err = d.client.AllocID(context.Background())

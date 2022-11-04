@@ -200,7 +200,7 @@ func (c *Counter) Flush() {
 			for sourceID, count := range counters {
 				sourceIDStr := strconv.FormatUint(sourceID, 10)
 				for targetID, value := range count {
-					targetIDStr := strconv.FormatUint(sourceID, 10)
+					targetIDStr := strconv.FormatUint(targetID, 10)
 					if value > 0 {
 						filterCounter.WithLabelValues(actionName, c.scope, filterName, sourceIDStr, targetIDStr).
 							Add(float64(value))
