@@ -173,6 +173,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
+	if collector != nil && len(sourceStores) > 0 {
+		collector.Collect(plan.SetResource(sourceStores[0]), plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+	}
+
 	solver.step++
 	var sourceIndex int
 

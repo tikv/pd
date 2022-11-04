@@ -109,7 +109,6 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
-
 				return false
 			}
 			return true
