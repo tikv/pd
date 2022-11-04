@@ -186,6 +186,7 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
 	})
+	op2.Sync(op1)
 
 	return []*Operator{op1, op2}, nil
 }
