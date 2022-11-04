@@ -51,28 +51,28 @@ func init() {
 	})
 }
 
-type transferLeaderScheduler struct {
+type trasferWitnessLeaderScheduler struct {
 	*BaseScheduler
 	regions chan *core.RegionInfo
 }
 
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
 func newTransferWitnessLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
-	return &transferLeaderScheduler{
+	return &trasferWitnessLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		regions:       make(chan *core.RegionInfo, TransferWitnessLeaderRecvMaxRegionSize),
 	}
 }
 
-func (s *transferLeaderScheduler) GetName() string {
+func (s *trasferWitnessLeaderScheduler) GetName() string {
 	return TransferWitnessLeaderName
 }
 
-func (s *transferLeaderScheduler) GetType() string {
+func (s *trasferWitnessLeaderScheduler) GetType() string {
 	return TransferWitnessLeaderType
 }
 
-func (s *transferLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *trasferWitnessLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	// TODO: make sure the restriction is reasonable
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
@@ -81,12 +81,12 @@ func (s *transferLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 	return allowed
 }
 
-func (s *transferLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *trasferWitnessLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, TransferWitnessLeaderBatchSize), nil
 }
 
-func (s *transferLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster schedule.Cluster, batchSize int) []*operator.Operator {
+func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster schedule.Cluster, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		select {
@@ -108,7 +108,7 @@ func (s *transferLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ s
 	return ops
 }
 
-func (s *transferLeaderScheduler) scheduleTransferWitnessLeader(name, typ string, cluster schedule.Cluster, region *core.RegionInfo) (*operator.Operator, error) {
+func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ string, cluster schedule.Cluster, region *core.RegionInfo) (*operator.Operator, error) {
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -144,5 +144,5 @@ func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
 
 // RecvRegionInfo is used to return a writable channel to recv region info from other places
 func RecvRegionInfo(s schedule.Scheduler) chan<- *core.RegionInfo {
-	return s.(*transferLeaderScheduler).regions
+	return s.(*trasferWitnessLeaderScheduler).regions
 }
