@@ -666,6 +666,8 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
+	// TODO: waited to be polished. It's recommended to merge following AwakenRegions checking
+	// and UpdateAwakenStoreTime into HandlStoreHeartbeat.
 	if needAwaken, slowStoreIDs := rc.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
 		err := rc.UpdateAwakenStoreTime(storeID, time.Now())
