@@ -969,7 +969,7 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 }
 
 func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
-	if schedulers.NeedTransferWitnessLeader(region) {
+	if core.NeedTransferWitnessLeader(region) {
 		c.RLock()
 		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
 		c.RUnlock()
@@ -977,7 +977,7 @@ func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
 			select {
 			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
 			default:
-				log.Warn("transfer witness leader recv region channel full", zap.Uint64("drop region-id", region.GetID()))
+				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
 			}
 		}
 	}

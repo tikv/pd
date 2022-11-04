@@ -33,10 +33,10 @@ const (
 	TransferWitnessLeaderType = "transfer-witness-leader"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
-	TransferWitnessLeaderBatchSize = 3
+	transferWitnessLeaderBatchSize = 3
 	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
-	TransferWitnessLeaderRecvMaxRegionSize = 1000
+	transferWitnessLeaderRecvMaxRegionSize = 1000
 )
 
 func init() {
@@ -60,7 +60,7 @@ type trasferWitnessLeaderScheduler struct {
 func newTransferWitnessLeaderScheduler(opController *schedule.OperatorController) schedule.Scheduler {
 	return &trasferWitnessLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
-		regions:       make(chan *core.RegionInfo, TransferWitnessLeaderRecvMaxRegionSize),
+		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
 	}
 }
 
@@ -83,7 +83,7 @@ func (s *trasferWitnessLeaderScheduler) IsScheduleAllowed(cluster schedule.Clust
 
 func (s *trasferWitnessLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, TransferWitnessLeaderBatchSize), nil
+	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, transferWitnessLeaderBatchSize), nil
 }
 
 func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster schedule.Cluster, batchSize int) []*operator.Operator {
