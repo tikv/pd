@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -25,6 +26,7 @@ import (
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
+	"go.uber.org/zap"
 )
 
 // SelectSourceStores selects stores that be selected as source store from the list.
@@ -581,13 +583,17 @@ type ruleFitFilter struct {
 // newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func newRuleFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, oldFit *placement.RegionFit, oldStoreID uint64) Filter {
+	if oldFit == nil {
+		oldFit = ruleManager.FitRegion(cluster, region)
+	}
 	return &ruleFitFilter{
 		scope:       scope,
 		cluster:     cluster,
 		ruleManager: ruleManager,
 		region:      region,
-		oldFit:      ruleManager.FitRegion(cluster, region),
+		oldFit:      oldFit,
 		srcStore:    oldStoreID,
 	}
 }
@@ -657,7 +663,13 @@ func (f *ruleLeaderFitFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo
 	return statusOK
 }
 
-func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f *ruleLeaderFitFilter) Target(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+	targetStoreID := store.GetID()
+	targetPeer := f.region.GetStorePeer(targetStoreID)
+	if targetPeer == nil && !f.allowMoveLeader {
+		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
+		return statusStoreNotMatchRule
+	}
 	if f.oldFit.Replace(f.srcLeaderStoreID, store, f.region) {
 		return statusOK
 	}
@@ -670,9 +682,10 @@ func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
 
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
 // peer, the placement restriction will not become worse.
-func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit) Filter {
 	if opt.IsPlacementRulesEnabled() {
-		return newRuleFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
+		return newRuleFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID())
 	}
 	return NewLocationSafeguard(scope, opt.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
 }
