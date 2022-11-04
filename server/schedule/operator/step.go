@@ -32,20 +32,20 @@ import (
 )
 
 const (
-	// DefaultSlowExecutorRate is the fast rate of the operator executor.
+	// DefaultSlowExecutorRate is the fast rate of the step executor.
 	// default: 6 s/Mb
 	DefaultSlowExecutorRate = 6
-	// DefaultFastExecutorRate is the slow rate of the operator executor.
-	// default:  0.1 s/Mb
-	DefaultFastExecutorRate = 0.1
-	// FastOperatorWaitTime is the duration that when an operator that is not marked
-	// `OpRegion` runs longer than it, the operator will be considered timeout.
+	// DefaultFastExecutorRate is the slow rate of the step executor.
+	// default:  0.6 s/Mb
+	DefaultFastExecutorRate = 0.6
+	// FastStepWaitTime is the duration that the OpStep may take.
+	// there are some steps that may take a short time, such as transfer leader, remove peer etc.
 	// It should consider the latency of handling region heartbeat especially big cluster.
 	// The update duration of region heartbeat should be less than the region heartbeat interval(default 60s).
-	FastOperatorWaitTime = 60 * time.Second
-	// SlowOperatorWaitTime is the duration that when an operator marked `OpRegion`
-	// runs longer than it, the operator will be considered timeout.
-	SlowOperatorWaitTime = 10 * time.Minute
+	FastStepWaitTime = 60 * time.Second
+	// SlowStepWaitTime is the duration that the OpStep may take.
+	// there are some steps that may take a long time, such as add peer, merge region etc.
+	SlowStepWaitTime = 10 * time.Minute
 )
 
 // OpStep describes the basic scheduling steps that can not be subdivided.
@@ -119,7 +119,7 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 	to.LeaderCount++
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (tl TransferLeader) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -190,12 +190,12 @@ func (ap AddPeer) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) e
 	}
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil && peer.GetId() != ap.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
+		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), ap.ToStore, ap.PeerID)
 	}
 	return nil
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (ap AddPeer) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
@@ -258,7 +258,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (bw BecomeWitness) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -318,7 +318,7 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
-// Timeout returns true if the step is timeout
+// Timeout returns duration that current step may take.
 func (bn BecomeNonWitness) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
@@ -370,7 +370,7 @@ func (al AddLearner) CheckInProgress(ci ClusterInformer, region *core.RegionInfo
 		return nil
 	}
 	if peer.GetId() != al.PeerID {
-		return errors.Errorf("peer %d has already existed in store %d, the operator is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
+		return errors.Errorf("peer %d has already existed in store %d, the timeout is trying to add peer %d on the same store", peer.GetId(), al.ToStore, al.PeerID)
 	}
 	if !core.IsLearner(peer) {
 		return errors.New("peer already is a voter")
@@ -391,7 +391,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (al AddLearner) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
@@ -446,7 +446,7 @@ func (pl PromoteLearner) CheckInProgress(_ ClusterInformer, region *core.RegionI
 // Influence calculates the store difference that current step makes.
 func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (pl PromoteLearner) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -507,7 +507,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (rp RemovePeer) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -568,10 +568,10 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 	}
 }
 
-// Timeout returns true if the step is timeout.
-// The merge operator must wait for the first operator finished, so the executing duration must larger than add learner.
+// Timeout returns duration that current step may take.
+// The merge step need more time to finish but less than slow step.
 func (mr MergeRegion) Timeout(regionSize int64) time.Duration {
-	return slowStepWaitDuration(regionSize) * 2
+	return fastStepWaitDuration(regionSize) * 10
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -623,7 +623,7 @@ func (sr SplitRegion) CheckInProgress(_ ClusterInformer, _ *core.RegionInfo) err
 	return nil
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (sr SplitRegion) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -675,7 +675,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 	return false
 }
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (dv DemoteVoter) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
@@ -795,7 +795,7 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ ClusterInformer, region *core.Reg
 // Influence calculates the store difference that current step makes.
 func (cpe ChangePeerV2Enter) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
 	count := uint64(len(cpe.PromoteLearners)+len(cpe.DemoteVoters)) + 1
 	return fastStepWaitDuration(regionSize) * time.Duration(count)
@@ -935,7 +935,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ ClusterInformer, region *core.Reg
 // Influence calculates the store difference that current step makes.
 func (cpl ChangePeerV2Leave) Influence(_ OpInfluence, _ *core.RegionInfo) {}
 
-// Timeout returns true if the step is timeout.
+// Timeout returns duration that current step may take.
 func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
 	count := uint64(len(cpl.PromoteLearners)+len(cpl.DemoteVoters)) + 1
 	return fastStepWaitDuration(regionSize) * time.Duration(count)
@@ -966,8 +966,8 @@ func validateStore(ci ClusterInformer, id uint64) error {
 func slowStepWaitDuration(regionSize int64) time.Duration {
 	seconds := DefaultSlowExecutorRate * regionSize
 	wait := time.Duration(seconds) * time.Second
-	if wait < SlowOperatorWaitTime {
-		wait = SlowOperatorWaitTime
+	if wait < SlowStepWaitTime {
+		wait = SlowStepWaitTime
 	}
 	return wait
 }
@@ -975,8 +975,8 @@ func slowStepWaitDuration(regionSize int64) time.Duration {
 func fastStepWaitDuration(regionSize int64) time.Duration {
 	seconds := int64(DefaultFastExecutorRate * float64(regionSize))
 	wait := time.Duration(seconds) * time.Second
-	if wait < FastOperatorWaitTime {
-		wait = FastOperatorWaitTime
+	if wait < FastStepWaitTime {
+		wait = FastStepWaitTime
 	}
 	return wait
 }

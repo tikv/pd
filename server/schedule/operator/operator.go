@@ -50,7 +50,7 @@ type Operator struct {
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
-	totalDuration    time.Duration
+	timeout          time.Duration
 }
 
 // NewOperator creates a new operator.
@@ -60,9 +60,9 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 	if kind&OpAdmin != 0 {
 		level = core.Urgent
 	}
-	duration := offset.Seconds()
+	timeout := offset.Seconds()
 	for _, v := range steps {
-		duration += v.Timeout(approximateSize).Seconds()
+		timeout += v.Timeout(approximateSize).Seconds()
 	}
 	return &Operator{
 		desc:            desc,
@@ -76,8 +76,13 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
-		totalDuration:   time.Duration(duration) * time.Second,
+		timeout:         time.Duration(timeout) * time.Second,
 	}
+}
+
+// Sync some attribute with the given timeout.
+func (o *Operator) Sync(other *Operator) {
+	o.timeout = other.timeout
 }
 
 func (o *Operator) String() string {
@@ -85,9 +90,9 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s])",
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s]，timeout:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
-		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "))
+		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
 	if o.CheckSuccess() {
 		s += " finished"
 	}
@@ -225,12 +230,12 @@ func (o *Operator) CheckExpired() bool {
 	return o.status.CheckExpired(OperatorExpireTime)
 }
 
-// CheckTimeout checks if the operator is timeout, and update the status.
+// CheckTimeout returns true if the operator is timeout, and update the status.
 func (o *Operator) CheckTimeout() bool {
 	if o.CheckSuccess() {
 		return false
 	}
-	return o.status.CheckStepTimeout(o.totalDuration)
+	return o.status.CheckTimeout(o.timeout)
 }
 
 // Len returns the operator's steps count.

@@ -123,11 +123,11 @@ func TestCheckStepTimeout(t *testing.T) {
 		status OpStatus
 	}{{
 		step:   AddLearner{},
-		start:  time.Now().Add(-(SlowOperatorWaitTime - time.Second)),
+		start:  time.Now().Add(-(SlowStepWaitTime - time.Second)),
 		status: STARTED,
 	}, {
 		step:   AddLearner{},
-		start:  time.Now().Add(-(SlowOperatorWaitTime + time.Second)),
+		start:  time.Now().Add(-(SlowStepWaitTime + time.Second)),
 		status: TIMEOUT,
 	}}
 
@@ -136,7 +136,7 @@ func TestCheckStepTimeout(t *testing.T) {
 		trk := NewOpStatusTracker()
 		trk.To(STARTED)
 		trk.reachTimes[STARTED] = v.start
-		re.Equal(v.status == TIMEOUT, trk.CheckStepTimeout(SlowOperatorWaitTime))
+		re.Equal(v.status == TIMEOUT, trk.CheckTimeout(SlowStepWaitTime))
 		re.Equal(v.status, trk.Status())
 	}
 }
