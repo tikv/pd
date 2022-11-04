@@ -1363,8 +1363,7 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 			continue
 		}
 
-		// We will filter out heartbeat requests from slowStores. Meanwhile, we won't triggering
-		// redundant AwakenRergions when slowStores are still in CONNECTING.
+		// We will filter out heartbeat requests from slowStores.
 		if (store.IsUp() || store.IsRemoving()) && store.IsSlow() &&
 			store.GetStoreStats().GetStoreId() != storeID {
 			needAwaken = true
