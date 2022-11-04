@@ -170,11 +170,6 @@ func (s *StoreInfo) IsPhysicallyDestroyed() bool {
 	return s.GetMeta().GetPhysicallyDestroyed()
 }
 
-// IsAbnormal checks if the store is abnormal.
-func (s *StoreInfo) IsAbnormal() bool {
-	return s.IsPreparing() || s.IsRemoving() || s.IsSlow()
-}
-
 // DownTime returns the time elapsed since last heartbeat.
 func (s *StoreInfo) DownTime() time.Duration {
 	return time.Since(s.GetLastHeartbeatTS())
