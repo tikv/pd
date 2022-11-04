@@ -60,9 +60,10 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 	if kind&OpAdmin != 0 {
 		level = core.Urgent
 	}
-	timeout := offset.Seconds()
+
+	maxDuration := float64(0)
 	for _, v := range steps {
-		timeout += v.Timeout(approximateSize).Seconds()
+		maxDuration += v.Timeout(approximateSize).Seconds()
 	}
 	return &Operator{
 		desc:            desc,
@@ -76,7 +77,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level:           level,
 		AdditionalInfos: make(map[string]string),
 		ApproximateSize: approximateSize,
-		timeout:         time.Duration(timeout) * time.Second,
+		timeout:         time.Duration(maxDuration) * time.Second,
 	}
 }
 
