@@ -116,27 +116,6 @@ func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
 }
 
-// CompareRegionFit determines the superiority of 2 fits.
-// It returns 1 when the first fit result is better.
-func CompareRegionFit(a, b *RegionFit) int {
-	for i := range a.RuleFits {
-		if i >= len(b.RuleFits) {
-			break
-		}
-		if cmp := compareRuleFit(a.RuleFits[i], b.RuleFits[i]); cmp != 0 {
-			return cmp
-		}
-	}
-	switch {
-	case len(a.OrphanPeers) < len(b.OrphanPeers):
-		return 1
-	case len(a.OrphanPeers) > len(b.OrphanPeers):
-		return -1
-	default:
-		return 0
-	}
-}
-
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
 	Rule *Rule `json:"rule"`

@@ -337,7 +337,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	targetLeader := r.selectAvailableLeaderStore(group, targetPeers, r.ordinaryEngine)
+	targetLeader := r.selectAvailableLeaderStore(group, region, targetPeers, r.ordinaryEngine)
 	if targetLeader == 0 {
 		scatterCounter.WithLabelValues("no-leader", "").Inc()
 		return nil
@@ -396,7 +396,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreI
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore)
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, nil)
 	for _, filterFunc := range context.filterFuncs {
 		filters = append(filters, filterFunc())
 	}
@@ -457,16 +457,22 @@ func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceSto
 }
 
 // selectAvailableLeaderStore select the target leader store from the candidates. The candidates would be collected by
-// the existed peers store depended on the leader counts in the group level.
-func (r *RegionScatterer) selectAvailableLeaderStore(group string, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+// the existed peers store depended on the leader counts in the group level. Please use this func before scatter spacial engines.
+func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo, peers map[uint64]*metapb.Peer, context engineContext) uint64 {
+	sourceStore := r.cluster.GetStore(region.GetLeader().GetStoreId())
+	if sourceStore == nil {
+		log.Error("failed to get the store", zap.Uint64("store-id", region.GetLeader().GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
+		return 0
+	}
 	leaderCandidateStores := make([]uint64, 0)
+	// use PlacementLeaderSafeguard for filtering follower and learner in rule
+	filter := filter.NewPlacementLeaderSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, true /*allowMoveLeader*/)
 	for storeID := range peers {
 		store := r.cluster.GetStore(storeID)
 		if store == nil {
 			return 0
 		}
-		engine := store.GetLabelValue(core.EngineKey)
-		if len(engine) < 1 {
+		if filter == nil || filter.Target(r.cluster.GetOpts(), store).IsOK() {
 			leaderCandidateStores = append(leaderCandidateStores, storeID)
 		}
 	}
