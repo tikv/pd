@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage/endpoint"
+	"go.uber.org/zap"
 )
 
 const (
@@ -134,15 +135,17 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ 
 	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
 }
 
-// NeedTransferWitnessLeader is used to judge if the region's leader is a witness
-func NeedTransferWitnessLeader(region *core.RegionInfo) bool {
-	if region == nil || region.GetLeader() == nil {
-		return false
-	}
-	return region.GetLeader().IsWitness
+func recvRegionInfo(s schedule.Scheduler) chan<- *core.RegionInfo {
+	return s.(*trasferWitnessLeaderScheduler).regions
 }
 
-// RecvRegionInfo is used to return a writable channel to recv region info from other places
-func RecvRegionInfo(s schedule.Scheduler) chan<- *core.RegionInfo {
-	return s.(*trasferWitnessLeaderScheduler).regions
+// CheckTransferWitnessLeader receives a region to determine if transfer leader is required
+func CheckTransferWitnessLeader(s schedule.Scheduler, region *core.RegionInfo) {
+	if core.NeedTransferWitnessLeader(region) {
+		select {
+		case recvRegionInfo(s) <- region:
+		default:
+			log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
+		}
+	}
 }

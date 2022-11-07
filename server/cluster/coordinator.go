@@ -968,17 +968,12 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 	return s.GetDelayUntil(), nil
 }
 
+// CheckTransferWitnessLeader passes the region to the scheduler to determine if transfer leader is required
 func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
-	if core.NeedTransferWitnessLeader(region) {
-		c.RLock()
-		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
-		c.RUnlock()
-		if ok {
-			select {
-			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
-			default:
-				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
-			}
-		}
+	c.RLock()
+	s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
+	c.RUnlock()
+	if ok {
+		schedulers.CheckTransferWitnessLeader(s.Scheduler, region)
 	}
 }
