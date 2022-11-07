@@ -47,7 +47,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 
 	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	recvRegionInfo(sl) <- tc.GetRegion(1)
+	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
@@ -80,14 +80,14 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
-	recvRegionInfo(sl) <- tc.GetRegion(1)
+	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
 	ops, _ = sl.Schedule(tc, false)
 	re.Nil(ops)
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
-	recvRegionInfo(sl) <- tc.GetRegion(1)
+	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
