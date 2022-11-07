@@ -1138,3 +1138,61 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re.Equal(uint64(4), step1.PromoteLearners[0].ToStore)
 	re.Equal(uint64(3), step1.DemoteVoters[0].ToStore)
 }
+
+func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
+	type testCase struct {
+		originPeers   []*metapb.Peer // first is leader
+		kind          OpKind
+		expectedError bool
+		prepareSteps  []OpStep
+	}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner, IsWitness: true},
+			},
+			0,
+			false,
+			[]OpStep{
+				BecomeNonWitness{StoreID: 2, PeerID: 2},
+			},
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			0,
+			false,
+			[]OpStep{
+				ChangePeerV2Enter{
+					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
+				},
+				BecomeNonWitness{StoreID: 2, PeerID: 2},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers}, testCase.originPeers[0])
+		op, err := CreateNonWitnessPeerOperator("test", suite.cluster, region, testCase.originPeers[1])
+		suite.NoError(err)
+		suite.NotNil(op)
+		suite.Equal(testCase.kind, op.kind)
+
+		expectedSteps := testCase.prepareSteps
+		for i := 0; i < op.Len(); i++ {
+			switch step := op.Step(i).(type) {
+			case ChangePeerV2Enter:
+				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
+					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+				}
+			case BecomeNonWitness:
+				suite.Equal(step.StoreID, expectedSteps[i].(BecomeNonWitness).StoreID)
+				suite.Equal(step.PeerID, expectedSteps[i].(BecomeNonWitness).PeerID)
+			}
+		}
+	}
+}

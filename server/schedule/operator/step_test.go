@@ -526,6 +526,40 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(cpl, desc, testCases)
 }
 
+func (suite *operatorStepTestSuite) TestConvertToWitness() {
+	step := BecomeWitness{StoreID: 2, PeerID: 2}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			0,
+			true,
+			suite.NoError,
+		},
+	}
+	suite.check(step, "convert peer 2 on store 2 to witness", testCases)
+}
+
 func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []testCase) {
 	suite.Equal(desc, step.String())
 	for _, testCase := range testCases {

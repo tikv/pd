@@ -294,12 +294,14 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	brief := fmt.Sprintf("create witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewBuilder(desc, ci, region).
+		BecomeWitness(peer.GetStoreId()).
+		Build(0)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	brief := fmt.Sprintf("promote to non-witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(peer.GetStoreId()).
+		Build(0)
 }
