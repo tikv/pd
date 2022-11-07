@@ -223,19 +223,17 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
 	plans := make([]plan.Plan, 0)
-	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[4], step: 0, status: plan.NewStatus(plan.StatusStoreDown)})
+	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[4], step: 0, status: plan.NewStatus(plan.StatusStoreRemoveLimitThrottled)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[3], region: suite.regions[0], step: 1, status: plan.NewStatus(plan.StatusRegionNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[2], region: suite.regions[0], step: 1, status: plan.NewStatus(plan.StatusRegionNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], target: suite.stores[0], step: 2, status: plan.NewStatus(plan.StatusStoreScoreDisallowed)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], target: suite.stores[1], step: 2, status: plan.NewStatus(plan.StatusStoreAlreadyHasPeer)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], target: suite.stores[2], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], target: suite.stores[3], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
-	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[1], target: suite.stores[4], step: 2, status: plan.NewStatus(plan.StatusStoreDown)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[0], step: 2, status: plan.NewStatus(plan.StatusStoreAlreadyHasPeer)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[1], step: 3, status: plan.NewStatus(plan.StatusStoreScoreDisallowed)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[2], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
 	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[3], step: 2, status: plan.NewStatus(plan.StatusStoreNotMatchRule)})
-	plans = append(plans, &balanceSchedulerPlan{source: suite.stores[0], target: suite.stores[4], step: 4, status: plan.NewStatus(plan.StatusCreateOperatorFailed)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
 	suite.NoError(err)
 	suite.False(isNormal)
@@ -245,7 +243,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
 			2: plan.NewStatus(plan.StatusStoreAlreadyHasPeer),
 			3: plan.NewStatus(plan.StatusStoreNotMatchRule),
 			4: plan.NewStatus(plan.StatusStoreNotMatchRule),
-			5: plan.NewStatus(plan.StatusCreateOperatorFailed),
+			5: plan.NewStatus(plan.StatusStoreRemoveLimitThrottled),
 		}))
 }
 

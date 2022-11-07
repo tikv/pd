@@ -1350,6 +1350,53 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 	c.core.SlowStoreRecovered(storeID)
 }
 
+// NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
+func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bool, slowStoreIDs []uint64) {
+	store := c.GetStore(storeID)
+	// We just return AwakenRegions messages to those Serving stores which need to be awaken.
+	if store.IsSlow() || !store.NeedAwakenStore() {
+		return false, nil
+	}
+
+	needAwaken = false
+	for _, store := range c.GetStores() {
+		if store.IsRemoved() {
+			continue
+		}
+
+		// We will filter out heartbeat requests from slowStores.
+		if (store.IsUp() || store.IsRemoving()) && store.IsSlow() &&
+			store.GetStoreStats().GetStoreId() != storeID {
+			needAwaken = true
+			slowStoreIDs = append(slowStoreIDs, store.GetID())
+		}
+	}
+	return needAwaken, slowStoreIDs
+}
+
+// UpdateAwakenStoreTime updates the last awaken time for the store.
+func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
+	c.Lock()
+	defer c.Unlock()
+
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	if store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
+
+	if store.IsPhysicallyDestroyed() {
+		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
+	}
+
+	newStore := store.Clone(core.SetLastAwakenTime(lastAwakenTime))
+
+	return c.putStoreLocked(newStore)
+}
+
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()

@@ -28,7 +28,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20221026112947-f8d61344b172
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
-	github.com/pingcap/tidb-dashboard v0.0.0-20220728104842-3743e533b594
+	github.com/pingcap/tidb-dashboard v0.0.0-20221103012625-46facc4b7f6d
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -175,3 +175,8 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.1.0 // indirect
 )
+
+// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
+// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
+// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
+// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch

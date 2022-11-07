@@ -1252,17 +1252,19 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 
-func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64, interval time.Duration) {
-	time.Sleep(interval)
-	ts := rc.GetMinResolvedTS()
-	re.Equal(expect, ts)
+func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetMinResolvedTS()
+		return expect == ts
+	}, time.Second*10, time.Millisecond*50)
 }
 
-func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64, interval time.Duration) {
-	time.Sleep(interval)
-	ts2, err := rc.GetStorage().LoadMinResolvedTS()
-	re.NoError(err)
-	re.Equal(expect, ts2)
+func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts2, err := rc.GetStorage().LoadMinResolvedTS()
+		re.NoError(err)
+		return expect == ts2
+	}, time.Second*10, time.Millisecond*50)
 }
 
 func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
@@ -1270,7 +1272,6 @@ func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.Raf
 	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
 	err := svr.SetPDServerConfig(*cfg)
 	re.NoError(err)
-	time.Sleep(time.Millisecond + interval)
 }
 
 func TestMinResolvedTS(t *testing.T) {
@@ -1321,7 +1322,6 @@ func TestMinResolvedTS(t *testing.T) {
 	// default run job
 	re.NotEqual(rc.GetOpts().GetMinResolvedTSPersistenceInterval(), 0)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
-	time.Sleep(config.DefaultMinResolvedTSPersistenceInterval) // wait sync
 	re.Equal(time.Duration(0), rc.GetOpts().GetMinResolvedTSPersistenceInterval())
 
 	// case1: cluster is no initialized
@@ -1335,14 +1335,13 @@ func TestMinResolvedTS(t *testing.T) {
 	// case2: add leader peer to store1 but no run job
 	// min resolved ts should be zero
 	putRegionWithLeader(re, rc, id, store1)
-	checkMinResolvedTS(re, rc, 0, cluster.DefaultMinResolvedTSPersistenceInterval)
+	checkMinResolvedTS(re, rc, 0)
 
 	// case3: add leader peer to store1 and run job
 	// min resolved ts should be store1TS
-	interval := time.Millisecond
-	setMinResolvedTSPersistenceInterval(re, rc, svr, interval)
-	checkMinResolvedTS(re, rc, store1TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store1TS, interval)
+	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinResolvedTS(re, rc, store1TS)
+	checkMinResolvedTSFromStorage(re, rc, store1TS)
 
 	// case4: add tiflash store
 	// min resolved ts should no change
@@ -1357,16 +1356,15 @@ func TestMinResolvedTS(t *testing.T) {
 	// case6: set store1 to tombstone
 	// min resolved ts should change to store 3
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
-	time.Sleep(interval) // wait sync
-	checkMinResolvedTS(re, rc, store3TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
 
 	// case7: add a store with leader peer but no report min resolved ts
 	// min resolved ts should be no change
 	store4 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, 0, store3TS)
 	putRegionWithLeader(re, rc, id, store4)
-	checkMinResolvedTS(re, rc, store3TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
 	resetStoreState(re, rc, store4, metapb.StoreState_Tombstone)
 
 	// case8: set min resolved ts persist interval to zero
@@ -1376,9 +1374,9 @@ func TestMinResolvedTS(t *testing.T) {
 	store5 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store5TS, store3TS)
 	resetStoreState(re, rc, store3, metapb.StoreState_Tombstone)
 	putRegionWithLeader(re, rc, id, store5)
-	checkMinResolvedTS(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
-	checkMinResolvedTS(re, rc, store5TS, interval)
+	checkMinResolvedTS(re, rc, store5TS)
 }
 
 // See https://github.com/tikv/pd/issues/4941

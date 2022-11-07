@@ -17,6 +17,7 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -401,8 +402,10 @@ func TestScheduler(t *testing.T) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	// cannot set qps as write-peer-priorities
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-	re.Equal(expected1, conf1)
+	re.Eventually(func() bool {
+		mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+		return reflect.DeepEqual(expected1, conf1)
+	}, time.Second*10, time.Millisecond*50)
 	// test remove and add
 	mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
