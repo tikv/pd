@@ -1421,3 +1421,11 @@ func (h HexRegionsMeta) String() string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// NeedTransferWitnessLeader is used to judge if the region's leader is a witness
+func NeedTransferWitnessLeader(region *RegionInfo) bool {
+	if region == nil || region.GetLeader() == nil {
+		return false
+	}
+	return region.GetLeader().IsWitness
+}

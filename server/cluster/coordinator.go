@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -965,4 +966,20 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
+}
+
+// CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
+func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
+	if core.NeedTransferWitnessLeader(region) {
+		c.RLock()
+		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
+		c.RUnlock()
+		if ok {
+			select {
+			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
+			default:
+				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
+			}
+		}
+	}
 }
