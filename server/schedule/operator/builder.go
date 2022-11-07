@@ -838,21 +838,23 @@ func (b *Builder) execBatchSwitchWitnesses() {
 	}
 
 	step := BatchSwitchWitness{
-		toWitnesses:    make([]BecomeWitness, 0, len(b.toWitness)),
-		toNonWitnesses: make([]BecomeNonWitness, 0, len(b.toNonWitness)),
+		ToWitnesses:    make([]BecomeWitness, 0, len(b.toWitness)),
+		ToNonWitnesses: make([]BecomeNonWitness, 0, len(b.toNonWitness)),
 	}
 
 	for _, w := range b.toWitness.IDs() {
 		peer := b.toWitness[w]
-		step.toWitnesses = append(step.toWitnesses, BecomeWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+		step.ToWitnesses = append(step.ToWitnesses, BecomeWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
 	}
 	b.toWitness = newPeersMap()
 
 	for _, nw := range b.toNonWitness.IDs() {
 		peer := b.toNonWitness[nw]
-		step.toNonWitnesses = append(step.toNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+		step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
 	}
 	b.toNonWitness = newPeersMap()
+
+	b.steps = append(b.steps, step)
 }
 
 // check if the peer is allowed to become the leader.

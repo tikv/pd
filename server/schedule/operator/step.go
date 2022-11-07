@@ -324,18 +324,18 @@ func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool)
 }
 
 type BatchSwitchWitness struct {
-	toWitnesses    []BecomeWitness
-	toNonWitnesses []BecomeNonWitness
+	ToWitnesses    []BecomeWitness
+	ToNonWitnesses []BecomeNonWitness
 }
 
 func (bsw BatchSwitchWitness) String() string {
 	b := &strings.Builder{}
 	_, _ = b.WriteString("batch switch witness")
-	for _, w := range bsw.toWitnesses {
+	for _, w := range bsw.ToWitnesses {
 		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to witness", w.PeerID, w.StoreID)
 	}
-	for _, nw := range bsw.toNonWitnesses {
-		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to non witness", nw.PeerID, nw.StoreID)
+	for _, nw := range bsw.ToNonWitnesses {
+		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to non-witness", nw.PeerID, nw.StoreID)
 	}
 	return b.String()
 }
@@ -347,12 +347,12 @@ func (bsw BatchSwitchWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 
 // IsFinish checks if current step is finished.
 func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
-	for _, w := range bsw.toWitnesses {
+	for _, w := range bsw.ToWitnesses {
 		if !w.IsFinish(region) {
 			return false
 		}
 	}
-	for _, nw := range bsw.toNonWitnesses {
+	for _, nw := range bsw.ToNonWitnesses {
 		if !nw.IsFinish(region) {
 			return false
 		}
@@ -361,12 +361,12 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 func (bsw BatchSwitchWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
-	for _, w := range bsw.toWitnesses {
+	for _, w := range bsw.ToWitnesses {
 		if err := w.CheckInProgress(ci, region); err != nil {
 			return err
 		}
 	}
-	for _, nw := range bsw.toNonWitnesses {
+	for _, nw := range bsw.ToNonWitnesses {
 		if err := nw.CheckInProgress(ci, region); err != nil {
 			return err
 		}
@@ -375,25 +375,25 @@ func (bsw BatchSwitchWitness) CheckInProgress(ci ClusterInformer, region *core.R
 }
 
 func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for _, w := range bsw.toWitnesses {
+	for _, w := range bsw.ToWitnesses {
 		w.Influence(opInfluence, region)
 	}
-	for _, nw := range bsw.toNonWitnesses {
+	for _, nw := range bsw.ToNonWitnesses {
 		nw.Influence(opInfluence, region)
 	}
 }
 
 func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
-	count := uint64(len(bsw.toWitnesses)+len(bsw.toNonWitnesses)) + 1
+	count := uint64(len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses)) + 1
 	return fastStepWaitDuration(regionSize) * time.Duration(count)
 }
 
 func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	switches := make([]*pdpb.SwitchWitness, 0, len(bsw.toWitnesses)+len(bsw.toNonWitnesses))
-	for _, w := range bsw.toWitnesses {
+	switches := make([]*pdpb.SwitchWitness, 0, len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses))
+	for _, w := range bsw.ToWitnesses {
 		switches = append(switches, w.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
 	}
-	for _, nw := range bsw.toNonWitnesses {
+	for _, nw := range bsw.ToNonWitnesses {
 		switches = append(switches, nw.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
 	}
 	return &pdpb.RegionHeartbeatResponse{

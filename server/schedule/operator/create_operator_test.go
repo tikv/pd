@@ -265,14 +265,21 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			[]*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
 			[]*metapb.Peer{
 				{Id: 4, StoreId: 1, Role: metapb.PeerRole_Voter},
-				{Id: 3, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 6, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
+				{Id: 5, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			0,
-			true,
-			nil,
+			OpMerge,
+			false,
+			[]OpStep{
+				BatchSwitchWitness{
+					ToWitnesses:    []BecomeWitness{{PeerID: 3, StoreID: 3}},
+					ToNonWitnesses: []BecomeNonWitness{{PeerID: 2, StoreID: 2}},
+				},
+			},
 		},
 	}
 
