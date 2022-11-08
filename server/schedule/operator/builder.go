@@ -422,8 +422,8 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toRemove = newPeersMap()
 	b.toPromote = newPeersMap()
 	b.toDemote = newPeersMap()
-	b.toNonWitness = newPeersMap()
 	b.toWitness = newPeersMap()
+	b.toNonWitness = newPeersMap()
 
 	voterCount := 0
 	for _, peer := range b.targetPeers {
@@ -455,6 +455,19 @@ func (b *Builder) prepareBuild() (string, error) {
 			}
 		}
 
+		// Demote voter to learner before switch witness to non-witness if needed.
+		isOriginPeerWitness := core.IsWitness(o)
+		isTargetPeerWitness := core.IsWitness(n)
+		if isOriginPeerWitness && !isTargetPeerWitness {
+			if !core.IsLearner(n) {
+				n.Role = metapb.PeerRole_Learner
+				n.IsWitness = true
+			}
+			b.toNonWitness.Set(n)
+		} else if !isOriginPeerWitness && isTargetPeerWitness {
+			b.toWitness.Set(n)
+		}
+
 		isOriginPeerLearner := core.IsLearner(o)
 		isTargetPeerLearner := core.IsLearner(n)
 		if isOriginPeerLearner && !isTargetPeerLearner {
@@ -463,22 +476,10 @@ func (b *Builder) prepareBuild() (string, error) {
 		} else if !isOriginPeerLearner && isTargetPeerLearner {
 			// voter -> learner
 			if b.useJointConsensus {
-				if core.IsWitness(o) && !core.IsWitness(n) {
-					n.IsWitness = true
-					b.toNonWitness.Set(n)
-				} else if !core.IsWitness(o) && core.IsWitness(n) {
-					b.toWitness.Set(n)
-				}
 				b.toDemote.Set(n)
 			} else {
 				b.toRemove.Set(o)
 				// the targetPeers loop below will add `b.toAdd.Set(n)`
-			}
-		} else {
-			if core.IsWitness(o) && !core.IsWitness(n) {
-				b.toNonWitness.Set(n)
-			} else if !core.IsWitness(o) && core.IsWitness(n) {
-				b.toWitness.Set(n)
 			}
 		}
 	}
@@ -518,7 +519,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	// TODO:
+	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter),
+	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
 		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) && len(b.toWitness)+len(b.toNonWitness) <= 1 {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
@@ -552,6 +554,10 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
 	case b.originLeaderStoreID != b.targetLeaderStoreID:
 		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
+	case len(b.toWitness) > 0:
+		return fmt.Sprintf("switch peer: store %s to witness", b.toWitness)
+	case len(b.toNonWitness) > 0:
+		return fmt.Sprintf("switch peer: store %s to non-witness", b.toNonWitness)
 	default:
 		return ""
 	}

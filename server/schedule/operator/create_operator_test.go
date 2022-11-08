@@ -275,6 +275,10 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			OpMerge,
 			false,
 			[]OpStep{
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
+				},
 				BatchSwitchWitness{
 					ToWitnesses:    []BecomeWitness{{PeerID: 3, StoreID: 3}},
 					ToNonWitnesses: []BecomeNonWitness{{PeerID: 2, StoreID: 2}},
