@@ -455,10 +455,10 @@ func (b *Builder) prepareBuild() (string, error) {
 			}
 		}
 
-		// Demote voter to learner before switch witness to non-witness if needed.
 		isOriginPeerWitness := core.IsWitness(o)
 		isTargetPeerWitness := core.IsWitness(n)
 		if isOriginPeerWitness && !isTargetPeerWitness {
+			// Demote voter to learner before switch witness to non-witness if needed.
 			if !core.IsLearner(n) {
 				n.Role = metapb.PeerRole_Learner
 				n.IsWitness = true

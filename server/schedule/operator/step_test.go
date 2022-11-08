@@ -526,7 +526,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(cpl, desc, testCases)
 }
 
-func (suite *operatorStepTestSuite) TestConvertToWitness() {
+func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 	step := BecomeWitness{StoreID: 2, PeerID: 2}
 	testCases := []testCase{
 		{
@@ -557,7 +557,7 @@ func (suite *operatorStepTestSuite) TestConvertToWitness() {
 			suite.NoError,
 		},
 	}
-	suite.check(step, "convert peer 2 on store 2 to witness", testCases)
+	suite.check(step, "switch peer 2 on store 2 to witness", testCases)
 }
 
 func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []testCase) {

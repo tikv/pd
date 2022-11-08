@@ -1089,7 +1089,7 @@ func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionH
 func switchWitness(peerID uint64, isWitness bool) *pdpb.RegionHeartbeatResponse {
 	return &pdpb.RegionHeartbeatResponse{
 		SwitchWitnesses: &pdpb.BatchSwitchWitness{
-			SwitchWitnesses: []*pdpb.SwitchWitness{&pdpb.SwitchWitness{PeerId: peerID, IsWitness: isWitness}},
+			SwitchWitnesses: []*pdpb.SwitchWitness{{PeerId: peerID, IsWitness: isWitness}},
 		},
 	}
 }
