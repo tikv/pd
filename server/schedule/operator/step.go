@@ -221,7 +221,7 @@ func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (bw BecomeWitness) String() string {
-	return fmt.Sprintf("convert peer %v on store %v to witness", bw.PeerID, bw.StoreID)
+	return fmt.Sprintf("switch peer %v on store %v to witness", bw.PeerID, bw.StoreID)
 }
 
 // IsFinish checks if current step is finished.
@@ -278,7 +278,7 @@ func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (bn BecomeNonWitness) String() string {
-	return fmt.Sprintf("convert peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
+	return fmt.Sprintf("switch peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
 }
 
 // IsFinish checks if current step is finished.
