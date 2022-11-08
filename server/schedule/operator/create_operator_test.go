@@ -272,16 +272,18 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 				{Id: 6, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
 				{Id: 5, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			OpMerge,
+			OpMerge | OpRegion,
 			false,
 			[]OpStep{
 				ChangePeerV2Enter{
-					PromoteLearners: []PromoteLearner{},
-					DemoteVoters:    []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
+					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},
 				BatchSwitchWitness{
 					ToWitnesses:    []BecomeWitness{{PeerID: 3, StoreID: 3}},
 					ToNonWitnesses: []BecomeNonWitness{{PeerID: 2, StoreID: 2}},
+				},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{PeerID: 2, ToStore: 2, IsWitness: false}},
 				},
 			},
 		},
@@ -1211,13 +1213,16 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			0,
+			OpRegion,
 			false,
 			[]OpStep{
 				ChangePeerV2Enter{
 					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},
 				BecomeNonWitness{StoreID: 2, PeerID: 2},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 2, PeerID: 2, IsWitness: false}},
+				},
 			},
 		},
 	}

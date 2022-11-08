@@ -77,11 +77,11 @@ type Builder struct {
 	forceTargetLeader bool
 
 	// intermediate states
-	currentPeers                                                  peersMap
-	currentLeaderStoreID                                          uint64
-	toAdd, toRemove, toPromote, toDemote, toWitness, toNonWitness peersMap       // pending tasks.
-	steps                                                         []OpStep       // generated steps.
-	peerAddStep                                                   map[uint64]int // record at which step a peer is created.
+	currentPeers                                                                                    peersMap
+	currentLeaderStoreID                                                                            uint64
+	toAdd, toRemove, toPromote, toDemote, toWitness, toNonWitness, toPromoteAfterSwitchToNonWitness peersMap       // pending tasks.
+	steps                                                                                           []OpStep       // generated steps.
+	peerAddStep                                                                                     map[uint64]int // record at which step a peer is created.
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
@@ -424,6 +424,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	b.toDemote = newPeersMap()
 	b.toWitness = newPeersMap()
 	b.toNonWitness = newPeersMap()
+	b.toPromoteAfterSwitchToNonWitness = newPeersMap()
 
 	voterCount := 0
 	for _, peer := range b.targetPeers {
@@ -462,6 +463,7 @@ func (b *Builder) prepareBuild() (string, error) {
 			if !core.IsLearner(n) {
 				n.Role = metapb.PeerRole_Learner
 				n.IsWitness = true
+				b.toPromoteAfterSwitchToNonWitness.Set(n)
 			}
 			b.toNonWitness.Set(n)
 		} else if !isOriginPeerWitness && isTargetPeerWitness {
@@ -522,7 +524,8 @@ func (b *Builder) prepareBuild() (string, error) {
 	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
-		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) && len(b.toWitness)+len(b.toNonWitness) <= 1 {
+		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) &&
+		len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteAfterSwitchToNonWitness) <= 1 {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
 		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
@@ -628,6 +631,14 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	}
 
 	b.execBatchSwitchWitnesses()
+
+	for _, promote := range b.toPromoteAfterSwitchToNonWitness.IDs() {
+		peer := b.toPromoteAfterSwitchToNonWitness[promote]
+		b.toPromote.Set(peer)
+		kind |= OpRegion
+	}
+	b.toPromoteAfterSwitchToNonWitness = newPeersMap()
+	b.execChangePeerV2(true, false)
 
 	return kind, nil
 }
