@@ -323,6 +323,7 @@ func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool)
 	return switchWitness(bn.PeerID, false)
 }
 
+// BatchSwitchWitness is an OpStep that batch switch witness.
 type BatchSwitchWitness struct {
 	ToWitnesses    []BecomeWitness
 	ToNonWitnesses []BecomeNonWitness
@@ -360,6 +361,7 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 	return true
 }
 
+// CheckInProgress checks if the step is in the progress of advancing.
 func (bsw BatchSwitchWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
 	for _, w := range bsw.ToWitnesses {
 		if err := w.CheckInProgress(ci, region); err != nil {
@@ -374,6 +376,7 @@ func (bsw BatchSwitchWitness) CheckInProgress(ci ClusterInformer, region *core.R
 	return nil
 }
 
+// Influence calculates the store difference that current step makes.
 func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for _, w := range bsw.ToWitnesses {
 		w.Influence(opInfluence, region)
@@ -383,11 +386,13 @@ func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.Re
 	}
 }
 
+// Timeout returns duration that current step may take.
 func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
 	count := uint64(len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses)) + 1
 	return fastStepWaitDuration(regionSize) * time.Duration(count)
 }
 
+// GetCmd returns the schedule command for heartbeat response.
 func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
 	switches := make([]*pdpb.SwitchWitness, 0, len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses))
 	for _, w := range bsw.ToWitnesses {
