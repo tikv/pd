@@ -280,7 +280,7 @@ func (b *Builder) BecomeNonWitness(storeID uint64) *Builder {
 		b.targetPeers.Set(&metapb.Peer{
 			Id:        peer.GetId(),
 			StoreId:   peer.GetStoreId(),
-			Role:      metapb.PeerRole_Learner,
+			Role:      peer.GetRole(),
 			IsWitness: false,
 		})
 	}
