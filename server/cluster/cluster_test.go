@@ -1781,9 +1781,6 @@ func TestAwakenStore(t *testing.T) {
 	re.NoError(cluster.putStoreLocked(store4))
 	store1 := cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
-	re.NoError(cluster.UpdateAwakenStoreTime(1, now))
-	store1 = cluster.GetStore(1)
-	re.False(store1.NeedAwakenStore())
 }
 
 type testCluster struct {

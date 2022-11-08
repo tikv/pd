@@ -1387,29 +1387,6 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 	return needAwaken, slowStoreIDs
 }
 
-// UpdateAwakenStoreTime updates the last awaken time for the store.
-func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
-	c.Lock()
-	defer c.Unlock()
-
-	store := c.GetStore(storeID)
-	if store == nil {
-		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-
-	if store.IsRemoved() {
-		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
-	}
-
-	if store.IsPhysicallyDestroyed() {
-		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
-	}
-
-	newStore := store.Clone(core.SetLastAwakenTime(lastAwakenTime))
-
-	return c.putStoreLocked(newStore)
-}
-
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
