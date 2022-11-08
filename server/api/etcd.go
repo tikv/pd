@@ -17,9 +17,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.etcd.io/etcd/etcdserver"
 )
 
 type etcdHandler struct {
@@ -35,32 +35,35 @@ func newEtcdHandler(svr *server.Server, rd *render.Render) *etcdHandler {
 }
 
 // @Summary  ETCD readiness status of the PD instance.
-// @Produce  json
+// @Produce  plain
 // @Success  200  {string}  string  "ok"
 // @Failure  400  {string}  string  "not ready"
-// @Failure  400  {string}  string  "not found"
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /ready [get]
 func (h *etcdHandler) GetReadyStatus(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
-	resp, err := etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+
+	var leaderIndex uint64
+	if h.svr.GetLeader() == nil || len(h.svr.GetLeader().PeerUrls) == 0 {
+		h.rd.Text(w, http.StatusInternalServerError, "failed to find etcd leader url")
 		return
+	}
+	if leaderStatus, err := client.Maintenance.Status(client.Ctx(), h.svr.GetLeader().PeerUrls[0]); err != nil {
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		return
+	} else {
+		leaderIndex = leaderStatus.RaftIndex
 	}
 
-	for _, member := range resp.Members {
-		if member.GetID() != h.svr.GetMember().ID() {
-			continue
-		}
-		// readiness check failed if the member is still a learner
-		// after it is promoted to a leader or follower, the PD instance is ready
-		if member.IsLearner {
-			h.rd.Text(w, http.StatusBadRequest, "not ready")
-			return
-		}
-		h.rd.Text(w, http.StatusOK, "ok")
+	if h.svr.GetMember() == nil || h.svr.GetMember().Etcd() == nil || h.svr.GetMember().Etcd().Server == nil {
+		h.rd.Text(w, http.StatusInternalServerError, "failed to find PD's etcd server")
 		return
 	}
-	h.rd.Text(w, http.StatusNotFound, "not found")
+	currServer := h.svr.GetMember().Etcd().Server
+
+	if currServer.IsLearner() || currServer.AppliedIndex()+etcdserver.DefaultSnapshotCatchUpEntries < leaderIndex {
+		h.rd.Text(w, http.StatusBadRequest, "not ready")
+	}
+
+	h.rd.Text(w, http.StatusOK, "ok")
 }
