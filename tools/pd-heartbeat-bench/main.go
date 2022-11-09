@@ -17,7 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	stdlog "log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -27,26 +27,16 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	flag "github.com/spf13/pflag"
+	"github.com/pingcap/log"
+	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
-)
-
-var (
-	pdAddr            = flag.String("pd", "127.0.0.1:2379", "pd address")
-	storeCount        = flag.Int("store", 100, "store count")
-	regionCount       = flag.Int("region", 1800000, "region count")
-	keyLen            = flag.Int("key-len", 56, "key length")
-	replica           = flag.Int("replica", 3, "replica count")
-	leaderUpdateRatio = flag.Float64("leader", 0.06, "ratio of the region leader need to update, they need save-tree")
-	epochUpdateRatio  = flag.Float64("epoch", 0.04, "ratio of the region epoch need to update, they need save-kv")
-	spaceUpdateRatio  = flag.Float64("space", 0.15, "ratio of the region space need to update")
-	flowUpdateRatio   = flag.Float64("flow", 0.35, "ratio of the region flow need to update")
-	sample            = flag.Bool("sample", false, "sample per second")
-	// for tiup
-	logFile = flag.String("log-file", "", "")
 )
 
 const (
@@ -63,11 +53,11 @@ func trimHTTPPrefix(str string) string {
 	return str
 }
 
-func newClient() pdpb.PDClient {
-	addr := trimHTTPPrefix(*pdAddr)
+func newClient(cfg *config.Config) pdpb.PDClient {
+	addr := trimHTTPPrefix(cfg.PDAddr)
 	cc, err := grpc.Dial(addr, grpc.WithInsecure())
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to create gRPC connection", zap.Error(err))
 	}
 	return pdpb.NewPDClient(cc)
 }
@@ -75,13 +65,13 @@ func newClient() pdpb.PDClient {
 func initClusterID(ctx context.Context, cli pdpb.PDClient) {
 	res, err := cli.GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to get members", zap.Error(err))
 	}
 	if res.GetHeader().GetError() != nil {
-		log.Fatal(res.GetHeader().GetError())
+		log.Fatal("failed to get members", zap.String("err", res.GetHeader().GetError().String()))
 	}
 	clusterID = res.GetHeader().GetClusterId()
-	log.Println("ClusterID:", clusterID)
+	log.Info("init cluster ID successfully", zap.Uint64("cluster-id", clusterID))
 }
 
 func header() *pdpb.RequestHeader {
@@ -93,10 +83,10 @@ func header() *pdpb.RequestHeader {
 func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	isBootstrapped, err := cli.IsBootstrapped(ctx, &pdpb.IsBootstrappedRequest{Header: header()})
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("check if cluster has already bootstrapped failed", zap.Error(err))
 	}
 	if isBootstrapped.GetBootstrapped() {
-		log.Println("already bootstrapped")
+		log.Info("already bootstrapped")
 		return
 	}
 
@@ -117,16 +107,16 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	}
 	resp, err := cli.Bootstrap(ctx, req)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
 	}
 	if resp.GetHeader().GetError() != nil {
-		log.Fatalf("bootstrap failed: %s", resp.GetHeader().GetError().String())
+		log.Fatal("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
 	}
-	log.Println("bootstrapped")
+	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cli pdpb.PDClient) {
-	for i := uint64(1); i <= uint64(*storeCount); i++ {
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
+	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
 			Address: fmt.Sprintf("localhost:%d", i),
@@ -134,10 +124,10 @@ func putStores(ctx context.Context, cli pdpb.PDClient) {
 		}
 		resp, err := cli.PutStore(ctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
 		}
 		if resp.GetHeader().GetError() != nil {
-			log.Fatalf("put store failed: %s", resp.GetHeader().GetError().String())
+			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
 			var heartbeatTicker = time.NewTicker(10 * time.Second)
@@ -158,14 +148,14 @@ func putStores(ctx context.Context, cli pdpb.PDClient) {
 	}
 }
 
-func newStartKey(id uint64) []byte {
-	k := make([]byte, *keyLen)
+func newStartKey(id uint64, keyLen int) []byte {
+	k := make([]byte, keyLen)
 	copy(k, fmt.Sprintf("%010d", id))
 	return k
 }
 
-func newEndKey(id uint64) []byte {
-	k := newStartKey(id)
+func newEndKey(id uint64, keyLen int) []byte {
+	k := newStartKey(id, keyLen)
 	k[len(k)-1]++
 	return k
 }
@@ -182,21 +172,22 @@ type Regions struct {
 	updateFlow   []int
 }
 
-func (rs *Regions) init() {
-	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, *regionCount)
+func (rs *Regions) init(cfg *config.Config) {
+	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, cfg.RegionCount)
 	rs.updateRound = 0
 
 	// Generate regions
 	id := uint64(1)
 	now := uint64(time.Now().Unix())
 
-	for i := 0; i < *regionCount; i++ {
+	keyLen := cfg.KeyLength
+	for i := 0; i < cfg.RegionCount; i++ {
 		region := &pdpb.RegionHeartbeatRequest{
 			Header: header(),
 			Region: &metapb.Region{
 				Id:          id,
-				StartKey:    newStartKey(id),
-				EndKey:      newEndKey(id),
+				StartKey:    newStartKey(id, keyLen),
+				EndKey:      newEndKey(id, keyLen),
 				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
 			},
 			ApproximateSize: bytesUnit,
@@ -209,9 +200,9 @@ func (rs *Regions) init() {
 		}
 		id += 1
 
-		peers := make([]*metapb.Peer, 0, *replica)
-		for j := 0; j < *replica; j++ {
-			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%*storeCount + 1)})
+		peers := make([]*metapb.Peer, 0, cfg.Replica)
+		for j := 0; j < cfg.Replica; j++ {
+			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%cfg.StoreCount + 1)})
 			id += 1
 		}
 
@@ -221,32 +212,32 @@ func (rs *Regions) init() {
 	}
 
 	// Generate sample index
-	slice := make([]int, *regionCount)
+	slice := make([]int, cfg.RegionCount)
 	for i := range slice {
 		slice[i] = i
 	}
 
 	rand.Seed(0) // Ensure consistent behavior multiple times
 	pick := func(ratio float64) []int {
-		rand.Shuffle(*regionCount, func(i, j int) {
+		rand.Shuffle(cfg.RegionCount, func(i, j int) {
 			slice[i], slice[j] = slice[j], slice[i]
 		})
-		return append(slice[:0:0], slice[0:int(float64(*regionCount)*ratio)]...)
+		return append(slice[:0:0], slice[0:int(float64(cfg.RegionCount)*ratio)]...)
 	}
 
-	rs.updateLeader = pick(*leaderUpdateRatio)
-	rs.updateEpoch = pick(*epochUpdateRatio)
-	rs.updateSpace = pick(*spaceUpdateRatio)
-	rs.updateFlow = pick(*flowUpdateRatio)
+	rs.updateLeader = pick(cfg.LeaderUpdateRatio)
+	rs.updateEpoch = pick(cfg.EpochUpdateRatio)
+	rs.updateSpace = pick(cfg.SpaceUpdateRatio)
+	rs.updateFlow = pick(cfg.FlowUpdateRatio)
 }
 
-func (rs *Regions) update() {
+func (rs *Regions) update(replica int) {
 	rs.updateRound += 1
 
 	// update leader
 	for _, i := range rs.updateLeader {
 		region := rs.regions[i]
-		region.Leader = region.Region.Peers[rs.updateRound%*replica]
+		region.Leader = region.Region.Peers[rs.updateRound%replica]
 	}
 	// update epoch
 	for _, i := range rs.updateEpoch {
@@ -274,11 +265,11 @@ func (rs *Regions) update() {
 	}
 }
 
-func createHeartbeatStream(ctx context.Context) pdpb.PD_RegionHeartbeatClient {
-	cli := newClient()
+func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_RegionHeartbeatClient {
+	cli := newClient(cfg)
 	stream, err := cli.RegionHeartbeat(ctx)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("create stream error", zap.Error(err))
 	}
 
 	go func() {
@@ -306,25 +297,35 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 		err = stream.Send(region)
 		rep.Results() <- report.Result{Start: start, End: time.Now(), Err: err}
 		if err != nil {
-			log.Fatal(err)
+			log.Error("send result error", zap.Error(err))
 		}
 	}
-	log.Printf("store %d finish one round region heartbeat, cost time: %v\n", storeID, time.Since(start))
+	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
 }
 
 func main() {
-	log.SetFlags(0)
-	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
-	flag.Parse()
+	cfg := config.NewConfig()
+	err := cfg.Parse(os.Args[1:])
+	defer logutil.LogPanic()
+
+	switch errors.Cause(err) {
+	case nil:
+	case pflag.ErrHelp:
+		exit(0)
+	default:
+		log.Fatal("parse cmd flags error", zap.Error(err))
+	}
+
+	// New zap logger
+	err = cfg.SetupLogger()
+	if err == nil {
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+	} else {
+		log.Fatal("initialize logger error", zap.Error(err))
+	}
 
 	// let PD have enough time to start
 	time.Sleep(5 * time.Second)
-	f, err := os.OpenFile(*logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("file open error : %v", err)
-	}
-	defer f.Close()
-	log.SetOutput(f)
 	ctx, cancel := context.WithCancel(context.Background())
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -338,30 +339,33 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	cli := newClient()
+	cli := newClient(cfg)
 	initClusterID(ctx, cli)
 	bootstrap(ctx, cli)
-	putStores(ctx, cli)
-	log.Println("finish put stores")
+	putStores(ctx, cfg, cli)
+	log.Info("finish put stores")
 	regions := new(Regions)
-	regions.init()
-	log.Println("finish init regions")
+	regions.init(cfg)
+	log.Info("finish init regions")
 
-	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, *storeCount)
-	for i := 1; i <= *storeCount; i++ {
-		streams[uint64(i)] = createHeartbeatStream(ctx)
+	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
+	for i := 1; i <= cfg.StoreCount; i++ {
+		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
 	}
 	var heartbeatTicker = time.NewTicker(60 * time.Second)
 	defer heartbeatTicker.Stop()
 	for {
 		select {
 		case <-heartbeatTicker.C:
-			rep := newReport()
+			if cfg.Round != 0 && regions.updateRound > cfg.Round {
+				exit(0)
+			}
+			rep := newReport(cfg)
 			r := rep.Run()
 
 			startTime := time.Now()
 			wg := &sync.WaitGroup{}
-			for i := 1; i <= *storeCount; i++ {
+			for i := 1; i <= cfg.StoreCount; i++ {
 				id := uint64(i)
 				wg.Add(1)
 				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
@@ -370,12 +374,11 @@ func main() {
 
 			since := time.Since(startTime).Seconds()
 			close(rep.Results())
-			log.Println(<-r)
-			log.Println(regions.result(since))
-
-			regions.update()
+			stdlog.Println(<-r)
+			stdlog.Println(regions.result(cfg.RegionCount, since))
+			regions.update(cfg.Replica)
 		case <-ctx.Done():
-			log.Println("Got signal to exit")
+			log.Info("Got signal to exit")
 			switch sig {
 			case syscall.SIGTERM:
 				exit(0)
@@ -390,15 +393,15 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-func newReport() report.Report {
+func newReport(cfg *config.Config) report.Report {
 	p := "%4.4f"
-	if *sample {
+	if cfg.Sample {
 		return report.NewReportSample(p)
 	}
 	return report.NewReport(p)
 }
 
-func (rs *Regions) result(sec float64) string {
+func (rs *Regions) result(regionCount int, sec float64) string {
 	if rs.updateRound == 0 {
 		// There was no difference in the first round
 		return ""
@@ -417,10 +420,10 @@ func (rs *Regions) result(sec float64) string {
 	for _, i := range rs.updateFlow {
 		updated[i] = struct{}{}
 	}
-	inactiveCount := *regionCount - len(updated)
+	inactiveCount := regionCount - len(updated)
 
 	ret := "Update speed of each category:\n"
-	ret += fmt.Sprintf("  Requests/sec:   %12.4f\n", float64(*regionCount)/sec)
+	ret += fmt.Sprintf("  Requests/sec:   %12.4f\n", float64(regionCount)/sec)
 	ret += fmt.Sprintf("  Save-Tree/sec:  %12.4f\n", float64(len(rs.updateLeader))/sec)
 	ret += fmt.Sprintf("  Save-KV/sec:    %12.4f\n", float64(len(rs.updateEpoch))/sec)
 	ret += fmt.Sprintf("  Save-Space/sec: %12.4f\n", float64(len(rs.updateSpace))/sec)
