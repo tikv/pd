@@ -379,27 +379,30 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
 	r = r.Clone(core.WithLearners([]*metapb.Peer{r.GetPeer(3)}))
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
 
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   "pd",
-		ID:        "default",
-		Index:     100,
-		Override:  true,
-		Role:      placement.Voter,
-		Count:     2,
-		IsWitness: false,
-	})
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   "pd",
-		ID:        "r1",
-		Index:     100,
-		Override:  false,
-		Role:      placement.Learner,
-		Count:     1,
-		IsWitness: false,
-		LabelConstraints: []placement.LabelConstraint{
-			{Key: "C", Op: "in", Values: []string{"learner"}},
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:   "pd",
+			ID:        "default",
+			Index:     100,
+			Override:  true,
+			Role:      placement.Voter,
+			Count:     2,
+			IsWitness: false,
+		},
+		{
+			GroupID:   "pd",
+			ID:        "r1",
+			Index:     100,
+			Override:  false,
+			Role:      placement.Learner,
+			Count:     1,
+			IsWitness: false,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "C", Op: "in", Values: []string{"learner"}},
+			},
 		},
 	})
+	suite.NoError(err)
 
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
