@@ -435,6 +435,44 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
 	suite.Nil(op)
 }
 
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:   "pd",
+			ID:        "default",
+			Index:     100,
+			Role:      placement.Voter,
+			IsWitness: false,
+			Count:     2,
+		},
+		{
+			GroupID:   "pd",
+			ID:        "r1",
+			Index:     100,
+			Role:      placement.Voter,
+			Count:     1,
+			IsWitness: true,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "C", Op: "in", Values: []string{"voter"}},
+			},
+		},
+	})
+	suite.NoError(err)
+
+	suite.rc.recordRegionPromoteToNonWitness(1)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+
+	suite.rc.switchWitnessCache.Remove(1)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+}
+
 func (suite *ruleCheckerTestSuite) TestBetterReplacement() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host1"})
