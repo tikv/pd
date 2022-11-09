@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"context"
 	"errors"
 	"math"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -47,23 +49,25 @@ const maxPendingListLen = 100000
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster           schedule.Cluster
-	ruleManager       *placement.RuleManager
-	name              string
-	regionWaitingList cache.Cache
-	pendingList       cache.Cache
-	record            *recorder
+	cluster            schedule.Cluster
+	ruleManager        *placement.RuleManager
+	name               string
+	regionWaitingList  cache.Cache
+	pendingList        cache.Cache
+	switchWitnessCache *cache.TTLUint64
+	record             *recorder
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
-		cluster:           cluster,
-		ruleManager:       ruleManager,
-		name:              "rule-checker",
-		regionWaitingList: regionWaitingList,
-		pendingList:       cache.NewDefaultCache(maxPendingListLen),
-		record:            newRecord(),
+		cluster:            cluster,
+		ruleManager:        ruleManager,
+		name:               "rule-checker",
+		regionWaitingList:  regionWaitingList,
+		pendingList:        cache.NewDefaultCache(maxPendingListLen),
+		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetOpts().GetSwitchWitnessInterval()),
+		record:             newRecord(),
 	}
 }
 
@@ -145,37 +149,45 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	return nil
 }
 
+func (c *RuleChecker) recordRegionPromoteToNonWitness(regionID uint64) {
+	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetOpts().GetSwitchWitnessInterval())
+}
+
+func (c *RuleChecker) isWitnessEnabled() bool {
+	return (versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
+		c.cluster.GetOpts().IsSwitchWitnessAllowed())
+}
+
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
 		return c.addRulePeer(region, rf)
 	}
+	isWitnessEnabled := c.isWitnessEnabled()
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
-			if c.isStoreDownTimeUnderMaxDownTime(peer.GetStoreId()) {
+			if c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
+				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
+				if isWitnessEnabled {
+					rf.Rule.IsWitness = true
+				}
+				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			}
+			if isWitnessEnabled {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
-					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+					op, err := operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+					if err == nil {
+						c.recordRegionPromoteToNonWitness(region.GetID())
+					}
+					return op, err
 				}
-			} else {
-				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
 		}
 		if c.isOfflinePeer(peer) {
-			if witness, ok := c.hasAvailableWitness(region, peer); ok {
-				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
-			}
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
-		}
-		if c.isPendingPeer(region, peer) {
-			if witness, ok := c.hasAvailableWitness(region, peer); ok {
-				checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
-			}
 		}
 	}
 	// fix loose matched peers.
@@ -218,7 +230,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: true}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -288,20 +300,35 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
 		return nil, errPeerCannotBeWitness
 	}
-	if !core.IsWitness(peer) && rf.Rule.IsWitness {
-		lv := "set-voter-witness"
-		if core.IsLearner(peer) {
-			lv = "set-learner-witness"
+	if c.isWitnessEnabled() {
+		if !core.IsWitness(peer) && rf.Rule.IsWitness {
+			c.switchWitnessCache.UpdateTTL(c.cluster.GetOpts().GetSwitchWitnessInterval())
+			if c.switchWitnessCache.Exists(region.GetID()) {
+				checkerCounter.WithLabelValues("rule_checker", "recently-promote-to-non-witness").Inc()
+				return nil, nil
+			}
+			if len(region.GetPendingPeers()) > 0 {
+				checkerCounter.WithLabelValues("rule_checker", "cancel-switch-to-witness").Inc()
+				return nil, nil
+			}
+			lv := "set-voter-witness"
+			if core.IsLearner(peer) {
+				lv = "set-learner-witness"
+			}
+			checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+			return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
+		} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
+			lv := "set-voter-non-witness"
+			if core.IsLearner(peer) {
+				lv = "set-learner-non-witness"
+			}
+			checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+			op, err := operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
+			if err == nil {
+				c.recordRegionPromoteToNonWitness(region.GetID())
+			}
+			return op, err
 		}
-		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
-	} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
-		lv := "set-voter-non-witness"
-		if core.IsLearner(peer) {
-			lv = "set-learner-non-witness"
-		}
-		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
 	}
 	return nil, nil
 }
@@ -395,9 +422,9 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 	return false
 }
 
-func (c *RuleChecker) isStoreDownTimeUnderMaxDownTime(storeID uint64) bool {
+func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	store := c.cluster.GetStore(storeID)
-	return store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime()
+	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 
 func (c *RuleChecker) isPendingPeer(region *core.RegionInfo, peer *metapb.Peer) bool {

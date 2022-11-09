@@ -50,10 +50,12 @@ func (suite *ruleCheckerTestSuite) SetupTest() {
 	cfg := config.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
-	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
 	suite.cluster.SetEnablePlacementRules(true)
+	suite.cluster.SetEnableSwitchWitness(true)
+	suite.cluster.SetEnableUseJointConsensus(false)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
+	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
 }
 
 func (suite *ruleCheckerTestSuite) TearDownTest() {
@@ -959,38 +961,7 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvaliableWitness() {
 	suite.cluster.SetStoreOffline(4)
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
-	suite.Equal("promote-witness", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixPendingPeerWithAvaliableWitness() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	r := suite.cluster.GetRegion(1)
-	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{r.GetPeer(3)}))
-	suite.Nil(suite.rc.Check(r))
-
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(2)}))
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
-		ID:      "default",
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   "pd",
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-	op := suite.rc.Check(r)
-	suite.NotNil(op)
-	suite.Equal("promote-witness", op.Desc())
-	suite.Equal(uint64(2), op.Step(0).(operator.BecomeNonWitness).StoreID)
+	suite.Equal("replace-rule-offline-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {

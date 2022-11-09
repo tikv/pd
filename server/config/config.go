@@ -246,6 +246,7 @@ const (
 	defaultEnablePlacementRules = true
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
+	defaultEnableSwitchWitness  = false
 
 	defaultDashboardAddress = "auto"
 
@@ -650,6 +651,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
+	// SwitchWitnessInterval is the minimum interval time to permit to witness after promote to non-witness.
+	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
@@ -770,6 +773,9 @@ type ScheduleConfig struct {
 
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// EnableSwitchWitness is the option to enable using witness
+	EnableSwitchWitness bool `toml:"enable-switch-witness" json:"enable-switch-witness,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -795,6 +801,7 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
+	defaultSwitchWitnessInterval     = time.Hour
 	defaultEnableDiagnostic          = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
@@ -833,6 +840,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	adjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
@@ -880,6 +888,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
+
+	if !meta.IsDefined("enable-switch-witness") {
+		c.EnableSwitchWitness = defaultEnableSwitchWitness
 	}
 
 	// new cluster:v2, old cluster:v1

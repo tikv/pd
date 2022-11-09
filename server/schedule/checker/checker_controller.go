@@ -59,7 +59,7 @@ func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *p
 		opController:      opController,
 		learnerChecker:    NewLearnerChecker(cluster),
 		replicaChecker:    NewReplicaChecker(cluster, regionWaitingList),
-		ruleChecker:       NewRuleChecker(cluster, ruleManager, regionWaitingList),
+		ruleChecker:       NewRuleChecker(ctx, cluster, ruleManager, regionWaitingList),
 		splitChecker:      NewSplitChecker(cluster, ruleManager, labeler),
 		mergeChecker:      NewMergeChecker(ctx, cluster),
 		jointStateChecker: NewJointStateChecker(cluster),

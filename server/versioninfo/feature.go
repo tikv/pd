@@ -45,6 +45,8 @@ const (
 	ConfChangeV2
 	// HotScheduleWithQuery supports schedule hot region with query info.
 	HotScheduleWithQuery
+	// SwitchWithess supports switch between witness and non-witness.
+	SwitchWitness
 )
 
 var featuresDict = map[Feature]string{
@@ -57,6 +59,7 @@ var featuresDict = map[Feature]string{
 	Version5_0:           "5.0.0",
 	ConfChangeV2:         "5.0.0",
 	HotScheduleWithQuery: "5.2.0",
+	SwitchWitness:        "6.4.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.

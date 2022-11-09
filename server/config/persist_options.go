@@ -272,6 +272,18 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
+func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
+	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
+}
+
+// SetSplitMergeInterval to set the interval between promote to non-witness and starting to switch to witness. It's only used to test.
+func (o *PersistOptions) SetSwitchWitnessInterval(switchWitnessInterval time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.SplitMergeInterval = typeutil.Duration{Duration: switchWitnessInterval}
+	o.SetScheduleConfig(v)
+}
+
 // IsDiagnosticAllowed returns whether is enable to use diagnostic.
 func (o *PersistOptions) IsDiagnosticAllowed() bool {
 	return o.GetScheduleConfig().EnableDiagnostic
@@ -281,6 +293,18 @@ func (o *PersistOptions) IsDiagnosticAllowed() bool {
 func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
 	v := o.GetScheduleConfig().Clone()
 	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
+}
+
+// IsSwitchWitnessAllowed returns whether is enable to use witness.
+func (o *PersistOptions) IsSwitchWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableSwitchWitness
+}
+
+// SetEnableSwitchWitness to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableSwitchWitness(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableSwitchWitness = enable
 	o.SetScheduleConfig(v)
 }
 
@@ -561,6 +585,13 @@ func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 // IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
 func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
+}
+
+// SetEnableUseJointConsensus to set the option for using joint consensus. It's only used to test.
+func (o *PersistOptions) SetEnableUseJointConsensus(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableJointConsensus = enable
+	o.SetScheduleConfig(v)
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
