@@ -427,15 +427,6 @@ func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 
-func (c *RuleChecker) isPendingPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
-	for _, pending := range region.GetPendingPeers() {
-		if pending.GetId() == peer.GetId() {
-			return true
-		}
-	}
-	return false
-}
-
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 	store := c.cluster.GetStore(peer.GetStoreId())
 	if store == nil {

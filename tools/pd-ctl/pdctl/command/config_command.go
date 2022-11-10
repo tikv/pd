@@ -45,7 +45,6 @@ var (
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
 	pdServerPrefix        = "pd/api/v1/config/pd-server"
-	switchWitnessPrefix   = "pd/api/v1/config/switch-witness"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
