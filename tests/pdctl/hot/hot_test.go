@@ -394,18 +394,20 @@ func TestHotWithoutHotPeer(t *testing.T) {
 	load := 1024.0
 	for _, store := range stores {
 		for i := 0; i < 5; i++ {
-			err := leaderServer.GetServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreStats{
-				StoreId:      store.Id,
-				BytesRead:    uint64(load * statistics.StoreHeartBeatReportInterval),
-				KeysRead:     uint64(load * statistics.StoreHeartBeatReportInterval),
-				BytesWritten: uint64(load * statistics.StoreHeartBeatReportInterval),
-				KeysWritten:  uint64(load * statistics.StoreHeartBeatReportInterval),
-				Capacity:     1000 * units.MiB,
-				Available:    1000 * units.MiB,
-				Interval: &pdpb.TimeInterval{
-					StartTimestamp: timestamp + uint64(i*statistics.StoreHeartBeatReportInterval),
-					EndTimestamp:   timestamp + uint64((i+1)*statistics.StoreHeartBeatReportInterval)},
-			})
+			err := leaderServer.GetServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{
+				Stats: &pdpb.StoreStats{
+					StoreId:      store.Id,
+					BytesRead:    uint64(load * statistics.StoreHeartBeatReportInterval),
+					KeysRead:     uint64(load * statistics.StoreHeartBeatReportInterval),
+					BytesWritten: uint64(load * statistics.StoreHeartBeatReportInterval),
+					KeysWritten:  uint64(load * statistics.StoreHeartBeatReportInterval),
+					Capacity:     1000 * units.MiB,
+					Available:    1000 * units.MiB,
+					Interval: &pdpb.TimeInterval{
+						StartTimestamp: timestamp + uint64(i*statistics.StoreHeartBeatReportInterval),
+						EndTimestamp:   timestamp + uint64((i+1)*statistics.StoreHeartBeatReportInterval)},
+				},
+			}, &pdpb.StoreHeartbeatResponse{})
 			re.NoError(err)
 		}
 	}
