@@ -111,6 +111,7 @@ type RegionInfo struct {
 	Leader          MetaPeer      `json:"leader,omitempty"`
 	DownPeers       []PDPeerStats `json:"down_peers,omitempty"`
 	PendingPeers    []MetaPeer    `json:"pending_peers,omitempty"`
+	CPUUsage        uint64        `json:"cpu_usage"`
 	WrittenBytes    uint64        `json:"written_bytes"`
 	ReadBytes       uint64        `json:"read_bytes"`
 	WrittenKeys     uint64        `json:"written_keys"`
@@ -158,6 +159,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.Leader = fromPeer(r.GetLeader())
 	s.DownPeers = fromPeerStatsSlice(r.GetDownPeers())
 	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
+	s.CPUUsage = r.GetCPUUsage()
 	s.WrittenBytes = r.GetBytesWritten()
 	s.WrittenKeys = r.GetKeysWritten()
 	s.ReadBytes = r.GetBytesRead()
@@ -767,6 +769,19 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
 		return a.GetApproximateKeys() < b.GetApproximateKeys()
+	})
+}
+
+// @Tags     region
+// @Summary  List regions with the highest CPU usage.
+// @Param    limit  query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/cpu [get]
+func (h *regionsHandler) GetTopCPURegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetCPUUsage() < b.GetCPUUsage()
 	})
 }
 

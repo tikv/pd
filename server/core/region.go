@@ -54,6 +54,7 @@ type RegionInfo struct {
 	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
+	cpuUsage          uint64
 	writtenBytes      uint64
 	writtenKeys       uint64
 	readBytes         uint64
@@ -153,6 +154,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		leader:            heartbeat.GetLeader(),
 		downPeers:         heartbeat.GetDownPeers(),
 		pendingPeers:      heartbeat.GetPendingPeers(),
+		cpuUsage:          heartbeat.GetCpuUsage(),
 		writtenBytes:      heartbeat.GetBytesWritten(),
 		writtenKeys:       heartbeat.GetKeysWritten(),
 		readBytes:         heartbeat.GetBytesRead(),
@@ -218,6 +220,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
+		cpuUsage:          r.cpuUsage,
 		writtenBytes:      r.writtenBytes,
 		writtenKeys:       r.writtenKeys,
 		readBytes:         r.readBytes,
@@ -491,6 +494,12 @@ func (r *RegionInfo) GetDownPeers() []*pdpb.PeerStats {
 // GetPendingPeers returns the pending peers of the region.
 func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 	return r.pendingPeers
+}
+
+// GetCPUUsage returns the CPU usage of the region since the last heartbeat.
+// The number range is [0, N * 100], where N is the number of CPU cores.
+func (r *RegionInfo) GetCPUUsage() uint64 {
+	return r.cpuUsage
 }
 
 // GetBytesRead returns the read bytes of the region.

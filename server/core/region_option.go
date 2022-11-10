@@ -170,6 +170,13 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// SetCPUUsage sets the CPU usage of the region.
+func SetCPUUsage(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.cpuUsage = v
+	}
+}
+
 // SetWrittenBytes sets the written bytes for the region.
 func SetWrittenBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {

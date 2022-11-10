@@ -324,6 +324,24 @@ func (suite *regionTestSuite) TestTopSize() {
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=%d", suite.urlPrefix, 2), []uint64{7, 8})
 }
 
+func (suite *regionTestSuite) TestTopCPU() {
+	re := suite.Require()
+	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
+	opt := core.SetCPUUsage(500)
+	r1 := newTestRegionInfo(10, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r1)
+	opt = core.SetCPUUsage(300)
+	r2 := newTestRegionInfo(11, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r2)
+	opt = core.SetCPUUsage(100)
+	r3 := newTestRegionInfo(12, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r3)
+	// query with limit
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu?limit=%d", suite.urlPrefix, 2), []uint64{10, 11})
+	// query without limit
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{10, 11, 12})
+}
+
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
 	re := suite.Require()
 	r1 := newTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
