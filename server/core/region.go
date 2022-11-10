@@ -498,6 +498,9 @@ func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 
 // GetCPUUsage returns the CPU usage of the region since the last heartbeat.
 // The number range is [0, N * 100], where N is the number of CPU cores.
+// However, since the TiKV basically only meters the CPU usage inside the
+// Unified Read Pool, it should be considered as an indicator of Region read
+// CPU overhead for now.
 func (r *RegionInfo) GetCPUUsage() uint64 {
 	return r.cpuUsage
 }
