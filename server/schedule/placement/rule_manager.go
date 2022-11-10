@@ -204,6 +204,9 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	if r.Role == Leader && r.Count > 1 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
 	}
+	if r.IsWitness && r.Count > 1 {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple witness by count %d", r.Count))
+	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
