@@ -41,6 +41,7 @@ var (
 	regionsVersionPrefix    = "pd/api/v1/regions/version"
 	regionsSizePrefix       = "pd/api/v1/regions/size"
 	regionTopKeysPrefix     = "pd/api/v1/regions/keys"
+	regionTopCPUPrefix      = "pd/api/v1/regions/cpu"
 	regionsKeyPrefix        = "pd/api/v1/regions/key"
 	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
 	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
@@ -109,6 +110,14 @@ func NewRegionCommand() *cobra.Command {
 	}
 	topKeys.Flags().String("jq", "", "jq query")
 	r.AddCommand(topKeys)
+
+	topCPU := &cobra.Command{
+		Use:   `topcpu <limit> [--jq="<query string>"]`,
+		Short: "show regions with top CPU usage",
+		Run:   showRegionsTopCommand(regionTopCPUPrefix),
+	}
+	topCPU.Flags().String("jq", "", "jq query")
+	r.AddCommand(topCPU)
 
 	scanRegion := &cobra.Command{
 		Use:   `scan [--jq="<query string>"]`,
