@@ -1777,7 +1777,7 @@ func TestAwakenStore(t *testing.T) {
 	}
 
 	now := time.Now()
-	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-6*time.Minute)))
+	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-11*time.Minute)))
 	re.NoError(cluster.putStoreLocked(store4))
 	store1 := cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
