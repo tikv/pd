@@ -220,7 +220,7 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
-	if !m.opt.IsSwitchWitnessAllowed() {
+	if m.opt != nil && !m.opt.IsSwitchWitnessAllowed() {
 		r.IsWitness = false
 		log.Warn("adjust witness to disabled", zap.String("rule", fmt.Sprint(r)))
 	}
