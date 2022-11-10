@@ -514,6 +514,11 @@ func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
 }
 
+// GetGCTunerThreshold gets the GC tuner threshold.
+func (o *PersistOptions) GetGCTunerThreshold() float64 {
+	return o.GetPDServerConfig().GCTunerThreshold
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveDownReplica
