@@ -2618,3 +2618,17 @@ func TestExpect(t *testing.T) {
 		re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
 }
+
+// ref https://github.com/tikv/pd/issues/5701
+func TestEncodeConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	data, err := sche.EncodeConfig()
+	re.NoError(err)
+	re.NotEqual("null", string(data))
+}

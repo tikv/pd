@@ -134,6 +134,10 @@ func (h *hotScheduler) GetType() string {
 	return HotRegionType
 }
 
+func (h *hotScheduler) EncodeConfig() ([]byte, error) {
+	return h.conf.EncodeConfig()
+}
+
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
