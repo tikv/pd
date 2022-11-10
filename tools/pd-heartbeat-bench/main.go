@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	stdlog "log"
 	"math/rand"
 	"os"
@@ -63,7 +64,9 @@ func newClient(cfg *config.Config) pdpb.PDClient {
 }
 
 func initClusterID(ctx context.Context, cli pdpb.PDClient) {
-	res, err := cli.GetMembers(ctx, &pdpb.GetMembersRequest{})
+	cctx, cancel := context.WithCancel(ctx)
+	res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
+	cancel()
 	if err != nil {
 		log.Fatal("failed to get members", zap.Error(err))
 	}
@@ -81,7 +84,9 @@ func header() *pdpb.RequestHeader {
 }
 
 func bootstrap(ctx context.Context, cli pdpb.PDClient) {
-	isBootstrapped, err := cli.IsBootstrapped(ctx, &pdpb.IsBootstrappedRequest{Header: header()})
+	cctx, cancel := context.WithCancel(ctx)
+	isBootstrapped, err := cli.IsBootstrapped(cctx, &pdpb.IsBootstrappedRequest{Header: header()})
+	cancel()
 	if err != nil {
 		log.Fatal("check if cluster has already bootstrapped failed", zap.Error(err))
 	}
@@ -105,7 +110,9 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 		Store:  store,
 		Region: region,
 	}
-	resp, err := cli.Bootstrap(ctx, req)
+	cctx, cancel = context.WithCancel(ctx)
+	resp, err := cli.Bootstrap(cctx, req)
+	cancel()
 	if err != nil {
 		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
 	}
@@ -122,7 +129,9 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
 			Address: fmt.Sprintf("localhost:%d", i),
 			Version: "6.4.0-alpha",
 		}
-		resp, err := cli.PutStore(ctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
+		cctx, cancel := context.WithCancel(ctx)
+		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
+		cancel()
 		if err != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
 		}
@@ -135,11 +144,13 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
 			for {
 				select {
 				case <-heartbeatTicker.C:
-					cli.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &pdpb.StoreStats{
+					cctx, cancel := context.WithCancel(ctx)
+					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &pdpb.StoreStats{
 						StoreId:   storeID,
 						Capacity:  2 * units.TiB,
 						Available: 1.5 * units.TiB,
 					}})
+					cancel()
 				case <-ctx.Done():
 					return
 				}
@@ -296,6 +307,13 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 	for _, region := range regions {
 		err = stream.Send(region)
 		rep.Results() <- report.Result{Start: start, End: time.Now(), Err: err}
+		if err == io.EOF {
+			log.Error("receive eof error", zap.Error(err))
+			err := stream.CloseSend()
+			if err != nil {
+				log.Error("fail to close stream", zap.Error(err))
+			}
+		}
 		if err != nil {
 			log.Error("send result error", zap.Error(err))
 		}
