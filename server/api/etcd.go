@@ -34,10 +34,20 @@ func newEtcdHandler(svr *server.Server, rd *render.Render) *etcdHandler {
 	}
 }
 
+// etcdReadiness reflects current PD instance's etcd readiness.
+type etcdReadiness struct {
+	// IsLearner indicates whether the etcd member is a learner.
+	IsLearner bool `json:"is_learner"`
+	// CurrIndex is the applied raft index for current PD.
+	CurrIndex uint64 `json:"curr_index"`
+	// LeaderIndex is the commited raft index for the leader.
+	LeaderIndex uint64 `json:"leader_index"`
+}
+
 // @Summary  ETCD readiness status of the PD instance.
-// @Produce  plain
-// @Success  200  {string}  string  "ok"
-// @Failure  400  {string}  string  "not ready"
+// @Produce  json
+// @Success  200  {object}  etcdReadiness
+// @Failure  400  {object}  etcdReadiness
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /ready [get]
 func (h *etcdHandler) GetReadyStatus(w http.ResponseWriter, r *http.Request) {
@@ -45,25 +55,30 @@ func (h *etcdHandler) GetReadyStatus(w http.ResponseWriter, r *http.Request) {
 
 	var leaderIndex uint64
 	if h.svr.GetLeader() == nil || len(h.svr.GetLeader().PeerUrls) == 0 {
-		h.rd.Text(w, http.StatusInternalServerError, "failed to find etcd leader url")
+		h.rd.JSON(w, http.StatusInternalServerError, "failed to find etcd leader url")
 		return
 	}
 	if leaderStatus, err := client.Maintenance.Status(client.Ctx(), h.svr.GetLeader().PeerUrls[0]); err != nil {
-		h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	} else {
 		leaderIndex = leaderStatus.RaftIndex
 	}
 
 	if h.svr.GetMember() == nil || h.svr.GetMember().Etcd() == nil || h.svr.GetMember().Etcd().Server == nil {
-		h.rd.Text(w, http.StatusInternalServerError, "failed to find PD's etcd server")
+		h.rd.JSON(w, http.StatusInternalServerError, "failed to find PD's etcd server")
 		return
 	}
 	currServer := h.svr.GetMember().Etcd().Server
 
+	status := &etcdReadiness{
+		IsLearner:   currServer.IsLearner(),
+		CurrIndex:   currServer.AppliedIndex(),
+		LeaderIndex: leaderIndex,
+	}
 	if currServer.IsLearner() || currServer.AppliedIndex()+etcdserver.DefaultSnapshotCatchUpEntries < leaderIndex {
-		h.rd.Text(w, http.StatusBadRequest, "not ready")
+		h.rd.JSON(w, http.StatusBadRequest, status)
 	}
 
-	h.rd.Text(w, http.StatusOK, "ok")
+	h.rd.JSON(w, http.StatusOK, status)
 }
