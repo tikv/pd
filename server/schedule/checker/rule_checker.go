@@ -300,35 +300,33 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
 		return nil, errPeerCannotBeWitness
 	}
-	if c.isWitnessEnabled() {
-		if !core.IsWitness(peer) && rf.Rule.IsWitness {
-			c.switchWitnessCache.UpdateTTL(c.cluster.GetOpts().GetSwitchWitnessInterval())
-			if c.switchWitnessCache.Exists(region.GetID()) {
-				checkerCounter.WithLabelValues("rule_checker", "recently-promote-to-non-witness").Inc()
-				return nil, nil
-			}
-			if len(region.GetPendingPeers()) > 0 {
-				checkerCounter.WithLabelValues("rule_checker", "cancel-switch-to-witness").Inc()
-				return nil, nil
-			}
-			lv := "set-voter-witness"
-			if core.IsLearner(peer) {
-				lv = "set-learner-witness"
-			}
-			checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-			return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
-		} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
-			lv := "set-voter-non-witness"
-			if core.IsLearner(peer) {
-				lv = "set-learner-non-witness"
-			}
-			checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-			op, err := operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
-			if err == nil {
-				c.recordRegionPromoteToNonWitness(region.GetID())
-			}
-			return op, err
+	if !core.IsWitness(peer) && rf.Rule.IsWitness {
+		c.switchWitnessCache.UpdateTTL(c.cluster.GetOpts().GetSwitchWitnessInterval())
+		if c.switchWitnessCache.Exists(region.GetID()) {
+			checkerCounter.WithLabelValues("rule_checker", "recently-promote-to-non-witness").Inc()
+			return nil, nil
 		}
+		if len(region.GetPendingPeers()) > 0 {
+			checkerCounter.WithLabelValues("rule_checker", "cancel-switch-to-witness").Inc()
+			return nil, nil
+		}
+		lv := "set-voter-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-witness"
+		}
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
+	} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
+		lv := "set-voter-non-witness"
+		if core.IsLearner(peer) {
+			lv = "set-learner-non-witness"
+		}
+		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
+		op, err := operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
+		if err == nil {
+			c.recordRegionPromoteToNonWitness(region.GetID())
+		}
+		return op, err
 	}
 	return nil, nil
 }

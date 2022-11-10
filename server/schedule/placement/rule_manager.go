@@ -217,6 +217,11 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		}
 	}
 
+	if !m.opt.IsSwitchWitnessAllowed() {
+		r.IsWitness = false
+		log.Warn("adjust witness to disabled", zap.String("rule", fmt.Sprint(r)))
+	}
+
 	return nil
 }
 
@@ -318,10 +323,21 @@ func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
 	return m.ruleList.getRulesForApplyRange(start, end)
 }
 
+func (m *RuleManager) checkAndAjustRules(rules []*Rule) {
+	if !m.opt.IsSwitchWitnessAllowed() {
+		for _, rule := range rules {
+			if rule.IsWitness {
+				rule.IsWitness = false
+			}
+		}
+	}
+}
+
 // FitRegion fits a region to the rules it matches.
 func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
+	m.checkAndAjustRules(rules)
 	if m.opt.IsPlacementRulesCacheEnabled() {
 		if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
 			return fit
