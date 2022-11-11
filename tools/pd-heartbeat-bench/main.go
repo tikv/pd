@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	stdlog "log"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -308,14 +307,16 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 		err = stream.Send(region)
 		rep.Results() <- report.Result{Start: start, End: time.Now(), Err: err}
 		if err == io.EOF {
-			log.Error("receive eof error", zap.Error(err))
+			log.Error("receive eof error", zap.Uint64("store-id", storeID), zap.Error(err))
 			err := stream.CloseSend()
 			if err != nil {
-				log.Error("fail to close stream", zap.Error(err))
+				log.Error("fail to close stream", zap.Uint64("store-id", storeID), zap.Error(err))
 			}
+			return
 		}
 		if err != nil {
-			log.Error("send result error", zap.Error(err))
+			log.Error("send result error", zap.Uint64("store-id", storeID), zap.Error(err))
+			return
 		}
 	}
 	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
@@ -379,7 +380,7 @@ func main() {
 				exit(0)
 			}
 			rep := newReport(cfg)
-			r := rep.Run()
+			r := rep.Stats()
 
 			startTime := time.Now()
 			wg := &sync.WaitGroup{}
@@ -392,8 +393,16 @@ func main() {
 
 			since := time.Since(startTime).Seconds()
 			close(rep.Results())
-			stdlog.Println(<-r)
-			stdlog.Println(regions.result(cfg.RegionCount, since))
+			regions.result(cfg.RegionCount, since)
+			stats := <-r
+			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
+				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
+				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
+				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
+				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
+				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+			)
+			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg.Replica)
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
@@ -419,10 +428,10 @@ func newReport(cfg *config.Config) report.Report {
 	return report.NewReport(p)
 }
 
-func (rs *Regions) result(regionCount int, sec float64) string {
+func (rs *Regions) result(regionCount int, sec float64) {
 	if rs.updateRound == 0 {
 		// There was no difference in the first round
-		return ""
+		return
 	}
 
 	updated := make(map[int]struct{})
@@ -440,12 +449,10 @@ func (rs *Regions) result(regionCount int, sec float64) string {
 	}
 	inactiveCount := regionCount - len(updated)
 
-	ret := "Update speed of each category:\n"
-	ret += fmt.Sprintf("  Requests/sec:   %12.4f\n", float64(regionCount)/sec)
-	ret += fmt.Sprintf("  Save-Tree/sec:  %12.4f\n", float64(len(rs.updateLeader))/sec)
-	ret += fmt.Sprintf("  Save-KV/sec:    %12.4f\n", float64(len(rs.updateEpoch))/sec)
-	ret += fmt.Sprintf("  Save-Space/sec: %12.4f\n", float64(len(rs.updateSpace))/sec)
-	ret += fmt.Sprintf("  Save-Flow/sec:  %12.4f\n", float64(len(rs.updateFlow))/sec)
-	ret += fmt.Sprintf("  Skip/sec:       %12.4f\n", float64(inactiveCount)/sec)
-	return ret
+	log.Info("update speed of each category", zap.String("rps", fmt.Sprintf("%.4f", float64(regionCount)/sec)),
+		zap.String("save-tree", fmt.Sprintf("%.4f", float64(len(rs.updateLeader))/sec)),
+		zap.String("save-kv", fmt.Sprintf("%.4f", float64(len(rs.updateEpoch))/sec)),
+		zap.String("save-space", fmt.Sprintf("%.4f", float64(len(rs.updateSpace))/sec)),
+		zap.String("save-flow", fmt.Sprintf("%.4f", float64(len(rs.updateFlow))/sec)),
+		zap.String("skip", fmt.Sprintf("%.4f", float64(inactiveCount)/sec)))
 }
