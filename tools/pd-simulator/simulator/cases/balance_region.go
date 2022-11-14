@@ -29,16 +29,20 @@ func newRedundantBalanceRegion() *Case {
 	var simCase Case
 
 	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum * storeNum / 3
+	regionNum := simutil.CaseConfigure.RegionNum
 	if storeNum == 0 || regionNum == 0 {
 		storeNum, regionNum = 6, 4000
 	}
 
 	for i := 0; i < storeNum; i++ {
-		simCase.Stores = append(simCase.Stores, &Store{
+		s := &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
-		})
+		}
+		if i%2 == 1 {
+			s.HasExtraUsedSpace = true
+		}
+		simCase.Stores = append(simCase.Stores, s)
 	}
 
 	for i := 0; i < regionNum; i++ {

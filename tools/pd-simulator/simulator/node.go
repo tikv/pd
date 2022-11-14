@@ -51,6 +51,7 @@ type Node struct {
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
+	hasExtraUsedSpace        bool
 }
 
 // NewNode returns a Node.
@@ -102,6 +103,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
+		hasExtraUsedSpace:        s.HasExtraUsedSpace,
 	}, nil
 }
 
