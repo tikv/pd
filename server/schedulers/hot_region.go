@@ -49,16 +49,21 @@ type baseHotScheduler struct {
 	// temporary states
 	// Every time `Schedule()` will recalculate it.
 	storesLoads map[uint64][]float64
-	types       []statistics.RWType
-	r           *rand.Rand
+	// regionPendings stores regionID -> pendingInfluence
+	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
+	// be selected if its owner region is tracked in this attribute.
+	regionPendings map[uint64]*pendingInfluence
+	types          []statistics.RWType
+	r              *rand.Rand
 }
 
 func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &baseHotScheduler{
-		BaseScheduler: base,
-		types:         []statistics.RWType{statistics.Write, statistics.Read},
-		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+		BaseScheduler:  base,
+		types:          []statistics.RWType{statistics.Write, statistics.Read},
+		regionPendings: make(map[uint64]*pendingInfluence),
+		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
@@ -70,6 +75,7 @@ func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotSche
 // each store, only update read or write load detail
 func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster schedule.Cluster) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
+	h.summaryPendingInfluence(cluster)
 	h.storesLoads = cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
@@ -93,6 +99,38 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 		regionWrite := cluster.RegionWriteStats()
 		prepare(regionWrite, core.LeaderKind)
 		prepare(regionWrite, core.RegionKind)
+	}
+}
+
+// summaryPendingInfluence calculate the summary of pending Influence for each store
+// and clean the region from regionInfluence if they have ended operator.
+// It makes each dim rate or count become `weight` times to the origin value.
+func (h *baseHotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
+	for id, p := range h.regionPendings {
+		from := h.stInfos[p.from]
+		to := h.stInfos[p.to]
+		maxZombieDur := p.maxZombieDuration
+		weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
+
+		if needGC {
+			delete(h.regionPendings, id)
+			continue
+		}
+
+		if from != nil && weight > 0 {
+			from.AddInfluence(&p.origin, -weight)
+		}
+		if to != nil && weight > 0 {
+			to.AddInfluence(&p.origin, weight)
+		}
+	}
+	for storeID, info := range h.stInfos {
+		storeLabel := strconv.FormatUint(storeID, 10)
+		if infl := info.PendingSum; infl != nil {
+			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
+				cluster.SetHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
+			})
+		}
 	}
 }
 
@@ -155,12 +193,6 @@ type hotScheduler struct {
 	name string
 	*baseHotScheduler
 	syncutil.RWMutex
-
-	// regionPendings stores regionID -> pendingInfluence
-	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
-	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*pendingInfluence
-
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
@@ -171,7 +203,6 @@ func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionS
 	ret := &hotScheduler{
 		name:             HotRegionName,
 		baseHotScheduler: base,
-		regionPendings:   make(map[uint64]*pendingInfluence),
 		conf:             conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -221,7 +252,6 @@ func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*opera
 func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
-	h.summaryPendingInfluence(cluster)
 	h.prepareForBalance(typ, cluster)
 	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {
@@ -237,44 +267,6 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 	return nil
 }
 
-// summaryPendingInfluence calculate the summary of pending Influence for each store
-// and clean the region from regionInfluence if they have ended operator.
-// It makes each dim rate or count become `weight` times to the origin value.
-func (h *hotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
-	for id, p := range h.regionPendings {
-		from := h.stInfos[p.from]
-		to := h.stInfos[p.to]
-		maxZombieDur := p.maxZombieDuration
-		weight, needGC := h.calcPendingInfluence(p.op, maxZombieDur)
-
-		if needGC {
-			delete(h.regionPendings, id)
-			schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Dec()
-			log.Debug("gc pending influence in hot region scheduler",
-				zap.Uint64("region-id", id),
-				zap.Time("create", p.op.GetCreateTime()),
-				zap.Time("now", time.Now()),
-				zap.Duration("zombie", maxZombieDur))
-			continue
-		}
-
-		if from != nil && weight > 0 {
-			from.AddInfluence(&p.origin, -weight)
-		}
-		if to != nil && weight > 0 {
-			to.AddInfluence(&p.origin, weight)
-		}
-	}
-	for storeID, info := range h.stInfos {
-		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := info.PendingSum; infl != nil {
-			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
-				cluster.SetHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
-			})
-		}
-	}
-}
-
 func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
@@ -286,7 +278,6 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
 	h.regionPendings[regionID] = influence
 
-	schedulerStatus.WithLabelValues(h.GetName(), "pending_op_infos").Inc()
 	statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
 		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), statistics.DimToString(dim)).Observe(infl.Loads[kind])
 	})
@@ -1455,7 +1446,7 @@ func (bs *balanceSolver) logBestSolution() {
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]
-func (h *hotScheduler) calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
+func calcPendingInfluence(op *operator.Operator, maxZombieDur time.Duration) (weight float64, needGC bool) {
 	status := op.CheckAndGetStatus()
 	if !operator.IsEndStatus(status) {
 		return 1, false

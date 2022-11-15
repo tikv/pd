@@ -1679,7 +1679,6 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 
 		if testCase.DegreeAfterTransferLeader >= 3 {
 			// try schedule
-			hb.summaryPendingInfluence(tc)
 			hb.prepareForBalance(testCase.kind, tc)
 			leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
 			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
