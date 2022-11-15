@@ -691,7 +691,6 @@ func TestRegionHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -914,7 +913,6 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 		re.Equal(overlapRegion.GetMeta(), region)
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func TestRegionFlowChanged(t *testing.T) {
@@ -1323,7 +1321,6 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -1361,7 +1358,6 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re.NoError(tc.processRegionHeartbeat(newRegion))
 	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func TestTopologyWeight(t *testing.T) {

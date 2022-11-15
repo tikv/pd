@@ -75,6 +75,7 @@ const (
 	nodeStateCheckJobInterval = 10 * time.Second
 	// metricsCollectionJobInterval is the interval to run metrics collection job.
 	metricsCollectionJobInterval = 10 * time.Second
+	updateStoreStatsInterval     = 5 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
@@ -448,10 +449,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(time.Millisecond)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker = time.NewTicker(10 * time.Millisecond)
-	})
+	ticker := time.NewTicker(updateStoreStatsInterval)
 	defer ticker.Stop()
 
 	for {
