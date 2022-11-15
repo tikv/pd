@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -363,15 +364,14 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
 }
 
-func TestHotWithoutHotPeer(t *testing.T) {
-	re := require.New(t)
+func (s *hotTestSuite) TestHotWithoutHotPeer(c *C) {
 	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
@@ -390,9 +390,10 @@ func TestHotWithoutHotPeer(t *testing.T) {
 	}
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
+	err = leaderServer.BootstrapCluster()
+	c.Assert(err, IsNil)
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
 	}
 	timestamp := uint64(time.Now().UnixNano())
 	load := 1024.0
@@ -410,7 +411,7 @@ func TestHotWithoutHotPeer(t *testing.T) {
 					StartTimestamp: timestamp + uint64(i*statistics.StoreHeartBeatReportInterval),
 					EndTimestamp:   timestamp + uint64((i+1)*statistics.StoreHeartBeatReportInterval)},
 			})
-			re.NoError(err)
+			c.Assert(err, IsNil)
 		}
 	}
 	defer cluster.Destroy()
@@ -421,26 +422,28 @@ func TestHotWithoutHotPeer(t *testing.T) {
 		args := []string{"-u", pdAddr, "hot", "read"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		hotRegion := statistics.StoreHotPeersInfos{}
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &hotRegion))
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
-		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
-		re.Equal(load, hotRegion.AsLeader[1].StoreByteRate)
+		c.Assert(err, IsNil)
+		err = json.Unmarshal(output, &hotRegion)
+		c.Assert(err, IsNil)
+		c.Assert(hotRegion.AsPeer[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsPeer[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsPeer[1].StoreByteRate, Equals, load)
+		c.Assert(hotRegion.AsLeader[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsLeader[1].StoreByteRate, Equals, load)
 	}
 	{
 		args := []string{"-u", pdAddr, "hot", "write"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		hotRegion := statistics.StoreHotPeersInfos{}
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &hotRegion))
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
-		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
-		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
+		c.Assert(err, IsNil)
+		err = json.Unmarshal(output, &hotRegion)
+		c.Assert(err, IsNil)
+		c.Assert(hotRegion.AsPeer[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsPeer[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsPeer[1].StoreByteRate, Equals, load)
+		c.Assert(hotRegion.AsLeader[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsLeader[1].StoreByteRate, Equals, 0.0) // write leader sum
 	}
 }
