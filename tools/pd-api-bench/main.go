@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -56,6 +57,8 @@ var (
 	stores = flag.Int("stores", 0, "GetStores qps")
 	// store max id
 	maxStoreId = flag.Int("max-store", 100, "store max id")
+	// concurrency
+	concurrency = flag.Int("concurrency", 1, "client number")
 )
 
 var base int = int(time.Second) / int(time.Microsecond)
@@ -79,13 +82,20 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	pdCli := newClient()
-	initClusterID(ctx, pdCli)
+	if *concurrency == 0 {
+		log.Println("concurrency == 0, exit")
+		return
+	}
+	pdClis := make([]pdpb.PDClient, 0)
+	for i := 0; i < *concurrency; i++ {
+		pdClis = append(pdClis, newClient())
+	}
+	initClusterID(ctx, pdClis[0])
 
-	go handleGetRegion(ctx, pdCli)
-	go handleScanRegions(ctx, pdCli)
-	go handleGetStore(ctx, pdCli)
-	go handleGetStores(ctx, pdCli)
+	go handleGetRegion(ctx, pdClis)
+	go handleScanRegions(ctx, pdClis)
+	go handleGetStore(ctx, pdClis)
+	go handleGetStores(ctx, pdClis)
 
 	<-ctx.Done()
 	log.Println("Exit")
@@ -97,33 +107,41 @@ func main() {
 	}
 }
 
-func handleGetRegion(ctx context.Context, pdCli pdpb.PDClient) {
+func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
 	g := func(id int, keyLen int) []byte {
 		k := make([]byte, keyLen)
 		copy(k, fmt.Sprintf("%010d", id))
 		return k
 	}
-	req := &pdpb.GetRegionRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: clusterID,
-		},
-	}
 	if *region == 0 {
 		log.Println("handleGetRegion qps = 0, exit")
 		return
 	}
-	tt := base / *region
+	tt := base / *region * *concurrency
 	var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 	defer ticker.Stop()
+	var wg sync.WaitGroup
 	for {
-		id := rand.Intn(*regionNum)*4 + 1
-		req.RegionKey = g(id, 56)
 		select {
 		case <-ticker.C:
-			_, err := pdCli.GetRegion(ctx, req)
-			if err != nil {
-				log.Println(err)
+			for _, pdCli := range pdClis {
+				wg.Add(1)
+				go func(pdCli pdpb.PDClient) {
+					id := rand.Intn(*regionNum)*4 + 1
+					req := &pdpb.GetRegionRequest{
+						Header: &pdpb.RequestHeader{
+							ClusterId: clusterID,
+						},
+						RegionKey: g(id, 56),
+					}
+					_, err := pdCli.GetRegion(ctx, req)
+					if err != nil {
+						log.Println(err)
+					}
+					wg.Done()
+				}(pdCli)
 			}
+			wg.Wait()
 		case <-ctx.Done():
 			log.Println("Got signal to exit handleGetRegion")
 			return
@@ -131,38 +149,47 @@ func handleGetRegion(ctx context.Context, pdCli pdpb.PDClient) {
 	}
 }
 
-func handleScanRegions(ctx context.Context, pdCli pdpb.PDClient) {
+func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 	g := func(id int, keyLen int) []byte {
 		k := make([]byte, keyLen)
 		copy(k, fmt.Sprintf("%010d", id))
 		return k
 	}
-	req := &pdpb.ScanRegionsRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: clusterID,
-		},
-		Limit: int32(*regionsSample),
-	}
 	if *regions == 0 {
 		log.Println("handleScanRegions qps = 0, exit")
 		return
 	}
-	tt := base / *regions
+	tt := base / *regions * *concurrency
 	var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 	defer ticker.Stop()
+	var wg sync.WaitGroup
 	for {
-		upperBound := *regionNum / *regionsSample
-		random := rand.Intn(upperBound)
-		startId := *regionsSample*random*4 + 1
-		endId := *regionsSample*(random+1)*4 + 1
-		req.StartKey = g(startId, 56)
-		req.EndKey = g(endId, 56)
 		select {
 		case <-ticker.C:
-			_, err := pdCli.ScanRegions(ctx, req)
-			if err != nil {
-				log.Println(err)
+			for _, pdCli := range pdClis {
+				wg.Add(1)
+				go func(pdCli pdpb.PDClient) {
+					upperBound := *regionNum / *regionsSample
+					random := rand.Intn(upperBound)
+					startId := *regionsSample*random*4 + 1
+					endId := *regionsSample*(random+1)*4 + 1
+					req := &pdpb.ScanRegionsRequest{
+						Header: &pdpb.RequestHeader{
+							ClusterId: clusterID,
+						},
+						Limit:    int32(*regionsSample),
+						StartKey: g(startId, 56),
+						EndKey:   g(endId, 56),
+					}
+
+					_, err := pdCli.ScanRegions(ctx, req)
+					if err != nil {
+						log.Println(err)
+					}
+					wg.Done()
+				}(pdCli)
 			}
+			wg.Wait()
 		case <-ctx.Done():
 			log.Println("Got signal to exit handleScanRegions")
 			return
@@ -170,28 +197,36 @@ func handleScanRegions(ctx context.Context, pdCli pdpb.PDClient) {
 	}
 }
 
-func handleGetStore(ctx context.Context, pdCli pdpb.PDClient) {
-	req := &pdpb.GetStoreRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: clusterID,
-		},
-	}
+func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
 	if *store == 0 {
 		log.Println("handleGetStore qps = 0, exit")
 		return
 	}
-	tt := base / *store
+	tt := base / *store * *concurrency
 	var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 	defer ticker.Stop()
+	var wg sync.WaitGroup
 	for {
-		storeId := rand.Intn(*maxStoreId) + 1
-		req.StoreId = uint64(storeId)
 		select {
 		case <-ticker.C:
-			_, err := pdCli.GetStore(ctx, req)
-			if err != nil {
-				log.Println(err)
+			for _, pdCli := range pdClis {
+				wg.Add(1)
+				go func(pdCli pdpb.PDClient) {
+					req := &pdpb.GetStoreRequest{
+						Header: &pdpb.RequestHeader{
+							ClusterId: clusterID,
+						},
+					}
+					storeId := rand.Intn(*maxStoreId) + 1
+					req.StoreId = uint64(storeId)
+					_, err := pdCli.GetStore(ctx, req)
+					if err != nil {
+						log.Println(err)
+					}
+					wg.Done()
+				}(pdCli)
 			}
+			wg.Wait()
 		case <-ctx.Done():
 			log.Println("Got signal to exit handleGetStore")
 			return
@@ -199,26 +234,34 @@ func handleGetStore(ctx context.Context, pdCli pdpb.PDClient) {
 	}
 }
 
-func handleGetStores(ctx context.Context, pdCli pdpb.PDClient) {
-	req := &pdpb.GetAllStoresRequest{
-		Header: &pdpb.RequestHeader{
-			ClusterId: clusterID,
-		},
-	}
+func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
 	if *stores == 0 {
 		log.Println("handleGetStores qps = 0, exit")
 		return
 	}
-	tt := base / *stores
+	tt := base / *stores * *concurrency
 	var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 	defer ticker.Stop()
+	var wg sync.WaitGroup
 	for {
 		select {
 		case <-ticker.C:
-			_, err := pdCli.GetAllStores(ctx, req)
-			if err != nil {
-				log.Println(err)
+			for _, pdCli := range pdClis {
+				wg.Add(1)
+				go func(pdCli pdpb.PDClient) {
+					req := &pdpb.GetAllStoresRequest{
+						Header: &pdpb.RequestHeader{
+							ClusterId: clusterID,
+						},
+					}
+					_, err := pdCli.GetAllStores(ctx, req)
+					if err != nil {
+						log.Println(err)
+					}
+					wg.Done()
+				}(pdCli)
 			}
+			wg.Wait()
 		case <-ctx.Done():
 			log.Println("Got signal to exit handleGetStores")
 			return
