@@ -58,6 +58,8 @@ var (
 	maxStoreId = flag.Int("max-store", 100, "store max id")
 	// concurrency
 	concurrency = flag.Int("concurrency", 1, "client number")
+	// brust
+	brust = flag.Int("brust", 1, "brust request")
 )
 
 var base int = int(time.Second) / int(time.Microsecond)
@@ -83,6 +85,10 @@ func main() {
 	}()
 	if *concurrency == 0 {
 		log.Println("concurrency == 0, exit")
+		return
+	}
+	if *brust == 0 {
+		log.Println("brust == 0, exit")
 		return
 	}
 	pdClis := make([]pdpb.PDClient, 0)
@@ -116,7 +122,7 @@ func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
 		log.Println("handleGetRegion qps = 0, exit")
 		return
 	}
-	tt := base / *region * *concurrency
+	tt := base / *region * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -131,9 +137,11 @@ func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
 						},
 						RegionKey: g(id, 56),
 					}
-					_, err := pdCli.GetRegion(ctx, req)
-					if err != nil {
-						log.Println(err)
+					for i := 0; i < *brust; i++ {
+						_, err := pdCli.GetRegion(ctx, req)
+						if err != nil {
+							log.Println(err)
+						}
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleGetRegion")
@@ -154,7 +162,7 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 		log.Println("handleScanRegions qps = 0, exit")
 		return
 	}
-	tt := base / *regions * *concurrency
+	tt := base / *regions * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -174,10 +182,11 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 						StartKey: g(startId, 56),
 						EndKey:   g(endId, 56),
 					}
-
-					_, err := pdCli.ScanRegions(ctx, req)
-					if err != nil {
-						log.Println(err)
+					for i := 0; i < *brust; i++ {
+						_, err := pdCli.ScanRegions(ctx, req)
+						if err != nil {
+							log.Println(err)
+						}
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleScanRegions")
@@ -193,8 +202,7 @@ func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
 		log.Println("handleGetStore qps = 0, exit")
 		return
 	}
-	tt := base / *store * *concurrency
-
+	tt := base / *store * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -209,9 +217,11 @@ func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
 					}
 					storeId := rand.Intn(*maxStoreId) + 1
 					req.StoreId = uint64(storeId)
-					_, err := pdCli.GetStore(ctx, req)
-					if err != nil {
-						log.Println(err)
+					for i := 0; i < *brust; i++ {
+						_, err := pdCli.GetStore(ctx, req)
+						if err != nil {
+							log.Println(err)
+						}
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleGetStore")
@@ -227,7 +237,7 @@ func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
 		log.Println("handleGetStores qps = 0, exit")
 		return
 	}
-	tt := base / *stores * *concurrency
+	tt := base / *stores * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -240,9 +250,11 @@ func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
 							ClusterId: clusterID,
 						},
 					}
-					_, err := pdCli.GetAllStores(ctx, req)
-					if err != nil {
-						log.Println(err)
+					for i := 0; i < *brust; i++ {
+						_, err := pdCli.GetAllStores(ctx, req)
+						if err != nil {
+							log.Println(err)
+						}
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleGetStores")

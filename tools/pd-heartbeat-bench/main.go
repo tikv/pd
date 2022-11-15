@@ -370,7 +370,7 @@ func main() {
 	for i := 1; i <= cfg.StoreCount; i++ {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
 	}
-	var heartbeatTicker = time.NewTicker(60 * time.Second)
+	var heartbeatTicker = time.NewTicker(30 * time.Second)
 	defer heartbeatTicker.Stop()
 	for {
 		select {
