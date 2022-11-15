@@ -63,6 +63,8 @@ var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
+	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
+	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -670,7 +672,8 @@ func (c *RaftCluster) ClearSuspectKeyRanges() {
 }
 
 // HandleStoreHeartbeat updates the store status.
-func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
+func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
+	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
 	c.Lock()
 	defer c.Unlock()
@@ -678,7 +681,20 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
 	}
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+
+	nowTime := time.Now()
+	var newStore *core.StoreInfo
+	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
+	if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
+		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime))
+		resp.AwakenRegions = &pdpb.AwakenRegions{
+			AbnormalStores: slowStoreIDs,
+		}
+	} else {
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+	}
+
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
 			zap.Uint64("store-id", storeID),
@@ -689,7 +705,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
-			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
+			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
 	if store := c.core.GetStore(storeID); store != nil {
@@ -795,6 +811,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	c.coordinator.CheckTransferWitnessLeader(region)
 
+	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
@@ -802,7 +819,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
-		if c.regionStats != nil && c.regionStats.RegionStatsNeedUpdate(region) {
+		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 		}
 		return nil
@@ -843,10 +860,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			c.core.UpdateStoreStatus(key)
 		}
 
-		regionEventCounter.WithLabelValues("update_cache").Inc()
+		regionUpdateCacheEventCounter.Inc()
 	}
 
-	if c.regionStats != nil {
+	if hasRegionStats {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
@@ -874,7 +891,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 					errs.ZapError(err))
 			}
-			regionEventCounter.WithLabelValues("update_kv").Inc()
+			regionUpdateKVEventCounter.Inc()
 		}
 	}
 
@@ -1372,29 +1389,6 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 		}
 	}
 	return needAwaken, slowStoreIDs
-}
-
-// UpdateAwakenStoreTime updates the last awaken time for the store.
-func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
-	c.Lock()
-	defer c.Unlock()
-
-	store := c.GetStore(storeID)
-	if store == nil {
-		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-
-	if store.IsRemoved() {
-		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
-	}
-
-	if store.IsPhysicallyDestroyed() {
-		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
-	}
-
-	newStore := store.Clone(core.SetLastAwakenTime(lastAwakenTime))
-
-	return c.putStoreLocked(newStore)
 }
 
 // UpStore up a store from offline

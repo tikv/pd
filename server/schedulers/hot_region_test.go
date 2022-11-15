@@ -67,6 +67,48 @@ func clearPendingInfluence(h *hotScheduler) {
 	h.regionPendings = make(map[uint64]*pendingInfluence)
 }
 
+func TestUpgrade(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	// new
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(HotRegionType, nil))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetReadPriorities())
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetWriteLeaderPriorities())
+	re.Equal([]string{statistics.BytePriority, statistics.KeyPriority}, hb.conf.GetWritePeerPriorities())
+	re.Equal("v2", hb.conf.GetRankFormulaVersion())
+	// upgrade from json(null)
+	sche, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	hb = sche.(*hotScheduler)
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetReadPriorities())
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetWriteLeaderPriorities())
+	re.Equal([]string{statistics.BytePriority, statistics.KeyPriority}, hb.conf.GetWritePeerPriorities())
+	re.Equal("v2", hb.conf.GetRankFormulaVersion())
+	// upgrade from < 5.2
+	config51 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"strict-picking-store":"true","enable-for-tiflash":"true"}`
+	sche, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte(config51)))
+	re.NoError(err)
+	hb = sche.(*hotScheduler)
+	re.Equal([]string{statistics.BytePriority, statistics.KeyPriority}, hb.conf.GetReadPriorities())
+	re.Equal([]string{statistics.KeyPriority, statistics.BytePriority}, hb.conf.GetWriteLeaderPriorities())
+	re.Equal([]string{statistics.BytePriority, statistics.KeyPriority}, hb.conf.GetWritePeerPriorities())
+	re.Equal("v1", hb.conf.GetRankFormulaVersion())
+	// upgrade from < 6.4
+	config54 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"read-priorities":["query","byte"],"write-leader-priorities":["query","byte"],"write-peer-priorities":["byte","key"],"strict-picking-store":"true","enable-for-tiflash":"true","forbid-rw-type":"none"}`
+	sche, err = schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte(config54)))
+	re.NoError(err)
+	hb = sche.(*hotScheduler)
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetReadPriorities())
+	re.Equal([]string{statistics.QueryPriority, statistics.BytePriority}, hb.conf.GetWriteLeaderPriorities())
+	re.Equal([]string{statistics.BytePriority, statistics.KeyPriority}, hb.conf.GetWritePeerPriorities())
+	re.Equal("v1", hb.conf.GetRankFormulaVersion())
+}
+
 func TestGCPendingOpInfos(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -2617,4 +2659,18 @@ func TestExpect(t *testing.T) {
 		re.Equal(testCase.allow, bs.checkSrcByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
+}
+
+// ref https://github.com/tikv/pd/issues/5701
+func TestEncodeConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	data, err := sche.EncodeConfig()
+	re.NoError(err)
+	re.NotEqual("null", string(data))
 }
