@@ -459,6 +459,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 			return
 		case <-ticker.C:
 			// Update related stores.
+			start := time.Now()
 			stores := c.GetStores()
 			for _, store := range stores {
 				if store.IsRemoved() {
@@ -466,6 +467,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 				}
 				c.core.UpdateStoreStatus(store.GetID())
 			}
+			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
 }
