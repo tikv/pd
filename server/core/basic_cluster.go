@@ -321,6 +321,13 @@ func (bc *BasicCluster) getWriteRate(
 	return
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (bc *BasicCluster) GetRangeCount(startKey, endKey []byte) int {
+	bc.RLock()
+	defer bc.RUnlock()
+	return bc.Regions.GetRangeCount(startKey, endKey)
+}
+
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
 	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
