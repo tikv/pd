@@ -38,6 +38,68 @@ import (
 	"go.uber.org/zap"
 )
 
+type baseHotScheduler struct {
+	*BaseScheduler
+	// store information, including pending Influence by resource type
+	// Every time `Schedule()` will recalculate it.
+	stInfos map[uint64]*statistics.StoreSummaryInfo
+	// temporary states but exported to API or metrics
+	// Every time `Schedule()` will recalculate it.
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	// temporary states
+	// Every time `Schedule()` will recalculate it.
+	storesLoads map[uint64][]float64
+	types       []statistics.RWType
+	r           *rand.Rand
+}
+
+func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotScheduler {
+	base := NewBaseScheduler(opController)
+	ret := &baseHotScheduler{
+		BaseScheduler: base,
+		types:         []statistics.RWType{statistics.Write, statistics.Read},
+		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
+		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
+	}
+	return ret
+}
+
+// prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
+// each store, only update read or write load detail
+func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster schedule.Cluster) {
+	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
+	h.storesLoads = cluster.GetStoresLoads()
+	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
+
+	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource core.ResourceKind) {
+		ty := buildResourceType(rw, resource)
+		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
+			h.stInfos,
+			h.storesLoads,
+			regionStats,
+			isTraceRegionFlow,
+			rw, resource)
+	}
+	switch rw {
+	case statistics.Read:
+		// update read statistics
+		regionRead := cluster.RegionReadStats()
+		prepare(regionRead, core.LeaderKind)
+		prepare(regionRead, core.RegionKind)
+	case statistics.Write:
+		// update write statistics
+		regionWrite := cluster.RegionWriteStats()
+		prepare(regionWrite, core.LeaderKind)
+		prepare(regionWrite, core.RegionKind)
+	}
+}
+
+func (h *baseHotScheduler) randomRWType() statistics.RWType {
+	return h.types[h.r.Int()%len(h.types)]
+}
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(HotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -91,22 +153,13 @@ var (
 
 type hotScheduler struct {
 	name string
-	*BaseScheduler
+	*baseHotScheduler
 	syncutil.RWMutex
-	types []statistics.RWType
-	r     *rand.Rand
 
 	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings map[uint64]*pendingInfluence
-
-	// store information, including pending Influence by resource type
-	// Every time `Schedule()` will recalculate it.
-	stInfos map[uint64]*statistics.StoreSummaryInfo
-	// temporary states but exported to API or metrics
-	// Every time `Schedule()` will recalculate it.
-	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
@@ -114,17 +167,14 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := NewBaseScheduler(opController)
+	base := newBaseHotScheduler(opController)
 	ret := &hotScheduler{
-		name:           HotRegionName,
-		BaseScheduler:  base,
-		types:          []statistics.RWType{statistics.Write, statistics.Read},
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
-		regionPendings: make(map[uint64]*pendingInfluence),
-		conf:           conf,
+		name:             HotRegionName,
+		baseHotScheduler: base,
+		regionPendings:   make(map[uint64]*pendingInfluence),
+		conf:             conf,
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
 		ret.searchRevertRegions[ty] = false
 	}
 	return ret
@@ -164,13 +214,14 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 
 func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
-	return h.dispatch(h.types[h.r.Int()%len(h.types)], cluster), nil
+	rw := h.randomRWType()
+	return h.dispatch(rw, cluster), nil
 }
 
 func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
-
+	h.summaryPendingInfluence(cluster)
 	h.prepareForBalance(typ, cluster)
 	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {
@@ -184,48 +235,6 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
-}
-
-// prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
-// each store
-func (h *hotScheduler) prepareForBalance(typ statistics.RWType, cluster schedule.Cluster) {
-	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence(cluster)
-	storesLoads := cluster.GetStoresLoads()
-	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
-
-	switch typ {
-	case statistics.Read:
-		// update read statistics
-		regionRead := cluster.RegionReadStats()
-		h.stLoadInfos[readLeader] = statistics.SummaryStoresLoad(
-			h.stInfos,
-			storesLoads,
-			regionRead,
-			isTraceRegionFlow,
-			statistics.Read, core.LeaderKind)
-		h.stLoadInfos[readPeer] = statistics.SummaryStoresLoad(
-			h.stInfos,
-			storesLoads,
-			regionRead,
-			isTraceRegionFlow,
-			statistics.Read, core.RegionKind)
-	case statistics.Write:
-		// update write statistics
-		regionWrite := cluster.RegionWriteStats()
-		h.stLoadInfos[writeLeader] = statistics.SummaryStoresLoad(
-			h.stInfos,
-			storesLoads,
-			regionWrite,
-			isTraceRegionFlow,
-			statistics.Write, core.LeaderKind)
-		h.stLoadInfos[writePeer] = statistics.SummaryStoresLoad(
-			h.stInfos,
-			storesLoads,
-			regionWrite,
-			isTraceRegionFlow,
-			statistics.Write, core.RegionKind)
-	}
 }
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
@@ -1515,6 +1524,26 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 		}
 	}
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
+}
+
+func buildResourceType(rwTy statistics.RWType, ty core.ResourceKind) resourceType {
+	switch rwTy {
+	case statistics.Write:
+		switch ty {
+		case core.RegionKind:
+			return writePeer
+		case core.LeaderKind:
+			return writeLeader
+		}
+	case statistics.Read:
+		switch ty {
+		case core.RegionKind:
+			return readPeer
+		case core.LeaderKind:
+			return readLeader
+		}
+	}
+	panic(fmt.Sprintf("invalid arguments for buildResourceType: rwTy = %v, ty = %v", rwTy, ty))
 }
 
 func stringToDim(name string) int {

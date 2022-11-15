@@ -15,9 +15,7 @@
 package schedulers
 
 import (
-	"math/rand"
 	"strconv"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -78,24 +76,16 @@ type shuffleHotRegionSchedulerConfig struct {
 // to a random store, and then transfer the leader to
 // the hot peer.
 type shuffleHotRegionScheduler struct {
-	*BaseScheduler
-	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
-	r           *rand.Rand
-	conf        *shuffleHotRegionSchedulerConfig
-	types       []statistics.RWType
+	*baseHotScheduler
+	conf *shuffleHotRegionSchedulerConfig
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *schedule.OperatorController, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
-	base := NewBaseScheduler(opController)
+	base := newBaseHotScheduler(opController)
 	ret := &shuffleHotRegionScheduler{
-		BaseScheduler: base,
-		conf:          conf,
-		types:         []statistics.RWType{statistics.Read, statistics.Write},
-		r:             rand.New(rand.NewSource(time.Now().UnixNano())),
-	}
-	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
-		ret.stLoadInfos[ty] = map[uint64]*statistics.StoreLoadDetail{}
+		baseHotScheduler: base,
+		conf:             conf,
 	}
 	return ret
 }
@@ -130,34 +120,10 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) 
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
-	i := s.r.Int() % len(s.types)
-	return s.dispatch(s.types[i], cluster), nil
-}
-
-func (s *shuffleHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
-	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
-	storesLoads := cluster.GetStoresLoads()
-	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
-
-	switch typ {
-	case statistics.Read:
-		s.stLoadInfos[readLeader] = statistics.SummaryStoresLoad(
-			storeInfos,
-			storesLoads,
-			cluster.RegionReadStats(),
-			isTraceRegionFlow,
-			statistics.Read, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[readLeader])
-	case statistics.Write:
-		s.stLoadInfos[writeLeader] = statistics.SummaryStoresLoad(
-			storeInfos,
-			storesLoads,
-			cluster.RegionWriteStats(),
-			isTraceRegionFlow,
-			statistics.Write, core.LeaderKind)
-		return s.randomSchedule(cluster, s.stLoadInfos[writeLeader])
-	}
-	return nil
+	rw := s.randomRWType()
+	s.prepareForBalance(rw, cluster)
+	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, core.LeaderKind)])
+	return operators, nil
 }
 
 func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
