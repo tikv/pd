@@ -1249,8 +1249,6 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 		}
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
-
-	time.Sleep(50 * time.Millisecond)
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 

@@ -73,14 +73,6 @@ var (
 			Help:      "Time spent of patrol checks region.",
 		})
 
-	updateStoreStatsGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "update_stores_stats_time",
-			Help:      "Time spent of updating store stats.",
-		})
-
 	clusterStateCPUGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -151,5 +143,4 @@ func init() {
 	prometheus.MustRegister(storesSpeedGauge)
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
-	prometheus.MustRegister(updateStoreStatsGauge)
 }
