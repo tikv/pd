@@ -29,20 +29,15 @@ type StoreLoadDetail struct {
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
-<<<<<<< HEAD
 	totalLoads := make([]float64, RegionStatCount)
-	if len(li.HotPeers) == 0 {
-		return &HotPeersStat{
-			TotalLoads:     totalLoads,
-=======
 	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
 		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
+			TotalLoads:     totalLoads,
 			StoreByteRate:  storeByteRate,
 			StoreKeyRate:   storeKeyRate,
 			StoreQueryRate: storeQueryRate,
->>>>>>> 8ed16608a (statistics: fix `ToHotPeersStat` result when `HotPeers` is empty (#5597))
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
@@ -64,14 +59,9 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			}
 		}
 	}
-<<<<<<< HEAD
 
 	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
 	byteRate, keyRate, queryRate := totalLoads[b], totalLoads[k], totalLoads[q]
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
-		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
-=======
->>>>>>> 8ed16608a (statistics: fix `ToHotPeersStat` result when `HotPeers` is empty (#5597))
 
 	return &HotPeersStat{
 		TotalLoads:     totalLoads,
