@@ -277,13 +277,6 @@ func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
 	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
 }
 
-// SetSwitchWitnessInterval to set the interval between promote to non-witness and starting to switch to witness. It's only used to test.
-func (o *PersistOptions) SetSwitchWitnessInterval(switchWitnessInterval time.Duration) {
-	v := o.GetScheduleConfig().Clone()
-	v.SplitMergeInterval = typeutil.Duration{Duration: switchWitnessInterval}
-	o.SetScheduleConfig(v)
-}
-
 // IsDiagnosticAllowed returns whether is enable to use diagnostic.
 func (o *PersistOptions) IsDiagnosticAllowed() bool {
 	return o.GetScheduleConfig().EnableDiagnostic

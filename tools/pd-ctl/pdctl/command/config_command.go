@@ -57,7 +57,6 @@ func NewConfigCommand() *cobra.Command {
 	conf.AddCommand(NewSetConfigCommand())
 	conf.AddCommand(NewDeleteConfigCommand())
 	conf.AddCommand(NewPlacementRulesCommand())
-	conf.AddCommand(NewSwitchWitnessCommand())
 	return conf
 }
 
@@ -806,42 +805,4 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Println(res)
-}
-
-// NewSwitchWitnessCommand placement rules subcommand
-func NewSwitchWitnessCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:   "switch-witness",
-		Short: "switch witness configuration",
-	}
-	enable := &cobra.Command{
-		Use:   "enable",
-		Short: "enable switch witness",
-		Run:   enableSwitchWitness,
-	}
-	disable := &cobra.Command{
-		Use:   "disable",
-		Short: "disable switch witness",
-		Run:   disableSwitchWitness,
-	}
-	c.AddCommand(enable, disable)
-	return c
-}
-
-func enableSwitchWitness(cmd *cobra.Command, args []string) {
-	err := postConfigDataWithPath(cmd, "enable-switch-witness", "true", configPrefix)
-	if err != nil {
-		cmd.Printf("Failed to set config: %s\n", err)
-		return
-	}
-	cmd.Println("Success!")
-}
-
-func disableSwitchWitness(cmd *cobra.Command, args []string) {
-	err := postConfigDataWithPath(cmd, "enable-switch-witness", "false", configPrefix)
-	if err != nil {
-		cmd.Printf("Failed to set config: %s\n", err)
-		return
-	}
-	cmd.Println("Success!")
 }
