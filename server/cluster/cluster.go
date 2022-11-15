@@ -75,7 +75,7 @@ const (
 	nodeStateCheckJobInterval = 10 * time.Second
 	// metricsCollectionJobInterval is the interval to run metrics collection job.
 	metricsCollectionJobInterval = 10 * time.Second
-	updateStoreStatsInterval     = 5 * time.Millisecond
+	updateStoreStatsInterval     = 9 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
