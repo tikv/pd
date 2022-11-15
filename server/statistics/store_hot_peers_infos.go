@@ -32,6 +32,42 @@ type StoreHotPeersInfos struct {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreHotPeersStat map[uint64]*HotPeersStat
 
+// CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
+func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat) *StoreHotPeersInfos {
+	peerLoadSum := make([]float64, DimLen)
+	collect := func(kind core.ResourceKind) StoreHotPeersStat {
+		ret := make(StoreHotPeersStat, len(stores))
+		for _, store := range stores {
+			id := store.GetID()
+			hotPeers, ok := regionStats[id]
+			if !ok {
+				continue
+			}
+			for i := range peerLoadSum {
+				peerLoadSum[i] = 0
+			}
+			peers := filterHotPeers(kind, hotPeers)
+			for _, peer := range peers {
+				for j := range peerLoadSum {
+					peerLoadSum[j] += peer.Loads[j]
+				}
+			}
+			ret[id] = &HotPeersStat{
+				TotalBytesRate: peerLoadSum[ByteDim],
+				TotalKeysRate:  peerLoadSum[KeyDim],
+				TotalQueryRate: peerLoadSum[QueryDim],
+				Count:          len(peers),
+			}
+		}
+		return ret
+	}
+	return &StoreHotPeersInfos{
+		AsPeer:   collect(core.RegionKind),
+		AsLeader: collect(core.LeaderKind),
+	}
+}
+
+
 // GetHotStatus returns the hot status for a given type.
 func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
