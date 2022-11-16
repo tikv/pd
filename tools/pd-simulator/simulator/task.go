@@ -138,7 +138,7 @@ func changePeerToOperator(region *core.RegionInfo, cp *pdpb.ChangePeer) (operato
 	peer := cp.GetPeer()
 	switch cp.GetChangeType() {
 	case eraftpb.ConfChangeType_AddNode:
-		if region.GetPeer(peer.GetId()) != nil {
+		if region.GetStoreLearner(peer.GetStoreId()) != nil {
 			return &promoteLearner{peer: peer}, fmt.Sprintf("promote learner %+v for region %d", peer, regionID)
 		}
 		return &addPeer{
@@ -149,7 +149,7 @@ func changePeerToOperator(region *core.RegionInfo, cp *pdpb.ChangePeer) (operato
 			receivingStat: newSnapshotState(region.GetApproximateSize(), receive),
 		}, fmt.Sprintf("add voter %+v for region %d", peer, regionID)
 	case eraftpb.ConfChangeType_AddLearnerNode:
-		if region.GetPeer(peer.GetId()) != nil {
+		if region.GetStoreVoter(peer.GetStoreId()) != nil {
 			return &demoteVoter{peer: peer}, fmt.Sprintf("demote voter %+v for region %d", peer, regionID)
 		}
 		return &addPeer{
@@ -211,6 +211,7 @@ func (t *Task) Step(engine *RaftEngine) (isFinished bool) {
 	newRegion, t.isFinished = t.tick(engine, region)
 
 	if newRegion != nil {
+		t.epoch = newRegion.GetRegionEpoch()
 		engine.SetRegion(newRegion)
 		engine.recordRegionChange(newRegion)
 	}
@@ -374,7 +375,7 @@ func (cl *changePeerV2Leave) tick(engine *RaftEngine, region *core.RegionInfo) (
 		case metapb.PeerRole_IncomingVoter:
 			opts = append(opts, checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter)...)
 		case metapb.PeerRole_DemotingVoter:
-			opts = append(opts, checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter)...)
+			opts = append(opts, checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_DemotingVoter, metapb.PeerRole_Learner)...)
 		}
 	}
 	if len(opts) < 4 {
@@ -529,7 +530,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 
 	// store should Generate/Receive snapshot by chunk size.
 	// todo: the process of snapshot is single thread, the later snapshot task must wait the first one.
-	for n.limiter.AllowN(int(chunkSize)) {
+	for stat.remainSize > 0 && n.limiter.AllowN(chunkSize) {
 		stat.remainSize -= chunkSize
 	}
 

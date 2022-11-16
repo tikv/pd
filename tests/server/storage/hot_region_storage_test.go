@@ -93,7 +93,7 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	}
 	for _, storeStats := range storeStats {
-		leaderServer.GetRaftCluster().HandleStoreHeartbeat(storeStats)
+		leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
 	}
 	// wait hot scheduler starts
 	time.Sleep(5000 * time.Millisecond)

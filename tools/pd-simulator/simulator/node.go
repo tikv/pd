@@ -51,6 +51,7 @@ type Node struct {
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
+	hasExtraUsedSpace        bool
 }
 
 // NewNode returns a Node.
@@ -59,7 +60,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 	store := &metapb.Store{
 		Id:      s.ID,
 		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
-		Version: s.Version,
+		Version: config.StoreVersion,
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
@@ -67,7 +68,6 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		StoreStats: pdpb.StoreStats{
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
-			Available: uint64(config.RaftStore.Available),
 			StartTime: uint32(time.Now().Unix()),
 		},
 	}
@@ -103,6 +103,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
+		hasExtraUsedSpace:        s.HasExtraUsedSpace,
 	}, nil
 }
 
