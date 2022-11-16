@@ -175,6 +175,20 @@ type Server struct {
 // HandlerBuilder builds a server HTTP handler.
 type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
 
+// GRPCServiceregistry used to install the registered services.
+type GRPCServiceregistry interface {
+	InstallAllServices(srv *Server, g *grpc.Server)
+}
+
+// NewGRPCServiceregistry is a hook for msc code which implements the micro service.
+var NewGRPCServiceregistry = func() GRPCServiceregistry {
+	return dummyGRPCServiceregistry{}
+}
+
+type dummyGRPCServiceregistry struct{}
+
+func (d dummyGRPCServiceregistry) InstallAllServices(srv *Server, g *grpc.Server) {}
+
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
 	Name       string
@@ -283,12 +297,15 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		}
 		etcdCfg.UserHandlers = userHandlers
 	}
+
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+		NewGRPCServiceregistry().InstallAllServices(s, gs)
 	}
+
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()

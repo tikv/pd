@@ -6,7 +6,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20221104101942-09d82b914df1
-	github.com/stretchr/testify v1.7.1
+	github.com/stretchr/testify v1.8.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
@@ -60,7 +60,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
-	github.com/google/uuid v1.0.0 // indirect
+	github.com/google/uuid v1.1.2 // indirect
 	github.com/gorilla/mux v1.7.4 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4 // indirect
@@ -109,7 +109,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/stretchr/objx v0.2.0 // indirect
+	github.com/stretchr/objx v0.4.0 // indirect
 	github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 // indirect
 	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba // indirect
 	github.com/swaggo/swag v1.8.3 // indirect
@@ -133,10 +133,10 @@ require (
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4 // indirect
 	golang.org/x/exp v0.0.0-20220321173239-a90fa8a75705 // indirect
 	golang.org/x/image v0.0.0-20200119044424-58c23975cae1 // indirect
-	golang.org/x/net v0.0.0-20220425223048-2871e0cb64e4 // indirect
+	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
 	golang.org/x/oauth2 v0.0.0-20190226205417-e64efc72b421 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
-	golang.org/x/sys v0.0.0-20211216021012-1d35b9e2eb4e // indirect
+	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
 	golang.org/x/tools v0.1.10 // indirect
@@ -145,12 +145,12 @@ require (
 	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/mysql v1.0.6 // indirect
 	gorm.io/driver/sqlite v1.1.4 // indirect
 	gorm.io/gorm v1.21.9 // indirect
 	moul.io/zapgorm2 v1.1.0 // indirect
-	sigs.k8s.io/yaml v1.1.0 // indirect
+	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
 replace (
