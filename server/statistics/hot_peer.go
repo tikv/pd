@@ -237,3 +237,9 @@ func (stat *HotPeerStat) defaultAntiCount() int {
 	}
 	return hotRegionAntiCount
 }
+
+// Warm makes the item warm. It is only used for test.
+func (stat *HotPeerStat) Warm() {
+	stat.HotDegree = 20
+	stat.AntiCount = stat.defaultAntiCount()
+}

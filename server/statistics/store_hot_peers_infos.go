@@ -49,7 +49,7 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 			peers := filterHotPeers(kind, hotPeers)
 			for _, peer := range peers {
 				for j := range peerLoadSum {
-					peerLoadSum[j] += peer.Loads[j]
+					peerLoadSum[j] += peer.GetLoad(j)
 				}
 			}
 			ret[id] = &HotPeersStat{
