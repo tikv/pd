@@ -40,7 +40,8 @@ const (
 	// HotRegionReportMinInterval is used for the simulator and test
 	HotRegionReportMinInterval = 3
 
-	hotRegionAntiCount = 2
+	// HotRegionAntiCount is default value for antiCount
+	HotRegionAntiCount = 2
 
 	queueCap = 20000
 )

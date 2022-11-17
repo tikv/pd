@@ -280,12 +280,13 @@ func TestCollectMetrics(t *testing.T) {
 	for i := 0; i <= count; i++ {
 		for k := 0; k < 200; k++ {
 			item := &statistics.HotPeerStat{
-				StoreID:  uint64(i % 5),
-				RegionID: uint64(i*1000 + k),
-				Kind:     statistics.Write,
-				Loads:    []float64{10, 20, 30},
+				StoreID:   uint64(i % 5),
+				RegionID:  uint64(i*1000 + k),
+				Kind:      statistics.Write,
+				Loads:     []float64{10, 20, 30},
+				HotDegree: 10,
+				AntiCount: statistics.HotRegionAntiCount, // for write
 			}
-			item.Warm()
 			tc.hotStat.HotCache.Update(item)
 		}
 	}

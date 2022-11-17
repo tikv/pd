@@ -233,13 +233,7 @@ func (stat *HotPeerStat) IsLearner() bool {
 
 func (stat *HotPeerStat) defaultAntiCount() int {
 	if stat.Kind == Read {
-		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
-	return hotRegionAntiCount
-}
-
-// Warm makes the item warm. It is only used for test.
-func (stat *HotPeerStat) Warm() {
-	stat.HotDegree = 20
-	stat.AntiCount = stat.defaultAntiCount()
+	return HotRegionAntiCount
 }
