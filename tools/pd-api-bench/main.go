@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -45,7 +47,8 @@ var (
 	// GetRegion qps
 	region = flag.Int("region", 0, "GetRegion qps")
 	// ScanRegions qps
-	regions = flag.Int("regions", 0, "ScanRegions qps")
+	regions     = flag.Int("regions", 0, "ScanRegions qps")
+	regionStats = flag.Int("region-stats", 0, "/stats/region qps")
 	// ScanRegions the number of region
 	regionsSample = flag.Int("regions-sample", 10000, "ScanRegions the number of region")
 	// the number of regions
@@ -95,10 +98,15 @@ func main() {
 	for i := 0; i < *concurrency; i++ {
 		pdClis = append(pdClis, newClient())
 	}
+	httpClis := make([]*http.Client, 0)
+	for i := 0; i < *concurrency; i++ {
+		httpClis = append(httpClis, &http.Client{})
+	}
 	initClusterID(ctx, pdClis[0])
 
 	go handleGetRegion(ctx, pdClis)
 	go handleScanRegions(ctx, pdClis)
+	go handleRegionsStats(ctx, httpClis)
 	go handleGetStore(ctx, pdClis)
 	go handleGetStores(ctx, pdClis)
 
@@ -187,6 +195,49 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 						if err != nil {
 							log.Println(err)
 						}
+					}
+				case <-ctx.Done():
+					log.Println("Got signal to exit handleScanRegions")
+					return
+				}
+			}
+		}(pdCli)
+	}
+}
+
+func handleRegionsStats(ctx context.Context, httpClis []*http.Client) {
+	g := func(id int, keyLen int) []byte {
+		k := make([]byte, keyLen)
+		copy(k, fmt.Sprintf("%010d", id))
+		return k
+	}
+	if *regionStats == 0 {
+		log.Println("handleRegionsStats qps = 0, exit")
+		return
+	}
+	tt := base / *regionStats * *concurrency * *brust
+	for _, pdCli := range httpClis {
+		go func(pdCli *http.Client) {
+			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					upperBound := *regionNum / *regionsSample
+					random := rand.Intn(upperBound)
+					startId := *regionsSample*random*4 + 1
+					endId := *regionsSample*(random+1)*4 + 1
+					for i := 0; i < *brust; i++ {
+						req, _ := http.NewRequest(http.MethodGet, "http://"+*pdAddr+fmt.Sprintf("/pd/api/v1/stats/region?start_key=%s&end_key=%s&%s",
+							url.QueryEscape(string(g(startId, 56))),
+							url.QueryEscape(string(g(endId, 56))),
+							"",
+						), nil)
+						res, err := pdCli.Do(req)
+						if err != nil {
+							log.Println(err)
+						}
+						res.Body.Close()
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleScanRegions")
