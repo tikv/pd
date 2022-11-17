@@ -177,6 +177,19 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	oldItem := f.getOldHotPeerStat(regionID, storeID)
 	thresholds := f.calcHotThresholds(storeID)
 
+	// check whether the peer is allowed to be inherited
+	source := direct
+	if oldItem == nil {
+		for _, storeID := range f.getAllStoreIDs(region) {
+			oldItem = f.getOldHotPeerStat(regionID, storeID)
+			if oldItem != nil && oldItem.allowInherited {
+				source = inherit
+				break
+			}
+		}
+	}
+
+	// check new item whether is hot
 	if oldItem == nil {
 		regionStats := f.kind.RegionStats()
 		isHot := slice.AnyOf(regionStats, func(i int) bool {
@@ -199,17 +212,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		peers:          region.GetPeers(),
 		actionType:     Update,
 		thresholds:     thresholds,
-		source:         direct,
-	}
-
-	if oldItem == nil {
-		for _, storeID := range f.getAllStoreIDs(region) {
-			oldItem = f.getOldHotPeerStat(regionID, storeID)
-			if oldItem != nil && oldItem.allowInherited {
-				newItem.source = inherit
-				break
-			}
-		}
+		source:         source,
 	}
 
 	if oldItem == nil {
