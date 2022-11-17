@@ -695,38 +695,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
-// regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.
-type regionMap map[uint64]*regionItem
-
-func newRegionMap() regionMap {
-	return make(map[uint64]*regionItem)
-}
-
-func (rm regionMap) Len() int {
-	return len(rm)
-}
-
-func (rm regionMap) Get(id uint64) *regionItem {
-	return rm[id]
-}
-
-// AddNew uses RegionInfo to generate a new regionItem.
-// If the regionItem already exists, it will be overwritten.
-// Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
-func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
-	item := &regionItem{RegionInfo: region}
-	rm[region.GetID()] = item
-	return item
-}
-
-func (rm regionMap) Delete(id uint64) {
-	delete(rm, id)
-}
-
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      regionMap              // regionID -> regionInfo
+	regions      map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
@@ -738,7 +710,7 @@ type RegionsInfo struct {
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:         newRegionTree(),
-		regions:      newRegionMap(),
+		regions:      make(map[uint64]*regionItem),
 		leaders:      make(map[uint64]*regionTree),
 		followers:    make(map[uint64]*regionTree),
 		learners:     make(map[uint64]*regionTree),
@@ -749,7 +721,7 @@ func NewRegionsInfo() *RegionsInfo {
 
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
-	if item := r.regions.Get(regionID); item != nil {
+	if item := r.regions[regionID]; item != nil {
 		return item.RegionInfo
 	}
 	return nil
@@ -760,7 +732,7 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	var item *regionItem // Pointer to the *RegionInfo of this ID.
 	rangeChanged := true // This Region is new, or its range has changed.
-	if item = r.regions.Get(region.GetID()); item != nil {
+	if item = r.regions[region.GetID()]; item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
 		origin := item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
@@ -787,7 +759,8 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 		item.RegionInfo = region
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
-		item = r.regions.AddNew(region)
+		item = &regionItem{RegionInfo: region}
+		r.regions[region.GetID()] = item
 	}
 
 	if rangeChanged {
@@ -838,11 +811,6 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	return
 }
 
-// Len returns the RegionsInfo length
-func (r *RegionsInfo) Len() int {
-	return r.regions.Len()
-}
-
 // TreeLen returns the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLen() int {
 	return r.tree.length()
@@ -882,7 +850,7 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
 	r.tree.remove(region)
-	r.regions.Delete(region.GetID())
+	delete(r.regions, region.GetID())
 	// Remove from leaders and followers.
 	r.removeRegionFromSubTree(region)
 }
@@ -973,7 +941,7 @@ func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
-	regions := make([]*RegionInfo, 0, r.regions.Len())
+	regions := make([]*RegionInfo, 0, len(r.regions))
 	for _, item := range r.regions {
 		regions = append(regions, item.RegionInfo)
 	}
@@ -1037,7 +1005,7 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
-	regions := make([]*metapb.Region, 0, r.regions.Len())
+	regions := make([]*metapb.Region, 0, len(r.regions))
 	for _, item := range r.regions {
 		regions = append(regions, typeutil.DeepClone(item.meta, RegionFactory))
 	}
@@ -1046,7 +1014,7 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 
 // GetRegionCount gets the total count of RegionInfo of regionMap
 func (r *RegionsInfo) GetRegionCount() int {
-	return r.regions.Len()
+	return len(r.regions)
 }
 
 // GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
