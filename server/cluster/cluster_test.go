@@ -64,24 +64,26 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(int(n), cluster.core.Regions.RegionsInfo.GetRegionCount())
 
 	for i, store := range stores {
-		storeStats := &pdpb.StoreStats{
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
 			StoreId:     store.GetID(),
 			Capacity:    100,
 			Available:   50,
 			RegionCount: 1,
 		}
-		re.Error(cluster.HandleStoreHeartbeat(storeStats))
+		re.Error(cluster.HandleStoreHeartbeat(req, resp))
 
 		re.NoError(cluster.putStoreLocked(store))
 		re.Equal(i+1, cluster.GetStoreCount())
 
 		re.Equal(int64(0), store.GetLastHeartbeatTS().UnixNano())
 
-		re.NoError(cluster.HandleStoreHeartbeat(storeStats))
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 
 		s := cluster.GetStore(store.GetID())
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
-		re.Equal(storeStats, s.GetStoreStats())
+		re.Equal(req.GetStats(), s.GetStoreStats())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
@@ -95,7 +97,9 @@ func TestStoreHeartbeat(t *testing.T) {
 		re.NoError(err)
 		re.Equal(storeMetasAfterHeartbeat[i], tmp)
 	}
-	hotHeartBeat := &pdpb.StoreStats{
+	hotReq := &pdpb.StoreHeartbeatRequest{}
+	hotResp := &pdpb.StoreHeartbeatResponse{}
+	hotReq.Stats = &pdpb.StoreStats{
 		StoreId:     1,
 		RegionCount: 1,
 		Interval: &pdpb.TimeInterval{
@@ -113,7 +117,10 @@ func TestStoreHeartbeat(t *testing.T) {
 			},
 		},
 	}
-	coldHeartBeat := &pdpb.StoreStats{
+	hotHeartBeat := hotReq.GetStats()
+	coldReq := &pdpb.StoreHeartbeatRequest{}
+	coldResp := &pdpb.StoreHeartbeatResponse{}
+	coldReq.Stats = &pdpb.StoreStats{
 		StoreId:     1,
 		RegionCount: 1,
 		Interval: &pdpb.TimeInterval{
@@ -122,9 +129,9 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats := cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Len(storeStats[1], 1)
@@ -135,32 +142,32 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[statistics.KeyDim])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[statistics.QueryDim])
 	// After cold heartbeat, we won't find region 1 peer in regionStats
-	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	re.Empty(storeStats[1])
 	// After hot heartbeat, we can find region 1 peer again
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
-	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
-	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
-	re.NoError(cluster.HandleStoreHeartbeat(coldHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
+	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 0)
 	re.Empty(storeStats[1])
-	re.Nil(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.Nil(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 1)
 	re.Len(storeStats[1], 0)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
-	re.NoError(cluster.HandleStoreHeartbeat(hotHeartBeat))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Len(storeStats[1], 1)
@@ -177,20 +184,22 @@ func TestFilterUnhealthyStore(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 
 	stores := newTestStores(3, "2.0.0")
+	req := &pdpb.StoreHeartbeatRequest{}
+	resp := &pdpb.StoreHeartbeatResponse{}
 	for _, store := range stores {
-		storeStats := &pdpb.StoreStats{
+		req.Stats = &pdpb.StoreStats{
 			StoreId:     store.GetID(),
 			Capacity:    100,
 			Available:   50,
 			RegionCount: 1,
 		}
 		re.NoError(cluster.putStoreLocked(store))
-		re.NoError(cluster.HandleStoreHeartbeat(storeStats))
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 		re.NotNil(cluster.hotStat.GetRollingStoreStats(store.GetID()))
 	}
 
 	for _, store := range stores {
-		storeStats := &pdpb.StoreStats{
+		req.Stats = &pdpb.StoreStats{
 			StoreId:     store.GetID(),
 			Capacity:    100,
 			Available:   50,
@@ -198,7 +207,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 		}
 		newStore := store.Clone(core.TombstoneStore())
 		re.NoError(cluster.putStoreLocked(newStore))
-		re.NoError(cluster.HandleStoreHeartbeat(storeStats))
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 		re.Nil(cluster.hotStat.GetRollingStoreStats(store.GetID()))
 	}
 }
@@ -687,9 +696,9 @@ func TestRegionHeartbeat(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
-
 	n, np := uint64(3), uint64(3)
-
+	cluster.wg.Add(1)
+	go cluster.runUpdateStoreStats()
 	stores := newTestStores(3, "2.0.0")
 	regions := newTestRegions(n, n, np)
 
@@ -847,11 +856,12 @@ func TestRegionHeartbeat(t *testing.T) {
 		}
 	}
 
-	for _, store := range cluster.core.Stores.GetStores() {
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
-		re.Equal(cluster.core.Regions.RegionsInfo.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
+	time.Sleep(50 * time.Millisecond)
+	for _, store := range cluster.GetStores() {
+		re.Equal(cluster.core.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
+		re.Equal(cluster.core.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
+		re.Equal(cluster.core.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
+		re.Equal(cluster.core.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
 	}
 
 	// Test with storage.
@@ -1320,6 +1330,8 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	for _, s := range stores {
 		re.NoError(tc.putStoreLocked(s))
 	}
+	tc.RaftCluster.wg.Add(1)
+	go tc.RaftCluster.runUpdateStoreStats()
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -1340,9 +1352,11 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	}
 	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
 	re.NoError(tc.processRegionHeartbeat(origin))
+	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
 	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
 	re.NoError(tc.processRegionHeartbeat(newRegion))
+	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
 }
 
@@ -1768,12 +1782,9 @@ func TestAwakenStore(t *testing.T) {
 	}
 
 	now := time.Now()
-	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-6*time.Minute)))
+	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-11*time.Minute)))
 	re.NoError(cluster.putStoreLocked(store4))
 	store1 := cluster.GetStore(1)
-	re.False(store1.NeedAwakenStore())
-	re.NoError(cluster.UpdateAwakenStoreTime(1, now.Add(-11*time.Minute)))
-	store1 = cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
 }
 
@@ -1941,7 +1952,7 @@ func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*co
 
 func checkPendingPeerCount(expect []int, cluster *RaftCluster, re *require.Assertions) {
 	for i, e := range expect {
-		s := cluster.core.Stores.GetStore(uint64(i + 1))
+		s := cluster.GetStore(uint64(i + 1))
 		re.Equal(e, s.GetPendingPeerCount())
 	}
 }

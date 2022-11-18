@@ -709,6 +709,15 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(co.addScheduler(gls))
 
+	hb, err := schedule.CreateScheduler(schedulers.HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
+	re.NoError(err)
+	conf, err = hb.EncodeConfig()
+	re.NoError(err)
+	data = make(map[string]interface{})
+	re.NoError(json.Unmarshal(conf, &data))
+	re.Contains(data, "enable-for-tiflash")
+	re.Equal("true", data["enable-for-tiflash"].(string))
+
 	// Transfer all leaders to store 1.
 	waitOperator(re, co, 2)
 	region2 := tc.GetRegion(2)

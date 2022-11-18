@@ -185,7 +185,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		Loads:          f.kind.GetLoadRatesFromPeer(peer),
 		LastUpdateTime: time.Now(),
 		isLeader:       region.GetLeader().GetStoreId() == storeID,
-		isLearner:      core.IsLearner(region.GetPeer(storeID)),
+		isLearner:      region.GetStoreLearner(storeID) != nil,
 		interval:       interval,
 		peers:          region.GetPeers(),
 		actionType:     Update,
