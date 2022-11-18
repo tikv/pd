@@ -40,7 +40,7 @@ type etcdReadiness struct {
 	IsLearner bool `json:"is_learner"`
 	// CurrIndex is the applied raft index for current PD.
 	CurrIndex uint64 `json:"curr_index"`
-	// LeaderIndex is the commited raft index for the leader.
+	// LeaderIndex is the committed raft index for the leader.
 	LeaderIndex uint64 `json:"leader_index"`
 }
 
