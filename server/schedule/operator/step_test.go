@@ -552,7 +552,7 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			0,
+			1,
 			true,
 			suite.NoError,
 		},
