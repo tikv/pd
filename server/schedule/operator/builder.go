@@ -77,11 +77,12 @@ type Builder struct {
 	forceTargetLeader bool
 
 	// intermediate states
-	currentPeers                                                                                    peersMap
-	currentLeaderStoreID                                                                            uint64
-	toAdd, toRemove, toPromote, toDemote, toWitness, toNonWitness, toPromoteAfterSwitchToNonWitness peersMap       // pending tasks.
-	steps                                                                                           []OpStep       // generated steps.
-	peerAddStep                                                                                     map[uint64]int // record at which step a peer is created.
+	currentPeers                                              peersMap
+	currentLeaderStoreID                                      uint64
+	toAdd, toRemove, toPromote, toDemote                      peersMap
+	toWitness, toNonWitness, toPromoteAfterSwitchToNonWitness peersMap
+	steps                                                     []OpStep       // generated steps.
+	peerAddStep                                               map[uint64]int // record at which step a peer is created.
 
 	// comparison function
 	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
@@ -436,7 +437,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		return "", errors.New("cannot create operator: target peers have no voter")
 	}
 
-	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`, `toWitness`, `toNonWitness`.
+	// Diff `originPeers` and `targetPeers` to initialize `toAdd`, `toRemove`, `toPromote`, `toDemote`,
+	// `toWitness`, `toNonWitness`, `toPromoteAfterSwitchToNonWitness`.
 	// Note: Use `toDemote` only when `useJointConsensus` is true. Otherwise use `toAdd`, `toRemove` instead.
 	for _, o := range b.originPeers {
 		n := b.targetPeers[o.GetStoreId()]
@@ -521,7 +523,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter),
+	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
+	// it will domote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
 		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) &&
@@ -733,6 +736,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 		}
 		if plan.witness != nil {
 			b.execSwitchToWitness(plan.witness)
+			kind |= OpRegion
 		}
 		if plan.nonWitness != nil {
 			b.execSwitchToNonWitness(plan.nonWitness)

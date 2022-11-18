@@ -217,7 +217,8 @@ type BecomeWitness struct {
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return 0
+	peer := region.GetStorePeer(bw.StoreID)
+	return typeutil.BoolToUint64((peer.GetId() == bw.PeerID) && peer.GetIsWitness())
 }
 
 func (bw BecomeWitness) String() string {
@@ -274,7 +275,8 @@ type BecomeNonWitness struct {
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return 0
+	peer := region.GetStorePeer(bn.StoreID)
+	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness() && (region.GetPendingPeer(peer.GetId()) == nil))
 }
 
 func (bn BecomeNonWitness) String() string {
@@ -343,7 +345,17 @@ func (bsw BatchSwitchWitness) String() string {
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bsw BatchSwitchWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
-	return 0 // switch witness never change the conf version
+	for _, w := range bsw.ToWitnesses {
+		if w.ConfVerChanged(region) == 0 {
+			return 0
+		}
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		if nw.ConfVerChanged(region) == 0 {
+			return 0
+		}
+	}
+	return uint64(len(bsw.ToWitnesses) + len(bsw.ToNonWitnesses))
 }
 
 // IsFinish checks if current step is finished.
