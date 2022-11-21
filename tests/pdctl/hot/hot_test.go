@@ -290,15 +290,19 @@ func TestHistoryHotRegions(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	startTime := time.Now().Second()
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000),
+		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
+		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	// wait hot scheduler starts
 	time.Sleep(5000 * time.Millisecond)
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
-	start := strconv.FormatInt(startTime, 10)
+	start := strconv.FormatInt(int64(startTime*1000), 10)
 	end := strconv.FormatInt(endTime, 10)
 	args := []string{"-u", pdAddr, "hot", "history",
 		start, end,

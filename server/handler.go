@@ -1032,12 +1032,12 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
-				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
 				IsLeader:       hotPeerStat.IsLeader,
-				IsLearner:      hotPeerStat.IsLearner,
+				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,

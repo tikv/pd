@@ -68,6 +68,7 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 }
 
 // GetHotStatus returns the hot status for a given type.
+// NOTE: This function is exported by HTTP API. It does not contain `isLearner` and `LastUpdateTime` field.
 func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
 	stLoadInfosAsLeader := SummaryStoresLoad(

@@ -157,8 +157,8 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 
 // Update updates the cache.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) Update(item *HotPeerStat) {
-	switch item.Kind {
+func (w *HotCache) Update(item *HotPeerStat, kind RWType) {
+	switch kind {
 	case Write:
 		w.writeCache.updateStat(item)
 	case Read:
@@ -201,4 +201,16 @@ func (w *HotCache) GetFilledPeriod(kind RWType) int {
 		reportIntervalSecs = w.readCache.reportIntervalSecs
 	}
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(reportIntervalSecs)*time.Second).GetFilledPeriod()
+}
+
+// GetThresholds returns thresholds.
+// This is used for test purpose.
+func (w *HotCache) GetThresholds(kind RWType, storeID uint64) []float64 {
+	switch kind {
+	case Write:
+		return w.writeCache.calcHotThresholds(storeID)
+	case Read:
+		return w.readCache.calcHotThresholds(storeID)
+	}
+	return nil
 }

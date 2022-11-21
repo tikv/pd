@@ -484,16 +484,35 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
+	var infos *statistics.StoreHotPeersInfos
 	switch typ {
 	case statistics.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
 	case statistics.Read:
 		regionStats := c.cluster.RegionReadStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
 	default:
 	}
-	return nil
+	for _, store := range infos.AsPeer {
+		for _, hotPeer := range store.Stats {
+			region := c.cluster.GetRegion(hotPeer.RegionID)
+			if region != nil {
+				hotPeer.IsLearner = core.IsLearner(region.GetPeer(hotPeer.StoreID))
+				hotPeer.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+			}
+		}
+	}
+	for _, store := range infos.AsLeader {
+		for _, hotPeer := range store.Stats {
+			region := c.cluster.GetRegion(hotPeer.RegionID)
+			if region != nil {
+				hotPeer.IsLearner = core.IsLearner(region.GetPeer(hotPeer.StoreID))
+				hotPeer.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+			}
+		}
+	}
+	return infos
 }
 
 func (c *coordinator) getSchedulers() []string {

@@ -196,10 +196,8 @@ func checkIntervalSumContinuous(re *require.Assertions, intervalSums map[uint64]
 			continue
 		}
 		new := int(ret.getIntervalSum() / 1000000000)
-		if ret.source == direct {
-			if old, ok := intervalSums[ret.StoreID]; ok {
-				re.Equal((old+int(interval))%RegionHeartBeatReportInterval, new)
-			}
+		if old, ok := intervalSums[ret.StoreID]; ok {
+			re.Equal((old+int(interval))%RegionHeartBeatReportInterval, new)
 		}
 		intervalSums[ret.StoreID] = new
 	}
@@ -316,9 +314,9 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	// skip interval=0
 	interval := 0
 	deltaLoads := []float64{0.0, 0.0, 0.0}
-	MinHotThresholds[RegionReadBytes] = 0.0
-	MinHotThresholds[RegionReadKeys] = 0.0
-	MinHotThresholds[RegionReadQueryNum] = 0.0
+	cache.defaultThresholds[RegionReadBytes] = 0.0
+	cache.defaultThresholds[RegionReadKeys] = 0.0
+	cache.defaultThresholds[RegionReadQueryNum] = 0.0
 
 	newItem := cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Nil(newItem)
@@ -326,18 +324,18 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	// new peer, interval is larger than report interval, but no hot
 	interval = 10
 	deltaLoads = []float64{0.0, 0.0, 0.0}
-	MinHotThresholds[RegionReadBytes] = 1.0
-	MinHotThresholds[RegionReadKeys] = 1.0
-	MinHotThresholds[RegionReadQueryNum] = 1.0
+	cache.defaultThresholds[RegionReadBytes] = 1.0
+	cache.defaultThresholds[RegionReadKeys] = 1.0
+	cache.defaultThresholds[RegionReadQueryNum] = 1.0
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Nil(newItem)
 
 	// new peer, interval is less than report interval
 	interval = 4
 	deltaLoads = []float64{60.0, 60.0, 60.0}
-	MinHotThresholds[RegionReadBytes] = 0.0
-	MinHotThresholds[RegionReadKeys] = 0.0
-	MinHotThresholds[RegionReadQueryNum] = 0.0
+	cache.defaultThresholds[RegionReadBytes] = 0.0
+	cache.defaultThresholds[RegionReadKeys] = 0.0
+	cache.defaultThresholds[RegionReadQueryNum] = 0.0
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.NotNil(newItem)
 	re.Equal(0, newItem.HotDegree)
@@ -350,7 +348,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem.HotDegree)
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
-	newItem.AntiCount = newItem.defaultAntiCount()
+	newItem.AntiCount = newItem.defaultAntiCount(Read)
 	cache.updateStat(newItem)
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
@@ -367,9 +365,9 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(2, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is larger than report interval, and cold
-	MinHotThresholds[RegionReadBytes] = 10.0
-	MinHotThresholds[RegionReadKeys] = 10.0
-	MinHotThresholds[RegionReadQueryNum] = 10.0
+	cache.defaultThresholds[RegionReadBytes] = 10.0
+	cache.defaultThresholds[RegionReadKeys] = 10.0
+	cache.defaultThresholds[RegionReadQueryNum] = 10.0
 	cache.updateStat(newItem)
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
@@ -399,17 +397,19 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
+	DefaultThresholdsUpdateInterval = 0
+	defer func() {
+		DefaultThresholdsUpdateInterval = 10 * time.Second
+	}()
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		var item *HotPeerStat
 		for {
 			thresholds := cache.calcHotThresholds(storeID)
 			newItem := &HotPeerStat{
-				Kind:       cache.kind,
 				StoreID:    storeID,
 				RegionID:   i,
 				actionType: Update,
-				thresholds: thresholds,
 				Loads:      make([]float64, DimLen),
 			}
 			newItem.Loads[ByteDim] = byteRate
@@ -422,13 +422,13 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 			if oldItem == nil {
 				item = cache.updateNewHotPeerStat(newItem, loads, time.Duration(interval)*time.Second)
 			} else {
-				item = cache.updateHotPeerStat(nil, newItem, oldItem, loads, time.Duration(interval)*time.Second)
+				item = cache.updateHotPeerStat(nil, newItem, oldItem, loads, time.Duration(interval)*time.Second, direct)
 			}
 			cache.updateStat(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			re.Equal(MinHotThresholds[RegionReadBytes], thresholds[ByteDim])
+			re.Equal(cache.defaultThresholds[RegionReadBytes], thresholds[ByteDim])
 		} else {
 			re.Equal(expectThreshold, thresholds[ByteDim])
 		}
@@ -525,7 +525,7 @@ func TestRemoveFromCacheRandom(t *testing.T) {
 
 func checkCoolDown(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect bool) {
 	item := cache.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
-	re.Equal(expect, item.IsNeedCoolDownTransferLeader(3))
+	re.Equal(expect, item.IsNeedCoolDownTransferLeader(3, cache.kind))
 }
 
 func TestCoolDownTransferLeader(t *testing.T) {
@@ -668,7 +668,7 @@ func TestHotPeerCacheTopN(t *testing.T) {
 
 	cache := NewHotPeerCache(Write)
 	now := time.Now()
-	for id := uint64(99); id > 0; id-- {
+	for id := uint64(0); id < 100; id++ {
 		meta := &metapb.Region{
 			Id:    id,
 			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
@@ -687,10 +687,19 @@ func TestHotPeerCacheTopN(t *testing.T) {
 				cache.updateStat(stat)
 			}
 		}
+		if id < 60 {
+			re.Equal(MinHotThresholds[RegionWriteKeys], cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
+		}
 	}
 
 	re.Contains(cache.peersOfStore, uint64(1))
 	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
+	re.Equal(80.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
+	DefaultThresholdsUpdateInterval = 0
+	defer func() {
+		DefaultThresholdsUpdateInterval = 10 * time.Second
+	}()
+	re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {

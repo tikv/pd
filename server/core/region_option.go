@@ -284,6 +284,13 @@ func SetReportInterval(v uint64) RegionCreateOption {
 	}
 }
 
+// SetInterval sets the report interval for the region.
+func SetInterval(start, end uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
+	}
+}
+
 // SetRegionConfVer sets the config version for the region.
 func SetRegionConfVer(confVer uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
