@@ -61,7 +61,9 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que.Init()
+	for aot.que.que.Len() > 0 {
+		aot.que.PopFront()
+	}
 	aot.margin = deltaWithInterval{
 		delta:    0,
 		interval: 0,

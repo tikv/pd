@@ -93,15 +93,19 @@ func TestMember(t *testing.T) {
 	args = []string{"-u", pdAddr, "member", "delete", "name", name}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	members, err = etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 2)
+	testutil.Eventually(re, func() bool {
+		members, err = etcdutil.ListEtcdMembers(client)
+		re.NoError(err)
+		return len(members.Members) == 2
+	})
 
 	// member delete id <member_id>
 	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	members, err = etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 2)
+	testutil.Eventually(re, func() bool {
+		members, err = etcdutil.ListEtcdMembers(client)
+		re.NoError(err)
+		return len(members.Members) == 2
+	})
 }
