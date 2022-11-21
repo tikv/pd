@@ -307,56 +307,77 @@ func newPeers(n int, pid genID, sid genID) []*metapb.Peer {
 func TestUpdateHotPeerStat(t *testing.T) {
 	re := require.New(t)
 	cache := NewHotPeerCache(Read)
+	storeID, regionID := uint64(1), uint64(2)
+	peer := &metapb.Peer{StoreId: storeID}
+	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
 
 	// skip interval=0
-	newItem := &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 0)
+	interval := 0
+	deltaLoads := []float64{0.0, 0.0, 0.0}
+	MinHotThresholds[RegionReadBytes] = 0.0
+	MinHotThresholds[RegionReadKeys] = 0.0
+	MinHotThresholds[RegionReadQueryNum] = 0.0
+
+	newItem := cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Nil(newItem)
 
 	// new peer, interval is larger than report interval, but no hot
-	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{1.0, 1.0, 1.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{0.0, 0.0, 0.0}, 10*time.Second)
+	interval = 10
+	deltaLoads = []float64{0.0, 0.0, 0.0}
+	MinHotThresholds[RegionReadBytes] = 1.0
+	MinHotThresholds[RegionReadKeys] = 1.0
+	MinHotThresholds[RegionReadQueryNum] = 1.0
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Nil(newItem)
 
 	// new peer, interval is less than report interval
-	newItem = &HotPeerStat{actionType: Update, thresholds: []float64{0.0, 0.0, 0.0}, Kind: Read}
-	newItem = cache.updateHotPeerStat(nil, newItem, nil, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	interval = 4
+	deltaLoads = []float64{60.0, 60.0, 60.0}
+	MinHotThresholds[RegionReadBytes] = 0.0
+	MinHotThresholds[RegionReadKeys] = 0.0
+	MinHotThresholds[RegionReadQueryNum] = 0.0
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.NotNil(newItem)
 	re.Equal(0, newItem.HotDegree)
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is less than report interval
-	oldItem := newItem
-	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	interval = 4
+	deltaLoads = []float64{60.0, 60.0, 60.0}
+	cache.updateStat(newItem)
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(0, newItem.HotDegree)
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
-	oldItem = newItem
-	oldItem.AntiCount = oldItem.defaultAntiCount()
-	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	newItem.AntiCount = newItem.defaultAntiCount()
+	cache.updateStat(newItem)
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is less than report interval
-	oldItem = newItem
-	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 4*time.Second)
+	cache.updateStat(newItem)
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
-	oldItem = newItem
-	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	interval = 10
+	cache.updateStat(newItem)
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(2, newItem.HotDegree)
 	re.Equal(2*m, newItem.AntiCount)
 	// sum of interval is larger than report interval, and cold
-	oldItem = newItem
-	newItem.thresholds = []float64{10.0, 10.0, 10.0}
-	newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+	MinHotThresholds[RegionReadBytes] = 10.0
+	MinHotThresholds[RegionReadKeys] = 10.0
+	MinHotThresholds[RegionReadQueryNum] = 10.0
+	cache.updateStat(newItem)
+	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
 	re.Equal(2*m-1, newItem.AntiCount)
 	// sum of interval is larger than report interval, and cold
 	for i := 0; i < 2*m-1; i++ {
-		oldItem = newItem
-		newItem = cache.updateHotPeerStat(nil, newItem, oldItem, []float64{60.0, 60.0, 60.0}, 10*time.Second)
+		cache.updateStat(newItem)
+		newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	}
 	re.Less(newItem.HotDegree, 0)
 	re.Equal(0, newItem.AntiCount)
@@ -380,6 +401,7 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
+		var item *HotPeerStat
 		for {
 			thresholds := cache.calcHotThresholds(storeID)
 			newItem := &HotPeerStat{
@@ -396,7 +418,12 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 			if oldItem != nil && oldItem.rollingLoads[ByteDim].isHot(thresholds[ByteDim]) == true {
 				break
 			}
-			item := cache.updateHotPeerStat(nil, newItem, oldItem, []float64{byteRate * interval, 0.0, 0.0}, time.Duration(interval)*time.Second)
+			loads := []float64{byteRate * interval, 0.0, 0.0}
+			if oldItem == nil {
+				item = cache.updateNewHotPeerStat(newItem, loads, time.Duration(interval)*time.Second)
+			} else {
+				item = cache.updateHotPeerStat(nil, newItem, oldItem, loads, time.Duration(interval)*time.Second)
+			}
 			cache.updateStat(item)
 		}
 		thresholds := cache.calcHotThresholds(storeID)
@@ -663,7 +690,6 @@ func TestHotPeerCacheTopN(t *testing.T) {
 	}
 
 	re.Contains(cache.peersOfStore, uint64(1))
-	println(cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim))
 	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
 }
 
