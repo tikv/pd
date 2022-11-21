@@ -478,6 +478,8 @@ func TestRemovingProcess(t *testing.T) {
 			regionInStore1 = append(regionInStore1, region)
 		}
 		re.NoError(cluster.putRegion(region))
+		task := <-cluster.core.UpdateSubtreeNotifier()
+		cluster.core.UpdateSubTree(task)
 	}
 	re.Len(regionInStore1, 20)
 	cluster.progressManager = progress.NewManager()
@@ -703,8 +705,9 @@ func TestRegionHeartbeat(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	n, np := uint64(3), uint64(3)
-	cluster.wg.Add(1)
+	cluster.wg.Add(2)
 	go cluster.runUpdateStoreStats()
+	go cluster.runUpdateSubtree()
 	stores := newTestStores(3, "2.0.0")
 	regions := newTestRegions(n, n, np)
 
@@ -715,11 +718,13 @@ func TestRegionHeartbeat(t *testing.T) {
 	for i, region := range regions {
 		// region does not exist.
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		origin := region
@@ -727,12 +732,14 @@ func TestRegionHeartbeat(t *testing.T) {
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(stale))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -743,12 +750,14 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(stale))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -761,24 +770,28 @@ func TestRegionHeartbeat(t *testing.T) {
 		}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Add a pending peer.
 		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear down peers.
 		region = region.Clone(core.WithDownPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear pending peers.
 		region = region.Clone(core.WithPendingPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Remove peers.
@@ -786,12 +799,14 @@ func TestRegionHeartbeat(t *testing.T) {
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -802,36 +817,42 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateSize.
 		region = region.Clone(core.SetApproximateSize(144))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateKeys.
 		region = region.Clone(core.SetApproximateKeys(144000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
+		time.Sleep(10 * time.Millisecond)
 		checkRegions(re, cluster.core, regions[:i+1])
 	}
 
@@ -1336,8 +1357,9 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	for _, s := range stores {
 		re.NoError(tc.putStoreLocked(s))
 	}
-	tc.RaftCluster.wg.Add(1)
+	tc.RaftCluster.wg.Add(2)
 	go tc.RaftCluster.runUpdateStoreStats()
+	go tc.RaftCluster.runUpdateSubtree()
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -1679,7 +1701,7 @@ func Test(t *testing.T) {
 		checkRegions(re, cache, regions[0:i])
 
 		origin, overlaps, rangeChanged := cache.SetRegion(region)
-		cache.UpdateSubTree(region, origin, overlaps, rangeChanged)
+		cache.UpdateSubTree(core.NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
 		checkRegion(re, cache.GetRegion(i), region)
 		checkRegion(re, cache.GetRegionByKey(regionKey), region)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1693,7 +1715,7 @@ func Test(t *testing.T) {
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
 		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
-		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
+		cache.UpdateSubTree(core.NewUpdateSubtreeTask(newRegion, origin, overlaps, rangeChanged))
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1708,7 +1730,7 @@ func Test(t *testing.T) {
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
 		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
-		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
+		cache.UpdateSubTree(core.NewUpdateSubtreeTask(newRegion, origin, overlaps, rangeChanged))
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
@@ -1730,7 +1752,7 @@ func Test(t *testing.T) {
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
 	origin, overlaps, rangeChanged := cache.SetRegion(overlapRegion)
-	cache.UpdateSubTree(overlapRegion, origin, overlaps, rangeChanged)
+	cache.UpdateSubTree(core.NewUpdateSubtreeTask(overlapRegion, origin, overlaps, rangeChanged))
 	re.Nil(cache.GetRegion(n - 2))
 	re.NotNil(cache.GetRegion(n - 1))
 
@@ -1740,7 +1762,7 @@ func Test(t *testing.T) {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
-			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
+			cache.UpdateSubTree(core.NewUpdateSubtreeTask(newRegion, origin, overlaps, rangeChanged))
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}

@@ -119,7 +119,7 @@ func TestRejectLeader(t *testing.T) {
 		}
 	}
 	origin, overlaps, rangeChanged := tc.SetRegion(region)
-	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	tc.UpdateSubTree(core.NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }
@@ -300,6 +300,8 @@ func TestShuffleRegionRole(t *testing.T) {
 		Peers:       peers,
 	}, peers[0])
 	tc.PutRegion(region)
+	task := <-tc.UpdateSubtreeNotifier()
+	tc.UpdateSubTree(task)
 
 	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	re.NoError(err)

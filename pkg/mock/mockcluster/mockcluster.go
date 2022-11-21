@@ -105,6 +105,8 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	//  regions load from etcd will have no leader
 	r := mc.newMockRegionInfo(regionID, 0, peerStoreIDs...).Clone(core.WithLeader(nil))
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 }
 
 // GetStoresLoads gets stores load statistics.
@@ -342,6 +344,8 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return region
 }
 
@@ -349,6 +353,8 @@ func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherP
 func (mc *Cluster) AddLightWeightLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	region := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	mc.PutRegion(region)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return region
 }
 
@@ -357,6 +363,8 @@ func (mc *Cluster) AddNoLeaderRegion(regionID uint64, otherPeerStoreIDs ...uint6
 	origin := mc.newMockRegionInfo(regionID, 0, otherPeerStoreIDs...)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return region
 }
 
@@ -365,6 +373,8 @@ func (mc *Cluster) AddRegionWithLearner(regionID uint64, leaderStoreID uint64, f
 	origin := mc.MockRegionInfo(regionID, leaderStoreID, followerStoreIDs, learnerStoreIDs, nil)
 	region := origin.Clone(core.SetApproximateSize(defaultRegionSize/units.MiB), core.SetApproximateKeys(10))
 	mc.PutRegion(region)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return region
 }
 
@@ -376,6 +386,8 @@ func (mc *Cluster) AddLeaderRegionWithRange(regionID uint64, startKey string, en
 		core.WithEndKey([]byte(endKey)),
 	)
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 }
 
 // AddRegionWithReadInfo adds region with specified leader, followers and read info.
@@ -402,6 +414,8 @@ func (mc *Cluster) AddRegionWithReadInfo(
 		}
 	}
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return items
 }
 
@@ -424,6 +438,8 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		}
 	}
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return items
 }
 
@@ -451,6 +467,8 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 		}
 	}
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return items
 }
 
@@ -479,6 +497,8 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 		}
 	}
 	mc.PutRegion(r)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	return items
 }
 
@@ -712,6 +732,8 @@ func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
 		meta.Peers = append(meta.Peers, &metapb.Peer{StoreId: s})
 	}
 	mc.PutRegion(core.NewRegionInfo(meta, &metapb.Peer{StoreId: stores[0]}))
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 }
 
 // PutStoreWithLabels mocks method.

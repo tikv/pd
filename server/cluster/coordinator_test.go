@@ -90,7 +90,13 @@ func (c *testCluster) addLeaderRegion(regionID uint64, leaderStoreID uint64, fol
 		region.Peers = append(region.Peers, peer)
 	}
 	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
-	return c.putRegion(regionInfo)
+	err := c.putRegion(regionInfo)
+	if err != nil {
+		return err
+	}
+	task := <-c.core.UpdateSubtreeNotifier()
+	c.core.UpdateSubTree(task)
+	return nil
 }
 
 func (c *testCluster) updateLeaderCount(storeID uint64, leaderCount int) error {
@@ -147,7 +153,13 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	return c.putRegion(core.NewRegionInfo(region, nil))
+	err := c.putRegion(core.NewRegionInfo(region, nil))
+	if err != nil {
+		return err
+	}
+	task := <-c.core.UpdateSubtreeNotifier()
+	c.core.UpdateSubTree(task)
+	return nil
 }
 
 func TestBasic(t *testing.T) {
@@ -615,7 +627,6 @@ func TestShouldRun(t *testing.T) {
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	tc.RaftCluster.coordinator = co
 	defer cleanup()
-
 	re.NoError(tc.addLeaderStore(1, 5))
 	re.NoError(tc.addLeaderStore(2, 2))
 	re.NoError(tc.addLeaderStore(3, 0))

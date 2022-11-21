@@ -281,7 +281,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	c.wg.Add(9)
+	c.wg.Add(10)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -291,6 +291,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
 	go c.runUpdateStoreStats()
+	go c.runUpdateSubtree()
 
 	c.running.Store(true)
 	return nil
@@ -469,6 +470,21 @@ func (c *RaftCluster) runUpdateStoreStats() {
 				c.core.UpdateStoreStatus(store.GetID())
 			}
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
+		}
+	}
+}
+
+func (c *RaftCluster) runUpdateSubtree() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("update subtree background jobs has been stopped")
+			return
+		case task := <-c.core.UpdateSubtreeNotifier():
+			c.core.UpdateSubTree(task)
 		}
 	}
 }

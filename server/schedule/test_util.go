@@ -79,6 +79,8 @@ func ApplyOperator(mc *mockcluster.Cluster, op *operator.Operator) {
 		region = ApplyOperatorStep(region, op)
 	}
 	mc.PutRegion(region)
+	task := <-mc.UpdateSubtreeNotifier()
+	mc.UpdateSubTree(task)
 	for id := range region.GetStoreIDs() {
 		mc.UpdateStoreStatus(id)
 	}

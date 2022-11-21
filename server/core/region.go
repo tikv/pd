@@ -706,29 +706,31 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            syncutil.RWMutex
-	tree         *regionTree
-	regions      map[uint64]*regionItem // regionID -> regionInfo
-	st           syncutil.RWMutex
-	subRegions   map[uint64]*regionItem // regionID -> regionInfo
-	leaders      map[uint64]*regionTree // storeID -> sub regionTree
-	followers    map[uint64]*regionTree // storeID -> sub regionTree
-	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
-	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	t               syncutil.RWMutex
+	tree            *regionTree
+	regions         map[uint64]*regionItem // regionID -> regionInfo
+	st              syncutil.RWMutex
+	subRegions      map[uint64]*regionItem // regionID -> regionInfo
+	leaders         map[uint64]*regionTree // storeID -> sub regionTree
+	followers       map[uint64]*regionTree // storeID -> sub regionTree
+	learners        map[uint64]*regionTree // storeID -> sub regionTree
+	witnesses       map[uint64]*regionTree // storeID -> sub regionTree
+	pendingPeers    map[uint64]*regionTree // storeID -> sub regionTree
+	updateSubtreeCh chan *updateSubtreeTask
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:         newRegionTree(),
-		regions:      make(map[uint64]*regionItem),
-		subRegions:   make(map[uint64]*regionItem),
-		leaders:      make(map[uint64]*regionTree),
-		followers:    make(map[uint64]*regionTree),
-		learners:     make(map[uint64]*regionTree),
-		witnesses:    make(map[uint64]*regionTree),
-		pendingPeers: make(map[uint64]*regionTree),
+		tree:            newRegionTree(),
+		regions:         make(map[uint64]*regionItem),
+		subRegions:      make(map[uint64]*regionItem),
+		leaders:         make(map[uint64]*regionTree),
+		followers:       make(map[uint64]*regionTree),
+		learners:        make(map[uint64]*regionTree),
+		witnesses:       make(map[uint64]*regionTree),
+		pendingPeers:    make(map[uint64]*regionTree),
+		updateSubtreeCh: make(chan *updateSubtreeTask),
 	}
 }
 
@@ -764,14 +766,14 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
-	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	r.UpdateSubTree(NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
 	return overlaps
 }
 
 // PutRegion put a region.
 func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.SetRegion(region)
-	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	r.UpdateSubTree(NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
 	return overlaps
 }
 
@@ -783,8 +785,9 @@ func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*reg
 }
 
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
+func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, *RegionInfo, bool, error) {
 	r.t.Lock()
+	defer r.t.Unlock()
 	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
@@ -792,13 +795,13 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	}
 	err := check(region, origin, ols)
 	if err != nil {
-		r.t.Unlock()
-		return nil, err
+		return nil, nil, false, err
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
-	r.t.Unlock()
-	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	return overlaps, nil
+	if err == nil {
+		r.updateSubtreeCh <- NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged)
+	}
+	return overlaps, origin, rangeChanged, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
@@ -894,28 +897,28 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 }
 
 // UpdateSubTree updates the subtree.
-func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
+func (r *RegionsInfo) UpdateSubTree(t *updateSubtreeTask) {
 	r.st.Lock()
 	defer r.st.Unlock()
-	if origin != nil {
-		if rangeChanged || !origin.peersEqualTo(region) {
+	if t.origin != nil {
+		if t.rangeChanged || !t.origin.peersEqualTo(t.region) {
 			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTreeLocked(origin)
+			r.removeRegionFromSubTreeLocked(t.origin)
 		} else {
-			r.updateSubTreeStat(origin, region)
-			r.subRegions[region.GetID()].RegionInfo = region
+			r.updateSubTreeStat(t.origin, t.region)
+			r.subRegions[t.region.GetID()].RegionInfo = t.region
 			return
 		}
 	}
-	if rangeChanged {
-		for _, re := range overlaps {
+	if t.rangeChanged {
+		for _, re := range t.overlaps {
 			r.removeRegionFromSubTreeLocked(re)
 		}
 	}
 
-	item := &regionItem{region}
-	r.subRegions[region.GetID()] = item
+	item := &regionItem{t.region}
+	r.subRegions[t.region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
 	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
@@ -928,9 +931,9 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	}
 
 	// Add to leaders and followers.
-	for _, peer := range region.GetVoters() {
+	for _, peer := range t.region.GetVoters() {
 		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
+		if peer.GetId() == t.region.leader.GetId() {
 			// Add leader peer to leaders.
 			setPeer(r.leaders, storeID, item)
 		} else {
@@ -946,11 +949,11 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		}
 	}
 	// Add to learners.
-	setPeers(r.learners, region.GetLearners())
+	setPeers(r.learners, t.region.GetLearners())
 	// Add to witnesses.
-	setPeers(r.witnesses, region.GetWitnesses())
+	setPeers(r.witnesses, t.region.GetWitnesses())
 	// Add to PendingPeers
-	setPeers(r.pendingPeers, region.GetPendingPeers())
+	setPeers(r.pendingPeers, t.region.GetPendingPeers())
 }
 
 func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {

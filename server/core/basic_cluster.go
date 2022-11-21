@@ -28,6 +28,7 @@ type BasicCluster struct {
 	}
 
 	*RegionsInfo
+	updateSubtreeCh chan *updateSubtreeTask
 }
 
 // NewBasicCluster creates a BasicCluster.
@@ -40,6 +41,28 @@ func NewBasicCluster() *BasicCluster {
 
 		RegionsInfo: NewRegionsInfo(),
 	}
+}
+
+type updateSubtreeTask struct {
+	region       *RegionInfo
+	origin       *RegionInfo
+	overlaps     []*RegionInfo
+	rangeChanged bool
+}
+
+// NewUpdateSubtreeTask creates a update subtree task.
+func NewUpdateSubtreeTask(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) *updateSubtreeTask {
+	return &updateSubtreeTask{
+		region:       region,
+		origin:       origin,
+		overlaps:     overlaps,
+		rangeChanged: rangeChanged,
+	}
+}
+
+// UpdateSubtreeNotifier returns the update tree channel.
+func (bc *BasicCluster) UpdateSubtreeNotifier() <-chan *updateSubtreeTask {
+	return bc.RegionsInfo.updateSubtreeCh
 }
 
 /* Stores read operations */

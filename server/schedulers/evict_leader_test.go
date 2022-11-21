@@ -82,14 +82,20 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
+	task := <-tc.UpdateSubtreeNotifier()
+	tc.UpdateSubTree(task)
 	ops, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
+	task = <-tc.UpdateSubtreeNotifier()
+	tc.UpdateSubTree(task)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
+	task = <-tc.UpdateSubtreeNotifier()
+	tc.UpdateSubTree(task)
 	ops, _ = sl.Schedule(tc, false)
 	re.Empty(ops)
 }
