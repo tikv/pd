@@ -31,7 +31,8 @@ type RangeCluster struct {
 func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
-		subCluster.Regions.SetRegion(r)
+		origin, _, toRemove, rangeChanged := subCluster.Regions.SetRegionWithUpdate(r)
+		subCluster.Regions.UpdateSubTree(r, origin, toRemove, rangeChanged)
 	}
 	return &RangeCluster{
 		Cluster:    cluster,

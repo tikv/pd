@@ -1678,7 +1678,8 @@ func Test(t *testing.T) {
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
 
-		cache.SetRegion(region)
+		origin, _, toRemove, rangeChanged := cache.SetRegionWithUpdate(region)
+		cache.UpdateSubTree(region, origin, toRemove, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), region)
 		checkRegion(re, cache.GetRegionByKey(regionKey), region)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1691,12 +1692,14 @@ func Test(t *testing.T) {
 		// Update leader to peer np-1.
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
-		cache.SetRegion(newRegion)
+		origin, _, toRemove, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+		cache.UpdateSubTree(newRegion, origin, toRemove, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
 
 		cache.RemoveRegion(region)
+		cache.RemoveRegionFromSubTree(region)
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
@@ -1704,7 +1707,8 @@ func Test(t *testing.T) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		cache.SetRegion(newRegion)
+		origin, _, toRemove, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+		cache.UpdateSubTree(newRegion, origin, toRemove, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
@@ -1725,7 +1729,8 @@ func Test(t *testing.T) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	cache.SetRegion(overlapRegion)
+	origin, _, toRemove, rangeChanged := cache.SetRegionWithUpdate(overlapRegion)
+	cache.UpdateSubTree(overlapRegion, origin, toRemove, rangeChanged)
 	re.Nil(cache.GetRegion(n - 2))
 	re.NotNil(cache.GetRegion(n - 1))
 
@@ -1734,7 +1739,8 @@ func Test(t *testing.T) {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
-			cache.SetRegion(newRegion)
+			origin, _, toRemove, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+			cache.UpdateSubTree(newRegion, origin, toRemove, rangeChanged)
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}

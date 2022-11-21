@@ -118,7 +118,8 @@ func TestRejectLeader(t *testing.T) {
 			break
 		}
 	}
-	tc.Regions.SetRegion(region)
+	origin, _, toRemove, rangeChanged := tc.Regions.SetRegionWithUpdate(region)
+	tc.Regions.UpdateSubTree(region, origin, toRemove, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }

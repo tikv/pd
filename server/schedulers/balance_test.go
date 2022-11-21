@@ -646,6 +646,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
 	ops, _ = lb.Schedule(suite.tc, false)
 	suite.Equal(uint64(2), ops[0].RegionID())
 	suite.tc.RemoveRegion(suite.tc.GetRegion(2))
+
 	suite.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -1303,7 +1304,8 @@ func TestScatterRangeBalance(t *testing.T) {
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
-		tc.Regions.SetRegion(regionInfo)
+		origin, _, toRemove, rangeChanged := tc.Regions.SetRegionWithUpdate(regionInfo)
+		tc.Regions.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
 	}
 	for i := 0; i < 100; i++ {
 		_, err := tc.AllocPeer(1)
@@ -1371,7 +1373,8 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, _, toRemove, rangeChanged := tc.Regions.SetRegionWithUpdate(regionInfo)
+		tc.Regions.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
 	}
 
 	for i := 0; i < 100; i++ {
@@ -1481,7 +1484,8 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, _, toRemove, rangeChanged := tc.Regions.SetRegionWithUpdate(regionInfo)
+		tc.Regions.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
 	}
 
 	for i := 1; i <= 3; i++ {

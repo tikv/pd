@@ -375,6 +375,7 @@ func checkByteRateOnly(re *require.Assertions, tc *mockcluster.Cluster, hb sched
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
+		tc.Regions.RemoveRegionFromSubTree(tc.GetRegion(i))
 	}
 	hb.Schedule(tc, false)
 	clearPendingInfluence(hb.(*hotScheduler))
@@ -1120,6 +1121,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
 		tc.Regions.RemoveRegion(tc.GetRegion(i))
+		tc.Regions.RemoveRegionFromSubTree(tc.GetRegion(i))
 	}
 	hb.Schedule(tc, false)
 	re.Contains(hb.regionPendings, uint64(4))
