@@ -17,7 +17,6 @@ package scheduler_test
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"testing"
 	"time"
 
@@ -37,6 +36,7 @@ func TestScheduler(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -129,8 +129,6 @@ func TestScheduler(t *testing.T) {
 	}
 
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
-	defer cluster.Destroy()
-
 	time.Sleep(3 * time.Second)
 
 	// scheduler show command
@@ -392,20 +390,25 @@ func TestScheduler(t *testing.T) {
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	re.Equal(expected1, conf1)
 	// test compatibility
+	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
-		mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	}
-	conf["read-priorities"] = []interface{}{"query", "byte"}
+	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	// After upgrading, we should not use query.
+	expected1["read-priorities"] = []interface{}{"query", "byte"}
+	re.NotEqual(expected1, conf1)
+	expected1["read-priorities"] = []interface{}{"key", "byte"}
+	re.Equal(expected1, conf1)
 	// cannot set qps as write-peer-priorities
-	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
-	re.Eventually(func() bool {
-		mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		return reflect.DeepEqual(expected1, conf1)
-	}, time.Second*10, time.Millisecond*50)
+	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
+	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
+	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
 	// test remove and add
 	mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
 	mustExec([]string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)

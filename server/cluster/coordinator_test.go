@@ -238,7 +238,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 	return nil
 }
 
-func TestCollectMetrics(t *testing.T) {
+func TestCollectMetricsConcurrent(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
@@ -267,6 +267,48 @@ func TestCollectMetrics(t *testing.T) {
 	co.resetSchedulerMetrics()
 	co.cluster.resetClusterMetrics()
 	wg.Wait()
+}
+
+func TestCollectMetrics(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
+		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+	}, func(co *coordinator) { co.run() }, re)
+	defer cleanup()
+	count := 10
+	for i := 0; i <= count; i++ {
+		for k := 0; k < 200; k++ {
+			item := &statistics.HotPeerStat{
+				StoreID:   uint64(i % 5),
+				RegionID:  uint64(i*1000 + k),
+				Kind:      statistics.Write,
+				Loads:     []float64{10, 20, 30},
+				HotDegree: 10,
+				AntiCount: statistics.HotRegionAntiCount, // for write
+			}
+			tc.hotStat.HotCache.Update(item)
+		}
+	}
+	for i := 0; i < 1000; i++ {
+		co.collectHotSpotMetrics()
+		co.collectSchedulerMetrics()
+		co.cluster.collectClusterMetrics()
+	}
+	stores := co.cluster.GetStores()
+	regionStats := co.cluster.RegionWriteStats()
+	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
+	status2 := statistics.GetHotStatus(stores, co.cluster.GetStoresLoads(), regionStats, statistics.Write, co.cluster.GetOpts().IsTraceRegionFlow())
+	for _, s := range status2.AsLeader {
+		s.Stats = nil
+	}
+	for _, s := range status2.AsPeer {
+		s.Stats = nil
+	}
+	re.Equal(status1, status2)
+	co.resetHotSpotMetrics()
+	co.resetSchedulerMetrics()
+	co.cluster.resetClusterMetrics()
 }
 
 func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*coordinator), re *require.Assertions) (*testCluster, *coordinator, func()) {
