@@ -108,10 +108,8 @@ func contains(item RangeItem, key []byte) bool {
 
 // Remove removes the given item and return the deleted item.
 func (r *RangeTree) Remove(item RangeItem) RangeItem {
-	if r, _ := r.tree.Delete(item); r != nil {
-		return r
-	}
-	return nil
+	i, _ := r.tree.Delete(item)
+	return i
 }
 
 // Len returns the count of the range tree.
@@ -157,9 +155,5 @@ func (r *RangeTree) GetAt(index int) RangeItem {
 
 // GetWithIndex returns index and item for the given item.
 func (r *RangeTree) GetWithIndex(item RangeItem) (RangeItem, int) {
-	rst, index := r.tree.GetWithIndex(item)
-	if rst == nil {
-		return nil, index
-	}
-	return rst, index
+	return r.tree.GetWithIndex(item)
 }
