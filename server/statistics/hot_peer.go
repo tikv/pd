@@ -233,7 +233,7 @@ func (stat *HotPeerStat) IsLearner() bool {
 
 func (stat *HotPeerStat) defaultAntiCount() int {
 	if stat.Kind == Read {
-		return hotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
-	return hotRegionAntiCount
+	return HotRegionAntiCount
 }
