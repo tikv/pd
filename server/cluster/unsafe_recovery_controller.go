@@ -43,51 +43,51 @@ const (
 )
 
 // Stage transition graph: for more details, please check `unsafeRecoveryController.HandleStoreHeartbeat()`
-//                      +-----------+           +-----------+
-//  +-----------+       |           |           |           |
-//  |           |       |  collect  |           | tombstone |
-//  |   idle    |------>|  Report   |-----+---->|  tiflash  |-----+
-//  |           |       |           |     |     |  learner  |     |
-//  +-----------+       +-----------+     |     |           |     |
-//                                        |     +-----------+     |
-//                                        |           |           |
-//                                        |           |           |
-//                                        |           v           |
-//                                        |     +-----------+     |
-//                                        |     |           |     |
-//                                        |     |   force   |     |
-//                                        |     | LeaderFor |-----+
-//                                        |     |CommitMerge|     |
-//                                        |     |           |     |
-//                                        |     +-----------+     |
-//                                        |           |           |
-//                                        |           |           |
-//                                        |           v           |
-//                                        |     +-----------+     |     +-----------+
-//                                        |     |           |     |     |           |        +-----------+
-//                                        |     |  force    |     |     | exitForce |        |           |
-//                                        |     |  Leader   |-----+---->|  Leader   |------->|  failed   |
-//                                        |     |           |     |     |           |        |           |
-//                                        |     +-----------+     |     +-----------+        +-----------+
-//                                        |           |           |
-//                                        |           |           |
-//                                        |           v           |
-//                                        |     +-----------+     |
-//                                        |     |           |     |
-//                                        |     |  demote   |     |
-//                                        +-----|  Voter    |-----|
-//                                              |           |     |
-//                                              +-----------+     |
-//                                                    |           |
-//                                                    |           |
-//                                                    v           |
-//                      +-----------+           +-----------+     |
-//  +-----------+       |           |           |           |     |
-//  |           |       | exitForce |           |  create   |     |
-//  | finished  |<------|  Leader   |<----------|  Region   |-----+
-//  |           |       |           |           |           |
-//  +-----------+       +-----------+           +-----------+
 //
+//	                    +-----------+           +-----------+
+//	+-----------+       |           |           |           |
+//	|           |       |  collect  |           | tombstone |
+//	|   idle    |------>|  Report   |-----+---->|  tiflash  |-----+
+//	|           |       |           |     |     |  learner  |     |
+//	+-----------+       +-----------+     |     |           |     |
+//	                                      |     +-----------+     |
+//	                                      |           |           |
+//	                                      |           |           |
+//	                                      |           v           |
+//	                                      |     +-----------+     |
+//	                                      |     |           |     |
+//	                                      |     |   force   |     |
+//	                                      |     | LeaderFor |-----+
+//	                                      |     |CommitMerge|     |
+//	                                      |     |           |     |
+//	                                      |     +-----------+     |
+//	                                      |           |           |
+//	                                      |           |           |
+//	                                      |           v           |
+//	                                      |     +-----------+     |     +-----------+
+//	                                      |     |           |     |     |           |        +-----------+
+//	                                      |     |  force    |     |     | exitForce |        |           |
+//	                                      |     |  Leader   |-----+---->|  Leader   |------->|  failed   |
+//	                                      |     |           |     |     |           |        |           |
+//	                                      |     +-----------+     |     +-----------+        +-----------+
+//	                                      |           |           |
+//	                                      |           |           |
+//	                                      |           v           |
+//	                                      |     +-----------+     |
+//	                                      |     |           |     |
+//	                                      |     |  demote   |     |
+//	                                      +-----|  Voter    |-----|
+//	                                            |           |     |
+//	                                            +-----------+     |
+//	                                                  |           |
+//	                                                  |           |
+//	                                                  v           |
+//	                    +-----------+           +-----------+     |
+//	+-----------+       |           |           |           |     |
+//	|           |       | exitForce |           |  create   |     |
+//	| finished  |<------|  Leader   |<----------|  Region   |-----+
+//	|           |       |           |           |           |
+//	+-----------+       +-----------+           +-----------+
 const (
 	idle unsafeRecoveryStage = iota
 	collectReport
@@ -394,25 +394,7 @@ func (u *unsafeRecoveryController) HandleStoreHeartbeat(heartbeat *pdpb.StoreHea
 	u.dispatchPlan(heartbeat, resp)
 }
 
-<<<<<<< HEAD
-func (u *unsafeRecoveryController) handleErr() bool {
-	if u.err != nil {
-		if u.stage == exitForceLeader {
-			u.changeStage(failed)
-			return true
-		}
-		u.storePlanExpires = make(map[uint64]time.Time)
-		u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-		u.timeout = time.Now().Add(storeRequestInterval)
-		u.changeStage(exitForceLeader)
-	}
-	return false
-}
-
-/// It dispatches recovery plan if any.
-=======
 // It dispatches recovery plan if any.
->>>>>>> 26c31db95 (Prevent PD from crashing due to epoch comparison error (#5449))
 func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
 	storeID := heartbeat.Stats.StoreId
 	now := time.Now()

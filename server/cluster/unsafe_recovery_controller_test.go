@@ -301,32 +301,14 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-<<<<<<< HEAD
 	c.Assert(resp.RecoveryPlan, IsNil)
-	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
-=======
-	re.Nil(resp.RecoveryPlan)
->>>>>>> 26c31db95 (Prevent PD from crashing due to epoch comparison error (#5449))
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-<<<<<<< HEAD
-		c.Assert(resp.RecoveryPlan, NotNil)
-		applyRecoveryPlan(c, storeID, reports, resp)
-	}
-
-	for storeID, report := range reports {
-		req := newStoreHeartbeat(storeID, report)
-		req.StoreReport = report
-		resp := &pdpb.StoreHeartbeatResponse{}
-		recoveryController.HandleStoreHeartbeat(req, resp)
-		applyRecoveryPlan(c, storeID, reports, resp)
-=======
-		re.Nil(resp.RecoveryPlan)
->>>>>>> 26c31db95 (Prevent PD from crashing due to epoch comparison error (#5449))
+		c.Assert(resp.RecoveryPlan, IsNil)
 	}
 	c.Assert(recoveryController.GetStage(), Equals, failed)
 }
@@ -998,14 +980,7 @@ func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-<<<<<<< HEAD
-	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
-	req.StoreReport = &pdpb.StoreReport{Step: 2}
-	recoveryController.HandleStoreHeartbeat(req, resp)
 	c.Assert(recoveryController.GetStage(), Equals, failed)
-=======
-	re.Equal(failed, recoveryController.GetStage())
->>>>>>> 26c31db95 (Prevent PD from crashing due to epoch comparison error (#5449))
 }
 
 func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
@@ -1554,23 +1529,19 @@ func (s *testUnsafeRecoverySuite) TestSplitPaused(c *C) {
 	c.Assert(err.Error(), Equals, "[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running")
 }
 
-func TestEpochComparsion(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (s *testUnsafeRecoverySuite) TestEpochComparison(c *C) {
 	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.Nil(cluster.PutStore(store.GetMeta()))
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}
 	recoveryController := newUnsafeRecoveryController(cluster)
-	re.Nil(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
-	}, 60, false))
+	}, 60), IsNil)
 
 	reports := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
@@ -1598,7 +1569,7 @@ func TestEpochComparsion(t *testing.T) {
 		}},
 	}
 
-	advanceUntilFinished(re, recoveryController, reports)
+	advanceUntilFinished(c, recoveryController, reports)
 	expects := map[uint64]*pdpb.StoreReport{
 		1: {PeerReports: []*pdpb.PeerReport{
 			{
@@ -1626,9 +1597,9 @@ func TestEpochComparsion(t *testing.T) {
 	}
 	for storeID, report := range reports {
 		if expect, ok := expects[storeID]; ok {
-			re.Equal(expect.PeerReports, report.PeerReports)
+			c.Assert(expect.PeerReports, DeepEquals, report.PeerReports)
 		} else {
-			re.Empty(len(report.PeerReports))
+			c.Assert(len(report.PeerReports), Equals, 0)
 		}
 	}
 }
