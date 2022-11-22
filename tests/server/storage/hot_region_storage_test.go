@@ -75,7 +75,6 @@ func TestHotRegionStorage(t *testing.T) {
 		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 4, 2, []byte("g"), []byte("h"),
 		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
-	// todo distinguish store heartbeat interval and region heartbeat interval
 	storeStats := []*pdpb.StoreStats{
 		{
 			StoreId:  1,

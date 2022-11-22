@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -148,7 +149,10 @@ func TestHot(t *testing.T) {
 					Id: hotRegionID,
 				}, leader)
 				rc.GetHotStat().CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
-				time.Sleep(5000 * time.Millisecond)
+				testutil.Eventually(re, func() bool {
+					hotPeerStat := rc.GetHotPeerStat(statistics.Read, hotRegionID, hotStoreID)
+					return hotPeerStat != nil
+				})
 				if reportInterval >= statistics.ReadReportInterval {
 					count++
 				}
@@ -159,7 +163,10 @@ func TestHot(t *testing.T) {
 					hotRegionID, hotStoreID,
 					[]byte("c"), []byte("d"),
 					core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(reportInterval))
-				time.Sleep(5000 * time.Millisecond)
+				testutil.Eventually(re, func() bool {
+					hotPeerStat := rc.GetHotPeerStat(statistics.Write, hotRegionID, hotStoreID)
+					return hotPeerStat != nil
+				})
 				if reportInterval >= statistics.WriteReportInterval {
 					count++
 				}
@@ -225,7 +232,12 @@ func TestHotWithStoreID(t *testing.T) {
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
 	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
+	rc := leaderServer.GetRaftCluster()
+	testutil.Eventually(re, func() bool {
+		return rc.GetHotPeerStat(statistics.Write, 1, 1) != nil &&
+			rc.GetHotPeerStat(statistics.Write, 2, 2) != nil &&
+			rc.GetHotPeerStat(statistics.Write, 3, 1) != nil
+	})
 	args := []string{"-u", pdAddr, "hot", "write", "1"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	hotRegion := statistics.StoreHotPeersInfos{}
@@ -300,7 +312,12 @@ func TestHistoryHotRegions(t *testing.T) {
 	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
 		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
+	testutil.Eventually(re, func() bool {
+		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+		iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), int64((startTime+10)*1000))
+		next, err := iter.Next()
+		return err == nil && next != nil
+	})
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	start := strconv.FormatInt(int64(startTime*1000), 10)
 	end := strconv.FormatInt(endTime, 10)
@@ -417,8 +434,6 @@ func TestHotWithoutHotPeer(t *testing.T) {
 	}
 	defer cluster.Destroy()
 
-	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
 	{
 		args := []string{"-u", pdAddr, "hot", "read"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)

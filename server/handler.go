@@ -1032,6 +1032,8 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
+				// todo: distinguish store heartbeat interval and region heartbeat interval
+				// read statistic from store heartbeat, write statistic from region heartbeat
 				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
