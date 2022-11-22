@@ -399,7 +399,7 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
 	DefaultThresholdsUpdateInterval = 0
 	defer func() {
-		DefaultThresholdsUpdateInterval = 10 * time.Second
+		DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
 	}()
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
@@ -697,7 +697,7 @@ func TestHotPeerCacheTopN(t *testing.T) {
 	re.Equal(80.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
 	DefaultThresholdsUpdateInterval = 0
 	defer func() {
-		DefaultThresholdsUpdateInterval = 10 * time.Second
+		DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
 	}()
 	re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
 }

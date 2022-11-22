@@ -193,7 +193,7 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
 }
 
-// GetStores returns the stores of the region.
+// GetStores returns the stores of all peers in the region.
 func (stat *HotPeerStat) GetStores() []uint64 {
 	return stat.stores
 }

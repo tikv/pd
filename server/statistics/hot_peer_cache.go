@@ -61,7 +61,7 @@ var MinHotThresholds = [RegionStatCount]float64{
 }
 
 // DefaultThresholdsUpdateInterval is the default interval to update thresholds.
-var DefaultThresholdsUpdateInterval = 10 * time.Second
+var DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
 
 type thresholdWithTime struct {
 	updatedTime time.Time

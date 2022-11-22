@@ -494,24 +494,16 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
 	default:
 	}
-	for _, store := range infos.AsPeer {
-		for _, hotPeer := range store.Stats {
-			region := c.cluster.GetRegion(hotPeer.RegionID)
-			if region != nil {
-				hotPeer.IsLearner = core.IsLearner(region.GetPeer(hotPeer.StoreID))
-				hotPeer.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+	updateRegionInfo := func(stores statistics.StoreHotPeersStat) {
+		for _, store := range stores {
+			for _, hotPeer := range store.Stats {
+				region := c.cluster.GetRegion(hotPeer.RegionID)
+				hotPeer.UpdateRegionInfo(region)
 			}
 		}
 	}
-	for _, store := range infos.AsLeader {
-		for _, hotPeer := range store.Stats {
-			region := c.cluster.GetRegion(hotPeer.RegionID)
-			if region != nil {
-				hotPeer.IsLearner = core.IsLearner(region.GetPeer(hotPeer.StoreID))
-				hotPeer.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
-			}
-		}
-	}
+	updateRegionInfo(infos.AsLeader)
+	updateRegionInfo(infos.AsPeer)
 	return infos
 }
 
