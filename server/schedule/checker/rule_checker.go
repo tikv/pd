@@ -149,13 +149,15 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	return nil
 }
 
-func (c *RuleChecker) recordRegionPromoteToNonWitness(regionID uint64) {
+// RecordRegionPromoteToNonWitness put the recently switch non-witness region into cache. RuleChecker
+// will skip switch it back to witness for a while.
+func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
 	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetOpts().GetSwitchWitnessInterval())
 }
 
 func (c *RuleChecker) isWitnessEnabled() bool {
-	return (versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
-		c.cluster.GetOpts().IsSwitchWitnessAllowed())
+	return versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
+		c.cluster.GetOpts().IsSwitchWitnessAllowed()
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
@@ -173,11 +175,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if c.isWitnessEnabled() {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
-					op, err := operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
-					if err == nil {
-						c.recordRegionPromoteToNonWitness(region.GetID())
-					}
-					return op, err
+					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
 				}
 			}
 		}
@@ -332,11 +330,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			lv = "set-learner-non-witness"
 		}
 		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
-		op, err := operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
-		if err == nil {
-			c.recordRegionPromoteToNonWitness(region.GetID())
-		}
-		return op, err
+		return operator.CreateNonWitnessPeerOperator("fix-non-witness-peer", c.cluster, region, peer)
 	}
 	return nil, nil
 }

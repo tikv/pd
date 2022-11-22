@@ -19,6 +19,7 @@ import (
 
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/operator"
 )
 
 // SetMaxMergeRegionSize updates the MaxMergeRegionSize configuration.
@@ -144,4 +145,9 @@ func (mc *Cluster) updateReplicationConfig(f func(*config.ReplicationConfig)) {
 	r := mc.GetReplicationConfig().Clone()
 	f(r)
 	mc.SetReplicationConfig(r)
+}
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (mc *Cluster) RecordOpStepWithTTL(_ operator.OpStep, regionID uint64) {
+
 }

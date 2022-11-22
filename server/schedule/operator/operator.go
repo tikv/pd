@@ -250,6 +250,17 @@ func (o *Operator) Step(i int) OpStep {
 	return nil
 }
 
+// ContainNonWitnessStep returns true if it contains the target OpStep
+func (o *Operator) ContainNonWitnessStep() bool {
+	for _, step := range o.steps {
+		switch step.(type) {
+		case BecomeNonWitness:
+			return true
+		}
+	}
+	return false
+}
+
 // getCurrentTimeAndStep returns the start time of the i-th step.
 // opStep is nil if the i-th step is not found.
 func (o *Operator) getCurrentTimeAndStep() (startTime time.Time, opStep OpStep) {

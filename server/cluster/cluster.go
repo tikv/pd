@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -554,6 +555,19 @@ func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
 // GetMergeChecker returns merge checker.
 func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	return c.coordinator.checkers.GetMergeChecker()
+}
+
+// GetRuleChecker returns rule checker.
+func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
+	return c.coordinator.checkers.GetRuleChecker()
+}
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (c *RaftCluster) RecordOpStepWithTTL(s operator.OpStep, regionID uint64) {
+	switch s.(type) {
+	case operator.BecomeNonWitness:
+		c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
+	}
 }
 
 // GetSchedulers gets all schedulers.

@@ -466,7 +466,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
 	})
 	suite.NoError(err)
 
-	suite.rc.recordRegionPromoteToNonWitness(1)
+	suite.rc.RecordRegionPromoteToNonWitness(1)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 
