@@ -392,7 +392,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
-	r = r.Clone(core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetReportInterval(0, reportInterval))
 	r = r.Clone(core.SetReadQuery(readQuery))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.Read)
 	if len(filledNums) > 0 {
@@ -414,7 +414,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStoreID, readBytes, readKeys, reportInterval uint64,
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
 	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
-	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(0, reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.Read)
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
@@ -442,7 +442,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	r = r.Clone(core.SetReadBytes(readBytes))
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReadQuery(readQuery))
-	r = r.Clone(core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetReportInterval(0, reportInterval))
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.Read)
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
@@ -468,7 +468,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetWrittenBytes(writtenBytes))
 	r = r.Clone(core.SetWrittenKeys(writtenKeys))
-	r = r.Clone(core.SetReportInterval(reportInterval))
+	r = r.Clone(core.SetReportInterval(0, reportInterval))
 	r = r.Clone(core.SetWrittenQuery(writtenQuery))
 
 	filledNum := mc.HotCache.GetFilledPeriod(statistics.Write)

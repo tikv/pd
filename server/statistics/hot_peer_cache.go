@@ -566,5 +566,5 @@ func (f *hotPeerCache) inheritItem(newItem, oldItem *HotPeerStat) {
 }
 
 func (f *hotPeerCache) interval() time.Duration {
-	return time.Duration(hotStatReportInterval(f.kind)) * time.Second
+	return time.Duration(f.kind.ReportInterval()) * time.Second
 }

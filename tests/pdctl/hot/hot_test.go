@@ -162,7 +162,7 @@ func TestHot(t *testing.T) {
 					re, cluster,
 					hotRegionID, hotStoreID,
 					[]byte("c"), []byte("d"),
-					core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(reportInterval))
+					core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(0, reportInterval))
 				testutil.Eventually(re, func() bool {
 					hotPeerStat := rc.GetHotPeerStat(statistics.Write, hotRegionID, hotStoreID)
 					return hotPeerStat != nil
@@ -228,9 +228,9 @@ func TestHotWithStoreID(t *testing.T) {
 	}
 	defer cluster.Destroy()
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
 	// wait hot scheduler starts
 	rc := leaderServer.GetRaftCluster()
 	testutil.Eventually(re, func() bool {
@@ -304,13 +304,13 @@ func TestHistoryHotRegions(t *testing.T) {
 	defer cluster.Destroy()
 	startTime := time.Now().Second()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	// wait hot scheduler starts
 	testutil.Eventually(re, func() bool {
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()

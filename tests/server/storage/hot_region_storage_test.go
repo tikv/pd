@@ -68,13 +68,13 @@ func TestHotRegionStorage(t *testing.T) {
 	defer cluster.Destroy()
 	startTime := time.Now().Second()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 4, 2, []byte("g"), []byte("h"),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	storeStats := []*pdpb.StoreStats{
 		{
 			StoreId:  1,
@@ -176,8 +176,8 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Second()
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval),
-		core.SetInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	var iter storage.HotRegionStorageIterator
 	var next *storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool {
@@ -197,7 +197,8 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	schedule.HotRegionsReservedDays = 0
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
 	time.Sleep(10 * interval)
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
@@ -271,7 +272,7 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	startTime := time.Now().Second()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(3000000000),
-		core.SetInterval(uint64(startTime-statistics.WriteReportInterval), uint64(startTime)))
+		core.SetReportInterval(uint64(startTime-statistics.WriteReportInterval), uint64(startTime)))
 	var iter storage.HotRegionStorageIterator
 	var next *storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool {
@@ -291,7 +292,8 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	schedule.HotRegionsWriteInterval.Duration = 20 * interval
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
 	time.Sleep(10 * interval)
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	// it cant get new hot region because wait time smaller than hot region write interval
