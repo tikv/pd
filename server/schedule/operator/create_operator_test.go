@@ -1202,7 +1202,7 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner, IsWitness: true},
 			},
-			0,
+			OpRegion,
 			false,
 			[]OpStep{
 				BecomeNonWitness{StoreID: 2, PeerID: 2},

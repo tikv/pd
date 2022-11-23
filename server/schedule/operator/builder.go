@@ -739,6 +739,7 @@ func (b *Builder) buildStepsWithoutJointConsensus(kind OpKind) (OpKind, error) {
 		}
 		if plan.nonWitness != nil {
 			b.execSwitchToNonWitness(plan.nonWitness)
+			kind |= OpRegion
 		}
 	}
 
