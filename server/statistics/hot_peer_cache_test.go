@@ -271,7 +271,7 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 		return core.NewRegionInfo(
 			meta,
 			leader,
-			core.SetReportInterval(interval),
+			core.SetReportInterval(0, interval),
 			core.SetReadBytes(10*units.MiB*interval),
 			core.SetReadKeys(10*units.MiB*interval),
 			core.SetReadQuery(1024*interval),
@@ -280,7 +280,7 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 		return core.NewRegionInfo(
 			meta,
 			leader,
-			core.SetReportInterval(interval),
+			core.SetReportInterval(0, interval),
 			core.SetWrittenBytes(10*units.MiB*interval),
 			core.SetWrittenKeys(10*units.MiB*interval),
 			core.SetWrittenQuery(1024*interval),
