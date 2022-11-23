@@ -208,6 +208,7 @@ func (rw RWType) Inverse() RWType {
 	}
 }
 
+// ReportInterval returns the report interval of read or write.
 func (rw RWType) ReportInterval() int {
 	switch rw {
 	case Write:
@@ -217,6 +218,7 @@ func (rw RWType) ReportInterval() int {
 	}
 }
 
+// DefaultAntiCount returns the default anti count of read or write.
 func (rw RWType) DefaultAntiCount() int {
 	switch rw {
 	case Write:
