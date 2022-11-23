@@ -114,7 +114,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 		values := peers.GetAll()
 		stat := make([]*HotPeerStat, 0, len(values))
 		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == peer.defaultAntiCount(f.kind) {
+			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == f.kind.DefaultAntiCount() {
 				stat = append(stat, peer)
 			}
 		}
@@ -546,7 +546,7 @@ func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
 
 func (f *hotPeerCache) hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	if oldItem.AntiCount < oldItem.defaultAntiCount(f.kind) {
+	if oldItem.AntiCount < f.kind.DefaultAntiCount() {
 		newItem.AntiCount = oldItem.AntiCount + 1
 	} else {
 		newItem.AntiCount = oldItem.AntiCount
@@ -556,7 +556,7 @@ func (f *hotPeerCache) hotItem(newItem, oldItem *HotPeerStat) {
 
 func (f *hotPeerCache) initItem(item *HotPeerStat) {
 	item.HotDegree = 1
-	item.AntiCount = item.defaultAntiCount(f.kind)
+	item.AntiCount = f.kind.DefaultAntiCount()
 	item.allowInherited = true
 }
 

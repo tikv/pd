@@ -34,10 +34,3 @@ const (
 func storeTag(id uint64) string {
 	return fmt.Sprintf("store-%d", id)
 }
-
-func hotStatReportInterval(kind RWType) int {
-	if kind == Read {
-		return ReadReportInterval
-	}
-	return WriteReportInterval
-}

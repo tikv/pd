@@ -197,10 +197,3 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 func (stat *HotPeerStat) GetStores() []uint64 {
 	return stat.stores
 }
-
-func (stat *HotPeerStat) defaultAntiCount(kind RWType) int {
-	if kind == Read {
-		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
-	return HotRegionAntiCount
-}

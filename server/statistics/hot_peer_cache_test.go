@@ -348,7 +348,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem.HotDegree)
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
-	newItem.AntiCount = newItem.defaultAntiCount(Read)
+	newItem.AntiCount = Read.DefaultAntiCount()
 	cache.updateStat(newItem)
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
