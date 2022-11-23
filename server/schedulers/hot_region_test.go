@@ -1450,6 +1450,10 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
+	statistics.DefaultThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.DefaultThresholdsUpdateInterval = statistics.StoreHeartBeatReportInterval
+	}()
 	{ // only a few regions
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
@@ -1726,7 +1730,7 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 		}
 	}
 	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3}, 1)
-	re.Equal(float64(rate)*statistics.HotThresholdRatio, items[0].GetThresholds()[0])
+	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.HotCache.GetThresholds(statistics.Write, items[0].StoreID)[0])
 	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
