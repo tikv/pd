@@ -208,16 +208,6 @@ func (rw RWType) Inverse() RWType {
 	}
 }
 
-// ReportInterval return the interval of report hot region.
-func (rw RWType) ReportInterval() int {
-	switch rw {
-	case Write:
-		return WriteReportInterval
-	default: // Case Read
-		return ReadReportInterval
-	}
-}
-
 // ForeachRegionStats foreach all region stats of read and write.
 func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
 	for _, rwTy := range []RWType{Read, Write} {
