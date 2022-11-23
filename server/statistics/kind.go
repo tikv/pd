@@ -208,6 +208,7 @@ func (rw RWType) Inverse() RWType {
 	}
 }
 
+// ReportInterval returns the report interval of read or write.
 func (rw RWType) ReportInterval() int {
 	switch rw {
 	case Write:
@@ -217,21 +218,13 @@ func (rw RWType) ReportInterval() int {
 	}
 }
 
+// DefaultAntiCount returns the default anti count of read or write.
 func (rw RWType) DefaultAntiCount() int {
 	switch rw {
 	case Write:
 		return HotRegionAntiCount
 	default: // Case Read
 		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
-}
-
-// ForeachRegionStats foreach all region stats of read and write.
-func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
-	for _, rwTy := range []RWType{Read, Write} {
-		for dim, kind := range rwTy.RegionStats() {
-			f(rwTy, dim, kind)
-		}
 	}
 }
 
@@ -250,6 +243,15 @@ func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
 func (rw RWType) SetFullLoadRates(full []float64, loads []float64) {
 	for dim, k := range rw.RegionStats() {
 		full[k] = loads[dim]
+	}
+}
+
+// ForeachRegionStats foreach all region stats of read and write.
+func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
+	for _, rwTy := range []RWType{Read, Write} {
+		for dim, kind := range rwTy.RegionStats() {
+			f(rwTy, dim, kind)
+		}
 	}
 }
 
