@@ -403,7 +403,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
-			mc.HotCache.Update(item)
+			mc.HotCache.Update(item, statistics.Read)
 		}
 	}
 	mc.PutRegion(r)
@@ -424,7 +424,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			if item.StoreID == targetStoreID {
-				mc.HotCache.Update(item)
+				mc.HotCache.Update(item, statistics.Read)
 			}
 		}
 	}
@@ -452,7 +452,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
-			mc.HotCache.Update(item)
+			mc.HotCache.Update(item, statistics.Read)
 		}
 	}
 	mc.PutRegion(r)
@@ -480,7 +480,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
-			mc.HotCache.Update(item)
+			mc.HotCache.Update(item, statistics.Read)
 		}
 	}
 	mc.PutRegion(r)
