@@ -1524,7 +1524,7 @@ func TestExternalTimestamp(t *testing.T) {
 		re.NoError(err)
 		globalTS := resp2.GetTimestamp()
 		// set external ts larger than global ts
-		unexpectedTS := tsoutil.ComposeTS(globalTS.Physical+1, 0)
+		unexpectedTS := tsoutil.ComposeTS(globalTS.Physical+2, 0)
 		req3 := &pdpb.SetExternalTimestampRequest{
 			Header:    testutil.NewRequestHeader(clusterID),
 			Timestamp: unexpectedTS,
