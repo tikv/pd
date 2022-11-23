@@ -261,7 +261,7 @@ const (
 
 	defaultMaxMovableHotPeerSize = int64(512)
 
-	defaultGCTunerThreshold = 0.6
+	defaultGCTunerThreshold = 0
 )
 
 // Special keys for Labels
@@ -1153,7 +1153,7 @@ type PDServerConfig struct {
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 	// GCTunerThreshold is the threshold of GC tuner.
-	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	GCTunerThreshold uint64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1180,7 +1180,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
 	if !meta.IsDefined("gc-tuner-threshold") {
-		adjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+		adjustUint64(&c.GCTunerThreshold, defaultGCTunerThreshold)
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()

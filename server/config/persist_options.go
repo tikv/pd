@@ -515,7 +515,7 @@ func (o *PersistOptions) IsUseRegionStorage() bool {
 }
 
 // GetGCTunerThreshold gets the GC tuner threshold.
-func (o *PersistOptions) GetGCTunerThreshold() float64 {
+func (o *PersistOptions) GetGCTunerThreshold() uint64 {
 	return o.GetPDServerConfig().GCTunerThreshold
 }
 

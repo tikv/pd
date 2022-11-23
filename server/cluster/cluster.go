@@ -26,6 +26,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gctuner"
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/slice"
@@ -305,7 +305,7 @@ func (c *RaftCluster) startGCTuner() {
 
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
-	lastThreshold := -1.0
+	lastThreshold := uint64(0)
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -319,14 +319,8 @@ func (c *RaftCluster) startGCTuner() {
 					gctuner.Tuning(0)
 					log.Info("disable gc tuner")
 				} else {
-					memTotal, err := memory.MemTotal()
-					if err != nil {
-						log.Warn("failed to get total memory")
-						return
-					}
-					threshold := float64(memTotal) * t
-					gctuner.Tuning(uint64(threshold))
-					log.Info("gc tuner changes threshold", zap.Float64("threshold", t))
+					gctuner.Tuning(t * units.GiB)
+					log.Info("gc tuner changes threshold", zap.Uint64("threshold", t))
 				}
 			}
 		}
