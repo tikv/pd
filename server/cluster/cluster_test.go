@@ -270,6 +270,12 @@ func TestSetOfflineStore(t *testing.T) {
 			re.NoError(cluster.BuryStore(storeID, false))
 		}
 	}
+	// test clean up tombstone store
+	toCleanStore := cluster.GetStore(1).Clone().GetMeta()
+	toCleanStore.LastHeartbeat = time.Now().Add(-40 * 24 * time.Hour).UnixNano()
+	cluster.PutStore(toCleanStore)
+	cluster.checkStores()
+	re.Nil(cluster.GetStore(1))
 }
 
 func TestSetOfflineWithReplica(t *testing.T) {
