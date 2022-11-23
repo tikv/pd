@@ -1404,7 +1404,6 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
-			fmt.Println(err)
 			return false
 		}
 		resp, err := suite.client.GetOperator(context.Background(), regionID)
