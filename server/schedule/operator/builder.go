@@ -526,9 +526,8 @@ func (b *Builder) prepareBuild() (string, error) {
 	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
 	// it will domote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
-	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote) <= 1 && len(b.toDemote) == 0 &&
-		!(len(b.toRemove) == 1 && len(b.targetPeers) == 1) &&
-		len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteAfterSwitchToNonWitness) <= 1 {
+	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteAfterSwitchToNonWitness) <= 1 &&
+		len(b.toDemote) == 0 && !(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
 		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
