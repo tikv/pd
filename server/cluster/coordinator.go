@@ -556,7 +556,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		regionStats = cluster.RegionWriteStats()
 		kind = statistics.Write.String()
 	}
-	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
+	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
 		storeAddress := s.GetAddress()

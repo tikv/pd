@@ -75,6 +75,7 @@ const (
 	nodeStateCheckJobInterval = 10 * time.Second
 	// metricsCollectionJobInterval is the interval to run metrics collection job.
 	metricsCollectionJobInterval = 10 * time.Second
+	updateStoreStatsInterval     = 9 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
@@ -279,7 +280,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	c.wg.Add(8)
+	c.wg.Add(9)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -288,6 +289,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
+	go c.runUpdateStoreStats()
 	c.running = true
 
 	return nil
@@ -439,6 +441,33 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 			return
 		case <-ticker.C:
 			c.hotStat.ObserveRegionsStats(c.core.GetStoresWriteRate())
+		}
+	}
+}
+
+func (c *RaftCluster) runUpdateStoreStats() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(updateStoreStatsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("update store stats background jobs has been stopped")
+			return
+		case <-ticker.C:
+			// Update related stores.
+			start := time.Now()
+			stores := c.GetStores()
+			for _, store := range stores {
+				if store.IsRemoved() {
+					continue
+				}
+				c.core.UpdateStoreStatus(store.GetID())
+			}
+			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
 }
@@ -845,21 +874,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			c.labelLevelStats.ClearDefunctRegion(item.GetID())
 		}
-
-		// Update related stores.
-		storeMap := make(map[uint64]struct{})
-		for _, p := range region.GetPeers() {
-			storeMap[p.GetStoreId()] = struct{}{}
-		}
-		if origin != nil {
-			for _, p := range origin.GetPeers() {
-				storeMap[p.GetStoreId()] = struct{}{}
-			}
-		}
-		for key := range storeMap {
-			c.core.UpdateStoreStatus(key)
-		}
-
 		regionUpdateCacheEventCounter.Inc()
 	}
 
