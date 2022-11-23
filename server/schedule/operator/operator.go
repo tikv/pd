@@ -256,6 +256,7 @@ func (o *Operator) ContainNonWitnessStep() bool {
 		switch step.(type) {
 		case BecomeNonWitness:
 			return true
+		default:
 		}
 	}
 	return false

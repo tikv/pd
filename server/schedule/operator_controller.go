@@ -119,7 +119,7 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
 			if op.ContainNonWitnessStep() {
-				oc.cluster.RecordOpStepWithTTL(operator.BecomeNonWitness{}, op.RegionID())
+				oc.cluster.RecordOpStepWithTTL(op.RegionID())
 			}
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()

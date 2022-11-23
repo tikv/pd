@@ -865,3 +865,8 @@ func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (mc *Cluster) RecordOpStepWithTTL(regionID uint64) {
+
+}

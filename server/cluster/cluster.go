@@ -48,7 +48,6 @@ import (
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
@@ -563,11 +562,8 @@ func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
 }
 
 // RecordOpStepWithTTL records OpStep with TTL
-func (c *RaftCluster) RecordOpStepWithTTL(s operator.OpStep, regionID uint64) {
-	switch s.(type) {
-	case operator.BecomeNonWitness:
-		c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
-	}
+func (c *RaftCluster) RecordOpStepWithTTL(regionID uint64) {
+	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
 }
 
 // GetSchedulers gets all schedulers.
