@@ -230,6 +230,9 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	}
 	var isWitness bool
 	if c.isWitnessEnabled() {
+		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
+		// exceeds the threshold(30min), add a witness and remove the down peer. Then witness is
+		// promoted to non-witness gradually to improve availability.
 		if status == "down" {
 			isWitness = true
 		} else {
