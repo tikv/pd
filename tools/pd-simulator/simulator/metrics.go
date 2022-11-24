@@ -20,26 +20,17 @@ var (
 			Help:      "Counter of region scheduling",
 		}, []string{"type"})
 
-	snapRecvCounter = prometheus.NewCounterVec(
+	snapshotCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "schedule",
-			Name:      "snap_recv_count",
-			Help:      "Counter of receiving region snapshot",
-		}, []string{"store"})
-
-	snapSendCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "snap_send_count",
-			Help:      "Counter of sending region snapshot",
-		}, []string{"store"})
+			Name:      "snapshot_count",
+			Help:      "Counter of region snapshot",
+		}, []string{"store", "type"})
 )
 
 func init() {
 	prometheus.MustRegister(snapDuration)
 	prometheus.MustRegister(schedulingCounter)
-	prometheus.MustRegister(snapRecvCounter)
-	prometheus.MustRegister(snapSendCounter)
+	prometheus.MustRegister(snapshotCounter)
 }

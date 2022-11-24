@@ -420,12 +420,12 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 		return nil, false
 	}
 	sendStoreID := fmt.Sprintf("store-%d", sendNode.Id)
-	snapSendCounter.WithLabelValues(sendStoreID).Inc()
+	snapshotCounter.WithLabelValues(sendStoreID, "send").Inc()
 	if !processSnapshot(recvNode, a.receivingStat) {
 		return nil, false
 	}
 	recvStoreID := fmt.Sprintf("store-%d", recvNode.Id)
-	snapRecvCounter.WithLabelValues(recvStoreID).Inc()
+	snapshotCounter.WithLabelValues(recvStoreID, "recv").Inc()
 	recvNode.incUsedSize(uint64(region.GetApproximateSize()))
 	// Step 3: Remove the Pending state
 	newRegion = region.Clone(removePendingPeer(region, a.peer))
