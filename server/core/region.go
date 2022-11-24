@@ -37,6 +37,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const randomRegionMaxRetry = 10
+
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
@@ -1238,10 +1240,10 @@ func (r *RegionsInfo) RandPendingRegion(storeID uint64, ranges []KeyRange) *Regi
 }
 
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
-func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.pendingPeers[storeID].RandomRegions(n, ranges)
+	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandLeaderRegion randomly gets a store's leader region.
@@ -1252,10 +1254,10 @@ func (r *RegionsInfo) RandLeaderRegion(storeID uint64, ranges []KeyRange) *Regio
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
-func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].RandomRegions(n, ranges)
+	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandFollowerRegion randomly gets a store's follower region.
@@ -1266,10 +1268,10 @@ func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *Reg
 }
 
 // RandFollowerRegions randomly gets a store's n follower regions.
-func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.followers[storeID].RandomRegions(n, ranges)
+	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandLearnerRegion randomly gets a store's learner region.
@@ -1280,10 +1282,10 @@ func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *Regi
 }
 
 // RandLearnerRegions randomly gets a store's n learner regions.
-func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n int) []*RegionInfo {
+func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.learners[storeID].RandomRegions(n, ranges)
+	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)

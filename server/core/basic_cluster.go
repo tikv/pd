@@ -30,7 +30,7 @@ type BasicCluster struct {
 		*StoresInfo
 	}
 
-	Regions *RegionsInfo
+	*RegionsInfo
 }
 
 // NewBasicCluster creates a BasicCluster.
@@ -41,7 +41,7 @@ func NewBasicCluster() *BasicCluster {
 			*StoresInfo
 		}{StoresInfo: NewStoresInfo()},
 
-		Regions: NewRegionsInfo(),
+		RegionsInfo: NewRegionsInfo(),
 	}
 }
 
@@ -150,7 +150,7 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
-	leaderCount, regionCount, witnessCount, pendingPeerCount, leaderRegionSize, regionSize := bc.Regions.GetStoreStats(storeID)
+	leaderCount, regionCount, witnessCount, pendingPeerCount, leaderRegionSize, regionSize := bc.RegionsInfo.GetStoreStats(storeID)
 	bc.Stores.mu.Lock()
 	defer bc.Stores.mu.Unlock()
 	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, witnessCount)
@@ -179,29 +179,9 @@ func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
 
 /* Regions read operations */
 
-// GetRegion searches for a region by ID.
-func (bc *BasicCluster) GetRegion(regionID uint64) *RegionInfo {
-	return bc.Regions.GetRegion(regionID)
-}
-
-// GetRegions gets all RegionInfo from regionMap.
-func (bc *BasicCluster) GetRegions() []*RegionInfo {
-	return bc.Regions.GetRegions()
-}
-
-// GetMetaRegions gets a set of metapb.Region from regionMap.
-func (bc *BasicCluster) GetMetaRegions() []*metapb.Region {
-	return bc.Regions.GetMetaRegions()
-}
-
-// GetStoreRegions gets all RegionInfo with a given storeID.
-func (bc *BasicCluster) GetStoreRegions(storeID uint64) []*RegionInfo {
-	return bc.Regions.GetStoreRegions(storeID)
-}
-
 // GetLeaderStoreByRegionID returns the leader store of the given region.
 func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
-	region := bc.Regions.GetRegion(regionID)
+	region := bc.RegionsInfo.GetRegion(regionID)
 	if region == nil || region.GetLeader() == nil {
 		return nil
 	}
@@ -209,114 +189,6 @@ func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 	bc.Stores.mu.RLock()
 	defer bc.Stores.mu.RUnlock()
 	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
-}
-
-// GetAdjacentRegions returns region's info that is adjacent with specific region.
-func (bc *BasicCluster) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
-	return bc.Regions.GetAdjacentRegions(region)
-}
-
-// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
-func (bc *BasicCluster) GetRangeHoles() [][]string {
-	return bc.Regions.GetRangeHoles()
-}
-
-const randomRegionMaxRetry = 10
-
-// RandFollowerRegions returns a random region that has a follower on the store.
-func (bc *BasicCluster) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
-	return bc.Regions.RandFollowerRegions(storeID, ranges, randomRegionMaxRetry)
-}
-
-// RandLeaderRegions returns a random region that has leader on the store.
-func (bc *BasicCluster) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
-	return bc.Regions.RandLeaderRegions(storeID, ranges, randomRegionMaxRetry)
-}
-
-// RandPendingRegions returns a random region that has a pending peer on the store.
-func (bc *BasicCluster) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
-	return bc.Regions.RandPendingRegions(storeID, ranges, randomRegionMaxRetry)
-}
-
-// RandLearnerRegions returns a random region that has a learner peer on the store.
-func (bc *BasicCluster) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
-	return bc.Regions.RandLearnerRegions(storeID, ranges, randomRegionMaxRetry)
-}
-
-// GetRegionCount gets the total count of RegionInfo of regionMap.
-func (bc *BasicCluster) GetRegionCount() int {
-	return bc.Regions.GetRegionCount()
-}
-
-// GetStoreRegionCount gets the total count of a store's leader and follower RegionInfo by storeID.
-func (bc *BasicCluster) GetStoreRegionCount(storeID uint64) int {
-	return bc.Regions.GetStoreRegionCount(storeID)
-}
-
-// GetStoreLeaderCount get the total count of a store's leader RegionInfo.
-func (bc *BasicCluster) GetStoreLeaderCount(storeID uint64) int {
-	return bc.Regions.GetStoreLeaderCount(storeID)
-}
-
-// GetStoreFollowerCount get the total count of a store's follower RegionInfo.
-func (bc *BasicCluster) GetStoreFollowerCount(storeID uint64) int {
-	return bc.Regions.GetStoreFollowerCount(storeID)
-}
-
-// GetStorePendingPeerCount gets the total count of a store's region that includes pending peer.
-func (bc *BasicCluster) GetStorePendingPeerCount(storeID uint64) int {
-	return bc.Regions.GetStorePendingPeerCount(storeID)
-}
-
-// GetStoreWitnessCount gets the total count of a store's witness RegionInfo.
-func (bc *BasicCluster) GetStoreWitnessCount(storeID uint64) int {
-	return bc.Regions.GetStoreWitnessCount(storeID)
-}
-
-// GetStoreLeaderRegionSize get total size of store's leader regions.
-func (bc *BasicCluster) GetStoreLeaderRegionSize(storeID uint64) int64 {
-	return bc.Regions.GetStoreLeaderRegionSize(storeID)
-}
-
-// GetStoreRegionSize get total size of store's regions.
-func (bc *BasicCluster) GetStoreRegionSize(storeID uint64) int64 {
-	return bc.Regions.GetStoreRegionSize(storeID)
-}
-
-// GetAverageRegionSize returns the average region approximate size.
-func (bc *BasicCluster) GetAverageRegionSize() int64 {
-	return bc.Regions.GetAverageRegionSize()
-}
-
-// GetRegionByKey searches RegionInfo from regionTree.
-func (bc *BasicCluster) GetRegionByKey(regionKey []byte) *RegionInfo {
-	return bc.Regions.GetRegionByKey(regionKey)
-}
-
-// GetPrevRegionByKey searches previous RegionInfo from regionTree.
-func (bc *BasicCluster) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
-	return bc.Regions.GetPrevRegionByKey(regionKey)
-}
-
-// ScanRange scans regions intersecting [start key, end key), returns at most
-// `limit` regions. limit <= 0 means no limit.
-func (bc *BasicCluster) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
-	return bc.Regions.ScanRange(startKey, endKey, limit)
-}
-
-// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
-func (bc *BasicCluster) GetRangeCount(startKey, endKey []byte) int {
-	return bc.Regions.GetRangeCount(startKey, endKey)
-}
-
-// GetOverlaps returns the regions which are overlapped with the specified region range.
-func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
-	return bc.Regions.GetOverlaps(region)
-}
-
-// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
-func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
 }
 
 func (bc *BasicCluster) getWriteRate(
@@ -341,19 +213,19 @@ func (bc *BasicCluster) getWriteRate(
 
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.Regions.GetStoreLeaderWriteRate)
+	return bc.getWriteRate(bc.RegionsInfo.GetStoreLeaderWriteRate)
 }
 
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.Regions.GetStoreWriteRate)
+	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
 }
 
 /* Regions write operations */
 
 // PreCheckPutRegion checks if the region is valid to put.
 func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, error) {
-	origin, overlaps := bc.Regions.GetRelevantRegions(region)
+	origin, overlaps := bc.RegionsInfo.GetRelevantRegions(region)
 	return check(region, origin, overlaps)
 }
 
@@ -368,35 +240,24 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	return bc.PutRegion(region)
 }
 
-// AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (bc *BasicCluster) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
-	return bc.Regions.AtomicCheckAndPutRegion(region)
-}
-
 // PutRegion put a region.
 func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, toRemove, rangeChanged := bc.Regions.SetRegionWithUpdate(region)
-	bc.Regions.UpdateSubTree(region, origin, toRemove, rangeChanged)
+	origin, overlaps, toRemove, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region)
+	bc.RegionsInfo.UpdateSubTree(region, origin, toRemove, rangeChanged)
 	return overlaps
 }
 
 // RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
 func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
-	if r := bc.Regions.GetRegion(id); r != nil {
-		bc.Regions.RemoveRegion(r)
-		bc.Regions.RemoveRegionFromSubTree(r)
+	if r := bc.RegionsInfo.GetRegion(id); r != nil {
+		bc.RegionsInfo.RemoveRegion(r)
+		bc.RegionsInfo.RemoveRegionFromSubTree(r)
 	}
 }
 
 // ResetRegionCache drops all region cache.
 func (bc *BasicCluster) ResetRegionCache() {
-	bc.Regions.Reset()
-}
-
-// RemoveRegion removes RegionInfo from regionTree and regionMap.
-func (bc *BasicCluster) RemoveRegion(region *RegionInfo) {
-	bc.Regions.RemoveRegion(region)
-	bc.Regions.RemoveRegionFromSubTree(region)
+	bc.RegionsInfo.Reset()
 }
 
 // RegionSetInformer provides access to a shared informer of regions.
