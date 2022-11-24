@@ -30,10 +30,7 @@ type BasicCluster struct {
 		*StoresInfo
 	}
 
-	Regions struct {
-		mu syncutil.RWMutex
-		*RegionsInfo
-	}
+	Regions *RegionsInfo
 }
 
 // NewBasicCluster creates a BasicCluster.
@@ -44,10 +41,7 @@ func NewBasicCluster() *BasicCluster {
 			*StoresInfo
 		}{StoresInfo: NewStoresInfo()},
 
-		Regions: struct {
-			mu syncutil.RWMutex
-			*RegionsInfo
-		}{RegionsInfo: NewRegionsInfo()},
+		Regions: NewRegionsInfo(),
 	}
 }
 

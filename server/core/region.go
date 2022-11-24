@@ -21,7 +21,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"unsafe"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
@@ -698,10 +698,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            sync.RWMutex
+	t            syncutil.RWMutex
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
-	st           sync.RWMutex
+	st           syncutil.RWMutex
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
@@ -739,7 +739,7 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 	return nil
 }
 
-// AtomicCheckAndPutRegion ...
+// AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
 	var overlaps []*RegionInfo
@@ -757,7 +757,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	return overlaps, nil
 }
 
-// GetRelevantRegions ...
+// GetRelevantRegions returns the relevant regions for a given region.
 func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
 	r.t.RLock()
 	defer r.t.RUnlock()
@@ -800,7 +800,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	return overlaps
 }
 
-// SetRegionWithUpdate ...
+// SetRegionWithUpdate sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
 func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo) (*RegionInfo, []*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
@@ -852,7 +852,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 	return origin, overlaps, toRemove, rangeChanged
 }
 
-// UpdateSubTree ...
+// UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*RegionInfo, rangeChanged bool) {
 	r.st.Lock()
 	defer r.st.Unlock()
@@ -960,7 +960,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	delete(r.regions, region.GetID())
 }
 
-// Reset ...
+// Reset resets the regions info.
 func (r *RegionsInfo) Reset() {
 	r.t.Lock()
 	r.tree = newRegionTree()
@@ -1168,7 +1168,7 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	return regions
 }
 
-// GetStoreStats ...
+// GetStoreStats returns the store stats.
 func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, pending int, leaderSize, regionSize int64) {
 	r.st.RLock()
 	defer r.st.RUnlock()

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/sasha-s/go-deadlock"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -565,6 +566,7 @@ func TestStoreVersionChange(t *testing.T) {
 
 func TestConcurrentHandleRegion(t *testing.T) {
 	re := require.New(t)
+	deadlock.Opts.DeadlockTimeout = time.Minute
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dashboard.SetCheckInterval(30 * time.Minute)
