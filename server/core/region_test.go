@@ -281,7 +281,7 @@ func TestRegionWriteRate(t *testing.T) {
 		{10, 3, 500, 0, 0},
 	}
 	for _, testCase := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(testCase.interval))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(0, testCase.interval))
 		bytesRate, keysRate := r.GetWriteRate()
 		re.Equal(testCase.expectBytesRate, bytesRate)
 		re.Equal(testCase.expectKeysRate, keysRate)
@@ -518,7 +518,7 @@ func TestSetRegion(t *testing.T) {
 		SetApproximateSize(30),
 		SetWrittenBytes(40),
 		SetWrittenKeys(10),
-		SetReportInterval(5))
+		SetReportInterval(0, 5))
 	regions.SetRegion(region)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
