@@ -880,7 +880,9 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 
 	suite.NotNil(op)
 	suite.Equal("promote-witness", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
+	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
+	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness2() {
