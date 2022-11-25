@@ -651,7 +651,7 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
-	// SwitchWitnessInterval is the minimum interval time to permit to witness after promote to non-witness.
+	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
 	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
