@@ -78,24 +78,17 @@ type hotPeerCache struct {
 	topNTTL            time.Duration
 	reportIntervalSecs int
 	taskQueue          chan FlowItemTask
-	defaultThresholds  []float64
 	thresholdsOfStore  map[uint64]*thresholdWithTime // storeID -> thresholds
 }
 
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(kind RWType) *hotPeerCache {
-	statKinds := kind.RegionStats()
-	defaultThresholds := make([]float64, DimLen)
-	for dim, kind := range statKinds {
-		defaultThresholds[dim] = MinHotThresholds[kind]
-	}
 	c := &hotPeerCache{
 		kind:              kind,
 		peersOfStore:      make(map[uint64]*TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
 		taskQueue:         make(chan FlowItemTask, queueCap),
-		defaultThresholds: defaultThresholds,
 		thresholdsOfStore: make(map[uint64]*thresholdWithTime),
 	}
 	if kind == Write {
@@ -312,10 +305,6 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
-	tn, ok := f.peersOfStore[storeID]
-	if !ok || tn.Len() < TopNN {
-		return f.defaultThresholds
-	}
 	thresholds, ok := f.thresholdsOfStore[storeID]
 	if ok && time.Since(thresholds.updatedTime) <= DefaultThresholdsUpdateInterval {
 		return thresholds.rates
@@ -324,10 +313,18 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 		updatedTime: time.Now(),
 		rates:       make([]float64, DimLen),
 	}
-	for i := range thresholds.rates {
-		thresholds.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, f.defaultThresholds[i])
-	}
 	f.thresholdsOfStore[storeID] = thresholds
+	statKinds := f.kind.RegionStats()
+	for dim, kind := range statKinds {
+		thresholds.rates[dim] = MinHotThresholds[kind]
+	}
+	tn, ok := f.peersOfStore[storeID]
+	if !ok || tn.Len() < TopNN {
+		return thresholds.rates
+	}
+	for i := range thresholds.rates {
+		thresholds.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, thresholds.rates[i])
+	}
 	return thresholds.rates
 }
 
