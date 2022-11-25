@@ -79,25 +79,21 @@ type hotPeerCache struct {
 	reportIntervalSecs int
 	taskQueue          chan FlowItemTask
 	thresholdsOfStore  map[uint64]*thresholdWithTime // storeID -> thresholds
+	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(kind RWType) *hotPeerCache {
-	c := &hotPeerCache{
-		kind:              kind,
-		peersOfStore:      make(map[uint64]*TopN),
-		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
-		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
-		taskQueue:         make(chan FlowItemTask, queueCap),
-		thresholdsOfStore: make(map[uint64]*thresholdWithTime),
+	return &hotPeerCache{
+		kind:               kind,
+		peersOfStore:       make(map[uint64]*TopN),
+		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
+		taskQueue:          make(chan FlowItemTask, queueCap),
+		thresholdsOfStore:  make(map[uint64]*thresholdWithTime),
+		reportIntervalSecs: kind.ReportInterval(),
+		topNTTL:            time.Duration(3*kind.ReportInterval()) * time.Second,
 	}
-	if kind == Write {
-		c.reportIntervalSecs = WriteReportInterval
-	} else {
-		c.reportIntervalSecs = ReadReportInterval
-	}
-	c.topNTTL = time.Duration(3*c.reportIntervalSecs) * time.Second
-	return c
 }
 
 // TODO: rename RegionStats as PeerStats
