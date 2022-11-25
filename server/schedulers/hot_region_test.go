@@ -1450,9 +1450,9 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	statistics.DefaultThresholdsUpdateInterval = 0
+	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
-		statistics.DefaultThresholdsUpdateInterval = statistics.StoreHeartBeatReportInterval
+		statistics.ThresholdsUpdateInterval = 8 * time.Second
 	}()
 	{ // only a few regions
 		tc := mockcluster.NewCluster(ctx, opt)

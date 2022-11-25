@@ -312,9 +312,9 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
-	DefaultThresholdsUpdateInterval = 0
+	ThresholdsUpdateInterval = 0
 	defer func() {
-		DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
+		ThresholdsUpdateInterval = 8 * time.Second
 	}()
 
 	// skip interval=0
@@ -403,9 +403,9 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
-	DefaultThresholdsUpdateInterval = 0
+	ThresholdsUpdateInterval = 0
 	defer func() {
-		DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
+		ThresholdsUpdateInterval = 8 * time.Second
 	}()
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
@@ -702,9 +702,9 @@ func TestHotPeerCacheTopN(t *testing.T) {
 	re.Contains(cache.peersOfStore, uint64(1))
 	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
 	re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
-	DefaultThresholdsUpdateInterval = 0
+	ThresholdsUpdateInterval = 0
 	defer func() {
-		DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * time.Second
+		ThresholdsUpdateInterval = 8 * time.Second
 	}()
 	re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
 }

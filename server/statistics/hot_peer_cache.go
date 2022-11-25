@@ -46,6 +46,10 @@ const (
 	queueCap = 20000
 )
 
+// ThresholdsUpdateInterval is the default interval to update thresholds.
+// the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
+var ThresholdsUpdateInterval = 8 * time.Second
+
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turn off by the simulator and the test.
 var Denoising = true
@@ -60,11 +64,7 @@ var MinHotThresholds = [RegionStatCount]float64{
 	RegionWriteQueryNum: 32,
 }
 
-// DefaultThresholdsUpdateInterval is the default interval to update thresholds.
-// the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
-var DefaultThresholdsUpdateInterval = StoreHeartBeatReportInterval * 0.8 * time.Second
-
-type thresholdWithTime struct {
+type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
 }
@@ -78,7 +78,7 @@ type hotPeerCache struct {
 	topNTTL            time.Duration
 	reportIntervalSecs int
 	taskQueue          chan FlowItemTask
-	thresholdsOfStore  map[uint64]*thresholdWithTime // storeID -> thresholds
+	thresholdsOfStore  map[uint64]*thresholds // storeID -> thresholds
 	// TODO: consider to remove store info when store is offline.
 }
 
@@ -90,7 +90,7 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
 		taskQueue:          make(chan FlowItemTask, queueCap),
-		thresholdsOfStore:  make(map[uint64]*thresholdWithTime),
+		thresholdsOfStore:  make(map[uint64]*thresholds),
 		reportIntervalSecs: kind.ReportInterval(),
 		topNTTL:            time.Duration(3*kind.ReportInterval()) * time.Second,
 	}
@@ -299,27 +299,27 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
-	thresholds, ok := f.thresholdsOfStore[storeID]
-	if ok && time.Since(thresholds.updatedTime) <= DefaultThresholdsUpdateInterval {
-		return thresholds.rates
+	t, ok := f.thresholdsOfStore[storeID]
+	if ok && time.Since(t.updatedTime) <= ThresholdsUpdateInterval {
+		return t.rates
 	}
-	thresholds = &thresholdWithTime{
+	t = &thresholds{
 		updatedTime: time.Now(),
 		rates:       make([]float64, DimLen),
 	}
-	f.thresholdsOfStore[storeID] = thresholds
+	f.thresholdsOfStore[storeID] = t
 	statKinds := f.kind.RegionStats()
 	for dim, kind := range statKinds {
-		thresholds.rates[dim] = MinHotThresholds[kind]
+		t.rates[dim] = MinHotThresholds[kind]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return thresholds.rates
+		return t.rates
 	}
-	for i := range thresholds.rates {
-		thresholds.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, thresholds.rates[i])
+	for i := range t.rates {
+		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
 	}
-	return thresholds.rates
+	return t.rates
 }
 
 // gets the storeIDs, including old region and new region
