@@ -1530,6 +1530,10 @@ func TestHotCacheByteAndKey(t *testing.T) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
+	statistics.ThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.ThresholdsUpdateInterval = 8 * time.Second
+	}()
 	regions := []testRegionInfo{}
 	for i := 1; i <= 500; i++ {
 		regions = append(regions, testRegionInfo{
@@ -1721,6 +1725,10 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	statistics.ThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.ThresholdsUpdateInterval = statistics.StoreHeartBeatReportInterval
+	}()
 	// some peers are hot, and some are cold #3198
 
 	rate := uint64(512 * units.KiB)
