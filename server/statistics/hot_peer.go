@@ -80,8 +80,6 @@ type HotPeerStat struct {
 	HotDegree int `json:"hot_degree"`
 	// AntiCount used to eliminate some noise when remove region in cache
 	AntiCount int `json:"anti_count"`
-
-	Kind RWType `json:"-"`
 	// Loads contains only Kind-related statistics and is DimLen in length.
 	Loads []float64 `json:"loads"`
 
@@ -126,7 +124,6 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Uint64("store", stat.StoreID),
 		zap.Bool("is-leader", stat.isLeader),
 		zap.Bool("is-learner", stat.isLearner),
-		zap.String("type", stat.Kind.String()),
 		zap.Float64s("loads", stat.GetLoads()),
 		zap.Float64s("loads-instant", stat.Loads),
 		zap.Float64s("thresholds", stat.thresholds),
@@ -140,8 +137,8 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 }
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
-func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int) bool {
-	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*stat.hotStatReportInterval())
+func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int, rwTy RWType) bool {
+	return time.Since(stat.lastTransferLeaderTime).Seconds() < float64(minHotDegree*rwTy.ReportInterval())
 }
 
 // IsLeader indicates the item belong to the leader.
@@ -203,13 +200,6 @@ func (stat *HotPeerStat) clearLastAverage() {
 	}
 }
 
-func (stat *HotPeerStat) hotStatReportInterval() int {
-	if stat.Kind == Read {
-		return ReadReportInterval
-	}
-	return WriteReportInterval
-}
-
 func (stat *HotPeerStat) getIntervalSum() time.Duration {
 	if len(stat.rollingLoads) == 0 || stat.rollingLoads[0] == nil {
 		return 0
@@ -229,11 +219,4 @@ func (stat *HotPeerStat) GetStores() []uint64 {
 // IsLearner indicates whether the item is learner.
 func (stat *HotPeerStat) IsLearner() bool {
 	return stat.isLearner
-}
-
-func (stat *HotPeerStat) defaultAntiCount() int {
-	if stat.Kind == Read {
-		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
-	}
-	return HotRegionAntiCount
 }

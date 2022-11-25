@@ -282,12 +282,11 @@ func TestCollectMetrics(t *testing.T) {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
-				Kind:      statistics.Write,
 				Loads:     []float64{10, 20, 30},
 				HotDegree: 10,
 				AntiCount: statistics.HotRegionAntiCount, // for write
 			}
-			tc.hotStat.HotCache.Update(item)
+			tc.hotStat.HotCache.Update(item, statistics.Write)
 		}
 	}
 	for i := 0; i < 1000; i++ {
