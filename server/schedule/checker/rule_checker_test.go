@@ -883,6 +883,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
 	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
 	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
+	suite.Equal(uint64(3), op.Step(3).(operator.PromoteLearner).ToStore)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness2() {
