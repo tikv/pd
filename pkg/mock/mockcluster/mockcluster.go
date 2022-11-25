@@ -480,7 +480,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
-			mc.HotCache.Update(item, statistics.Read)
+			mc.HotCache.Update(item, statistics.Write)
 		}
 	}
 	mc.PutRegion(r)
