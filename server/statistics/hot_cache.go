@@ -196,9 +196,9 @@ func (w *HotCache) GetFilledPeriod(kind RWType) int {
 	var reportIntervalSecs int
 	switch kind {
 	case Write:
-		reportIntervalSecs = w.writeCache.reportIntervalSecs
+		reportIntervalSecs = w.writeCache.kind.ReportInterval()
 	case Read:
-		reportIntervalSecs = w.readCache.reportIntervalSecs
+		reportIntervalSecs = w.readCache.kind.ReportInterval()
 	}
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(reportIntervalSecs)*time.Second).GetFilledPeriod()
 }

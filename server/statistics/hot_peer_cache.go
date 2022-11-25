@@ -71,28 +71,26 @@ type thresholds struct {
 
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind               RWType
-	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
-	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	topNTTL            time.Duration
-	reportIntervalSecs int
-	taskQueue          chan FlowItemTask
-	thresholdsOfStore  map[uint64]*thresholds // storeID -> thresholds
+	kind              RWType
+	peersOfStore      map[uint64]*TopN               // storeID -> hot peers
+	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	topNTTL           time.Duration
+	taskQueue         chan FlowItemTask
+	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
 	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(kind RWType) *hotPeerCache {
 	return &hotPeerCache{
-		kind:               kind,
-		peersOfStore:       make(map[uint64]*TopN),
-		storesOfRegion:     make(map[uint64]map[uint64]struct{}),
-		regionsOfStore:     make(map[uint64]map[uint64]struct{}),
-		taskQueue:          make(chan FlowItemTask, queueCap),
-		thresholdsOfStore:  make(map[uint64]*thresholds),
-		reportIntervalSecs: kind.ReportInterval(),
-		topNTTL:            time.Duration(3*kind.ReportInterval()) * time.Second,
+		kind:              kind,
+		peersOfStore:      make(map[uint64]*TopN),
+		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		taskQueue:         make(chan FlowItemTask, queueCap),
+		thresholdsOfStore: make(map[uint64]*thresholds),
+		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
 	}
 }
 
@@ -480,7 +478,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 	// interval is not 0 which is guaranteed by the caller.
-	if interval.Seconds() >= float64(f.reportIntervalSecs) {
+	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
 		f.initItem(newItem)
 	}
 	newItem.actionType = Add
