@@ -437,7 +437,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
 	suite.Equal(errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple witness by count %d", 2)).Error(), err.Error())
 }
 
-func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness6() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
