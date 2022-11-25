@@ -1503,31 +1503,52 @@ func TestExternalTimestamp(t *testing.T) {
 	}
 
 	{ // case3: set external timestamp larger than global ts
-		req := &pdpb.TsoRequest{
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+		// get external ts
+		req := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp, err := grpcPDClient.GetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+		ts = resp.GetTimestamp()
+		// get global ts
+		req2 := &pdpb.TsoRequest{
 			Header:     testutil.NewRequestHeader(clusterID),
 			Count:      1,
 			DcLocation: tso.GlobalDCLocation,
 		}
-		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(tsoClient.Send(req2))
+		resp2, err := tsoClient.Recv()
 		re.NoError(err)
-		defer tsoClient.CloseSend()
-		re.NoError(tsoClient.Send(req))
-		resp, err := tsoClient.Recv()
-		re.NoError(err)
-		globalTS := tsoutil.GenerateTS(resp.Timestamp)
-
-		req2 := &pdpb.SetExternalTimestampRequest{
+		globalTS := resp2.GetTimestamp()
+		// set external ts larger than global ts
+		unexpectedTS := tsoutil.ComposeTS(globalTS.Physical+2, 0)
+		req3 := &pdpb.SetExternalTimestampRequest{
 			Header:    testutil.NewRequestHeader(clusterID),
-			Timestamp: globalTS + 1,
+			Timestamp: unexpectedTS,
 		}
-		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req2)
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req3)
 		re.NoError(err)
-
-		req3 := &pdpb.GetExternalTimestampRequest{
+		// get external ts again
+		req4 := &pdpb.GetExternalTimestampRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 		}
-		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req3)
+		resp4, err := grpcPDClient.GetExternalTimestamp(context.Background(), req4)
 		re.NoError(err)
-		re.Equal(ts, resp2.GetTimestamp())
+		// get global ts again
+		req5 := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      1,
+			DcLocation: tso.GlobalDCLocation,
+		}
+		re.NoError(tsoClient.Send(req5))
+		resp5, err := tsoClient.Recv()
+		re.NoError(err)
+		currentGlobalTS := tsoutil.GenerateTS(resp5.GetTimestamp())
+		// check external ts should not be larger than global ts
+		re.Equal(1, tsoutil.CompareTimestampUint64(unexpectedTS, currentGlobalTS))
+		re.Equal(ts, resp4.GetTimestamp())
 	}
 }
