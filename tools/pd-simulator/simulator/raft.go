@@ -32,7 +32,6 @@ type RaftEngine struct {
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
 	regionChange      map[uint64][]uint64
-	schedulerStats    *schedulerStatistics
 	regionSplitSize   int64
 	regionSplitKeys   int64
 	storeConfig       *SimConfig
@@ -45,7 +44,6 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,
 		regionChange:    make(map[uint64][]uint64),
-		schedulerStats:  newSchedulerStatistics(),
 		regionSplitSize: conf.RegionSplitSize,
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
