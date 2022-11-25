@@ -867,6 +867,4 @@ func (mc *Cluster) ObserveRegionsStats() {
 }
 
 // RecordOpStepWithTTL records OpStep with TTL
-func (mc *Cluster) RecordOpStepWithTTL(regionID uint64) {
-
-}
+func (mc *Cluster) RecordOpStepWithTTL(regionID uint64) {}
