@@ -46,6 +46,10 @@ const (
 	queueCap = 20000
 )
 
+// ThresholdsUpdateInterval is the default interval to update thresholds.
+// the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
+var ThresholdsUpdateInterval = 8 * time.Second
+
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turn off by the simulator and the test.
 var Denoising = true
@@ -60,33 +64,34 @@ var MinHotThresholds = [RegionStatCount]float64{
 	RegionWriteQueryNum: 32,
 }
 
+type thresholds struct {
+	updatedTime time.Time
+	rates       []float64
+}
+
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind               RWType
-	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
-	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	topNTTL            time.Duration
-	reportIntervalSecs int
-	taskQueue          chan FlowItemTask
+	kind              RWType
+	peersOfStore      map[uint64]*TopN               // storeID -> hot peers
+	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	topNTTL           time.Duration
+	taskQueue         chan FlowItemTask
+	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
+	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(kind RWType) *hotPeerCache {
-	c := &hotPeerCache{
-		kind:           kind,
-		peersOfStore:   make(map[uint64]*TopN),
-		storesOfRegion: make(map[uint64]map[uint64]struct{}),
-		regionsOfStore: make(map[uint64]map[uint64]struct{}),
-		taskQueue:      make(chan FlowItemTask, queueCap),
+	return &hotPeerCache{
+		kind:              kind,
+		peersOfStore:      make(map[uint64]*TopN),
+		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		taskQueue:         make(chan FlowItemTask, queueCap),
+		thresholdsOfStore: make(map[uint64]*thresholds),
+		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
 	}
-	if kind == Write {
-		c.reportIntervalSecs = WriteReportInterval
-	} else {
-		c.reportIntervalSecs = ReadReportInterval
-	}
-	c.topNTTL = time.Duration(3*c.reportIntervalSecs) * time.Second
-	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -292,19 +297,27 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
+	t, ok := f.thresholdsOfStore[storeID]
+	if ok && time.Since(t.updatedTime) <= ThresholdsUpdateInterval {
+		return t.rates
+	}
+	t = &thresholds{
+		updatedTime: time.Now(),
+		rates:       make([]float64, DimLen),
+	}
+	f.thresholdsOfStore[storeID] = t
 	statKinds := f.kind.RegionStats()
-	ret := make([]float64, DimLen)
 	for dim, kind := range statKinds {
-		ret[dim] = MinHotThresholds[kind]
+		t.rates[dim] = MinHotThresholds[kind]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return ret
+		return t.rates
 	}
-	for i := range ret {
-		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, ret[i])
+	for i := range t.rates {
+		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
 	}
-	return ret
+	return t.rates
 }
 
 // gets the storeIDs, including old region and new region
@@ -465,7 +478,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 	// interval is not 0 which is guaranteed by the caller.
-	if interval.Seconds() >= float64(f.reportIntervalSecs) {
+	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
 		f.initItem(newItem)
 	}
 	newItem.actionType = Add

@@ -196,9 +196,21 @@ func (w *HotCache) GetFilledPeriod(kind RWType) int {
 	var reportIntervalSecs int
 	switch kind {
 	case Write:
-		reportIntervalSecs = w.writeCache.reportIntervalSecs
+		reportIntervalSecs = w.writeCache.kind.ReportInterval()
 	case Read:
-		reportIntervalSecs = w.readCache.reportIntervalSecs
+		reportIntervalSecs = w.readCache.kind.ReportInterval()
 	}
 	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(reportIntervalSecs)*time.Second).GetFilledPeriod()
+}
+
+// GetThresholds returns thresholds.
+// This is used for test purpose.
+func (w *HotCache) GetThresholds(kind RWType, storeID uint64) []float64 {
+	switch kind {
+	case Write:
+		return w.writeCache.calcHotThresholds(storeID)
+	case Read:
+		return w.readCache.calcHotThresholds(storeID)
+	}
+	return nil
 }

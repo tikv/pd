@@ -312,6 +312,10 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := RegionHeartBeatReportInterval / StoreHeartBeatReportInterval
+	ThresholdsUpdateInterval = 0
+	defer func() {
+		ThresholdsUpdateInterval = 8 * time.Second
+	}()
 
 	// skip interval=0
 	interval := 0
@@ -399,6 +403,10 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 	cache := NewHotPeerCache(Read)
 	storeID := uint64(1)
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
+	ThresholdsUpdateInterval = 0
+	defer func() {
+		ThresholdsUpdateInterval = 8 * time.Second
+	}()
 	for i := uint64(1); i < TopNN+10; i++ {
 		var oldItem *HotPeerStat
 		var item *HotPeerStat
@@ -667,7 +675,7 @@ func TestHotPeerCacheTopN(t *testing.T) {
 
 	cache := NewHotPeerCache(Write)
 	now := time.Now()
-	for id := uint64(99); id > 0; id-- {
+	for id := uint64(0); id < 100; id++ {
 		meta := &metapb.Region{
 			Id:    id,
 			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
@@ -686,10 +694,19 @@ func TestHotPeerCacheTopN(t *testing.T) {
 				cache.updateStat(stat)
 			}
 		}
+		if id < 60 {
+			re.Equal(MinHotThresholds[RegionWriteKeys], cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
+		}
 	}
 
 	re.Contains(cache.peersOfStore, uint64(1))
 	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
+	re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
+	ThresholdsUpdateInterval = 0
+	defer func() {
+		ThresholdsUpdateInterval = 8 * time.Second
+	}()
+	re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
