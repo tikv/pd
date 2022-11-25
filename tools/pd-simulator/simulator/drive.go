@@ -163,11 +163,6 @@ func (d *Driver) Check() bool {
 	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
 }
 
-// PrintStatistics prints the statistics of the scheduler.
-func (d *Driver) PrintStatistics() {
-	d.raftEngine.schedulerStats.PrintStatistics()
-}
-
 // Start starts all nodes.
 func (d *Driver) Start() error {
 	for _, n := range d.conn.Nodes {

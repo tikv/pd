@@ -364,10 +364,53 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("fix-non-witness-peer", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
+	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "learner"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	r := suite.cluster.GetRegion(1)
+	// set peer3 to witness learner
+	r = r.Clone(core.WithLearners([]*metapb.Peer{r.GetPeer(3)}))
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
+
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:   "pd",
+			ID:        "default",
+			Index:     100,
+			Override:  true,
+			Role:      placement.Voter,
+			Count:     2,
+			IsWitness: false,
+		},
+		{
+			GroupID:   "pd",
+			ID:        "r1",
+			Index:     100,
+			Override:  false,
+			Role:      placement.Learner,
+			Count:     1,
+			IsWitness: false,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "C", Op: "in", Values: []string{"learner"}},
+			},
+		},
+	})
+	suite.NoError(err)
+
+	op := suite.rc.Check(r)
+	suite.NotNil(op)
+	suite.Equal("fix-non-witness-peer", op.Desc())
+	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
