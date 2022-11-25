@@ -271,7 +271,7 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 		return core.NewRegionInfo(
 			meta,
 			leader,
-			core.SetReportInterval(interval),
+			core.SetReportInterval(0, interval),
 			core.SetReadBytes(10*units.MiB*interval),
 			core.SetReadKeys(10*units.MiB*interval),
 			core.SetReadQuery(1024*interval),
@@ -280,7 +280,7 @@ func buildRegion(kind RWType, peerCount int, interval uint64) *core.RegionInfo {
 		return core.NewRegionInfo(
 			meta,
 			leader,
-			core.SetReportInterval(interval),
+			core.SetReportInterval(0, interval),
 			core.SetWrittenBytes(10*units.MiB*interval),
 			core.SetWrittenKeys(10*units.MiB*interval),
 			core.SetWrittenQuery(1024*interval),
@@ -350,7 +350,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(0, newItem.HotDegree)
 	re.Equal(0, newItem.AntiCount)
 	// sum of interval is larger than report interval, and hot
-	newItem.AntiCount = newItem.defaultAntiCount()
+	newItem.AntiCount = Read.DefaultAntiCount()
 	cache.updateStat(newItem)
 	newItem = cache.checkPeerFlow(core.NewPeerInfo(peer, deltaLoads, uint64(interval)), region)
 	re.Equal(1, newItem.HotDegree)
@@ -405,7 +405,6 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 		for {
 			thresholds := cache.calcHotThresholds(storeID)
 			newItem := &HotPeerStat{
-				Kind:       cache.kind,
 				StoreID:    storeID,
 				RegionID:   i,
 				actionType: Update,
@@ -525,7 +524,7 @@ func TestRemoveFromCacheRandom(t *testing.T) {
 
 func checkCoolDown(re *require.Assertions, cache *hotPeerCache, region *core.RegionInfo, expect bool) {
 	item := cache.getOldHotPeerStat(region.GetID(), region.GetLeader().GetStoreId())
-	re.Equal(expect, item.IsNeedCoolDownTransferLeader(3))
+	re.Equal(expect, item.IsNeedCoolDownTransferLeader(3, cache.kind))
 }
 
 func TestCoolDownTransferLeader(t *testing.T) {

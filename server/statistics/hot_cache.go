@@ -157,8 +157,8 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 
 // Update updates the cache.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) Update(item *HotPeerStat) {
-	switch item.Kind {
+func (w *HotCache) Update(item *HotPeerStat, kind RWType) {
+	switch kind {
 	case Write:
 		w.writeCache.updateStat(item)
 	case Read:
