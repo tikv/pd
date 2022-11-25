@@ -119,7 +119,7 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            int64
+	running            atomic.Bool
 	meta               *metapb.Cluster
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
@@ -291,8 +291,8 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
 	go c.runUpdateStoreStats()
-	atomic.StoreInt64(&c.running, 1)
 
+	c.running.Store(true)
 	return nil
 }
 
@@ -493,7 +493,7 @@ func (c *RaftCluster) runReplicationMode() {
 
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
-	if !atomic.CompareAndSwapInt64(&c.running, 1, 0) {
+	if !c.running.CompareAndSwap(true, false) {
 		return
 	}
 
@@ -507,7 +507,7 @@ func (c *RaftCluster) Stop() {
 
 // IsRunning return if the cluster is running.
 func (c *RaftCluster) IsRunning() bool {
-	return atomic.LoadInt64(&c.running) == 1
+	return c.running.Load()
 }
 
 // Context returns the context of RaftCluster.
