@@ -1525,10 +1525,7 @@ func (c *RaftCluster) checkStores() {
 		// the store has already been tombstone
 		if store.IsRemoved() {
 			if store.DownTime() > gcTombstoreInterval {
-				// TODO: remove this lock
-				c.Lock()
-				err := c.deleteStoreLocked(store)
-				c.Unlock()
+				err := c.deleteStore(store)
 				if err != nil {
 					log.Error("auto gc the tombstore store failed",
 						zap.Stringer("store", store.GetMeta()),
@@ -1825,7 +1822,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				continue
 			}
 			// the store has already been tombstone
-			err := c.deleteStoreLocked(store)
+			err := c.deleteStore(store)
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
@@ -1850,7 +1847,8 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	return nil
 }
 
-func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
+// deleteStore deletes the store from the cluster. it's concurrent safe.
+func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	if c.storage != nil {
 		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
 			return err
