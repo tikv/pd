@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
@@ -65,15 +66,19 @@ func TestHotRegionStorage(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"))
-	pdctl.MustPutRegion(re, cluster, 4, 2, []byte("g"), []byte("h"))
+	startTime := time.Now().Second()
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 4, 2, []byte("g"), []byte("h"),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	storeStats := []*pdpb.StoreStats{
 		{
 			StoreId:  1,
-			Interval: &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: statistics.ReadReportInterval},
+			Interval: &pdpb.TimeInterval{StartTimestamp: uint64(startTime - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(startTime)},
 			PeerStats: []*pdpb.PeerStat{
 				{
 					RegionId:  3,
@@ -83,7 +88,7 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 		{
 			StoreId:  2,
-			Interval: &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: statistics.ReadReportInterval},
+			Interval: &pdpb.TimeInterval{StartTimestamp: uint64(startTime - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(startTime)},
 			PeerStats: []*pdpb.PeerStat{
 				{
 					RegionId:  4,
@@ -93,16 +98,16 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	}
 	for _, storeStats := range storeStats {
-		leaderServer.GetRaftCluster().HandleStoreHeartbeat(storeStats)
+		leaderServer.GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: storeStats}, &pdpb.StoreHeartbeatResponse{})
 	}
-	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
-	endTime := time.Now().UnixNano() / int64(time.Millisecond)
+	var iter storage.HotRegionStorageIterator
+	var next *storage.HistoryHotRegion
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
-	next, err := iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
+	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		next, err = iter.Next()
+		return err == nil && next != nil
+	})
 	re.Equal(uint64(1), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(storage.WriteType.String(), next.HotRegionType)
@@ -115,10 +120,8 @@ func TestHotRegionStorage(t *testing.T) {
 	next, err = iter.Next()
 	re.NoError(err)
 	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{storage.ReadType.String()}, startTime, endTime)
+	iter = hotRegionStorage.NewIterator([]string{storage.ReadType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
 	next, err = iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
 	re.Equal(uint64(3), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(storage.ReadType.String(), next.HotRegionType)
@@ -169,16 +172,17 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
-	endTime := time.Now().UnixNano() / int64(time.Millisecond)
-	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
-	next, err := iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
+	startTime := time.Now().Second()
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	var iter storage.HotRegionStorageIterator
+	var next *storage.HistoryHotRegion
+	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
+		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		next, err = iter.Next()
+		return err == nil && next != nil
+	})
 	re.Equal(uint64(1), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(storage.WriteType.String(), next.HotRegionType)
@@ -190,11 +194,12 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	schedule.HotRegionsReservedDays = 0
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
 	time.Sleep(10 * interval)
-	endTime = time.Now().UnixNano() / int64(time.Millisecond)
-	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
+	endTime := time.Now().UnixNano() / int64(time.Millisecond)
+	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)
@@ -210,7 +215,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	time.Sleep(3 * interval)
 	endTime = time.Now().UnixNano() / int64(time.Millisecond)
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)
@@ -261,16 +266,18 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
-	endTime := time.Now().UnixNano() / int64(time.Millisecond)
-	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
-	next, err := iter.Next()
-	re.NoError(err)
-	re.NotNil(next)
+	startTime := time.Now().Second()
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
+		core.SetWrittenBytes(3000000000),
+		core.SetReportInterval(uint64(startTime-statistics.WriteReportInterval), uint64(startTime)))
+	var iter storage.HotRegionStorageIterator
+	var next *storage.HistoryHotRegion
+	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
+		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		next, err = iter.Next()
+		return err == nil && next != nil
+	})
 	re.Equal(uint64(1), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(storage.WriteType.String(), next.HotRegionType)
@@ -282,12 +289,13 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	schedule.HotRegionsWriteInterval.Duration = 20 * interval
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
 	time.Sleep(10 * interval)
-	endTime = time.Now().UnixNano() / int64(time.Millisecond)
+	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	// it cant get new hot region because wait time smaller than hot region write interval
-	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime, endTime)
+	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)

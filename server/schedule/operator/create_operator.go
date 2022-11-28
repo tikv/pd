@@ -159,8 +159,9 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId: p.GetStoreId(),
-				Role:    p.GetRole(),
+				StoreId:   p.GetStoreId(),
+				Role:      p.GetRole(),
+				IsWitness: p.GetIsWitness(),
 			}
 		}
 		matchOp, err := NewBuilder("", ci, source).
@@ -199,7 +200,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) || core.IsWitness(pb) != core.IsWitness(pa) {
 			return false
 		}
 	}
@@ -297,15 +298,14 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	brief := fmt.Sprintf("create witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
-
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(),
-		ci.GetOpts().GetOperatorTimeoutOffset(), BecomeWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewBuilder(desc, ci, region).
+		BecomeWitness(peer.GetStoreId()).
+		Build(0)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
-	brief := fmt.Sprintf("promote to non-witness: region %v peer %v on store %v", region.GetID(), peer.Id, peer.StoreId)
-	return NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), OpRegion, region.GetApproximateSize(),
-		ci.GetOpts().GetOperatorTimeoutOffset(), BecomeNonWitness{StoreID: peer.StoreId, PeerID: peer.Id}), nil
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(peer.GetStoreId()).
+		Build(0)
 }

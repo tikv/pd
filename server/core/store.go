@@ -33,6 +33,7 @@ const (
 	storePersistInterval = 5 * time.Minute
 	initialMinSpace      = 8 * units.GiB // 2^33=8GB
 	slowStoreThreshold   = 80
+	awakenStoreInterval  = 10 * time.Minute // 2 * slowScoreRecoveryTime
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -60,6 +61,7 @@ type StoreInfo struct {
 	regionWeight        float64
 	limiter             map[storelimit.Type]*storelimit.StoreLimit
 	minResolvedTS       uint64
+	lastAwakenTime      time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -467,6 +469,12 @@ func (s *StoreInfo) GetUptime() time.Duration {
 // GetMinResolvedTS returns min resolved ts.
 func (s *StoreInfo) GetMinResolvedTS() uint64 {
 	return s.minResolvedTS
+}
+
+// NeedAwakenStore checks whether all hibernated regions in this store should
+// be awaken or not.
+func (s *StoreInfo) NeedAwakenStore() bool {
+	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
 }
 
 var (
