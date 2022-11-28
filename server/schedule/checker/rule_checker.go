@@ -157,7 +157,7 @@ func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
 
 func (c *RuleChecker) isWitnessEnabled() bool {
 	return versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
-		c.cluster.GetOpts().IsSwitchWitnessAllowed()
+		c.cluster.GetOpts().IsWitnessAllowed()
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
@@ -172,6 +172,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
+			// When witness placement rule is enabled, promotes the witness to voter when region has down peer.
 			if c.isWitnessEnabled() {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()

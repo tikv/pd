@@ -330,7 +330,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 			return fit
 		}
 	}
-	fit := fitRegion(regionStores, region, rules, m.opt.IsSwitchWitnessAllowed())
+	fit := fitRegion(regionStores, region, rules, m.opt.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules
 	return fit
