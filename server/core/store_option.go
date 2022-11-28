@@ -236,7 +236,11 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	return func(store *StoreInfo) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		store.limiter.Reset(ratePerSec[0], limitType)
+		rate := float64(0)
+		if len(ratePerSec) > 0 {
+			rate = ratePerSec[0]
+		}
+		store.limiter.Reset(rate, limitType)
 	}
 }
 
