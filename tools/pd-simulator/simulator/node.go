@@ -43,7 +43,7 @@ type Node struct {
 	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
-	tasks                    map[uint64]Task
+	tasks                    map[uint64]*Task
 	client                   Client
 	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                      context.Context
@@ -51,6 +51,7 @@ type Node struct {
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
+	hasExtraUsedSpace        bool
 }
 
 // NewNode returns a Node.
@@ -59,7 +60,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 	store := &metapb.Store{
 		Id:      s.ID,
 		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
-		Version: s.Version,
+		Version: config.StoreVersion,
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
@@ -67,7 +68,6 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		StoreStats: pdpb.StoreStats{
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
-			Available: uint64(config.RaftStore.Available),
 			StartTime: uint32(time.Now().Unix()),
 		},
 	}
@@ -99,10 +99,11 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		client:                   client,
 		ctx:                      ctx,
 		cancel:                   cancel,
-		tasks:                    make(map[uint64]Task),
+		tasks:                    make(map[uint64]*Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
+		hasExtraUsedSpace:        s.HasExtraUsedSpace,
 	}, nil
 }
 
@@ -125,7 +126,7 @@ func (n *Node) receiveRegionHeartbeat() {
 	for {
 		select {
 		case resp := <-n.receiveRegionHeartbeatCh:
-			task := responseToTask(resp, n.raftEngine)
+			task := responseToTask(n.raftEngine, resp)
 			if task != nil {
 				n.AddTask(task)
 			}
@@ -156,8 +157,7 @@ func (n *Node) stepTask() {
 	n.Lock()
 	defer n.Unlock()
 	for _, task := range n.tasks {
-		task.Step(n.raftEngine)
-		if task.IsFinished() {
+		if isFinished := task.Step(n.raftEngine); isFinished {
 			simutil.Logger.Debug("task status",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
@@ -246,7 +246,7 @@ func (n *Node) reportRegionChange() {
 }
 
 // AddTask adds task in this node.
-func (n *Node) AddTask(task Task) {
+func (n *Node) AddTask(task *Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {

@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/rangetree"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
@@ -53,6 +54,7 @@ type RegionInfo struct {
 	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
+	cpuUsage          uint64
 	writtenBytes      uint64
 	writtenKeys       uint64
 	readBytes         uint64
@@ -152,6 +154,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		leader:            heartbeat.GetLeader(),
 		downPeers:         heartbeat.GetDownPeers(),
 		pendingPeers:      heartbeat.GetPendingPeers(),
+		cpuUsage:          heartbeat.GetCpuUsage(),
 		writtenBytes:      heartbeat.GetBytesWritten(),
 		writtenKeys:       heartbeat.GetKeysWritten(),
 		readBytes:         heartbeat.GetBytesRead(),
@@ -217,6 +220,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
+		cpuUsage:          r.cpuUsage,
 		writtenBytes:      r.writtenBytes,
 		writtenKeys:       r.writtenKeys,
 		readBytes:         r.readBytes,
@@ -492,6 +496,15 @@ func (r *RegionInfo) GetPendingPeers() []*metapb.Peer {
 	return r.pendingPeers
 }
 
+// GetCPUUsage returns the CPU usage of the region since the last heartbeat.
+// The number range is [0, N * 100], where N is the number of CPU cores.
+// However, since the TiKV basically only meters the CPU usage inside the
+// Unified Read Pool, it should be considered as an indicator of Region read
+// CPU overhead for now.
+func (r *RegionInfo) GetCPUUsage() uint64 {
+	return r.cpuUsage
+}
+
 // GetBytesRead returns the read bytes of the region.
 func (r *RegionInfo) GetBytesRead() uint64 {
 	return r.readBytes
@@ -571,6 +584,20 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.
 func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
+}
+
+func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
+	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
+}
+
+func (r *RegionInfo) isRegionRecreated() bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we exclude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
@@ -669,38 +696,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
-// regionMap wraps a map[uint64]*regionItem and supports randomly pick a region. They are the leaves of regionTree.
-type regionMap map[uint64]*regionItem
-
-func newRegionMap() regionMap {
-	return make(map[uint64]*regionItem)
-}
-
-func (rm regionMap) Len() int {
-	return len(rm)
-}
-
-func (rm regionMap) Get(id uint64) *regionItem {
-	return rm[id]
-}
-
-// AddNew uses RegionInfo to generate a new regionItem.
-// If the regionItem already exists, it will be overwritten.
-// Note: Do not use this function when you only need to update the RegionInfo and do not need a new regionItem.
-func (rm regionMap) AddNew(region *RegionInfo) *regionItem {
-	item := &regionItem{region: region}
-	rm[region.GetID()] = item
-	return item
-}
-
-func (rm regionMap) Delete(id uint64) {
-	delete(rm, id)
-}
-
 // RegionsInfo for export
 type RegionsInfo struct {
 	tree         *regionTree
-	regions      regionMap              // regionID -> regionInfo
+	regions      map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
@@ -712,7 +711,7 @@ type RegionsInfo struct {
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
 		tree:         newRegionTree(),
-		regions:      newRegionMap(),
+		regions:      make(map[uint64]*regionItem),
 		leaders:      make(map[uint64]*regionTree),
 		followers:    make(map[uint64]*regionTree),
 		learners:     make(map[uint64]*regionTree),
@@ -723,8 +722,8 @@ func NewRegionsInfo() *RegionsInfo {
 
 // GetRegion returns the RegionInfo with regionID
 func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
-	if item := r.regions.Get(regionID); item != nil {
-		return item.region
+	if item := r.regions[regionID]; item != nil {
+		return item.RegionInfo
 	}
 	return nil
 }
@@ -734,9 +733,9 @@ func (r *RegionsInfo) GetRegion(regionID uint64) *RegionInfo {
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	var item *regionItem // Pointer to the *RegionInfo of this ID.
 	rangeChanged := true // This Region is new, or its range has changed.
-	if item = r.regions.Get(region.GetID()); item != nil {
+	if item = r.regions[region.GetID()]; item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
-		origin := item.region
+		origin := item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
@@ -751,17 +750,18 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 			// If the peers are not changed, only the statistical on the sub regionTree needs to be updated.
 			r.updateSubTreeStat(origin, region)
 			// Update the RegionInfo in the regionItem.
-			item.region = region
+			item.RegionInfo = region
 			return
 		}
 		// If the range or peers have changed, the sub regionTree needs to be cleaned up.
 		// TODO: Improve performance by deleting only the different peers.
 		r.removeRegionFromSubTree(origin)
 		// Update the RegionInfo in the regionItem.
-		item.region = region
+		item.RegionInfo = region
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
-		item = r.regions.AddNew(region)
+		item = &regionItem{RegionInfo: region}
+		r.regions[region.GetID()] = item
 	}
 
 	if rangeChanged {
@@ -812,11 +812,6 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (overlaps []*RegionInfo) {
 	return
 }
 
-// Len returns the RegionsInfo length
-func (r *RegionsInfo) Len() int {
-	return r.regions.Len()
-}
-
 // TreeLen returns the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLen() int {
 	return r.tree.length()
@@ -856,7 +851,7 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	// Remove from tree and regions.
 	r.tree.remove(region)
-	r.regions.Delete(region.GetID())
+	delete(r.regions, region.GetID())
 	// Remove from leaders and followers.
 	r.removeRegionFromSubTree(region)
 }
@@ -947,9 +942,9 @@ func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 
 // GetRegions gets all RegionInfo from regionMap
 func (r *RegionsInfo) GetRegions() []*RegionInfo {
-	regions := make([]*RegionInfo, 0, r.regions.Len())
+	regions := make([]*RegionInfo, 0, len(r.regions))
 	for _, item := range r.regions {
-		regions = append(regions, item.region)
+		regions = append(regions, item.RegionInfo)
 	}
 	return regions
 }
@@ -1011,16 +1006,16 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
-	regions := make([]*metapb.Region, 0, r.regions.Len())
+	regions := make([]*metapb.Region, 0, len(r.regions))
 	for _, item := range r.regions {
-		regions = append(regions, typeutil.DeepClone(item.region.meta, RegionFactory))
+		regions = append(regions, typeutil.DeepClone(item.meta, RegionFactory))
 	}
 	return regions
 }
 
 // GetRegionCount gets the total count of RegionInfo of regionMap
 func (r *RegionsInfo) GetRegionCount() int {
-	return r.regions.Len()
+	return len(r.regions)
 }
 
 // GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
@@ -1096,7 +1091,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(region).region
+		return leaders.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1104,7 +1099,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 // GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(region).region
+		return followers.find(region).RegionInfo
 	}
 	return nil
 }
@@ -1160,6 +1155,27 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	_, startIndex := r.tree.tree.GetWithIndex(start)
+	var endIndex int
+	var item rangetree.RangeItem
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = r.tree.tree.Len() - 1
+	} else {
+		item, endIndex = r.tree.tree.GetWithIndex(end)
+		// it should return the endIndex - 1 if the endKey is the startKey of a region.
+		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
+			endIndex--
+		}
+	}
+	return endIndex - startIndex + 1
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
@@ -1171,7 +1187,7 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 		if limit > 0 && len(res) >= limit {
 			return false
 		}
-		res = append(res, r.GetRegion(region.GetID()))
+		res = append(res, region)
 		return true
 	})
 	return res
@@ -1201,11 +1217,11 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	p, n := r.tree.getAdjacentRegions(region)
 	var prev, next *RegionInfo
 	// check key to avoid key range hole
-	if p != nil && bytes.Equal(p.region.GetEndKey(), region.GetStartKey()) {
-		prev = r.GetRegion(p.region.GetID())
+	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
+		prev = r.GetRegion(p.GetID())
 	}
-	if n != nil && bytes.Equal(region.GetEndKey(), n.region.GetStartKey()) {
-		next = r.GetRegion(n.region.GetID())
+	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
+		next = r.GetRegion(n.GetID())
 	}
 	return prev, next
 }
@@ -1287,10 +1303,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	}
 
 	return strings.Join(ret, ", ")
-}
-
-func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
-	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
 // String converts slice of bytes to string without copy.
@@ -1388,4 +1400,12 @@ func (h HexRegionsMeta) String() string {
 		b.WriteString(proto.CompactTextString(meta))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// NeedTransferWitnessLeader is used to judge if the region's leader is a witness
+func NeedTransferWitnessLeader(region *RegionInfo) bool {
+	if region == nil || region.GetLeader() == nil {
+		return false
+	}
+	return region.GetLeader().IsWitness
 }

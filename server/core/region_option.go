@@ -170,6 +170,13 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// SetCPUUsage sets the CPU usage of the region.
+func SetCPUUsage(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.cpuUsage = v
+	}
+}
+
 // SetWrittenBytes sets the written bytes for the region.
 func SetWrittenBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -271,9 +278,10 @@ func SetApproximateKeys(v int64) RegionCreateOption {
 }
 
 // SetReportInterval sets the report interval for the region.
-func SetReportInterval(v uint64) RegionCreateOption {
+// This func is only used for test.
+func SetReportInterval(start, end uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.interval = &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: v}
+		region.interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
 	}
 }
 
@@ -325,12 +333,12 @@ func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	}
 }
 
-// WithPromoteLearner promotes the learner.
-func WithPromoteLearner(peerID uint64) RegionCreateOption {
+// WithRole changes the role.
+func WithRole(peerID uint64, role metapb.PeerRole) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
 			if p.GetId() == peerID {
-				p.Role = metapb.PeerRole_Voter
+				p.Role = role
 			}
 		}
 	}

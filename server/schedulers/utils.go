@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -45,6 +46,7 @@ type solver struct {
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
+	fit               *placement.RegionFit
 
 	sourceScore float64
 	targetScore float64
@@ -146,7 +148,7 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := p.sourceScore > p.targetScore
 
-	if !shouldBalance {
+	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", p.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),

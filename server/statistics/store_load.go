@@ -29,11 +29,13 @@ type StoreLoadDetail struct {
 
 // ToHotPeersStat abstracts load information to HotPeersStat.
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
+	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
+		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
-			StoreByteRate:  0.0,
-			StoreKeyRate:   0.0,
-			StoreQueryRate: 0.0,
+			StoreByteRate:  storeByteRate,
+			StoreKeyRate:   storeKeyRate,
+			StoreQueryRate: storeQueryRate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
@@ -46,13 +48,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
 			peers = append(peers, toHotPeerStatShow(peer))
-			byteRate += peer.Loads[ByteDim]
-			keyRate += peer.Loads[KeyDim]
-			queryRate += peer.Loads[QueryDim]
+			byteRate += peer.GetLoad(ByteDim)
+			keyRate += peer.GetLoad(KeyDim)
+			queryRate += peer.GetLoad(QueryDim)
 		}
 	}
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
-		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 
 	return &HotPeersStat{
 		TotalBytesRate: byteRate,
@@ -72,9 +72,9 @@ func (li *StoreLoadDetail) IsUniform(dim int, threshold float64) bool {
 }
 
 func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
-	byteRate := p.Loads[ByteDim]
-	keyRate := p.Loads[KeyDim]
-	queryRate := p.Loads[QueryDim]
+	byteRate := p.GetLoad(ByteDim)
+	keyRate := p.GetLoad(KeyDim)
+	queryRate := p.GetLoad(QueryDim)
 	return HotPeerStatShow{
 		StoreID:        p.StoreID,
 		Stores:         p.GetStores(),

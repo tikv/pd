@@ -635,13 +635,14 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}, nil
 	}
 
+	resp := &pdpb.StoreHeartbeatResponse{Header: s.header()}
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
 
-		err := rc.HandleStoreHeartbeat(request.GetStats())
+		err := rc.HandleStoreHeartbeat(request, resp)
 		if err != nil {
 			return &pdpb.StoreHeartbeatResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
@@ -658,12 +659,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
 	}
 
-	resp := &pdpb.StoreHeartbeatResponse{
-		Header:            s.header(),
-		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
-		ClusterVersion:    rc.GetClusterVersion(),
-	}
+	resp.ReplicationStatus = rc.GetReplicationMode().GetReplicationStatus()
+	resp.ClusterVersion = rc.GetClusterVersion()
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+
 	return resp, nil
 }
 
@@ -1541,6 +1540,13 @@ func (s *GrpcServer) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
+func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
+	return s.errorHeader(&pdpb.Error{
+		Type:    pdpb.ErrorType_INVALID_VALUE,
+		Message: msg,
+	})
+}
+
 // Only used for the TestLocalAllocatorLeaderChange.
 var mockLocalAllocatorLeaderChangeFlag = false
 
@@ -2005,8 +2011,8 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	storeID := request.StoreId
-	minResolvedTS := request.MinResolvedTs
+	storeID := request.GetStoreId()
+	minResolvedTS := request.GetMinResolvedTs()
 	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
 		return nil, err
 	}
@@ -2015,5 +2021,55 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		zap.Uint64("min resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: s.header(),
+	}, nil
+}
+
+// SetExternalTimestamp implements gRPC PDServer.
+func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := request.GetTimestamp()
+	if err := s.SetExternalTS(timestamp); err != nil {
+		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
+	}
+	log.Debug("set external timestamp",
+		zap.Uint64("timestamp", timestamp))
+	return &pdpb.SetExternalTimestampResponse{
+		Header: s.header(),
+	}, nil
+}
+
+// GetExternalTimestamp implements gRPC PDServer.
+func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := s.GetExternalTS()
+	return &pdpb.GetExternalTimestampResponse{
+		Header:    s.header(),
+		Timestamp: timestamp,
 	}, nil
 }

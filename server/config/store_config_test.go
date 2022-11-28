@@ -26,6 +26,7 @@ import (
 
 func TestTiKVConfig(t *testing.T) {
 	re := require.New(t)
+	m := NewStoreConfigManager(nil)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -40,7 +41,7 @@ func TestTiKVConfig(t *testing.T) {
     	}}`
 		var config StoreConfig
 		re.NoError(json.Unmarshal([]byte(body), &config))
-
+		m.update(&config)
 		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
 		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
 		re.Equal(15*units.GiB/units.MiB, int(config.GetRegionMaxSize()))
@@ -67,6 +68,11 @@ func TestUpdateConfig(t *testing.T) {
 	manager.ObserveConfig("tidb.com")
 	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
 
+	// case2: the config should not update if config is same expect some ignore field.
+	c, err := manager.source.GetConfig("tidb.com")
+	re.NoError(err)
+	re.True(manager.GetStoreConfig().Equal(c))
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
@@ -79,6 +85,7 @@ func TestUpdateConfig(t *testing.T) {
 
 func TestParseConfig(t *testing.T) {
 	re := require.New(t)
+	m := NewStoreConfigManager(nil)
 	body := `
 {
 "coprocessor":{
@@ -99,6 +106,7 @@ func TestParseConfig(t *testing.T) {
 
 	var config StoreConfig
 	re.NoError(json.Unmarshal([]byte(body), &config))
+	m.update(&config)
 	re.Equal(uint64(96), config.GetRegionBucketSize())
 }
 
