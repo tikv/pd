@@ -557,6 +557,16 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	return c.coordinator.checkers.GetMergeChecker()
 }
 
+// GetRuleChecker returns rule checker.
+func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
+	return c.coordinator.checkers.GetRuleChecker()
+}
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (c *RaftCluster) RecordOpStepWithTTL(regionID uint64) {
+	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
+}
+
 // GetSchedulers gets all schedulers.
 func (c *RaftCluster) GetSchedulers() []string {
 	return c.coordinator.getSchedulers()
