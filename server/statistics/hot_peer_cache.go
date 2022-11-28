@@ -211,7 +211,6 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		RegionID:   regionID,
 		Loads:      f.kind.GetLoadRatesFromPeer(peer),
 		isLeader:   region.GetLeader().GetStoreId() == storeID,
-		interval:   interval,
 		actionType: Update,
 		stores:     make([]uint64, len(region.GetPeers())),
 	}
@@ -253,7 +252,6 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				// use 0 to make the cold newItem won't affect the loads.
 				Loads:      make([]float64, len(oldItem.Loads)),
 				isLeader:   oldItem.isLeader,
-				interval:   interval,
 				actionType: Update,
 				inCold:     true,
 				stores:     oldItem.stores,

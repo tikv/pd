@@ -88,10 +88,6 @@ type HotPeerStat struct {
 	actionType ActionType
 	// isLeader is true means that the region has a leader on this store.
 	isLeader bool
-	// interval is the time interval that the region report interval
-	// For read peer, it's the store heartbeat interval
-	// For write peer, it's the region heartbeat interval
-	interval uint64
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
@@ -115,7 +111,6 @@ func (stat *HotPeerStat) Less(dim int, than TopNItem) bool {
 // Log is used to output some info
 func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
 	level(str,
-		zap.Uint64("interval", stat.interval),
 		zap.Uint64("region-id", stat.RegionID),
 		zap.Bool("is-leader", stat.isLeader),
 		zap.Float64s("loads", stat.GetLoads()),

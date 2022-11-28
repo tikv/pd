@@ -502,8 +502,9 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 			}
 		}
 	}
-	updateRegionInfo(infos.AsLeader)
-	updateRegionInfo(infos.AsPeer)
+	for _, s := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
+		updateRegionInfo(s)
+	}
 	return infos
 }
 
