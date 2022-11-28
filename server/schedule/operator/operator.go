@@ -61,7 +61,7 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		level = core.Urgent
 	}
 
-	maxDuration := float64(0)
+	maxDuration := offset.Seconds()
 	for _, v := range steps {
 		maxDuration += v.Timeout(approximateSize).Seconds()
 	}
