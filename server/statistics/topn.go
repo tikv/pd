@@ -38,7 +38,7 @@ type TopN struct {
 	ttlLst *ttlList
 }
 
-// NewTopN returns a k-dimensional TopN with given TTL.
+// NewTopN returns a k-dimensional TopN with given TTL. Their length must be the same.
 // NOTE: panic if k <= 0 or n <= 0.
 func NewTopN(k, n int, ttl time.Duration) *TopN {
 	if k <= 0 || n <= 0 {
@@ -101,13 +101,6 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	return
 }
 
-// RemoveExpired deletes all expired items.
-func (tn *TopN) RemoveExpired() {
-	tn.rw.Lock()
-	defer tn.rw.Unlock()
-	tn.maintain()
-}
-
 // Remove deletes the item by given ID and returns it.
 func (tn *TopN) Remove(id uint64) (item TopNItem) {
 	tn.rw.Lock()
@@ -122,9 +115,12 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 
 func (tn *TopN) maintain() {
 	for _, id := range tn.ttlLst.TakeExpired() {
+		item := tn.topns[0].Get(id)
 		for _, stn := range tn.topns {
 			stn.Remove(id)
 		}
+		hotPeerStatPool.Put(item)
+		hotPool.WithLabelValues("peer_statistic", "put", "topn_maintain").Inc()
 	}
 }
 

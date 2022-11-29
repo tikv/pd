@@ -206,18 +206,19 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		}
 	}
 
-	newItem := &HotPeerStat{
-		StoreID:    storeID,
-		RegionID:   regionID,
-		Loads:      f.kind.GetLoadRatesFromPeer(peer),
-		isLeader:   region.GetLeader().GetStoreId() == storeID,
-		actionType: Update,
-		stores:     make([]uint64, len(region.GetPeers())),
-	}
-	for _, peer := range region.GetPeers() {
-		newItem.stores = append(newItem.stores, peer.GetStoreId())
-	}
-
+	newItem := hotPeerStatPool.Get().(*HotPeerStat)
+	hotPool.WithLabelValues("peer_statistic", "get", "check_peer").Inc()
+	newItem.StoreID = storeID
+	newItem.RegionID = regionID
+	newItem.actionType = Update
+	newItem.isLeader = region.GetLeader().GetStoreId() == storeID
+	newItem.inCold = false
+	newItem.allowInherited = false
+	newItem.HotDegree = 0
+	newItem.AntiCount = 0
+	newItem.rollingLoads = nil
+	newItem.updateStores(region)
+	newItem.updateLoads(f.kind, deltaLoads, interval)
 	if oldItem == nil {
 		return f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second)
 	}
@@ -245,24 +246,21 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				continue
 			}
 
-			// update the original hot peer, and mark it as cold.
-			newItem := &HotPeerStat{
-				StoreID:  storeID,
-				RegionID: regionID,
-				// use 0 to make the cold newItem won't affect the loads.
-				Loads:      make([]float64, len(oldItem.Loads)),
-				isLeader:   oldItem.isLeader,
-				actionType: Update,
-				inCold:     true,
-				stores:     oldItem.stores,
-			}
+			newItem := hotPeerStatPool.Get().(*HotPeerStat)
+			hotPool.WithLabelValues("peer_statistic", "get", "check_cold_peer").Inc()
+			newItem.StoreID = storeID
+			newItem.RegionID = regionID
+			newItem.isLeader = oldItem.isLeader
+			newItem.actionType = Update
+			newItem.inCold = true
+			newItem.rollingLoads = nil
+			newItem.stores = oldItem.stores
+			newItem.updateLoads(f.kind, nil, interval)
 			deltaLoads := make([]float64, RegionStatCount)
-			thresholds := f.calcHotThresholds(storeID)
-			source := direct
-			for i, loads := range thresholds {
+			for i, loads := range f.calcHotThresholds(storeID) { // todo thresholds?
 				deltaLoads[i] = loads * float64(interval)
 			}
-			stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source)
+			stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, direct)
 			if stat != nil {
 				ret = append(ret, stat)
 			}
@@ -514,7 +512,9 @@ func (f *hotPeerCache) putItem(item *HotPeerStat) {
 
 func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	if peers, ok := f.peersOfStore[item.StoreID]; ok {
-		peers.Remove(item.RegionID)
+		item := peers.Remove(item.RegionID)
+		hotPeerStatPool.Put(item)
+		hotPool.WithLabelValues("peer_statistic", "put", "topn_remove").Inc()
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {
 		delete(stores, item.StoreID)

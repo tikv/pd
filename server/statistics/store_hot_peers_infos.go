@@ -17,9 +17,26 @@ package statistics
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/tikv/pd/server/core"
 )
+
+var hotPeerStatPool *sync.Pool = &sync.Pool{
+	New: func() interface{} {
+		return new(HotPeerStat)
+	},
+}
+
+// HotPeerStatGC collects the hot peer stat from schedulers.
+func HotPeerStatGC(stLoadInfos map[uint64]*StoreLoadDetail) {
+	for _, load := range stLoadInfos {
+		for _, hotPeer := range load.HotPeers {
+			hotPeerStatPool.Put(hotPeer)
+			hotPool.WithLabelValues("peer_scheduler", "put", "gc").Inc()
+		}
+	}
+}
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
@@ -155,15 +172,16 @@ func summaryStoresLoadByEngine(
 		}
 
 		// Find all hot peers first
-		var hotPeers []*HotPeerStat
-		peerLoadSum := make([]float64, DimLen)
 		// TODO: To remove `filterHotPeers`, we need to:
 		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
-		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(i)
+		peerLoadSum := make([]float64, DimLen)
+		peers := filterHotPeers(kind, storeHotPeers[id])
+		hotPeers := make([]*HotPeerStat, len(peers))
+		for i, peer := range peers {
+			for j := range peerLoadSum {
+				peerLoadSum[j] += peer.Loads[j]
 			}
-			hotPeers = append(hotPeers, peer.Clone())
+			hotPeers[i] = peer.Clone()
 		}
 		{
 			// Metric for debug.

@@ -81,6 +81,7 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource core.ResourceKind) {
 		ty := buildResourceType(rw, resource)
+		statistics.HotPeerStatGC(h.stLoadInfos[ty])
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			h.storesLoads,

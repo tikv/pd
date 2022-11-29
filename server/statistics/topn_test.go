@@ -224,7 +224,9 @@ func TestTTL(t *testing.T) {
 		}
 		re.False(tn.Put(item))
 	}
-	tn.RemoveExpired()
+	tn.rw.Lock()
+	tn.maintain()
+	tn.rw.Unlock()
 
 	re.Equal(Total/3+1, tn.Len())
 	items := tn.GetAllTopN(0)

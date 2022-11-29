@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -160,13 +161,25 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 
 // Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
-	ret := *stat
-	ret.Loads = make([]float64, DimLen)
+	hotPool.WithLabelValues("peer_scheduler", "get", "clone").Inc()
+	ret := hotPeerStatPool.Get().(*HotPeerStat)
+	ret.StoreID = stat.StoreID
+	ret.RegionID = stat.RegionID
+	ret.HotDegree = stat.HotDegree
+	ret.AntiCount = stat.AntiCount
+	ret.lastTransferLeaderTime = stat.lastTransferLeaderTime
+	ret.isLeader = stat.isLeader
+	ret.actionType = stat.actionType
+	ret.inCold = stat.inCold
+	ret.allowInherited = stat.allowInherited
+	if len(ret.Loads) != DimLen {
+		ret.Loads = make([]float64, DimLen)
+	}
 	for i := 0; i < DimLen; i++ {
 		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil
-	return &ret
+	return ret
 }
 
 func (stat *HotPeerStat) isHot(thresholds []float64) bool {
@@ -191,4 +204,27 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 // GetStores returns the stores of all peers in the region.
 func (stat *HotPeerStat) GetStores() []uint64 {
 	return stat.stores
+}
+
+func (stat *HotPeerStat) updateLoads(kind RWType, loads []float64, interval uint64) {
+	if len(stat.Loads) != DimLen {
+		stat.Loads = make([]float64, DimLen)
+	}
+	for dim, k := range kind.RegionStats() {
+		if loads == nil {
+			stat.Loads[dim] = 0
+			continue
+		}
+		stat.Loads[dim] = loads[k] / float64(interval)
+	}
+}
+
+func (stat *HotPeerStat) updateStores(region *core.RegionInfo) {
+	peers := region.GetPeers()
+	if len(stat.stores) != len(peers) {
+		stat.stores = make([]uint64, len(peers))
+	}
+	for i, peer := range peers {
+		stat.stores[i] = peer.GetStoreId()
+	}
 }
