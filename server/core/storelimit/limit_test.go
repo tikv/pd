@@ -35,5 +35,4 @@ func TestStoreLimit(t *testing.T) {
 	limit.Reset(0, AddPeer)
 	re.True(limit.Available(influence, AddPeer))
 	re.True(limit.Take(influence, AddPeer))
-
 }

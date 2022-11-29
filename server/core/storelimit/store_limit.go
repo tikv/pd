@@ -23,14 +23,39 @@ const (
 	SmallRegionThreshold int64 = 20
 	// Unlimited is used to control the store limit. Here uses a big enough number to represent unlimited.
 	Unlimited = float64(100000000)
+	// influence is the influence of a normal region.
+	influence = 1000
+	// smallInfluence is the influence of a small region.
+	smallInfluence = 200
 )
-
-const influence = 1000
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
 var RegionInfluence = []int64{
 	AddPeer:    influence,
 	RemovePeer: influence,
+}
+
+// SmallRegionInfluence represents the influence of a operator step
+// when the region size is smaller than smallRegionThreshold, which is used by store limit.
+var SmallRegionInfluence = []int64{
+	AddPeer:    smallInfluence,
+	RemovePeer: smallInfluence,
+}
+
+// TypeNameValue indicates the name of store limit type and the enum value
+var TypeNameValue = map[string]Type{
+	"add-peer":    AddPeer,
+	"remove-peer": RemovePeer,
+}
+
+// String returns the representation of the Type
+func (t Type) String() string {
+	for n, v := range TypeNameValue {
+		if v == t {
+			return n
+		}
+	}
+	return ""
 }
 
 var _ StoreLimit = &StoreRateLimit{}
@@ -68,35 +93,13 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 	l.limits[typ].Reset(rate)
 }
 
-// SmallRegionInfluence represents the influence of a operator step
-// when the region size is smaller than smallRegionThreshold, which is used by store limit.
-var SmallRegionInfluence = []int64{
-	AddPeer:    200,
-	RemovePeer: 200,
-}
-
-// TypeNameValue indicates the name of store limit type and the enum value
-var TypeNameValue = map[string]Type{
-	"add-peer":    AddPeer,
-	"remove-peer": RemovePeer,
-}
-
-// String returns the representation of the Type
-func (t Type) String() string {
-	for n, v := range TypeNameValue {
-		if v == t {
-			return n
-		}
-	}
-	return ""
-}
-
-// limit  the operators of a store
+// limit the operators of a store
 type limit struct {
 	limiter    *ratelimit.RateLimiter
 	ratePerSec float64
 }
 
+// Reset resets the rate limit.
 func (l *limit) Reset(ratePerSec float64) {
 	if l.ratePerSec == ratePerSec {
 		return
@@ -119,7 +122,7 @@ func (l *limit) Reset(ratePerSec float64) {
 // Available returns the number of available tokens
 // It returns true if the rate per second is zero.
 func (l *limit) Available(n int64) bool {
-	if l == nil || l.ratePerSec == 0 {
+	if l.ratePerSec == 0 {
 		return true
 	}
 	// Unlimited = 1e8, so can convert int64 to int
@@ -128,7 +131,7 @@ func (l *limit) Available(n int64) bool {
 
 // Take takes count tokens from the bucket without blocking.
 func (l *limit) Take(count int64) bool {
-	if l == nil || l.ratePerSec == 0 {
+	if l.ratePerSec == 0 {
 		return true
 	}
 	return l.limiter.AllowN(int(count))
