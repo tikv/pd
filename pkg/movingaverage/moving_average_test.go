@@ -15,11 +15,13 @@
 package movingaverage
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
 	"time"
 
+	"github.com/montanaflynn/stats"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,7 +45,25 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 	re.Len(data, len(expected))
 	for i, x := range data {
 		ma.Add(x)
+		fmt.Println("                 ", i, x, ma.Get())
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
+	}
+}
+
+// checkMedianAdd checks MedianFilter Add works properly.
+func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int) {
+	statsMedianFunc := func(a []float64) float64 {
+		median, _ := stats.Median(a)
+		return median
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	for i := 0; i < n; i++ {
+		ma.Add(rand.Float64() * 1000)
+		result1 := ma.Get()
+		result2 := statsMedianFunc(ma.GetAll())
+		fmt.Println(i, ma.records, result1, result2)
+		re.LessOrEqual(math.Abs(result1-result2), 1e-7)
 	}
 }
 
@@ -70,6 +90,13 @@ func checkInstantaneous(re *require.Assertions, ma MovingAvg) {
 	re.Equal(value, ma.GetInstantaneous())
 }
 
+func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
+	b.StopTimer()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+	}
+}
+
 func TestMedianFilter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
@@ -83,6 +110,41 @@ func TestMedianFilter(t *testing.T) {
 	checkReset(re, mf, empty)
 	checkAdd(re, mf, data, expected)
 	checkSet(re, mf, data, expected)
+}
+
+func TestMedianFilterAdd(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	var empty float64 = 0
+	data := []float64{2, 4, 2, 800, 600, 6, 3, 3, 3, 3, 3, 3, 3, 3, 3}
+	expected := []float64{2, 3, 2, 3, 4, 5, 4, 3.5, 3, 3, 3, 3, 3, 3, 3}
+
+	mf := NewMedianFilter(10)
+	re.Equal(empty, mf.Get())
+	checkAdd(re, mf, data, expected)
+}
+
+func TestMedianFilterResultByStatsMedian(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	var empty float64 = 0
+
+	mf := NewMedianFilter(5)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000)
+
+	mf = NewMedianFilter(10)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000)
+
+	mf = NewMedianFilter(1)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000)
+
+	mf = NewMedianFilter(100)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000)
+
 }
 
 type testCase struct {

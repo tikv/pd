@@ -14,7 +14,10 @@
 
 package movingaverage
 
-import "github.com/montanaflynn/stats"
+import (
+	"fmt"
+	"math"
+)
 
 // MedianFilter works as a median filter with specified window size.
 // There are at most `size` data points for calculating.
@@ -24,6 +27,8 @@ type MedianFilter struct {
 	size          uint64
 	count         uint64
 	instantaneous float64
+	g             uint64
+	median        float64
 }
 
 // NewMedianFilter returns a MedianFilter.
@@ -35,29 +40,206 @@ func NewMedianFilter(size int) *MedianFilter {
 }
 
 // Add adds a data point.
+// func (r *MedianFilter) Add(n float64) {
+// 	r.instantaneous = n
+// 	// 需要 pop
+// 	if r.count >= r.size {
+// 		pop := r.records[r.count%r.size]
+// 		// pop 的是 median
+// 		if r.count%r.size == r.median {
+// 			r.records[r.count%r.size] = n
+// 			r.count++
+// 			if n >= pop {
+// 				// 找大于等于 pop 的最小数
+// 				for i := uint64(0); i < r.size; i++ {
+// 					if r.records[i] >= pop && r.records[r.median] > r.records[i] {
+// 						r.median = i
+// 					}
+// 				}
+// 			} else {
+// 				// 找小于 pop 的最大数
+// 				for i := uint64(0); i < r.size; i++ {
+// 					if r.records[i] < pop && r.records[r.median] < r.records[i] {
+// 						r.median = i
+// 					}
+// 				}
+// 			}
+// 		} else {
+// 			r.records[r.count%r.size] = n
+// 			r.count++
+// 			if n >= r.records[r.median] {
+// 				if pop < r.records[r.median] {
+// 					min := r.median
+// 					for i := uint64(0); i < r.size; i++ {
+// 						if i != r.median && r.records[i] >= r.records[r.median] && r.records[min] > r.records[i] {
+// 							min = i
+// 						}
+// 					}
+// 					r.median = min
+// 				}
+// 			} else {
+// 				if pop >= r.records[r.median] {
+// 					max := r.median
+// 					for i := uint64(0); i < r.size; i++ {
+// 						if i != r.median && r.records[i] >= r.records[r.median] && r.records[max] > r.records[i] {
+// 							max = i
+// 						}
+// 					}
+// 					r.median = max
+// 				}
+// 			}
+// 		}
+
+//		} else {
+//			// 先简单处理一下
+//			r.instantaneous = n
+//			r.records[r.count%r.size] = n
+//			r.count++
+//			records := r.records[:r.count]
+//			median, _ := stats.Median(records)
+//			for i := uint64(0); i < r.count; i++ {
+//				if r.records[i] < median+1e-8 && r.records[i] > median-1e-8 {
+//					r.median = i
+//				}
+//			}
+//		}
+//	}
+
+func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
+	len := r.size
+	if r.count < r.size {
+		len = r.count
+	}
+	first = math.MaxFloat64
+	second = math.MaxFloat64
+	var pos uint64
+	//fmt.Println("findTwoMinNumber : ")
+	for i := uint64(0); i < len; i++ {
+		//fmt.Println(r.records[i], r.median, first, r.records[i] > r.median, r.records[i] < first)
+		if r.records[i] > r.median && r.records[i] < first {
+			first = r.records[i]
+			pos = i
+		}
+	}
+	for i := uint64(0); i < len; i++ {
+		if i != pos && r.records[i] > r.median && r.records[i] < second {
+			second = r.records[i]
+		}
+	}
+	return
+}
+
+func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
+	len := r.size
+	if r.count < r.size {
+		len = r.count
+	}
+	first = -math.MaxFloat64
+	second = -math.MaxFloat64
+	var pos uint64
+	for i := uint64(0); i < len; i++ {
+		if r.records[i] <= r.median && r.records[i] > first {
+			first = r.records[i]
+			pos = i
+		}
+	}
+	for i := uint64(0); i < len; i++ {
+		if i != pos && r.records[i] <= r.median && r.records[i] > second {
+			second = r.records[i]
+		}
+	}
+	return
+}
+
 func (r *MedianFilter) Add(n float64) {
 	r.instantaneous = n
+	fmt.Println(" begin ", r.g, r.median)
+	if r.count >= r.size {
+		pop := r.records[r.count%r.size]
+		if pop > r.median {
+			r.g--
+		}
+		fmt.Println(" pop ", pop)
+	}
 	r.records[r.count%r.size] = n
 	r.count++
+	len := r.count
+	if r.count > r.size {
+		len = r.size
+	}
+	if n > r.median {
+		r.g++
+	}
+	fmt.Println(" end ", n, r.g, r.median, len)
+	if len%2 == 0 {
+		if r.g > len/2 {
+			g1, g2 := r.findTwoMinNumber()
+			r.median = (g1 + g2) / 2
+			r.g = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				}
+			}
+			return
+		} else if r.g == len/2 {
+			g1, _ := r.findTwoMinNumber()
+			l1, _ := r.findTwoMaxNumber()
+			r.median = (l1 + g1) / 2
+		} else {
+			l1, l2 := r.findTwoMaxNumber()
+			r.median = (l1 + l2) / 2
+			r.g = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				}
+			}
+			return
+		}
+	} else {
+		if r.g > len/2 {
+			g1, _ := r.findTwoMinNumber()
+			r.median = g1
+			r.g = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				}
+			}
+		} else if r.g < len/2 {
+			_, l2 := r.findTwoMaxNumber()
+			r.median = l2
+			r.g = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				}
+			}
+		} else {
+			l1, _ := r.findTwoMaxNumber()
+			r.median = l1
+			r.g = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				}
+			}
+		}
+	}
 }
 
 // Get returns the median of the data set.
 func (r *MedianFilter) Get() float64 {
-	if r.count == 0 {
-		return 0
-	}
-	records := r.records
-	if r.count < r.size {
-		records = r.records[:r.count]
-	}
-	median, _ := stats.Median(records)
-	return median
+	return r.median
 }
 
 // Reset cleans the data set.
 func (r *MedianFilter) Reset() {
 	r.instantaneous = 0
 	r.count = 0
+	r.median = 0
+	r.g = 0
 }
 
 // Set = Reset + Add.
@@ -65,6 +247,8 @@ func (r *MedianFilter) Set(n float64) {
 	r.instantaneous = n
 	r.records[0] = n
 	r.count = 1
+	r.median = n
+	r.g = 0
 }
 
 // GetInstantaneous returns the value just added.
@@ -82,4 +266,16 @@ func (r *MedianFilter) Clone() *MedianFilter {
 		count:         r.count,
 		instantaneous: r.instantaneous,
 	}
+}
+
+// GetAll only used in test
+func (r *MedianFilter) GetAll() []float64 {
+	if r.count == 0 {
+		return nil
+	}
+	records := r.records
+	if r.count < r.size {
+		records = r.records[:r.count]
+	}
+	return records
 }
