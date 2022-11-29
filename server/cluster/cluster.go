@@ -63,6 +63,8 @@ var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
+	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
+	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -73,8 +75,10 @@ const (
 	nodeStateCheckJobInterval = 10 * time.Second
 	// metricsCollectionJobInterval is the interval to run metrics collection job.
 	metricsCollectionJobInterval = 10 * time.Second
+	updateStoreStatsInterval     = 9 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
+	gcTombstoreInterval          = 30 * 24 * time.Hour
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes = 5
@@ -277,7 +281,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	c.wg.Add(8)
+	c.wg.Add(9)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -286,6 +290,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
+	go c.runUpdateStoreStats()
 	c.running = true
 
 	return nil
@@ -441,6 +446,33 @@ func (c *RaftCluster) runStatsBackgroundJobs() {
 	}
 }
 
+func (c *RaftCluster) runUpdateStoreStats() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(updateStoreStatsInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("update store stats background jobs has been stopped")
+			return
+		case <-ticker.C:
+			// Update related stores.
+			start := time.Now()
+			stores := c.GetStores()
+			for _, store := range stores {
+				if store.IsRemoved() {
+					continue
+				}
+				c.core.UpdateStoreStatus(store.GetID())
+			}
+			updateStoreStatsGauge.Set(time.Since(start).Seconds())
+		}
+	}
+}
+
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -523,6 +555,16 @@ func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
 // GetMergeChecker returns merge checker.
 func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 	return c.coordinator.checkers.GetMergeChecker()
+}
+
+// GetRuleChecker returns rule checker.
+func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
+	return c.coordinator.checkers.GetRuleChecker()
+}
+
+// RecordOpStepWithTTL records OpStep with TTL
+func (c *RaftCluster) RecordOpStepWithTTL(regionID uint64) {
+	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
 }
 
 // GetSchedulers gets all schedulers.
@@ -670,7 +712,8 @@ func (c *RaftCluster) ClearSuspectKeyRanges() {
 }
 
 // HandleStoreHeartbeat updates the store status.
-func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
+func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
+	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
 	c.Lock()
 	defer c.Unlock()
@@ -678,7 +721,20 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
 	}
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+
+	nowTime := time.Now()
+	var newStore *core.StoreInfo
+	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
+	if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
+		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime))
+		resp.AwakenRegions = &pdpb.AwakenRegions{
+			AbnormalStores: slowStoreIDs,
+		}
+	} else {
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+	}
+
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
 			zap.Uint64("store-id", storeID),
@@ -689,7 +745,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(stats *pdpb.StoreStats) error {
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
-			newStore = newStore.Clone(core.SetLastPersistTime(time.Now()))
+			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
 	if store := c.core.GetStore(storeID); store != nil {
@@ -795,6 +851,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	c.coordinator.CheckTransferWitnessLeader(region)
 
+	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
@@ -802,7 +859,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
-		if c.regionStats != nil && c.regionStats.RegionStatsNeedUpdate(region) {
+		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 		}
 		return nil
@@ -828,25 +885,10 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			}
 			c.labelLevelStats.ClearDefunctRegion(item.GetID())
 		}
-
-		// Update related stores.
-		storeMap := make(map[uint64]struct{})
-		for _, p := range region.GetPeers() {
-			storeMap[p.GetStoreId()] = struct{}{}
-		}
-		if origin != nil {
-			for _, p := range origin.GetPeers() {
-				storeMap[p.GetStoreId()] = struct{}{}
-			}
-		}
-		for key := range storeMap {
-			c.core.UpdateStoreStatus(key)
-		}
-
-		regionEventCounter.WithLabelValues("update_cache").Inc()
+		regionUpdateCacheEventCounter.Inc()
 	}
 
-	if c.regionStats != nil {
+	if hasRegionStats {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
@@ -874,7 +916,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
 					errs.ZapError(err))
 			}
-			regionEventCounter.WithLabelValues("update_kv").Inc()
+			regionUpdateKVEventCounter.Inc()
 		}
 	}
 
@@ -1374,29 +1416,6 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 	return needAwaken, slowStoreIDs
 }
 
-// UpdateAwakenStoreTime updates the last awaken time for the store.
-func (c *RaftCluster) UpdateAwakenStoreTime(storeID uint64, lastAwakenTime time.Time) error {
-	c.Lock()
-	defer c.Unlock()
-
-	store := c.GetStore(storeID)
-	if store == nil {
-		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-
-	if store.IsRemoved() {
-		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
-	}
-
-	if store.IsPhysicallyDestroyed() {
-		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
-	}
-
-	newStore := store.Clone(core.SetLastAwakenTime(lastAwakenTime))
-
-	return c.putStoreLocked(newStore)
-}
-
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
 	c.Lock()
@@ -1515,6 +1534,17 @@ func (c *RaftCluster) checkStores() {
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
+			if store.DownTime() > gcTombstoreInterval {
+				err := c.deleteStore(store)
+				if err != nil {
+					log.Error("auto gc the tombstore store failed",
+						zap.Stringer("store", store.GetMeta()),
+						zap.Duration("down-time", store.DownTime()),
+						errs.ZapError(err))
+				} else {
+					log.Info("auto gc the tombstore store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+				}
+			}
 			continue
 		}
 
@@ -1802,7 +1832,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				continue
 			}
 			// the store has already been tombstone
-			err := c.deleteStoreLocked(store)
+			err := c.deleteStore(store)
 			if err != nil {
 				log.Error("delete store failed",
 					zap.Stringer("store", store.GetMeta()),
@@ -1827,7 +1857,8 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	return nil
 }
 
-func (c *RaftCluster) deleteStoreLocked(store *core.StoreInfo) error {
+// deleteStore deletes the store from the cluster. it's concurrent safe.
+func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	if c.storage != nil {
 		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
 			return err

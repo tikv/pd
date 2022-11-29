@@ -15,12 +15,14 @@
 package checker
 
 import (
+	"context"
 	"errors"
 	"math"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
@@ -29,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -46,23 +49,25 @@ const maxPendingListLen = 100000
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster           schedule.Cluster
-	ruleManager       *placement.RuleManager
-	name              string
-	regionWaitingList cache.Cache
-	pendingList       cache.Cache
-	record            *recorder
+	cluster            schedule.Cluster
+	ruleManager        *placement.RuleManager
+	name               string
+	regionWaitingList  cache.Cache
+	pendingList        cache.Cache
+	switchWitnessCache *cache.TTLUint64
+	record             *recorder
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
-		cluster:           cluster,
-		ruleManager:       ruleManager,
-		name:              "rule-checker",
-		regionWaitingList: regionWaitingList,
-		pendingList:       cache.NewDefaultCache(maxPendingListLen),
-		record:            newRecord(),
+		cluster:            cluster,
+		ruleManager:        ruleManager,
+		name:               "rule-checker",
+		regionWaitingList:  regionWaitingList,
+		pendingList:        cache.NewDefaultCache(maxPendingListLen),
+		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetOpts().GetSwitchWitnessInterval()),
+		record:             newRecord(),
 	}
 }
 
@@ -144,6 +149,17 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	return nil
 }
 
+// RecordRegionPromoteToNonWitness put the recently switch non-witness region into cache. RuleChecker
+// will skip switch it back to witness for a while.
+func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
+	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetOpts().GetSwitchWitnessInterval())
+}
+
+func (c *RuleChecker) isWitnessEnabled() bool {
+	return versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
+		c.cluster.GetOpts().IsWitnessAllowed()
+}
+
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
@@ -152,8 +168,17 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
 		if c.isDownPeer(region, peer) {
-			checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			if c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
+				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
+				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+			}
+			// When witness placement rule is enabled, promotes the witness to voter when region has down peer.
+			if c.isWitnessEnabled() {
+				if witness, ok := c.hasAvailableWitness(region, peer); ok {
+					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
+					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+				}
+			}
 		}
 		if c.isOfflinePeer(peer) {
 			checkerCounter.WithLabelValues("rule_checker", "replace-offline").Inc()
@@ -182,7 +207,11 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToAdd
 	}
-	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
+	isWitness := rf.Rule.IsWitness
+	if !c.isWitnessEnabled() {
+		isWitness = false
+	}
+	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
 	if err != nil {
 		return nil, err
@@ -200,7 +229,20 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
+	var isWitness bool
+	if c.isWitnessEnabled() {
+		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
+		// exceeds the threshold(30min), add a witness and remove the down peer. Then witness is
+		// promoted to non-witness gradually to improve availability.
+		if status == "down" {
+			isWitness = true
+		} else {
+			isWitness = rf.Rule.IsWitness
+		}
+	} else {
+		isWitness = false
+	}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -270,14 +312,23 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
 		return nil, errPeerCannotBeWitness
 	}
-	if !core.IsWitness(peer) && rf.Rule.IsWitness {
+	if !core.IsWitness(peer) && rf.Rule.IsWitness && c.isWitnessEnabled() {
+		c.switchWitnessCache.UpdateTTL(c.cluster.GetOpts().GetSwitchWitnessInterval())
+		if c.switchWitnessCache.Exists(region.GetID()) {
+			checkerCounter.WithLabelValues("rule_checker", "recently-promote-to-non-witness").Inc()
+			return nil, nil
+		}
+		if len(region.GetPendingPeers()) > 0 {
+			checkerCounter.WithLabelValues("rule_checker", "cancel-switch-to-witness").Inc()
+			return nil, nil
+		}
 		lv := "set-voter-witness"
 		if core.IsLearner(peer) {
 			lv = "set-learner-witness"
 		}
 		checkerCounter.WithLabelValues("rule_checker", lv).Inc()
 		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
-	} else if core.IsWitness(peer) && !rf.Rule.IsWitness {
+	} else if core.IsWitness(peer) && (!rf.Rule.IsWitness || !c.isWitnessEnabled()) {
 		lv := "set-voter-non-witness"
 		if core.IsLearner(peer) {
 			lv = "set-learner-non-witness"
@@ -327,7 +378,11 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		return nil, nil
 	}
 	checkerCounter.WithLabelValues("rule_checker", "move-to-better-location").Inc()
-	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: rf.Rule.IsWitness}
+	isWitness := rf.Rule.IsWitness
+	if !c.isWitnessEnabled() {
+		isWitness = false
+	}
+	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 }
 
@@ -364,22 +419,22 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
 	for _, stats := range region.GetDownPeers() {
-		if stats.GetPeer().GetId() != peer.GetId() {
-			continue
+		if stats.GetPeer().GetId() == peer.GetId() {
+			storeID := peer.GetStoreId()
+			store := c.cluster.GetStore(storeID)
+			if store == nil {
+				log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+				return false
+			}
+			return true
 		}
-		storeID := peer.GetStoreId()
-		store := c.cluster.GetStore(storeID)
-		if store == nil {
-			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
-			return false
-		}
-		// Only consider the state of the Store, not `stats.DownSeconds`.
-		if store.DownTime() < c.cluster.GetOpts().GetMaxStoreDownTime() {
-			continue
-		}
-		return true
 	}
 	return false
+}
+
+func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
+	store := c.cluster.GetStore(storeID)
+	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
@@ -389,6 +444,28 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 		return false
 	}
 	return !store.IsPreparing() && !store.IsServing()
+}
+
+func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {
+	witnesses := region.GetWitnesses()
+	if len(witnesses) == 0 {
+		return nil, false
+	}
+	isAvailable := func(downPeers []*pdpb.PeerStats, witness *metapb.Peer) bool {
+		for _, stats := range downPeers {
+			if stats.GetPeer().GetId() == witness.GetId() {
+				return false
+			}
+		}
+		return c.cluster.GetStore(witness.GetStoreId()) != nil
+	}
+	downPeers := region.GetDownPeers()
+	for _, witness := range witnesses {
+		if witness.GetId() != peer.GetId() && isAvailable(downPeers, witness) {
+			return witness, true
+		}
+	}
+	return nil, false
 }
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {

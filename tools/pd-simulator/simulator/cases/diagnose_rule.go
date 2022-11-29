@@ -66,11 +66,8 @@ func newRule1() *Case {
 	for i := 0; i < storeNum; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id,
-			Status:    metapb.StoreState_Up,
-			Capacity:  1000 * units.GiB,
-			Available: 500 * units.GiB,
-			Version:   "2.1.0",
+			ID:     id,
+			Status: metapb.StoreState_Up,
 		})
 	}
 	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}, {Key: "idc", Value: "idc1"}}
@@ -154,11 +151,8 @@ func newRule2() *Case {
 	for i := 0; i < storeNum; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id,
-			Status:    metapb.StoreState_Up,
-			Capacity:  1000 * units.GiB,
-			Available: 500 * units.GiB,
-			Version:   "2.1.0",
+			ID:     id,
+			Status: metapb.StoreState_Up,
 		})
 	}
 	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}

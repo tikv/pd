@@ -38,7 +38,7 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
-	// Include peer addition or removal. This means that this operator may take a long time.
+	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
 	OpLeader

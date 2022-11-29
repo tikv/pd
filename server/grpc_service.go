@@ -635,13 +635,14 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}, nil
 	}
 
+	resp := &pdpb.StoreHeartbeatResponse{Header: s.header()}
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
 
-		err := rc.HandleStoreHeartbeat(request.GetStats())
+		err := rc.HandleStoreHeartbeat(request, resp)
 		if err != nil {
 			return &pdpb.StoreHeartbeatResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
@@ -658,27 +659,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
 	}
 
-	resp := &pdpb.StoreHeartbeatResponse{
-		Header:            s.header(),
-		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
-		ClusterVersion:    rc.GetClusterVersion(),
-	}
+	resp.ReplicationStatus = rc.GetReplicationMode().GetReplicationStatus()
+	resp.ClusterVersion = rc.GetClusterVersion()
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 
-	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
-	// TODO: waited to be polished. It's recommended to merge following AwakenRegions checking
-	// and UpdateAwakenStoreTime into HandlStoreHeartbeat.
-	if needAwaken, slowStoreIDs := rc.NeedAwakenAllRegionsInStore(storeID); needAwaken {
-		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
-		err := rc.UpdateAwakenStoreTime(storeID, time.Now())
-		if err != nil {
-			log.Warn("failed to awaken hibernated regions in store", zap.Uint64("store-id", storeID))
-		} else {
-			resp.AwakenRegions = &pdpb.AwakenRegions{
-				AbnormalStores: slowStoreIDs,
-			}
-		}
-	}
 	return resp, nil
 }
 

@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/montanaflynn/stats"
+	"github.com/elliotchance/pie/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +53,7 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 // checkMedianAdd checks MedianFilter Add works properly.
 func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int) {
 	statsMedianFunc := func(a []float64) float64 {
-		median, _ := stats.Median(a)
+		median := pie.Median(a)
 		return median
 	}
 
