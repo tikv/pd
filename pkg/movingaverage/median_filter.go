@@ -15,7 +15,6 @@
 package movingaverage
 
 import (
-	"fmt"
 	"math"
 )
 
@@ -39,72 +38,6 @@ func NewMedianFilter(size int) *MedianFilter {
 	}
 }
 
-// Add adds a data point.
-// func (r *MedianFilter) Add(n float64) {
-// 	r.instantaneous = n
-// 	// 需要 pop
-// 	if r.count >= r.size {
-// 		pop := r.records[r.count%r.size]
-// 		// pop 的是 median
-// 		if r.count%r.size == r.median {
-// 			r.records[r.count%r.size] = n
-// 			r.count++
-// 			if n >= pop {
-// 				// 找大于等于 pop 的最小数
-// 				for i := uint64(0); i < r.size; i++ {
-// 					if r.records[i] >= pop && r.records[r.median] > r.records[i] {
-// 						r.median = i
-// 					}
-// 				}
-// 			} else {
-// 				// 找小于 pop 的最大数
-// 				for i := uint64(0); i < r.size; i++ {
-// 					if r.records[i] < pop && r.records[r.median] < r.records[i] {
-// 						r.median = i
-// 					}
-// 				}
-// 			}
-// 		} else {
-// 			r.records[r.count%r.size] = n
-// 			r.count++
-// 			if n >= r.records[r.median] {
-// 				if pop < r.records[r.median] {
-// 					min := r.median
-// 					for i := uint64(0); i < r.size; i++ {
-// 						if i != r.median && r.records[i] >= r.records[r.median] && r.records[min] > r.records[i] {
-// 							min = i
-// 						}
-// 					}
-// 					r.median = min
-// 				}
-// 			} else {
-// 				if pop >= r.records[r.median] {
-// 					max := r.median
-// 					for i := uint64(0); i < r.size; i++ {
-// 						if i != r.median && r.records[i] >= r.records[r.median] && r.records[max] > r.records[i] {
-// 							max = i
-// 						}
-// 					}
-// 					r.median = max
-// 				}
-// 			}
-// 		}
-
-//		} else {
-//			// 先简单处理一下
-//			r.instantaneous = n
-//			r.records[r.count%r.size] = n
-//			r.count++
-//			records := r.records[:r.count]
-//			median, _ := stats.Median(records)
-//			for i := uint64(0); i < r.count; i++ {
-//				if r.records[i] < median+1e-8 && r.records[i] > median-1e-8 {
-//					r.median = i
-//				}
-//			}
-//		}
-//	}
-
 func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
 	len := r.size
 	if r.count < r.size {
@@ -113,9 +46,7 @@ func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
 	first = math.MaxFloat64
 	second = math.MaxFloat64
 	var pos uint64
-	//fmt.Println("findTwoMinNumber : ")
 	for i := uint64(0); i < len; i++ {
-		//fmt.Println(r.records[i], r.median, first, r.records[i] > r.median, r.records[i] < first)
 		if r.records[i] > r.median && r.records[i] < first {
 			first = r.records[i]
 			pos = i
@@ -151,15 +82,14 @@ func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
 	return
 }
 
+// Add adds a data point.
 func (r *MedianFilter) Add(n float64) {
 	r.instantaneous = n
-	fmt.Println(" begin ", r.g, r.median)
 	if r.count >= r.size {
 		pop := r.records[r.count%r.size]
 		if pop > r.median {
 			r.g--
 		}
-		fmt.Println(" pop ", pop)
 	}
 	r.records[r.count%r.size] = n
 	r.count++
@@ -170,7 +100,6 @@ func (r *MedianFilter) Add(n float64) {
 	if n > r.median {
 		r.g++
 	}
-	fmt.Println(" end ", n, r.g, r.median, len)
 	if len%2 == 0 {
 		if r.g > len/2 {
 			g1, g2 := r.findTwoMinNumber()

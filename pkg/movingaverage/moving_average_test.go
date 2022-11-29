@@ -15,7 +15,6 @@
 package movingaverage
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -45,7 +44,6 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 	re.Len(data, len(expected))
 	for i, x := range data {
 		ma.Add(x)
-		fmt.Println("                 ", i, x, ma.Get())
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
 	}
 }
@@ -62,7 +60,6 @@ func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int) {
 		ma.Add(rand.Float64() * 1000)
 		result1 := ma.Get()
 		result2 := statsMedianFunc(ma.GetAll())
-		fmt.Println(i, ma.records, result1, result2)
 		re.LessOrEqual(math.Abs(result1-result2), 1e-7)
 	}
 }
