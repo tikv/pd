@@ -49,17 +49,22 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 }
 
 // checkMedianAdd checks MedianFilter Add works properly.
-func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int) {
+func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int, rate float64) {
 	statsMedianFunc := func(a []float64) float64 {
 		median := pie.Median(a)
 		return median
 	}
 
 	rand.Seed(time.Now().UnixNano())
+	last := rand.Float64()
 	for i := 0; i < n; i++ {
-		ma.Add(rand.Float64() * 1000)
+		if rand.Float64() < rate {
+			last = rand.Float64()
+		}
+		ma.Add(last)
 		result1 := ma.Get()
 		result2 := statsMedianFunc(ma.GetAll())
+		//fmt.Println(i, last, ma.GetAll(), result1, result2)
 		re.LessOrEqual(math.Abs(result1-result2), 1e-7)
 	}
 }
@@ -85,13 +90,6 @@ func checkInstantaneous(re *require.Assertions, ma MovingAvg) {
 	value := 100.000000
 	ma.Add(value)
 	re.Equal(value, ma.GetInstantaneous())
-}
-
-func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
-	b.StopTimer()
-	b.StartTimer()
-	for i := 0; i < b.N; i++ {
-	}
 }
 
 func TestMedianFilter(t *testing.T) {
@@ -126,21 +124,29 @@ func TestMedianFilterResultByStatsMedian(t *testing.T) {
 	re := require.New(t)
 	var empty float64 = 0
 
-	mf := NewMedianFilter(5)
+	mf := NewMedianFilter(10)
 	re.Equal(empty, mf.Get())
-	checkMedianAdd(re, mf, 100000)
+	checkMedianAdd(re, mf, 100000, 0.4)
+
+	mf = NewMedianFilter(5)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 0.5)
 
 	mf = NewMedianFilter(10)
 	re.Equal(empty, mf.Get())
-	checkMedianAdd(re, mf, 100000)
+	checkMedianAdd(re, mf, 100000, 1)
+
+	mf = NewMedianFilter(5)
+	re.Equal(empty, mf.Get())
+	checkMedianAdd(re, mf, 100000, 1)
 
 	mf = NewMedianFilter(1)
 	re.Equal(empty, mf.Get())
-	checkMedianAdd(re, mf, 100000)
+	checkMedianAdd(re, mf, 100, 1)
 
-	mf = NewMedianFilter(100)
+	mf = NewMedianFilter(1000)
 	re.Equal(empty, mf.Get())
-	checkMedianAdd(re, mf, 100000)
+	checkMedianAdd(re, mf, 100000, 0.2)
 
 }
 

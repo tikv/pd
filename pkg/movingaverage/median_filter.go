@@ -27,6 +27,7 @@ type MedianFilter struct {
 	count         uint64
 	instantaneous float64
 	g             uint64
+	l             uint64
 	median        float64
 }
 
@@ -69,13 +70,13 @@ func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
 	second = -math.MaxFloat64
 	var pos uint64
 	for i := uint64(0); i < len; i++ {
-		if r.records[i] <= r.median && r.records[i] > first {
+		if r.records[i] < r.median && r.records[i] > first {
 			first = r.records[i]
 			pos = i
 		}
 	}
 	for i := uint64(0); i < len; i++ {
-		if i != pos && r.records[i] <= r.median && r.records[i] > second {
+		if i != pos && r.records[i] < r.median && r.records[i] > second {
 			second = r.records[i]
 		}
 	}
@@ -86,48 +87,122 @@ func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
 func (r *MedianFilter) Add(n float64) {
 	r.instantaneous = n
 	if r.count >= r.size {
-		pop := r.records[r.count%r.size]
-		if pop > r.median {
-			r.g--
+		pos := r.records[r.count%r.size]
+		r.records[r.count%r.size] = n
+		r.count++
+		if pos > r.median {
+			if n > r.median {
+			} else if n == r.median {
+				r.g--
+			} else {
+				r.g--
+				r.l++
+			}
+		} else if pos < r.median {
+			if n < r.median {
+			} else if n == r.median {
+				r.l--
+			} else {
+				r.l--
+				r.g++
+			}
+		} else {
+			if n > r.median {
+				r.g++
+			} else if n < r.median {
+				r.l++
+			}
 		}
+	} else {
+		if n > r.median {
+			r.g++
+		} else if n < r.median {
+			r.l++
+		}
+		r.records[r.count%r.size] = n
+		r.count++
 	}
-	r.records[r.count%r.size] = n
-	r.count++
 	len := r.count
 	if r.count > r.size {
 		len = r.size
-	}
-	if n > r.median {
-		r.g++
 	}
 	if len%2 == 0 {
 		if r.g > len/2 {
 			g1, g2 := r.findTwoMinNumber()
 			r.median = (g1 + g2) / 2
 			r.g = 0
+			r.l = 0
 			for i := uint64(0); i < len; i++ {
 				if r.records[i] > r.median {
 					r.g++
+				} else if r.records[i] < r.median {
+					r.l++
 				}
 			}
-			return
 		} else if r.g == len/2 {
 			g1, _ := r.findTwoMinNumber()
+			if r.l < len/2 {
+				r.median = (r.median + g1) / 2
+			} else {
+				l1, _ := r.findTwoMaxNumber()
+				r.median = (l1 + g1) / 2
+			}
+			r.g = 0
+			r.l = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				} else if r.records[i] < r.median {
+					r.l++
+				}
+			}
+		} else if r.l == len/2 {
 			l1, _ := r.findTwoMaxNumber()
-			r.median = (l1 + g1) / 2
-		} else {
+			if r.g < len/2 {
+				r.median = (r.median + l1) / 2
+			} else {
+				g1, _ := r.findTwoMinNumber()
+				r.median = (l1 + g1) / 2
+			}
+			r.g = 0
+			r.l = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				} else if r.records[i] < r.median {
+					r.l++
+				}
+			}
+		} else if r.l == len/2+1 {
 			l1, l2 := r.findTwoMaxNumber()
 			r.median = (l1 + l2) / 2
+			r.g = 0
+			r.l = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] > r.median {
+					r.g++
+				} else if r.records[i] < r.median {
+					r.l++
+				}
+			}
+		}
+	} else {
+		if r.l == len/2+1 {
+			l1, _ := r.findTwoMaxNumber()
+			r.median = l1
 			r.g = 0
 			for i := uint64(0); i < len; i++ {
 				if r.records[i] > r.median {
 					r.g++
 				}
 			}
-			return
-		}
-	} else {
-		if r.g > len/2 {
+			r.l = 0
+			for i := uint64(0); i < len; i++ {
+				if r.records[i] < r.median {
+					r.l++
+				}
+			}
+		} else if r.g == len/2+1 {
 			g1, _ := r.findTwoMinNumber()
 			r.median = g1
 			r.g = 0
@@ -136,22 +211,10 @@ func (r *MedianFilter) Add(n float64) {
 					r.g++
 				}
 			}
-		} else if r.g < len/2 {
-			_, l2 := r.findTwoMaxNumber()
-			r.median = l2
-			r.g = 0
+			r.l = 0
 			for i := uint64(0); i < len; i++ {
-				if r.records[i] > r.median {
-					r.g++
-				}
-			}
-		} else {
-			l1, _ := r.findTwoMaxNumber()
-			r.median = l1
-			r.g = 0
-			for i := uint64(0); i < len; i++ {
-				if r.records[i] > r.median {
-					r.g++
+				if r.records[i] < r.median {
+					r.l++
 				}
 			}
 		}
