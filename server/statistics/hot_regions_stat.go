@@ -47,8 +47,8 @@ type HotPeerStatShow struct {
 	LastUpdateTime time.Time `json:"last_update_time"`
 }
 
-// UpdateRegionInfo updates the region information, such as `IsLearner` and `LastUpdateTime`.
-func (h *HotPeerStatShow) UpdateRegionInfo(region *core.RegionInfo) {
+// UpdateHotPeerStatShow updates the region information, such as `IsLearner` and `LastUpdateTime`.
+func (h *HotPeerStatShow) UpdateHotPeerStatShow(region *core.RegionInfo) {
 	if region == nil {
 		return
 	}
