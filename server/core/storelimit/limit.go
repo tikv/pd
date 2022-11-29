@@ -23,7 +23,7 @@ const (
 	// RemovePeer indicates the type of store limit that limits the removing peer rate
 	RemovePeer
 
-	max
+	storeLimitTypeLen
 )
 
 // StoreLimit is an interface to control the operator rate of store
