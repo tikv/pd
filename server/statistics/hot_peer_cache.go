@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"math"
+	"sync"
 	"time"
 
 	"github.com/docker/go-units"
@@ -78,6 +79,7 @@ type hotPeerCache struct {
 	topNTTL           time.Duration
 	taskQueue         chan FlowItemTask
 	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
+	pool              *sync.Pool
 	// TODO: consider to remove store info when store is offline.
 }
 
@@ -91,6 +93,11 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		taskQueue:         make(chan FlowItemTask, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
+		pool: &sync.Pool{
+			New: func() interface{} {
+				return new(dimStat)
+			},
+		},
 	}
 }
 
@@ -416,7 +423,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
+			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone()) // dimStatPool.Get().(*dimStat)
 		}
 		newItem.allowInherited = false
 	} else {
@@ -481,7 +488,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	newItem.actionType = Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
-		ds := newDimStat(k, f.interval())
+		ds := newDimStat(k, f.interval()) // dimStatPool.Get().(*dimStat)
 		ds.Add(deltaLoads[k], interval)
 		if ds.isFull() {
 			ds.clearLastAverage()

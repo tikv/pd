@@ -17,6 +17,7 @@ package statistics
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/tikv/pd/server/core"
 )
