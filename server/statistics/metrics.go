@@ -186,6 +186,13 @@ var (
 			Name:      "pool",
 			Help:      "hot pool",
 		}, []string{"type", "rw", "location"})
+	hotThreshold = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "threshold",
+			Help:      "hot pool",
+		}, []string{"type", "rw", "store"})
 )
 
 var (
@@ -214,4 +221,5 @@ func init() {
 	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 	prometheus.MustRegister(hotPeerSummary)
 	prometheus.MustRegister(hotPool)
+	prometheus.MustRegister(hotThreshold)
 }

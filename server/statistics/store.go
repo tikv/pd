@@ -207,7 +207,7 @@ func (r *RollingStoreStats) Observe(stats *pdpb.StoreStats) {
 func (r *RollingStoreStats) ObserveRegionsStats(writeBytesRate, writeKeysRate float64) {
 	r.Lock()
 	defer r.Unlock()
-	r.movingAvgs[StoreRegionsWriteBytes].Add(writeBytesRate)
+	r.movingAvgs[StoreRegionsWriteBytes].Add(writeBytesRate) // why not use time median?
 	r.movingAvgs[StoreRegionsWriteKeys].Add(writeKeysRate)
 }
 

@@ -15,9 +15,17 @@
 package movingaverage
 
 import (
+	"sync"
+
 	"github.com/phf/go-queue/queue"
 	"github.com/tikv/pd/pkg/syncutil"
 )
+
+var queuePool = sync.Pool{
+	New: func() interface{} {
+		return queue.New()
+	},
+}
 
 // SafeQueue is a concurrency safe queue
 type SafeQueue struct {
@@ -28,7 +36,7 @@ type SafeQueue struct {
 // NewSafeQueue return a SafeQueue
 func NewSafeQueue() *SafeQueue {
 	sq := &SafeQueue{}
-	sq.que = queue.New()
+	sq.que = queuePool.Get().(*queue.Queue)
 	return sq
 }
 
@@ -50,7 +58,7 @@ func (sq *SafeQueue) PopFront() interface{} {
 func (sq *SafeQueue) Clone() *SafeQueue {
 	sq.mu.Lock()
 	defer sq.mu.Unlock()
-	q := queue.New()
+	q := queuePool.Get().(*queue.Queue)
 	for i := 0; i < sq.que.Len(); i++ {
 		v := sq.que.PopFront()
 		sq.que.PushBack(v)
@@ -59,4 +67,11 @@ func (sq *SafeQueue) Clone() *SafeQueue {
 	return &SafeQueue{
 		que: q,
 	}
+}
+
+func GCQueue(sq *SafeQueue) {
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	// sq.que.Init() need
+	queuePool.Put(sq.que)
 }

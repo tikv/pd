@@ -25,14 +25,12 @@ import (
 )
 
 type dimStat struct {
-	typ         RegionStatKind
 	rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
 	lastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
 }
 
 func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
 	return &dimStat{
-		typ:         typ,
 		rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
 		lastAverage: movingaverage.NewAvgOverTime(reportInterval),
 	}
@@ -59,17 +57,31 @@ func (d *dimStat) clearLastAverage() {
 	d.lastAverage.Clear()
 }
 
+func (d *dimStat) clear() {
+	d.lastAverage.Clear()
+	d.rolling.Clear()
+}
+
 func (d *dimStat) Get() float64 {
 	return d.rolling.Get()
 }
 
 func (d *dimStat) Clone() *dimStat {
 	return &dimStat{
-		typ:         d.typ,
 		rolling:     d.rolling.Clone(),
 		lastAverage: d.lastAverage.Clone(),
 	}
 }
+
+func GCDimStat(d *dimStat) {
+	movingaverage.GCAvgOverTime(d.lastAverage)
+	movingaverage.GCTimeMedian(d.rolling)
+}
+
+// func (d *dimStat) CopyFrom(from *dimStat) {
+// 	d.rolling.CopyFrom(from.rolling)
+// 	d.lastAverage.CopyFrom(from.lastAverage)
+// }
 
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
@@ -118,7 +130,6 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Float64s("loads-instant", stat.Loads),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.Bool("allow-inherited", stat.allowInherited),
 		zap.String("action-type", stat.actionType.String()),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
@@ -194,13 +205,6 @@ func (stat *HotPeerStat) clearLastAverage() {
 	}
 }
 
-func (stat *HotPeerStat) getIntervalSum() time.Duration {
-	if len(stat.rollingLoads) == 0 || stat.rollingLoads[0] == nil {
-		return 0
-	}
-	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
-}
-
 // GetStores returns the stores of all peers in the region.
 func (stat *HotPeerStat) GetStores() []uint64 {
 	return stat.stores
@@ -227,4 +231,15 @@ func (stat *HotPeerStat) updateStores(region *core.RegionInfo) {
 	for i, peer := range peers {
 		stat.stores[i] = peer.GetStoreId()
 	}
+}
+
+func (stat *HotPeerStat) Kind() RWType {
+	if len(stat.rollingLoads) == 0 {
+		return Write
+	}
+	k := stat.rollingLoads[0].rolling.Interval()
+	if k == ReadReportInterval {
+		return Read
+	}
+	return Write
 }

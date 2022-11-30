@@ -28,14 +28,43 @@ var hotPeerStatPool *sync.Pool = &sync.Pool{
 	},
 }
 
+var readDimStatPool *sync.Pool = &sync.Pool{
+	New: func() interface{} {
+		return new(dimStat)
+	},
+}
+
+var writeDimStatPool *sync.Pool = &sync.Pool{
+	New: func() interface{} {
+		return new(dimStat)
+	},
+}
+
 // HotPeerStatGC collects the hot peer stat from schedulers.
 func HotPeerStatGC(stLoadInfos map[uint64]*StoreLoadDetail) {
 	for _, load := range stLoadInfos {
 		for _, hotPeer := range load.HotPeers {
-			hotPeerStatPool.Put(hotPeer)
+			collectPool(hotPeer.Kind(), hotPeer)
 			hotPool.WithLabelValues("peer_scheduler", "put", "gc").Inc()
 		}
 	}
+}
+
+func collectPool(kind RWType, item *HotPeerStat) {
+	// switch kind {
+	// case Read:
+	// 	for _, r := range item.rollingLoads {
+	// 		readDimStatPool.Put(r)
+	// 	}
+	// case Write:
+	// 	for _, r := range item.rollingLoads {
+	// 		writeDimStatPool.Put(r)
+	// 	}
+	// }
+	// for _, r := range item.rollingLoads {
+	// 	GCDimStat(r)
+	// }
+	// hotPeerStatPool.Put(item)
 }
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.

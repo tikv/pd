@@ -16,7 +16,6 @@ package statistics
 
 import (
 	"math"
-	"sync"
 	"time"
 
 	"github.com/docker/go-units"
@@ -79,7 +78,6 @@ type hotPeerCache struct {
 	topNTTL           time.Duration
 	taskQueue         chan FlowItemTask
 	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
-	pool              *sync.Pool
 	// TODO: consider to remove store info when store is offline.
 }
 
@@ -93,11 +91,6 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		taskQueue:         make(chan FlowItemTask, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
-		pool: &sync.Pool{
-			New: func() interface{} {
-				return new(dimStat)
-			},
-		},
 	}
 }
 
@@ -318,6 +311,10 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	for i := range t.rates {
 		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
 	}
+	hotThreshold.WithLabelValues("threshold_byte", f.kind.String(), storeTag(storeID)).Set(t.rates[ByteDim])
+	hotThreshold.WithLabelValues("threshold_key", f.kind.String(), storeTag(storeID)).Set(t.rates[KeyDim])
+	hotThreshold.WithLabelValues("threshold_query", f.kind.String(), storeTag(storeID)).Set(t.rates[QueryDim])
+	hotThreshold.WithLabelValues("topn", f.kind.String(), storeTag(storeID)).Set(float64(tn.Len()))
 	return t.rates
 }
 
@@ -486,6 +483,14 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	newItem.actionType = Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
+		// var ds *dimStat
+		// switch f.kind {
+		// case Read:
+		// 	ds = readDimStatPool.Get().(*dimStat)
+		// case Write:
+		// 	ds = writeDimStatPool.Get().(*dimStat)
+		// }
+		// ds.clear()
 		ds := newDimStat(k, f.interval()) // dimStatPool.Get().(*dimStat)
 		ds.Add(deltaLoads[k], interval)
 		if ds.isFull() {
@@ -519,8 +524,8 @@ func (f *hotPeerCache) putItem(item *HotPeerStat) {
 
 func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	if peers, ok := f.peersOfStore[item.StoreID]; ok {
-		item := peers.Remove(item.RegionID)
-		hotPeerStatPool.Put(item)
+		item := peers.Remove(item.RegionID).(*HotPeerStat)
+		collectPool(f.kind, item)
 		hotPool.WithLabelValues("peer_statistic", "put", "topn_remove").Inc()
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {

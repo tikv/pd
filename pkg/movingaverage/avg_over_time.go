@@ -16,12 +16,9 @@ package movingaverage
 
 import (
 	"time"
-)
 
-type deltaWithInterval struct {
-	delta    float64
-	interval time.Duration
-}
+	"github.com/tikv/pd/pkg/syncutil"
+)
 
 // AvgOverTime maintains change rate in the last avgInterval.
 //
@@ -29,98 +26,100 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *SafeQueue        // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
-	margin      deltaWithInterval // The last element from `PopFront` in `que`
-	deltaSum    float64           // Including `margin` and all elements in `que`
-	intervalSum time.Duration     // Including `margin` and all elements in `que`
-	avgInterval time.Duration
+	syncutil.RWMutex
+	records []float64
+	size    int
+	count   int
+	result  float64
 }
 
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
+	size := int(interval.Seconds())
 	return &AvgOverTime{
-		que: NewSafeQueue(),
-		margin: deltaWithInterval{
-			delta:    0,
-			interval: 0,
-		},
-		deltaSum:    0,
-		intervalSum: 0,
-		avgInterval: interval,
+		records: make([]float64, size),
+		size:    size,
+		count:   0,
+		result:  0,
 	}
 }
 
 // Get returns change rate in the last interval.
 func (aot *AvgOverTime) Get() float64 {
-	if aot.intervalSum < aot.avgInterval {
-		return 0
-	}
-	marginDelta := aot.margin.delta * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds()) / aot.margin.interval.Seconds()
-	return (aot.deltaSum - marginDelta) / aot.avgInterval.Seconds()
+	aot.RLock()
+	defer aot.RUnlock()
+	return aot.result
 }
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	for aot.que.que.Len() > 0 {
-		aot.que.PopFront()
-	}
-	aot.margin = deltaWithInterval{
-		delta:    0,
-		interval: 0,
-	}
-	aot.intervalSum = 0
-	aot.deltaSum = 0
+	aot.Lock()
+	defer aot.Unlock()
+	aot.count = 0
+	aot.result = 0
 }
 
 // Add adds recent change to AvgOverTime.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
+	aot.Lock()
+	defer aot.Unlock()
 	if interval == 0 {
 		return
 	}
-
-	aot.que.PushBack(deltaWithInterval{delta, interval})
-	aot.deltaSum += delta
-	aot.intervalSum += interval
-
-	for aot.intervalSum-aot.margin.interval >= aot.avgInterval {
-		aot.deltaSum -= aot.margin.delta
-		aot.intervalSum -= aot.margin.interval
-		aot.margin = aot.que.PopFront().(deltaWithInterval)
+	for i := 0; i < int(interval.Seconds()); i++ {
+		aot.records[aot.count%aot.size] = delta / interval.Seconds()
+		aot.count++
 	}
+	aot.result = 0
+	for i := 0; i < aot.size; i++ {
+		aot.result += aot.records[i]
+	}
+	aot.result /= float64(aot.size)
 }
 
 // Set sets AvgOverTime to the given average.
 func (aot *AvgOverTime) Set(avg float64) {
 	aot.Clear()
-	aot.margin.delta = avg * aot.avgInterval.Seconds()
-	aot.margin.interval = aot.avgInterval
-	aot.deltaSum = aot.margin.delta
-	aot.intervalSum = aot.avgInterval
-	aot.que.PushBack(deltaWithInterval{delta: aot.deltaSum, interval: aot.intervalSum})
+	for i := 0; i < aot.size; i++ {
+		aot.records[i] = avg
+	}
 }
 
 // IsFull returns whether AvgOverTime is full
 func (aot *AvgOverTime) IsFull() bool {
-	return aot.intervalSum >= aot.avgInterval
+	aot.RLock()
+	defer aot.RUnlock()
+	return aot.count >= aot.size
 }
 
 // Clone returns a copy of AvgOverTime
 func (aot *AvgOverTime) Clone() *AvgOverTime {
-	que := aot.que.Clone()
-	margin := deltaWithInterval{
-		delta:    aot.margin.delta,
-		interval: aot.margin.interval,
+	aot.RLock()
+	defer aot.RUnlock()
+	records := make([]float64, aot.size)
+	for i := 0; i < aot.size; i++ {
+		records[i] = aot.records[i]
 	}
 	return &AvgOverTime{
-		que:         que,
-		margin:      margin,
-		deltaSum:    aot.deltaSum,
-		intervalSum: aot.intervalSum,
-		avgInterval: aot.avgInterval,
+		records: records,
+		size:    aot.size,
+		count:   aot.count,
+		result:  aot.result,
 	}
 }
 
-// GetIntervalSum returns the sum of interval
-func (aot *AvgOverTime) GetIntervalSum() time.Duration {
-	return aot.intervalSum
+// // CopyFrom copies the AvgOverTime from another AvgOverTime
+// func (aot *AvgOverTime) CopyFrom(other *AvgOverTime) {
+// 	aot.que = other.que
+// 	aot.margin = deltaWithInterval{
+// 		delta:    other.margin.delta,
+// 		interval: other.margin.interval,
+// 	}
+// 	aot.deltaSum = other.deltaSum
+// 	aot.intervalSum = other.intervalSum
+// 	aot.avgInterval = other.avgInterval
+// }
+
+func GCAvgOverTime(*AvgOverTime) {
+
 }

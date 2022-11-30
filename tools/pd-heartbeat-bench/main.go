@@ -263,10 +263,10 @@ func (rs *Regions) update(replica int) {
 	// update flow
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
-		region.BytesWritten += bytesUnit
-		region.BytesRead += bytesUnit
-		region.KeysWritten += keysUint
-		region.KeysRead += keysUint
+		region.BytesWritten = uint64(bytesUnit * rand.Float64())
+		region.BytesRead = uint64(bytesUnit * rand.Float64())
+		region.KeysWritten = uint64(keysUint * rand.Float64())
+		region.KeysRead = uint64(keysUint * rand.Float64())
 	}
 	// update interval
 	for _, region := range rs.regions {
