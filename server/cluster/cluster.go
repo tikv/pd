@@ -493,11 +493,12 @@ func (c *RaftCluster) runReplicationMode() {
 
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
+	c.Lock()
 	if !c.running.CompareAndSwap(true, false) {
+		c.Unlock()
 		return
 	}
 
-	c.Lock()
 	c.coordinator.stop()
 	c.cancel()
 	c.Unlock()
@@ -512,7 +513,7 @@ func (c *RaftCluster) IsRunning() bool {
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
-	if c.IsRunning() {
+	if c.running.Load() {
 		return c.ctx
 	}
 	return nil
