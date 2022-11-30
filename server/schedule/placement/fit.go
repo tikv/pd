@@ -126,7 +126,7 @@ type RuleFit struct {
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
-	// stores is the stores that the peers are placed in.s
+	// stores is the stores that the peers are placed in.
 	stores []*core.StoreInfo
 }
 
@@ -189,10 +189,11 @@ type fitWorker struct {
 func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer) []*fitPeer {
 	peers := make([]*fitPeer, len(fitPeers))
 	for i, p := range fitPeers {
-		peer := &fitPeer{}
-		peer.Peer = p
-		peer.store = getStoreByID(stores, p.GetStoreId())
-		peer.isLeader = region.GetLeader().GetId() == p.GetId()
+		peer := &fitPeer{
+			Peer:     p,
+			store:    getStoreByID(stores, p.GetStoreId()),
+			isLeader: region.GetLeader().GetId() == p.GetId(),
+		}
 		peers[i] = peer
 	}
 	return peers
