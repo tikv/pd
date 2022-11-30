@@ -32,7 +32,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/rangetree"
 	"github.com/tikv/pd/pkg/typeutil"
 	"go.uber.org/zap"
 )
@@ -1091,7 +1090,7 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange, n in
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	if leaders, ok := r.leaders[storeID]; ok {
-		return leaders.find(region).RegionInfo
+		return leaders.find(&regionItem{RegionInfo: region}).RegionInfo
 	}
 	return nil
 }
@@ -1099,7 +1098,7 @@ func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo 
 // GetFollower returns follower RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetFollower(storeID uint64, region *RegionInfo) *RegionInfo {
 	if followers, ok := r.followers[storeID]; ok {
-		return followers.find(region).RegionInfo
+		return followers.find(&regionItem{RegionInfo: region}).RegionInfo
 	}
 	return nil
 }
@@ -1162,7 +1161,7 @@ func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
-	var item rangetree.RangeItem
+	var item *regionItem
 	// it should return the length of the tree if endKey is nil.
 	if len(endKey) == 0 {
 		endIndex = r.tree.tree.Len() - 1
