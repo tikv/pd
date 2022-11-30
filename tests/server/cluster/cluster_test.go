@@ -1130,7 +1130,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	opt := rc.GetOpts()
 	scheduleCfg := opt.GetScheduleConfig().Clone()
-	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
+	scheduleCfg.StoreLimit = map[string]config.StoreLimitConfig{}
 	re.NoError(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg))
 	err = leaderServer.Stop()
 	re.NoError(err)

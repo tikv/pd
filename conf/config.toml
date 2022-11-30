@@ -142,6 +142,13 @@
 ## PD avoids migrating data to this store as much as possible.
 # low-space-ratio = 0.8
 
+## configure a specific store limit, the store id need to be an integer, here using 100
+# [schedule.100]
+## AddPeer indicates the type of store limit that limits the adding peer rate
+# AddPeer = 30.0
+## RemovePeer indicates the type of store limit that limits the removing peer rate
+# RemovePeer = 30.0
+
 ## The default version of balance Region score calculation.
 # region-score-formula-version = "v2"
 

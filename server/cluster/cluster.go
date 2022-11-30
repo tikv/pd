@@ -2164,7 +2164,8 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	storeID := store.GetId()
 	cfg := c.opt.GetScheduleConfig().Clone()
-	if _, ok := cfg.StoreLimit[storeID]; ok {
+	id := strconv.FormatUint(storeID, 10)
+	if _, ok := cfg.StoreLimit[id]; ok {
 		return
 	}
 
@@ -2179,7 +2180,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		}
 	}
 
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[id] = sc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for i := 0; i < persistLimitRetryTimes; i++ {
@@ -2198,7 +2199,8 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	for _, limitType := range storelimit.TypeNameValue {
 		c.core.ResetStoreLimit(storeID, limitType)
 	}
-	delete(cfg.StoreLimit, storeID)
+	id := strconv.FormatUint(storeID, 10)
+	delete(cfg.StoreLimit, id)
 	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for i := 0; i < persistLimitRetryTimes; i++ {

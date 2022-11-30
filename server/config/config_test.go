@@ -151,6 +151,13 @@ func TestValidation(t *testing.T) {
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.TolerantSizeRatio = 0.6
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimit["foo"] = StoreLimitConfig{}
+	re.Error(cfg.Schedule.Validate())
+	delete(cfg.Schedule.StoreLimit, "foo")
+	cfg.Schedule.StoreLimit["100"] = StoreLimitConfig{}
+	re.NoError(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes
@@ -526,4 +533,24 @@ func registerDefaultSchedulers() {
 	for _, d := range DefaultSchedulers {
 		RegisterScheduler(d.Type)
 	}
+}
+
+func TestStoreLimit(t *testing.T) {
+	re := require.New(t)
+	registerDefaultSchedulers()
+
+	cfgData := `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+
+	re.Equal(30.0, cfg.Schedule.StoreLimit["100"].AddPeer)
+	re.Equal(40.0, cfg.Schedule.StoreLimit["100"].RemovePeer)
 }
