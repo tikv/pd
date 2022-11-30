@@ -753,9 +753,9 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	if err != nil {
 		return nil, err
 	}
-	origin, overlaps, toRemove, rangeChanged := r.setRegionLocked(region)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region)
 	r.t.Unlock()
-	r.UpdateSubTree(region, origin, toRemove, rangeChanged)
+	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps, nil
 }
 
@@ -798,18 +798,18 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) (*RegionInfo, err
 func (r *RegionsInfo) SetRegion(region *RegionInfo) []*RegionInfo {
 	r.t.Lock()
 	defer r.t.Unlock()
-	_, overlaps, _, _ := r.setRegionLocked(region)
+	_, overlaps, _ := r.setRegionLocked(region)
 	return overlaps
 }
 
 // SetRegionWithUpdate sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
-func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo) (*RegionInfo, []*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
 	return r.setRegionLocked(region)
 }
 
-func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	var (
 		item   *regionItem // Pointer to the *RegionInfo of this ID.
 		origin *RegionInfo
@@ -831,7 +831,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
-			return origin, nil, nil, rangeChanged
+			return origin, nil, rangeChanged
 		}
 	} else {
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
@@ -839,7 +839,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 		r.regions[region.GetID()] = item
 	}
 
-	var overlaps, toRemove []*RegionInfo
+	var overlaps []*RegionInfo
 	if rangeChanged {
 		// It has been removed and all information needs to be updated again.
 		overlaps = r.tree.update(item)
@@ -848,10 +848,9 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 			// Remove from tree and regions.
 			r.tree.remove(o)
 			delete(r.regions, o.GetID())
-			toRemove = append(toRemove, o)
 		}
 	}
-	return origin, overlaps, toRemove, rangeChanged
+	return origin, overlaps, rangeChanged
 }
 
 // UpdateSubTree updates the subtree.

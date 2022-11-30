@@ -1310,8 +1310,8 @@ func TestScatterRangeBalance(t *testing.T) {
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
-		origin, _, toRemove, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
-		tc.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
+		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 	for i := 0; i < 100; i++ {
 		_, err := tc.AllocPeer(1)
@@ -1379,8 +1379,8 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		origin, _, toRemove, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
-		tc.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
+		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 0; i < 100; i++ {
@@ -1490,8 +1490,8 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		origin, _, toRemove, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
-		tc.UpdateSubTree(regionInfo, origin, toRemove, rangeChanged)
+		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 1; i <= 3; i++ {

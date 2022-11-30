@@ -242,8 +242,8 @@ func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 
 // PutRegion put a region.
 func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, toRemove, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region)
-	bc.RegionsInfo.UpdateSubTree(region, origin, toRemove, rangeChanged)
+	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region)
+	bc.RegionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
 
