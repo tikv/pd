@@ -64,7 +64,6 @@ func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int, rate float6
 		ma.Add(last)
 		result1 := ma.Get()
 		result2 := statsMedianFunc(ma.GetAll())
-		//fmt.Println(i, last, ma.GetAll(), result1, result2)
 		re.LessOrEqual(math.Abs(result1-result2), 1e-7)
 	}
 }
@@ -130,7 +129,7 @@ func TestMedianFilterResultByStatsMedian(t *testing.T) {
 
 	mf = NewMedianFilter(5)
 	re.Equal(empty, mf.Get())
-	checkMedianAdd(re, mf, 100000, 0.5)
+	checkMedianAdd(re, mf, 1000000, 0.5)
 
 	mf = NewMedianFilter(10)
 	re.Equal(empty, mf.Get())
@@ -147,7 +146,6 @@ func TestMedianFilterResultByStatsMedian(t *testing.T) {
 	mf = NewMedianFilter(1000)
 	re.Equal(empty, mf.Get())
 	checkMedianAdd(re, mf, 100000, 0.2)
-
 }
 
 type testCase struct {
