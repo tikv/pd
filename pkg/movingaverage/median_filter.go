@@ -104,12 +104,6 @@ func (r *MedianFilter) findTwoMaxNumber(needSecond bool) (first, second float64,
 	return
 }
 
-func (r *MedianFilter) add(n float64) {
-	r.instantaneous = n
-	r.records[r.count%r.size] = n
-	r.count++
-}
-
 // Add adds a data point.
 func (r *MedianFilter) Add(n float64) {
 	len := r.count + 1
@@ -127,7 +121,9 @@ func (r *MedianFilter) Add(n float64) {
 	} else if n < r.median {
 		r.l++
 	}
-	r.add(n)
+	r.instantaneous = n
+	r.records[r.count%r.size] = n
+	r.count++
 
 	updateStatus := func() {
 		r.g = 0
