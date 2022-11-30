@@ -54,7 +54,7 @@ func (suite *ruleCheckerTestSuite) SetupTest() {
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
 	suite.cluster.SetEnablePlacementRules(true)
-	suite.cluster.SetEnableSwitchWitness(true)
+	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(false)
 	suite.ruleManager = suite.cluster.RuleManager
 	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
@@ -510,7 +510,7 @@ func (suite *ruleCheckerTestSuite) TestDisableWitness() {
 	op := suite.rc.Check(r)
 	suite.Nil(op)
 
-	suite.cluster.SetEnableSwitchWitness(false)
+	suite.cluster.SetEnableWitness(false)
 	op = suite.rc.Check(r)
 	suite.NotNil(op)
 }

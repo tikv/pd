@@ -196,10 +196,8 @@ func checkIntervalSumContinuous(re *require.Assertions, intervalSums map[uint64]
 			continue
 		}
 		new := int(ret.getIntervalSum() / 1000000000)
-		if ret.source == direct {
-			if old, ok := intervalSums[ret.StoreID]; ok {
-				re.Equal((old+int(interval))%RegionHeartBeatReportInterval, new)
-			}
+		if old, ok := intervalSums[ret.StoreID]; ok {
+			re.Equal((old+int(interval))%RegionHeartBeatReportInterval, new)
 		}
 		intervalSums[ret.StoreID] = new
 	}
@@ -416,7 +414,6 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 				StoreID:    storeID,
 				RegionID:   i,
 				actionType: Update,
-				thresholds: thresholds,
 				Loads:      make([]float64, DimLen),
 			}
 			newItem.Loads[ByteDim] = byteRate
@@ -429,7 +426,7 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 			if oldItem == nil {
 				item = cache.updateNewHotPeerStat(newItem, loads, time.Duration(interval)*time.Second)
 			} else {
-				item = cache.updateHotPeerStat(nil, newItem, oldItem, loads, time.Duration(interval)*time.Second)
+				item = cache.updateHotPeerStat(nil, newItem, oldItem, loads, time.Duration(interval)*time.Second, direct)
 			}
 			cache.updateStat(item)
 		}

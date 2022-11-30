@@ -246,7 +246,7 @@ const (
 	defaultEnablePlacementRules = true
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
-	defaultEnableSwitchWitness  = false
+	defaultEnableWitness        = false
 
 	defaultDashboardAddress = "auto"
 
@@ -774,8 +774,8 @@ type ScheduleConfig struct {
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 
-	// EnableSwitchWitness is the option to enable using witness
-	EnableSwitchWitness bool `toml:"enable-switch-witness" json:"enable-switch-witness,string"`
+	// EnableWitness is the option to enable using witness
+	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -890,8 +890,8 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		c.EnableDiagnostic = defaultEnableDiagnostic
 	}
 
-	if !meta.IsDefined("enable-switch-witness") {
-		c.EnableSwitchWitness = defaultEnableSwitchWitness
+	if !meta.IsDefined("enable-witness") {
+		c.EnableWitness = defaultEnableWitness
 	}
 
 	// new cluster:v2, old cluster:v1

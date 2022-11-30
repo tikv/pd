@@ -289,15 +289,15 @@ func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
 	o.SetScheduleConfig(v)
 }
 
-// IsSwitchWitnessAllowed returns whether is enable to use witness.
-func (o *PersistOptions) IsSwitchWitnessAllowed() bool {
-	return o.GetScheduleConfig().EnableSwitchWitness
+// IsWitnessAllowed returns whether is enable to use witness.
+func (o *PersistOptions) IsWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableWitness
 }
 
-// SetEnableSwitchWitness to set the option for witness. It's only used to test.
-func (o *PersistOptions) SetEnableSwitchWitness(enable bool) {
+// SetEnableWitness to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableWitness(enable bool) {
 	v := o.GetScheduleConfig().Clone()
-	v.EnableSwitchWitness = enable
+	v.EnableWitness = enable
 	o.SetScheduleConfig(v)
 }
 
