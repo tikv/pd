@@ -173,6 +173,10 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
 	}
 
+	if collector != nil && len(sourceStores) > 0 {
+		collector.Collect(plan.SetResource(sourceStores[0]), plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+	}
+
 	solver.step++
 	var sourceIndex int
 
@@ -227,6 +231,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				continue
 			}
 			solver.step++
+			// the replica filter will cache the last region fit and the select one will only pict the first one region that
+			// satisfy all the filters, so the region fit must belong the scheduled region.
+			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
 				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
@@ -251,7 +258,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	// the more expensive the filter is, the later it should be placed.
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source),
+		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(),
+			solver.region, solver.source, solver.fit),
 	}
 	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {

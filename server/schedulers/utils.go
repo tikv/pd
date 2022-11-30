@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -45,6 +46,7 @@ type solver struct {
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
+	fit               *placement.RegionFit
 
 	sourceScore float64
 	targetScore float64

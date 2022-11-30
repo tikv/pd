@@ -281,7 +281,7 @@ func TestRegionWriteRate(t *testing.T) {
 		{10, 3, 500, 0, 0},
 	}
 	for _, testCase := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(testCase.interval))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(0, testCase.interval))
 		bytesRate, keysRate := r.GetWriteRate()
 		re.Equal(testCase.expectBytesRate, bytesRate)
 		re.Equal(testCase.expectKeysRate, keysRate)
@@ -367,24 +367,24 @@ func TestNeedSync(t *testing.T) {
 
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
-	rm := newRegionMap()
+	rm := make(map[uint64]*regionItem)
 	check(re, rm)
-	rm.AddNew(regionInfo(1))
+	rm[1] = &regionItem{RegionInfo: regionInfo(1)}
 	check(re, rm, 1)
 
-	rm.AddNew(regionInfo(2))
-	rm.AddNew(regionInfo(3))
+	rm[2] = &regionItem{RegionInfo: regionInfo(2)}
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
 	check(re, rm, 1, 2, 3)
 
-	rm.AddNew(regionInfo(3))
-	rm.Delete(4)
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	delete(rm, 4)
 	check(re, rm, 1, 2, 3)
 
-	rm.Delete(3)
-	rm.Delete(1)
+	delete(rm, 3)
+	delete(rm, 1)
 	check(re, rm, 2)
 
-	rm.AddNew(regionInfo(3))
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
 	check(re, rm, 2, 3)
 }
 
@@ -398,13 +398,13 @@ func regionInfo(id uint64) *RegionInfo {
 	}
 }
 
-func check(re *require.Assertions, rm regionMap, ids ...uint64) {
+func check(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
-		re.Equal(id, rm.Get(id).GetID())
+		re.Equal(id, rm[id].GetID())
 	}
 	// Check Len.
-	re.Equal(len(ids), rm.Len())
+	re.Equal(len(ids), len(rm))
 	// Check id set.
 	expect := make(map[uint64]struct{})
 	for _, id := range ids {
@@ -518,7 +518,7 @@ func TestSetRegion(t *testing.T) {
 		SetApproximateSize(30),
 		SetWrittenBytes(40),
 		SetWrittenKeys(10),
-		SetReportInterval(5))
+		SetReportInterval(0, 5))
 	regions.SetRegion(region)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())

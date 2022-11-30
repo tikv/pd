@@ -33,6 +33,9 @@ COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-recover /pd-recover
 COPY --from=builder /jq /usr/local/bin/jq
 
+RUN apk add --no-cache \
+    curl
+
 EXPOSE 2379 2380
 
 ENTRYPOINT ["/pd-server"]

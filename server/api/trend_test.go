@@ -73,6 +73,7 @@ func TestTrend(t *testing.T) {
 	mustRegionHeartbeat(re, svr, region6)
 	region6 = region6.Clone(core.WithRole(newPeerID, metapb.PeerRole_Voter), core.WithLeader(region6.GetStorePeer(2)), core.WithRemoveStorePeer(1), core.WithIncConfVer())
 	mustRegionHeartbeat(re, svr, region6)
+	time.Sleep(50 * time.Millisecond)
 
 	var trend Trend
 	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)

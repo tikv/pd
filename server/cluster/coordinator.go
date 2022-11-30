@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -483,16 +484,26 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
+	var infos *statistics.StoreHotPeersInfos
 	switch typ {
 	case statistics.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
 	case statistics.Read:
 		regionStats := c.cluster.RegionReadStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
 	default:
 	}
-	return nil
+	// update params `IsLearner` and `LastUpdateTime`
+	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
+		for _, store := range stores {
+			for _, hotPeer := range store.Stats {
+				region := c.cluster.GetRegion(hotPeer.RegionID)
+				hotPeer.UpdateHotPeerStatShow(region)
+			}
+		}
+	}
+	return infos
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -555,7 +566,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		regionStats = cluster.RegionWriteStats()
 		kind = statistics.Write.String()
 	}
-	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
+	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
 		storeAddress := s.GetAddress()
@@ -965,4 +976,20 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
+}
+
+// CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
+func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
+	if core.NeedTransferWitnessLeader(region) {
+		c.RLock()
+		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
+		c.RUnlock()
+		if ok {
+			select {
+			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
+			default:
+				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
+			}
+		}
+	}
 }

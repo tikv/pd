@@ -72,6 +72,7 @@ func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
 	if p.step < step {
 		return 0
 	}
+	// Please use with care. Add a nil check if need in the future
 	switch step {
 	case pickSource:
 		return p.source.GetID()
@@ -114,10 +115,10 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 // BalancePlanSummary is used to summarize for BalancePlan
 func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
-	var storeStatusCounter map[uint64]map[plan.Status]int
+	storeStatusCounter := make(map[uint64]map[plan.Status]int)
 	// statusCounter is used to count the number of status which is regarded as best status of each store
 	statusCounter := make(map[uint64]plan.Status)
-	maxStep := -1
+	storeMaxStep := make(map[uint64]int)
 	normal := true
 	for _, pi := range plans {
 		p, ok := pi.(*balanceSchedulerPlan)
@@ -129,16 +130,6 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		if step > pickTarget {
 			step = pickTarget
 		}
-		if step > maxStep {
-			storeStatusCounter = make(map[uint64]map[plan.Status]int)
-			maxStep = step
-			normal = true
-		} else if step < maxStep {
-			continue
-		}
-		if !p.status.IsNormal() {
-			normal = false
-		}
 		var store uint64
 		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
 		// and consider the failure as the status of source store.
@@ -147,8 +138,18 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		} else {
 			store = p.GetResource(step)
 		}
-		if _, ok := storeStatusCounter[store]; !ok {
+		maxStep, ok := storeMaxStep[store]
+		if !ok {
+			maxStep = -1
+		}
+		if step > maxStep {
 			storeStatusCounter[store] = make(map[plan.Status]int)
+			storeMaxStep[store] = step
+		} else if step < maxStep {
+			continue
+		}
+		if !p.status.IsNormal() {
+			normal = false
 		}
 		storeStatusCounter[store][*p.status]++
 	}

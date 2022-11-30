@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -97,7 +98,7 @@ func main() {
 
 func run(simCase string, simConfig *simulator.SimConfig) {
 	if *pdAddr != "" {
-		go runMetrics()
+		go runHTTPServer()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -115,8 +116,17 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 	}
 }
 
-func runMetrics() {
+func runHTTPServer() {
 	http.Handle("/metrics", promhttp.Handler())
+	// profile API
+	http.HandleFunc("/pprof/profile", pprof.Profile)
+	http.HandleFunc("/pprof/trace", pprof.Trace)
+	http.HandleFunc("/pprof/symbol", pprof.Symbol)
+	http.Handle("/pprof/heap", pprof.Handler("heap"))
+	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
+	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
+	http.Handle("/pprof/block", pprof.Handler("block"))
+	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
 	// nolint
 	http.ListenAndServe(*statusAddress, nil)
 }
@@ -196,7 +206,6 @@ EXIT:
 	}
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
-	driver.PrintStatistics()
 	if analysis.GetTransferCounter().IsValid {
 		analysis.GetTransferCounter().PrintResult()
 	}

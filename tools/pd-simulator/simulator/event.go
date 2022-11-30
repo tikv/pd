@@ -145,11 +145,10 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	config := raft.storeConfig
 	s := &cases.Store{
-		ID:        id,
-		Status:    metapb.StoreState_Up,
-		Capacity:  uint64(config.RaftStore.Capacity),
-		Available: uint64(config.RaftStore.Available),
-		Version:   config.StoreVersion,
+		ID:       id,
+		Status:   metapb.StoreState_Up,
+		Capacity: uint64(config.RaftStore.Capacity),
+		Version:  config.StoreVersion,
 	}
 	n, err := NewNode(s, raft.conn.pdAddr, config)
 	if err != nil {

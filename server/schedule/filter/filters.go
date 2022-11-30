@@ -109,7 +109,6 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 				if collector != nil {
 					collector.Collect(plan.SetResource(s), plan.SetStatus(status))
 				}
-
 				return false
 			}
 			return true
@@ -584,13 +583,17 @@ type ruleFitFilter struct {
 // newRuleFitFilter creates a filter that ensures after replace a peer with new
 // one, the isolation level will not decrease. Its function is the same as
 // distinctScoreFilter but used when placement rules is enabled.
-func newRuleFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, oldStoreID uint64) Filter {
+func newRuleFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, oldFit *placement.RegionFit, oldStoreID uint64) Filter {
+	if oldFit == nil {
+		oldFit = ruleManager.FitRegion(cluster, region)
+	}
 	return &ruleFitFilter{
 		scope:       scope,
 		cluster:     cluster,
 		ruleManager: ruleManager,
 		region:      region,
-		oldFit:      ruleManager.FitRegion(cluster, region),
+		oldFit:      oldFit,
 		srcStore:    oldStoreID,
 	}
 }
@@ -679,9 +682,10 @@ func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
 
 // NewPlacementSafeguard creates a filter that ensures after replace a peer with new
 // peer, the placement restriction will not become worse.
-func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo) Filter {
+func NewPlacementSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit) Filter {
 	if opt.IsPlacementRulesEnabled() {
-		return newRuleFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID())
+		return newRuleFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID())
 	}
 	return NewLocationSafeguard(scope, opt.GetLocationLabels(), cluster.GetRegionStores(region), sourceStore)
 }

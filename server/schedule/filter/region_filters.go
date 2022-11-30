@@ -17,6 +17,7 @@ package filter
 import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
@@ -94,20 +95,31 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
-type regionReplicatedFilter struct {
+// RegionReplicatedFilter filters all unreplicated regions.
+type RegionReplicatedFilter struct {
 	cluster regionHealthCluster
+	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
 func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
-	return &regionReplicatedFilter{cluster: cluster}
+	return &RegionReplicatedFilter{cluster: cluster}
 }
 
-func (f *regionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
+// GetFit returns the region fit.
+func (f *RegionReplicatedFilter) GetFit() *placement.RegionFit {
+	return f.fit
+}
+
+// Select returns Ok if the given region satisfy the replication.
+// it will cache the lasted region fit if the region satisfy the replication.
+func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
-		if !isRegionPlacementRuleSatisfied(f.cluster, region) {
+		fit := f.cluster.GetRuleManager().FitRegion(f.cluster, region)
+		if !fit.IsSatisfied() {
 			return statusRegionNotMatchRule
 		}
+		f.fit = fit
 		return statusOK
 	}
 	if !isRegionReplicasSatisfied(f.cluster, region) {
