@@ -873,10 +873,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 	if rangeChanged {
 		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
-			o := r.getRegionLocked(old.GetID())
-			// Remove from tree and regions.
-			r.tree.remove(o)
-			delete(r.regions, o.GetID())
+			delete(r.regions, old.GetID())
 		}
 	}
 	return origin, overlaps, rangeChanged
