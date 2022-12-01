@@ -755,14 +755,14 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		// return the state region to delete.
 		return []*RegionInfo{region}
 	}
-	origin, overlaps, rangeChanged := r.SetRegionWithUpdate(region, true, ols...)
+	origin, overlaps, rangeChanged := r.SetRegion(region, true, ols...)
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
 
 // PutRegion put a region.
 func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, rangeChanged := r.SetRegionWithUpdate(region, false)
+	origin, overlaps, rangeChanged := r.SetRegion(region, false)
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
@@ -827,8 +827,8 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 	return nil
 }
 
-// SetRegionWithUpdate sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
-func (r *RegionsInfo) SetRegionWithUpdate(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
+// SetRegion sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
+func (r *RegionsInfo) SetRegion(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
 	return r.setRegionLocked(region, withOverlaps, ol...)

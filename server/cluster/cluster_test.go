@@ -1678,7 +1678,7 @@ func Test(t *testing.T) {
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
 
-		origin, overlaps, rangeChanged := cache.SetRegionWithUpdate(region, false)
+		origin, overlaps, rangeChanged := cache.SetRegion(region, false)
 		cache.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), region)
 		checkRegion(re, cache.GetRegionByKey(regionKey), region)
@@ -1692,7 +1692,7 @@ func Test(t *testing.T) {
 		// Update leader to peer np-1.
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
-		origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion, false)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion, false)
 		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
@@ -1707,7 +1707,7 @@ func Test(t *testing.T) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion, false)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion, false)
 		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1729,7 +1729,7 @@ func Test(t *testing.T) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	origin, overlaps, rangeChanged := cache.SetRegionWithUpdate(overlapRegion, false)
+	origin, overlaps, rangeChanged := cache.SetRegion(overlapRegion, false)
 	cache.UpdateSubTree(overlapRegion, origin, overlaps, rangeChanged)
 	re.Nil(cache.GetRegion(n - 2))
 	re.NotNil(cache.GetRegion(n - 1))
@@ -1739,7 +1739,7 @@ func Test(t *testing.T) {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
-			origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion, false)
+			origin, overlaps, rangeChanged = cache.SetRegion(newRegion, false)
 			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))

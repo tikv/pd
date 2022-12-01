@@ -109,8 +109,8 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // insert the region.
 func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
 	region := item.RegionInfo
-	t.totalSize += item.GetApproximateSize()
-	regionWriteBytesRate, regionWriteKeysRate := item.GetWriteRate()
+	t.totalSize += region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 
