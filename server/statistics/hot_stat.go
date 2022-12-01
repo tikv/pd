@@ -27,9 +27,9 @@ type HotStat struct {
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
-func NewHotStat(ctx context.Context,opt *config.PersistOptions) *HotStat {
+func NewHotStat(ctx context.Context, opt *config.PersistOptions) *HotStat {
 	return &HotStat{
-		HotCache:    NewHotCache(ctx,opt),
+		HotCache:    NewHotCache(ctx, opt),
 		StoresStats: NewStoresStats(),
 	}
 }
