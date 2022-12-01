@@ -218,7 +218,10 @@ func TestConfig(t *testing.T) {
 			return scheduleConfig.HotRegionScheduleLimit
 		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-threshold-ratio", 1.2, func(scheduleConfig *config.ScheduleConfig) interface{} {
+			return scheduleConfig.HotThresholdRatio
+		}},
+		{"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
 		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {

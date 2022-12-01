@@ -598,6 +598,11 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetHotThresholdRatio returns HotThresholdRatio.
+func (o *PersistOptions) GetHotThresholdRatio() float64 {
+	return o.GetScheduleConfig().HotThresholdRatio
+}
+
 // GetStoresLimit gets the stores' limit.
 func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit

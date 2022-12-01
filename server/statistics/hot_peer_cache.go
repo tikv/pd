@@ -22,14 +22,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
 const (
 	// TopNN is the threshold which means we can get hot threshold from store.
 	TopNN = 60
-	// HotThresholdRatio is used to calculate hot thresholds
-	HotThresholdRatio = 0.8
 	// WriteReportInterval indicates the interval between write interval
 	WriteReportInterval = RegionHeartBeatReportInterval
 	// ReadReportInterval indicates the interval between read stats report
@@ -78,11 +77,12 @@ type hotPeerCache struct {
 	topNTTL           time.Duration
 	taskQueue         chan FlowItemTask
 	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
+	opt               *config.PersistOptions
 	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(kind RWType) *hotPeerCache {
+func NewHotPeerCache(kind RWType, opt *config.PersistOptions) *hotPeerCache {
 	return &hotPeerCache{
 		kind:              kind,
 		peersOfStore:      make(map[uint64]*TopN),
@@ -91,6 +91,7 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		taskQueue:         make(chan FlowItemTask, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
+		opt:               opt,
 	}
 }
 
@@ -310,8 +311,9 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	if !ok || tn.Len() < TopNN {
 		return t.rates
 	}
+	hotThresholdRatio := f.opt.GetHotThresholdRatio()
 	for i := range t.rates {
-		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*hotThresholdRatio, t.rates[i])
 	}
 	return t.rates
 }

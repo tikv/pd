@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -30,11 +31,11 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context) *HotCache {
+func NewHotCache(ctx context.Context, opt *config.PersistOptions) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
-		writeCache: NewHotPeerCache(Write),
-		readCache:  NewHotPeerCache(Read),
+		writeCache: NewHotPeerCache(Write, opt),
+		readCache:  NewHotPeerCache(Read, opt),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)

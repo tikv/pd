@@ -776,6 +776,9 @@ type ScheduleConfig struct {
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// HotThresholdRatio is used to calculate hot thresholds
+	HotThresholdRatio float64 `toml:"hot-threshold-ratio" json:"hot-threshold-ratio,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -817,6 +820,7 @@ const (
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
+	defaultHotThresholdRatio           = 0.8
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
@@ -862,6 +866,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
 		adjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
+	}
+	if !meta.IsDefined("hot-threshold-ratio") {
+		adjustFloat64(&c.HotThresholdRatio, defaultHotThresholdRatio)
 	}
 	if !meta.IsDefined("tolerant-size-ratio") {
 		adjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
