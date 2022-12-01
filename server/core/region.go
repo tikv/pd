@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/pkg/typeutil"
@@ -746,6 +747,33 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 	return nil
 }
 
+// CheckAndPutRegion checks if the region is valid to put, if valid then put.
+func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
+	origin, ols, err := r.PreCheckPutRegion(region)
+	if err != nil {
+		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
+		// return the state region to delete.
+		return []*RegionInfo{region}
+	}
+	origin, overlaps, rangeChanged := r.SetRegionWithUpdate(region, true, ols...)
+	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
+}
+
+// PutRegion put a region.
+func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
+	origin, overlaps, rangeChanged := r.SetRegionWithUpdate(region, false)
+	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
+}
+
+// PreCheckPutRegion checks if the region is valid to put.
+func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*regionItem, error) {
+	origin, overlaps := r.GetRelevantRegions(region)
+	err := check(region, origin, overlaps)
+	return origin, overlaps, err
+}
+
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
@@ -754,7 +782,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	_, _, err := check(region, origin, ols)
+	err := check(region, origin, ols)
 	if err != nil {
 		r.t.Unlock()
 		return nil, err
@@ -776,15 +804,15 @@ func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo
 	return
 }
 
-func check(region, origin *RegionInfo, overlaps []*regionItem) (*RegionInfo, []*regionItem, error) {
+func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
-			return nil, nil, errRegionIsStale(region.GetMeta(), item.GetMeta())
+			return errRegionIsStale(region.GetMeta(), item.GetMeta())
 		}
 	}
 	if origin == nil {
-		return nil, nil, nil
+		return nil
 	}
 
 	r := region.GetRegionEpoch()
@@ -793,10 +821,10 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) (*RegionInfo, []*
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
 	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
-		return origin, nil, errRegionIsStale(region.GetMeta(), origin.GetMeta())
+		return errRegionIsStale(region.GetMeta(), origin.GetMeta())
 	}
 
-	return origin, overlaps, nil
+	return nil
 }
 
 // SetRegionWithUpdate sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
@@ -962,8 +990,8 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	delete(r.regions, region.GetID())
 }
 
-// Reset resets the regions info.
-func (r *RegionsInfo) Reset() {
+// ResetRegionCache resets the regions info.
+func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
 	r.tree = newRegionTree()
 	r.regions = make(map[uint64]*regionItem)
@@ -997,6 +1025,14 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 		r.pendingPeers[storeID].remove(region)
 	}
 	delete(r.subRegions, region.GetMeta().GetId())
+}
+
+// RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
+func (r *RegionsInfo) RemoveRegionIfExist(id uint64) {
+	if region := r.GetRegion(id); region != nil {
+		r.RemoveRegion(region)
+		r.RemoveRegionFromSubTree(region)
+	}
 }
 
 type peerSlice []*metapb.Peer

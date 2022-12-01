@@ -16,11 +16,8 @@ package core
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core/storelimit"
-	"go.uber.org/zap"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
@@ -219,47 +216,6 @@ func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRate
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
 	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
-}
-
-/* Regions write operations */
-
-// PreCheckPutRegion checks if the region is valid to put.
-func (bc *BasicCluster) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*regionItem, error) {
-	origin, overlaps := bc.RegionsInfo.GetRelevantRegions(region)
-	return check(region, origin, overlaps)
-}
-
-// CheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (bc *BasicCluster) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
-	origin, ols, err := bc.PreCheckPutRegion(region)
-	if err != nil {
-		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
-		// return the state region to delete.
-		return []*RegionInfo{region}
-	}
-	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region, true, ols...)
-	bc.RegionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	return overlaps
-}
-
-// PutRegion put a region.
-func (bc *BasicCluster) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, rangeChanged := bc.RegionsInfo.SetRegionWithUpdate(region, false)
-	bc.RegionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	return overlaps
-}
-
-// RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
-func (bc *BasicCluster) RemoveRegionIfExist(id uint64) {
-	if r := bc.RegionsInfo.GetRegion(id); r != nil {
-		bc.RegionsInfo.RemoveRegion(r)
-		bc.RegionsInfo.RemoveRegionFromSubTree(r)
-	}
-}
-
-// ResetRegionCache drops all region cache.
-func (bc *BasicCluster) ResetRegionCache() {
-	bc.RegionsInfo.Reset()
 }
 
 // RegionSetInformer provides access to a shared informer of regions.
