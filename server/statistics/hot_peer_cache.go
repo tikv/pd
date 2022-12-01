@@ -304,14 +304,14 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	}
 	f.thresholdsOfStore[storeID] = t
 	statKinds := f.kind.RegionStats()
+	hotThresholdRatio := f.opt.GetHotThresholdRatio()
 	for dim, kind := range statKinds {
-		t.rates[dim] = MinHotThresholds[kind]
+		t.rates[dim] = MinHotThresholds[kind] * hotThresholdRatio
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
 		return t.rates
 	}
-	hotThresholdRatio := f.opt.GetHotThresholdRatio()
 	for i := range t.rates {
 		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*hotThresholdRatio, t.rates[i])
 	}

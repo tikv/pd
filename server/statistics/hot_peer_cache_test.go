@@ -404,6 +404,7 @@ func TestThresholdWithUpdateHotPeerStat(t *testing.T) {
 
 func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold float64) {
 	opt := config.NewTestOptions()
+	hotThresholdRatio := opt.GetScheduleConfig().HotThresholdRatio
 	cache := NewHotPeerCache(Read, opt)
 	storeID := uint64(1)
 	re.GreaterOrEqual(byteRate, MinHotThresholds[RegionReadBytes])
@@ -438,7 +439,7 @@ func testMetrics(re *require.Assertions, interval, byteRate, expectThreshold flo
 		}
 		thresholds := cache.calcHotThresholds(storeID)
 		if i < TopNN {
-			re.Equal(MinHotThresholds[RegionReadBytes], thresholds[ByteDim])
+			re.Equal(MinHotThresholds[RegionReadBytes]*hotThresholdRatio, thresholds[ByteDim])
 		} else {
 			re.Equal(expectThreshold, thresholds[ByteDim])
 		}
@@ -679,8 +680,8 @@ func TestUnstableData(t *testing.T) {
 // Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
 func TestHotPeerCacheTopN(t *testing.T) {
 	re := require.New(t)
-
 	opt := config.NewTestOptions()
+	hotThresholdRatio := opt.GetHotThresholdRatio()
 	cache := NewHotPeerCache(Write, opt)
 	now := time.Now()
 	for id := uint64(0); id < 100; id++ {
@@ -703,13 +704,13 @@ func TestHotPeerCacheTopN(t *testing.T) {
 			}
 		}
 		if id < 60 {
-			re.Equal(MinHotThresholds[RegionWriteKeys], cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
+			re.Equal(MinHotThresholds[RegionWriteKeys]*hotThresholdRatio, cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
 		}
 	}
 
 	re.Contains(cache.peersOfStore, uint64(1))
 	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
-	re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
+	re.Equal(32.0*hotThresholdRatio, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
 	ThresholdsUpdateInterval = 0
 	defer func() {
 		ThresholdsUpdateInterval = 8 * time.Second
