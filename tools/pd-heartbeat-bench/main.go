@@ -42,6 +42,7 @@ import (
 const (
 	bytesUnit    = 1 << 23 // 8MB
 	keysUint     = 1 << 13 // 8K
+	queryUnit    = 1 << 10 // 1K
 	intervalUint = 60      // 60s
 )
 
@@ -263,10 +264,14 @@ func (rs *Regions) update(replica int) {
 	// update flow
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
-		region.BytesWritten += bytesUnit
-		region.BytesRead += bytesUnit
-		region.KeysWritten += keysUint
-		region.KeysRead += keysUint
+		region.BytesWritten = uint64(bytesUnit * rand.Float64() * 2)
+		region.BytesRead = uint64(bytesUnit * rand.Float64() * 2)
+		region.KeysWritten = uint64(keysUint * rand.Float64() * 2)
+		region.KeysRead = uint64(keysUint * rand.Float64() * 2)
+		region.QueryStats = &pdpb.QueryStats{
+			Get: uint64(queryUnit * rand.Float64() * 2),
+			Put: uint64(queryUnit * rand.Float64() * 2),
+		}
 	}
 	// update interval
 	for _, region := range rs.regions {
