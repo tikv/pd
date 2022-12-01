@@ -40,10 +40,12 @@ import (
 )
 
 const (
-	bytesUnit    = 1 << 23 // 8MB
-	keysUint     = 1 << 13 // 8K
-	queryUnit    = 1 << 10 // 1K
-	intervalUint = 60      // 60s
+	bytesUnit            = 8 * units.MiB
+	keysUint             = 8 * units.KiB
+	queryUnit            = 1 * units.KiB
+	regionReportInterval = 60 // 60s
+	storeReportInterval  = 10 // 10s
+	capacity             = 2 * units.TiB
 )
 
 var clusterID uint64
@@ -138,24 +140,11 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
 		if resp.GetHeader().GetError() != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
-		go func(ctx context.Context, storeID uint64) {
-			var heartbeatTicker = time.NewTicker(10 * time.Second)
-			defer heartbeatTicker.Stop()
-			for {
-				select {
-				case <-heartbeatTicker.C:
-					cctx, cancel := context.WithCancel(ctx)
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &pdpb.StoreStats{
-						StoreId:   storeID,
-						Capacity:  2 * units.TiB,
-						Available: 1.5 * units.TiB,
-					}})
-					cancel()
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ctx, i)
+		cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &pdpb.StoreStats{
+			StoreId:   i,
+			Capacity:  capacity,
+			Available: capacity,
+		}})
 	}
 }
 
@@ -204,8 +193,9 @@ func (rs *Regions) init(cfg *config.Config) {
 			ApproximateSize: bytesUnit,
 			Interval: &pdpb.TimeInterval{
 				StartTimestamp: now,
-				EndTimestamp:   now + intervalUint,
+				EndTimestamp:   now + regionReportInterval,
 			},
+			QueryStats:      &pdpb.QueryStats{},
 			ApproximateKeys: keysUint,
 			Term:            1,
 		}
@@ -258,25 +248,33 @@ func (rs *Regions) update(replica int) {
 	// update space
 	for _, i := range rs.updateSpace {
 		region := rs.regions[i]
-		region.ApproximateSize += bytesUnit
-		region.ApproximateKeys += keysUint
+		if region.ApproximateSize == bytesUnit {
+			region.ApproximateSize = bytesUnit * 2
+		} else {
+			region.ApproximateSize = bytesUnit
+		}
+		if region.ApproximateKeys == keysUint {
+			region.ApproximateKeys = keysUint * 2
+		} else {
+			region.ApproximateKeys = keysUint
+		}
 	}
 	// update flow
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
-		region.BytesWritten = uint64(bytesUnit * rand.Float64() * 2)
-		region.BytesRead = uint64(bytesUnit * rand.Float64() * 2)
-		region.KeysWritten = uint64(keysUint * rand.Float64() * 2)
-		region.KeysRead = uint64(keysUint * rand.Float64() * 2)
+		region.BytesWritten = uint64(bytesUnit * rand.Float64())
+		region.BytesRead = uint64(bytesUnit * rand.Float64())
+		region.KeysWritten = uint64(keysUint * rand.Float64())
+		region.KeysRead = uint64(keysUint * rand.Float64())
 		region.QueryStats = &pdpb.QueryStats{
-			Get: uint64(queryUnit * rand.Float64() * 2),
-			Put: uint64(queryUnit * rand.Float64() * 2),
+			Get: uint64(queryUnit * rand.Float64()),
+			Put: uint64(queryUnit * rand.Float64()),
 		}
 	}
 	// update interval
 	for _, region := range rs.regions {
 		region.Interval.StartTimestamp = region.Interval.EndTimestamp
-		region.Interval.EndTimestamp = region.Interval.StartTimestamp + intervalUint
+		region.Interval.EndTimestamp = region.Interval.StartTimestamp + regionReportInterval
 	}
 }
 
@@ -325,6 +323,50 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 		}
 	}
 	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
+}
+
+func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
+	stores := make([]*pdpb.StoreStats, storeCount)
+	now := uint64(time.Now().Unix())
+	for i := 0; i < storeCount; i++ {
+		stores[i] = &pdpb.StoreStats{
+			StoreId:    uint64(i + 1),
+			Capacity:   capacity,
+			Available:  capacity,
+			QueryStats: &pdpb.QueryStats{},
+			PeerStats:  make([]*pdpb.PeerStat, 0),
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: now,
+				EndTimestamp:   now + storeReportInterval,
+			},
+		}
+	}
+	for _, region := range rs.regions {
+		for _, peer := range region.Region.Peers {
+			store := stores[peer.StoreId-1]
+			store.UsedSize += region.ApproximateSize
+			store.Available -= region.ApproximateSize
+			store.RegionCount += 1
+		}
+		store := stores[region.Leader.StoreId-1]
+		if region.BytesWritten != 0 {
+			store.BytesWritten += region.BytesWritten
+			store.BytesRead += region.BytesRead
+			store.KeysWritten += region.KeysWritten
+			store.KeysRead += region.KeysRead
+			store.QueryStats.Get += region.QueryStats.Get
+			store.QueryStats.Put += region.QueryStats.Put
+			store.PeerStats = append(store.PeerStats, &pdpb.PeerStat{
+				RegionId:     region.Region.Id,
+				ReadKeys:     region.KeysRead,
+				ReadBytes:    region.BytesRead,
+				WrittenKeys:  region.KeysWritten,
+				WrittenBytes: region.BytesWritten,
+				QueryStats:   region.QueryStats,
+			})
+		}
+	}
+	return stores
 }
 
 func main() {
@@ -376,7 +418,8 @@ func main() {
 	for i := 1; i <= cfg.StoreCount; i++ {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
 	}
-	var heartbeatTicker = time.NewTicker(60 * time.Second)
+	var storeUpdateRound = 0
+	var heartbeatTicker = time.NewTicker(10 * time.Second)
 	defer heartbeatTicker.Stop()
 	for {
 		select {
@@ -384,31 +427,45 @@ func main() {
 			if cfg.Round != 0 && regions.updateRound > cfg.Round {
 				exit(0)
 			}
-			rep := newReport(cfg)
-			r := rep.Stats()
-
-			startTime := time.Now()
-			wg := &sync.WaitGroup{}
-			for i := 1; i <= cfg.StoreCount; i++ {
-				id := uint64(i)
-				wg.Add(1)
-				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
+			storeUpdateRound++
+			{ // store heartbeat
+				wg := &sync.WaitGroup{}
+				storesStats := regions.collectStoresStats(cfg.StoreCount)
+				for i := 0; i < cfg.StoreCount; i++ {
+					wg.Add(1)
+					storeStat := storesStats[i]
+					go func() {
+						defer wg.Done()
+						cli.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
+					}()
+				}
+				wg.Wait()
 			}
-			wg.Wait()
-
-			since := time.Since(startTime).Seconds()
-			close(rep.Results())
-			regions.result(cfg.RegionCount, since)
-			stats := <-r
-			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
-			)
-			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-			regions.update(cfg.Replica)
+			if storeUpdateRound%6 == 0 { // region heartbeat
+				rep := newReport(cfg)
+				r := rep.Stats()
+				startTime := time.Now()
+				wg := &sync.WaitGroup{}
+				for i := 1; i <= cfg.StoreCount; i++ {
+					id := uint64(i)
+					wg.Add(1)
+					go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
+				}
+				wg.Wait()
+				since := time.Since(startTime).Seconds()
+				close(rep.Results())
+				regions.result(cfg.RegionCount, since)
+				stats := <-r
+				log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
+					zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
+					zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
+					zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
+					zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
+					zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+				)
+				log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
+				regions.update(cfg.Replica)
+			}
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
 			switch sig {
