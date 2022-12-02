@@ -990,6 +990,9 @@ func (c *ScheduleConfig) Validate() error {
 	if c.TolerantSizeRatio < 0 {
 		return errors.New("tolerant-size-ratio should be non-negative")
 	}
+	if c.HotThresholdRatio < 0 {
+		return errors.New("hot-threshold-ratio should be non-negative")
+	}
 	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
 		return errors.New("low-space-ratio should between 0 and 1")
 	}
