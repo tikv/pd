@@ -68,6 +68,12 @@ type thresholds struct {
 	rates       []float64
 }
 
+func (t *thresholds) collectMetrics(kind RWType, storeID uint64) {
+	for i := 0; i < DimLen; i++ {
+		hotThreshold.WithLabelValues(kind.String(), DimToString(i), storeTag(storeID)).Set(t.rates[i])
+	}
+}
+
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind              RWType
@@ -310,12 +316,14 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
+		t.collectMetrics(f.kind, storeID)
 		return t.rates
 	}
 	for i := range t.rates {
 		topn := tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)
 		t.rates[i] = math.Max(topn*math.Min(hotThresholdRatio, 1.0), t.rates[i])
 	}
+	t.collectMetrics(f.kind, storeID)
 	return t.rates
 }
 
