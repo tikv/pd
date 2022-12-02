@@ -368,24 +368,24 @@ func TestNeedSync(t *testing.T) {
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
-	check(re, rm)
+	checkMap(re, rm)
 	rm[1] = &regionItem{RegionInfo: regionInfo(1)}
-	check(re, rm, 1)
+	checkMap(re, rm, 1)
 
 	rm[2] = &regionItem{RegionInfo: regionInfo(2)}
 	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
-	check(re, rm, 1, 2, 3)
+	checkMap(re, rm, 1, 2, 3)
 
 	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
 	delete(rm, 4)
-	check(re, rm, 1, 2, 3)
+	checkMap(re, rm, 1, 2, 3)
 
 	delete(rm, 3)
 	delete(rm, 1)
-	check(re, rm, 2)
+	checkMap(re, rm, 2)
 
 	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
-	check(re, rm, 2, 3)
+	checkMap(re, rm, 2, 3)
 }
 
 func regionInfo(id uint64) *RegionInfo {
@@ -398,7 +398,7 @@ func regionInfo(id uint64) *RegionInfo {
 	}
 }
 
-func check(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) {
+func checkMap(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
 		re.Equal(id, rm[id].GetID())
@@ -466,7 +466,8 @@ func TestSetRegion(t *testing.T) {
 			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
 			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
 		}, peer1)
-		regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 
 	peer1 := &metapb.Peer{StoreId: uint64(4), Id: uint64(101)}
@@ -479,12 +480,14 @@ func TestSetRegion(t *testing.T) {
 		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
 	re.Len(regions.GetRegions(), 97)
 
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
 	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102), Role: metapb.PeerRole_Learner}
 	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
@@ -495,7 +498,8 @@ func TestSetRegion(t *testing.T) {
 		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
 	re.Len(regions.GetRegions(), 97)
@@ -504,7 +508,8 @@ func TestSetRegion(t *testing.T) {
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
 	re.NotNil(regions.GetRegion(21))
 	re.NotNil(regions.GetRegion(18))
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
 	re.Len(regions.GetRegions(), 96)
@@ -519,7 +524,8 @@ func TestSetRegion(t *testing.T) {
 		SetWrittenBytes(40),
 		SetWrittenKeys(10),
 		SetReportInterval(0, 5))
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
 	re.Len(regions.GetRegions(), 96)
@@ -630,7 +636,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -683,6 +690,7 @@ func BenchmarkAddRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.SetRegion(items[i])
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(items[i])
+		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
 }

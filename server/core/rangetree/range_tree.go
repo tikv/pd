@@ -20,9 +20,9 @@ import (
 	"github.com/tikv/pd/pkg/btree"
 )
 
-// RangeItem is one key range tree item.
+// RangeItem is the item of the range tree.
 type RangeItem interface {
-	btree.Item
+	Less(RangeItem) bool
 	GetStartKey() []byte
 	GetEndKey() []byte
 }
@@ -32,14 +32,14 @@ type DebrisFactory func(startKey, EndKey []byte, item RangeItem) []RangeItem
 
 // RangeTree is the tree contains RangeItems.
 type RangeTree struct {
-	tree    *btree.BTree
+	tree    *btree.BTreeG[RangeItem]
 	factory DebrisFactory
 }
 
 // NewRangeTree is the constructor of the range tree.
 func NewRangeTree(degree int, factory DebrisFactory) *RangeTree {
 	return &RangeTree{
-		tree:    btree.New(degree),
+		tree:    btree.NewG[RangeItem](degree),
 		factory: factory,
 	}
 }
@@ -74,15 +74,13 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 	if result == nil {
 		result = item
 	}
-
-	var overlaps []RangeItem
 	endKey := item.GetEndKey()
-	r.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
-		over := i.(RangeItem)
-		if len(endKey) > 0 && bytes.Compare(endKey, over.GetStartKey()) <= 0 {
+	var overlaps []RangeItem
+	r.tree.AscendGreaterOrEqual(result, func(i RangeItem) bool {
+		if len(endKey) > 0 && bytes.Compare(endKey, i.GetStartKey()) <= 0 {
 			return false
 		}
-		overlaps = append(overlaps, over)
+		overlaps = append(overlaps, i)
 		return true
 	})
 	return overlaps
@@ -91,8 +89,8 @@ func (r *RangeTree) GetOverlaps(item RangeItem) []RangeItem {
 // Find returns the range item contains the start key.
 func (r *RangeTree) Find(item RangeItem) RangeItem {
 	var result RangeItem
-	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		result = i.(RangeItem)
+	r.tree.DescendLessOrEqual(item, func(i RangeItem) bool {
+		result = i
 		return false
 	})
 
@@ -110,10 +108,8 @@ func contains(item RangeItem, key []byte) bool {
 
 // Remove removes the given item and return the deleted item.
 func (r *RangeTree) Remove(item RangeItem) RangeItem {
-	if r := r.tree.Delete(item); r != nil {
-		return r.(RangeItem)
-	}
-	return nil
+	i, _ := r.tree.Delete(item)
+	return i
 }
 
 // Len returns the count of the range tree.
@@ -128,25 +124,25 @@ func (r *RangeTree) ScanRange(start RangeItem, f func(_ RangeItem) bool) {
 	if startItem == nil {
 		startItem = start
 	}
-	r.tree.AscendGreaterOrEqual(startItem, func(item btree.Item) bool {
-		return f(item.(RangeItem))
+	r.tree.AscendGreaterOrEqual(startItem, func(item RangeItem) bool {
+		return f(item)
 	})
 }
 
 // GetAdjacentItem returns the adjacent range item.
 func (r *RangeTree) GetAdjacentItem(item RangeItem) (prev RangeItem, next RangeItem) {
-	r.tree.AscendGreaterOrEqual(item, func(i btree.Item) bool {
-		if bytes.Equal(item.GetStartKey(), i.(RangeItem).GetStartKey()) {
+	r.tree.AscendGreaterOrEqual(item, func(i RangeItem) bool {
+		if bytes.Equal(item.GetStartKey(), i.GetStartKey()) {
 			return true
 		}
-		next = i.(RangeItem)
+		next = i
 		return false
 	})
-	r.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		if bytes.Equal(item.GetStartKey(), i.(RangeItem).GetStartKey()) {
+	r.tree.DescendLessOrEqual(item, func(i RangeItem) bool {
+		if bytes.Equal(item.GetStartKey(), i.GetStartKey()) {
 			return true
 		}
-		prev = i.(RangeItem)
+		prev = i
 		return false
 	})
 	return prev, next
@@ -154,14 +150,10 @@ func (r *RangeTree) GetAdjacentItem(item RangeItem) (prev RangeItem, next RangeI
 
 // GetAt returns the given index item.
 func (r *RangeTree) GetAt(index int) RangeItem {
-	return r.tree.GetAt(index).(RangeItem)
+	return r.tree.GetAt(index)
 }
 
 // GetWithIndex returns index and item for the given item.
 func (r *RangeTree) GetWithIndex(item RangeItem) (RangeItem, int) {
-	rst, index := r.tree.GetWithIndex(item)
-	if rst == nil {
-		return nil, index
-	}
-	return rst.(RangeItem), index
+	return r.tree.GetWithIndex(item)
 }

@@ -23,30 +23,24 @@ const (
 	SmallRegionThreshold int64 = 20
 	// Unlimited is used to control the store limit. Here uses a big enough number to represent unlimited.
 	Unlimited = float64(100000000)
+	// influence is the influence of a normal region.
+	influence = 1000
+	// smallInfluence is the influence of a small region.
+	smallInfluence = 200
 )
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
-var RegionInfluence = map[Type]int64{
-	AddPeer:    1000,
-	RemovePeer: 1000,
+var RegionInfluence = []int64{
+	AddPeer:    influence,
+	RemovePeer: influence,
 }
 
 // SmallRegionInfluence represents the influence of a operator step
 // when the region size is smaller than smallRegionThreshold, which is used by store limit.
-var SmallRegionInfluence = map[Type]int64{
-	AddPeer:    200,
-	RemovePeer: 200,
+var SmallRegionInfluence = []int64{
+	AddPeer:    smallInfluence,
+	RemovePeer: smallInfluence,
 }
-
-// Type indicates the type of store limit
-type Type int
-
-const (
-	// AddPeer indicates the type of store limit that limits the adding peer rate
-	AddPeer Type = iota
-	// RemovePeer indicates the type of store limit that limits the removing peer rate
-	RemovePeer
-)
 
 // TypeNameValue indicates the name of store limit type and the enum value
 var TypeNameValue = map[string]Type{
@@ -64,45 +58,81 @@ func (t Type) String() string {
 	return ""
 }
 
-// StoreLimit limits the operators of a store
-type StoreLimit struct {
-	limiter         *ratelimit.RateLimiter
-	regionInfluence int64
-	ratePerSec      float64
+var _ StoreLimit = &StoreRateLimit{}
+
+// StoreRateLimit is a rate limiter for store.
+type StoreRateLimit struct {
+	limits []*limit
 }
 
-// NewStoreLimit returns a StoreLimit object
-func NewStoreLimit(ratePerSec float64, regionInfluence int64) *StoreLimit {
-	capacity := regionInfluence
+// NewStoreRateLimit creates a StoreRateLimit.
+func NewStoreRateLimit(ratePerSec float64) StoreLimit {
+	limits := make([]*limit, storeLimitTypeLen)
+	for i := 0; i < len(limits); i++ {
+		l := &limit{}
+		l.Reset(ratePerSec)
+		limits[i] = l
+	}
+	return &StoreRateLimit{
+		limits: limits,
+	}
+}
+
+// Available returns the number of available tokens
+func (l *StoreRateLimit) Available(cost int64, typ Type) bool {
+	return l.limits[typ].Available(cost)
+}
+
+// Take takes count tokens from the bucket without blocking.
+func (l *StoreRateLimit) Take(cost int64, typ Type) bool {
+	return l.limits[typ].Take(cost)
+}
+
+// Reset resets the rate limit.
+func (l *StoreRateLimit) Reset(rate float64, typ Type) {
+	l.limits[typ].Reset(rate)
+}
+
+// limit the operators of a store
+type limit struct {
+	limiter    *ratelimit.RateLimiter
+	ratePerSec float64
+}
+
+// Reset resets the rate limit.
+func (l *limit) Reset(ratePerSec float64) {
+	if l.ratePerSec == ratePerSec {
+		return
+	}
+	capacity := int64(influence)
 	rate := ratePerSec
 	// unlimited
 	if rate >= Unlimited {
 		capacity = int64(Unlimited)
 	} else if ratePerSec > 1 {
-		capacity = int64(ratePerSec * float64(regionInfluence))
-		ratePerSec *= float64(regionInfluence)
+		capacity = int64(ratePerSec * float64(influence))
+		ratePerSec *= float64(influence)
 	} else {
-		ratePerSec *= float64(regionInfluence)
+		ratePerSec *= float64(influence)
 	}
-	return &StoreLimit{
-		limiter:         ratelimit.NewRateLimiter(ratePerSec, int(capacity)),
-		regionInfluence: regionInfluence,
-		ratePerSec:      rate,
-	}
+	l.limiter = ratelimit.NewRateLimiter(ratePerSec, int(capacity))
+	l.ratePerSec = rate
 }
 
 // Available returns the number of available tokens
-func (l *StoreLimit) Available(n int64) bool {
+// It returns true if the rate per second is zero.
+func (l *limit) Available(n int64) bool {
+	if l.ratePerSec == 0 {
+		return true
+	}
 	// Unlimited = 1e8, so can convert int64 to int
 	return l.limiter.Available(int(n))
 }
 
-// Rate returns the fill rate of the bucket, in tokens per second.
-func (l *StoreLimit) Rate() float64 {
-	return l.ratePerSec
-}
-
 // Take takes count tokens from the bucket without blocking.
-func (l *StoreLimit) Take(count int64) {
-	l.limiter.AllowN(int(count))
+func (l *limit) Take(count int64) bool {
+	if l.ratePerSec == 0 {
+		return true
+	}
+	return l.limiter.AllowN(int(count))
 }

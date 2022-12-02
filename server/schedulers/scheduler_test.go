@@ -111,14 +111,15 @@ func TestRejectLeader(t *testing.T) {
 
 	// If the peer on store3 is pending, not transfer to store3 neither.
 	tc.SetStoreUp(3)
-	region := tc.Regions.GetRegion(1)
+	region := tc.GetRegion(1)
 	for _, p := range region.GetPeers() {
 		if p.GetStoreId() == 3 {
 			region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), p)))
 			break
 		}
 	}
-	tc.Regions.SetRegion(region)
+	origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(region)
+	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }
