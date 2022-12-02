@@ -24,38 +24,40 @@ import (
 )
 
 type dimStat struct {
-	typ         RegionStatKind
-	rolling     *movingaverage.TimeMedian  // it's used to statistic hot degree and average speed.
-	lastAverage *movingaverage.AvgOverTime // it's used to obtain the average speed in last second as instantaneous speed.
+	rolling         *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
+	lastIntervalSum int                       // lastIntervalSum and lastDelta are used to calculate the average speed of the last interval.
+	lastDelta       float64
 }
 
 func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
 	return &dimStat{
-		typ:         typ,
-		rolling:     movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
-		lastAverage: movingaverage.NewAvgOverTime(reportInterval),
+		rolling:         movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
+		lastIntervalSum: 0,
+		lastDelta:       0,
 	}
 }
 
 func (d *dimStat) Add(delta float64, interval time.Duration) {
-	d.lastAverage.Add(delta, interval)
+	d.lastIntervalSum += int(interval.Seconds())
+	d.lastDelta += delta
 	d.rolling.Add(delta, interval)
 }
 
 func (d *dimStat) isLastAverageHot(threshold float64) bool {
-	return d.lastAverage.Get() >= threshold
+	return d.lastDelta/float64(d.lastIntervalSum) >= threshold
 }
 
 func (d *dimStat) isHot(threshold float64) bool {
 	return d.rolling.Get() >= threshold
 }
 
-func (d *dimStat) isFull() bool {
-	return d.lastAverage.IsFull()
+func (d *dimStat) isFull(interval time.Duration) bool {
+	return d.lastIntervalSum >= int(interval.Seconds())
 }
 
 func (d *dimStat) clearLastAverage() {
-	d.lastAverage.Clear()
+	d.lastIntervalSum = 0
+	d.lastDelta = 0
 }
 
 func (d *dimStat) Get() float64 {
@@ -64,9 +66,8 @@ func (d *dimStat) Get() float64 {
 
 func (d *dimStat) Clone() *dimStat {
 	return &dimStat{
-		typ:         d.typ,
-		rolling:     d.rolling.Clone(),
-		lastAverage: d.lastAverage.Clone(),
+		rolling:         d.rolling.Clone(),
+		lastIntervalSum: d.lastIntervalSum,
 	}
 }
 
@@ -181,11 +182,13 @@ func (stat *HotPeerStat) clearLastAverage() {
 	}
 }
 
+// getIntervalSum returns the sum of all intervals.
+// only used for test
 func (stat *HotPeerStat) getIntervalSum() time.Duration {
 	if len(stat.rollingLoads) == 0 || stat.rollingLoads[0] == nil {
 		return 0
 	}
-	return stat.rollingLoads[0].lastAverage.GetIntervalSum()
+	return time.Duration(stat.rollingLoads[0].lastIntervalSum) * time.Second
 }
 
 // GetStores returns the stores of all peers in the region.
