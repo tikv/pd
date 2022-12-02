@@ -848,10 +848,15 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
 			// Because the regionItem is reused, there is no need to delete it in the regionMap.
+			idx := -1
 			for i, o := range ol {
 				if o.GetID() == region.GetID() {
-					ol = append(ol[:i], ol[i+1:]...)
+					idx = i
+					break
 				}
+			}
+			if idx >= 0 {
+				ol = append(ol[:idx], ol[idx+1:]...)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
@@ -876,6 +881,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			delete(r.regions, old.GetID())
 		}
 	}
+	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
 }
 
