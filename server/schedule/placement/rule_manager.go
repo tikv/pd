@@ -213,7 +213,7 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
 		}
 		if r.IsWitness && c.Key == core.EngineKey && slices.Contains(c.Values, core.EngineTiFlash) {
-			return errs.ErrRuleContent.FastGenByArgs("witness cann't combine with tiflash")
+			return errs.ErrRuleContent.FastGenByArgs("witness can't combine with tiflash")
 		}
 	}
 

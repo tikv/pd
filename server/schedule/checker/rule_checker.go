@@ -230,11 +230,11 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errNoStoreToReplace
 	}
 	var isWitness bool
-	if c.isWitnessEnabled() {
+	if c.isWitnessEnabled() && !core.IsStoreContainLabel(c.cluster.GetStore(store).GetMeta(), core.EngineKey, core.EngineTiFlash) {
 		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
 		// exceeds the threshold(30min), add a witness and remove the down peer. Then witness is
 		// promoted to non-witness gradually to improve availability.
-		if status == "down" && !core.IsStoreContainLabel(c.cluster.GetStore(store).GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if status == "down" {
 			isWitness = true
 		} else {
 			isWitness = rf.Rule.IsWitness
