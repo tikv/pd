@@ -419,7 +419,7 @@ func main() {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
 	}
 	var storeUpdateRound = 0
-	var heartbeatTicker = time.NewTicker(10 * time.Second)
+	var heartbeatTicker = time.NewTicker(storeReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
 	for {
 		select {
