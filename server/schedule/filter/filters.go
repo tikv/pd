@@ -670,6 +670,9 @@ func (f *ruleLeaderFitFilter) Target(_ *config.PersistOptions, store *core.Store
 		log.Warn("ruleLeaderFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return statusStoreNotMatchRule
 	}
+	if targetPeer != nil && targetPeer.IsWitness {
+		return statusStoreNotMatchRule
+	}
 	if f.oldFit.Replace(f.srcLeaderStoreID, store) {
 		return statusOK
 	}
