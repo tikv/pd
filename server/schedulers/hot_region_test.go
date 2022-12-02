@@ -1012,9 +1012,9 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().HotThresholdRatio = 1.0
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetHotThresholdRatio(1.0)
 	scheduler, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb := scheduler.(*hotScheduler)
@@ -1387,9 +1387,9 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
-	opt.GetScheduleConfig().HotThresholdRatio = 1.0
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.SetHotThresholdRatio(1.0)
 
 	// For read flow
 	addRegionInfo(tc, statistics.Read, []testRegionInfo{

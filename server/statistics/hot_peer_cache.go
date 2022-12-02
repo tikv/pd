@@ -313,7 +313,8 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 		return t.rates
 	}
 	for i := range t.rates {
-		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*hotThresholdRatio, t.rates[i])
+		topn := tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)
+		t.rates[i] = math.Max(topn*math.Min(hotThresholdRatio, 1.0), t.rates[i])
 	}
 	return t.rates
 }
