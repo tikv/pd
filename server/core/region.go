@@ -749,20 +749,27 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
-	origin, ols, err := r.PreCheckPutRegion(region)
+	r.t.Lock()
+	origin := r.getRegionLocked(region.GetID())
+	var ols []*regionItem
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+	}
+	err := check(region, origin, ols)
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
 		return []*RegionInfo{region}
 	}
-	origin, overlaps, rangeChanged := r.SetRegion(region, true, ols...)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
+	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
 
 // PutRegion put a region.
 func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
-	origin, overlaps, rangeChanged := r.SetRegion(region, false)
+	origin, overlaps, rangeChanged := r.SetRegion(region)
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
@@ -828,10 +835,10 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 }
 
 // SetRegion sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
-func (r *RegionsInfo) SetRegion(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) SetRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
-	return r.setRegionLocked(region, withOverlaps, ol...)
+	return r.setRegionLocked(region, false)
 }
 
 func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
