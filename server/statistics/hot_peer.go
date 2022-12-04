@@ -20,10 +20,12 @@ import (
 
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/syncutil"
 	"go.uber.org/zap"
 )
 
 type dimStat struct {
+	syncutil.RWMutex
 	rolling         *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
 	lastIntervalSum int                       // lastIntervalSum and lastDelta are used to calculate the average speed of the last interval.
 	lastDelta       float64
@@ -38,33 +40,47 @@ func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
 }
 
 func (d *dimStat) Add(delta float64, interval time.Duration) {
+	d.Lock()
+	defer d.Unlock()
 	d.lastIntervalSum += int(interval.Seconds())
 	d.lastDelta += delta
 	d.rolling.Add(delta, interval)
 }
 
 func (d *dimStat) isLastAverageHot(threshold float64) bool {
+	d.RLock()
+	defer d.RUnlock()
 	return d.lastDelta/float64(d.lastIntervalSum) >= threshold
 }
 
 func (d *dimStat) isHot(threshold float64) bool {
+	d.RLock()
+	defer d.RUnlock()
 	return d.rolling.Get() >= threshold
 }
 
 func (d *dimStat) isFull(interval time.Duration) bool {
+	d.RLock()
+	defer d.RUnlock()
 	return d.lastIntervalSum >= int(interval.Seconds())
 }
 
 func (d *dimStat) clearLastAverage() {
+	d.Lock()
+	defer d.Unlock()
 	d.lastIntervalSum = 0
 	d.lastDelta = 0
 }
 
 func (d *dimStat) Get() float64 {
+	d.RLock()
+	defer d.RUnlock()
 	return d.rolling.Get()
 }
 
 func (d *dimStat) Clone() *dimStat {
+	d.RLock()
+	defer d.RUnlock()
 	return &dimStat{
 		rolling:         d.rolling.Clone(),
 		lastIntervalSum: d.lastIntervalSum,
