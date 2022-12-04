@@ -31,7 +31,7 @@ type dimStat struct {
 	lastDelta       float64
 }
 
-func newDimStat(typ RegionStatKind, reportInterval time.Duration) *dimStat {
+func newDimStat(reportInterval time.Duration) *dimStat {
 	return &dimStat{
 		rolling:         movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
 		lastIntervalSum: 0,
