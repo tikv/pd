@@ -455,7 +455,7 @@ func main() {
 				)
 				log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 				regions.update(cfg.Replica)
-			}else{
+			} else {
 				wg.Wait()
 			}
 		case <-ctx.Done():
