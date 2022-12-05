@@ -865,6 +865,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	var overlaps []*core.RegionInfo
 	if saveCache {
+		failpoint.Inject("decEpoch", func() {
+			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
+		})
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
