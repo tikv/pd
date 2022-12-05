@@ -178,6 +178,51 @@ func TestDamagedRegion(t *testing.T) {
 	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
 }
 
+func TestStaleRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+		},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 10,
+			Version: 10,
+		},
+	}
+
+	// To put region.
+	regionInfoA := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(err)
+	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/decEpoch", `return(true)`))
+	tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/decEpoch"))
+	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	err = tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(err)
+}
+
 func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
