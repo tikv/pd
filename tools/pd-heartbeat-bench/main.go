@@ -248,16 +248,8 @@ func (rs *Regions) update(replica int) {
 	// update space
 	for _, i := range rs.updateSpace {
 		region := rs.regions[i]
-		if region.ApproximateSize == bytesUnit {
-			region.ApproximateSize = bytesUnit * 2
-		} else {
-			region.ApproximateSize = bytesUnit
-		}
-		if region.ApproximateKeys == keysUint {
-			region.ApproximateKeys = keysUint * 2
-		} else {
-			region.ApproximateKeys = keysUint
-		}
+		region.ApproximateSize = uint64(bytesUnit * rand.Float64())
+		region.ApproximateKeys = uint64(keysUint * rand.Float64())
 	}
 	// update flow
 	for _, i := range rs.updateFlow {
@@ -428,24 +420,22 @@ func main() {
 				exit(0)
 			}
 			storeUpdateRound++
-			{ // store heartbeat
-				wg := &sync.WaitGroup{}
-				storesStats := regions.collectStoresStats(cfg.StoreCount)
-				for i := 0; i < cfg.StoreCount; i++ {
-					wg.Add(1)
-					storeStat := storesStats[i]
-					go func() {
-						defer wg.Done()
-						cli.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
-					}()
-				}
-				wg.Wait()
+			wg := &sync.WaitGroup{}
+			// store heartbeat
+			storesStats := regions.collectStoresStats(cfg.StoreCount)
+			for i := 0; i < cfg.StoreCount; i++ {
+				wg.Add(1)
+				storeStat := storesStats[i]
+				go func() {
+					defer wg.Done()
+					cli.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
+				}()
 			}
-			if storeUpdateRound%6 == 0 { // region heartbeat
+			// region heartbeat
+			if storeUpdateRound%6 == 0 {
 				rep := newReport(cfg)
 				r := rep.Stats()
 				startTime := time.Now()
-				wg := &sync.WaitGroup{}
 				for i := 1; i <= cfg.StoreCount; i++ {
 					id := uint64(i)
 					wg.Add(1)
@@ -465,6 +455,8 @@ func main() {
 				)
 				log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 				regions.update(cfg.Replica)
+			}else{
+				wg.Wait()
 			}
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
