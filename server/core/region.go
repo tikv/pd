@@ -658,8 +658,8 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("to", region.GetLeader().GetStoreId()),
 					)
 				}
+				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
-				return
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
