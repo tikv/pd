@@ -625,6 +625,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			saveKV, saveCache, isNew = true, true, true
 		} else {
+			if !origin.IsFromHeartbeat() {
+				isNew = true
+			}
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() {
@@ -655,27 +658,17 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("to", region.GetLeader().GetStoreId()),
 					)
 				}
-				saveCache, needSync = true, true
-			}
-			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
-				saveCache, needSync = true, true
-			}
-			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				// We check it first and do not return because the log is important for us to investigate,
 				saveCache, needSync = true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
+				return
 			}
 			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
 				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
 				saveKV, saveCache = true, true
-			}
-
-			if region.GetApproximateSize() != origin.GetApproximateSize() ||
-				region.GetApproximateKeys() != origin.GetApproximateKeys() {
-				saveCache = true
+				return
 			}
 			// Once flow has changed, will update the cache.
 			// Because keys and bytes are strongly related, only bytes are judged.
@@ -683,15 +676,27 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true
+				return
 			}
-
+			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
+				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+				return
+			}
+			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
+				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				saveCache, needSync = true, true
+				return
+			}
+			if region.GetApproximateSize() != origin.GetApproximateSize() ||
+				region.GetApproximateKeys() != origin.GetApproximateKeys() {
+				saveCache = true
+				return
+			}
 			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
-			}
-			if !origin.IsFromHeartbeat() {
-				isNew = true
 			}
 		}
 		return

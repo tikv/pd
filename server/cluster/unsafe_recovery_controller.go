@@ -998,6 +998,21 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 					storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, store)
 				}
 			}
+			if u.autoDetect {
+				// For auto detect, the failedStores is empty. So need to add the detected failed store to the list
+				for _, peer := range u.getFailedPeers(leader.Region()) {
+					found := false
+					for _, store := range storeRecoveryPlan.ForceLeader.FailedStores {
+						if store == peer.StoreId {
+							found = true
+							break
+						}
+					}
+					if !found {
+						storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, peer.StoreId)
+					}
+				}
+			}
 			storeRecoveryPlan.ForceLeader.EnterForceLeaders = append(storeRecoveryPlan.ForceLeader.EnterForceLeaders, region.GetId())
 			u.recordAffectedRegion(leader.Region())
 			hasPlan = true

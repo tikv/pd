@@ -694,3 +694,34 @@ func BenchmarkAddRegion(b *testing.B) {
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
 }
+
+func BenchmarkRegionFromHeartbeat(b *testing.B) {
+	peers := make([]*metapb.Peer, 0, 3)
+	for i := uint64(1); i <= 3; i++ {
+		peers = append(peers, &metapb.Peer{
+			Id:      i,
+			StoreId: i,
+		})
+	}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 2,
+				Version: 1,
+			},
+		},
+		Leader:          peers[0],
+		Term:            5,
+		ApproximateSize: 10,
+		PendingPeers:    []*metapb.Peer{peers[1]},
+		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		RegionFromHeartbeat(regionReq)
+	}
+}
