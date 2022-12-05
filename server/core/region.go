@@ -751,6 +751,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	}
 	_, err := check(region, origin, overlaps)
 	if err != nil {
+		r.t.Unlock()
 		return nil, err
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region)
