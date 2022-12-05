@@ -282,12 +282,11 @@ func TestCollectMetrics(t *testing.T) {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
-				Kind:      statistics.Write,
 				Loads:     []float64{10, 20, 30},
 				HotDegree: 10,
 				AntiCount: statistics.HotRegionAntiCount, // for write
 			}
-			tc.hotStat.HotCache.Update(item)
+			tc.hotStat.HotCache.Update(item, statistics.Write)
 		}
 	}
 	for i := 0; i < 1000; i++ {
@@ -629,7 +628,7 @@ func TestShouldRun(t *testing.T) {
 	re.NoError(tc.LoadRegion(6, 2, 1, 4))
 	re.NoError(tc.LoadRegion(7, 2, 1, 4))
 	re.False(co.shouldRun())
-	re.Equal(2, tc.core.Regions.GetStoreRegionCount(4))
+	re.Equal(2, tc.GetStoreRegionCount(4))
 
 	testCases := []struct {
 		regionID  uint64
@@ -671,7 +670,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		re.NoError(tc.LoadRegion(uint64(i+1), 1, 2, 3))
 	}
 	re.False(co.shouldRun())
-	re.Equal(10, tc.core.Regions.GetStoreRegionCount(1))
+	re.Equal(10, tc.GetStoreRegionCount(1))
 
 	testCases := []struct {
 		regionID  uint64

@@ -76,17 +76,15 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 	keyRate := p.GetLoad(KeyDim)
 	queryRate := p.GetLoad(QueryDim)
 	return HotPeerStatShow{
-		StoreID:        p.StoreID,
-		Stores:         p.GetStores(),
-		IsLeader:       p.IsLeader(),
-		IsLearner:      p.IsLearner(),
-		RegionID:       p.RegionID,
-		HotDegree:      p.HotDegree,
-		ByteRate:       byteRate,
-		KeyRate:        keyRate,
-		QueryRate:      queryRate,
-		AntiCount:      p.AntiCount,
-		LastUpdateTime: p.LastUpdateTime,
+		StoreID:   p.StoreID,
+		Stores:    p.GetStores(),
+		IsLeader:  p.IsLeader(),
+		RegionID:  p.RegionID,
+		HotDegree: p.HotDegree,
+		ByteRate:  byteRate,
+		KeyRate:   keyRate,
+		QueryRate: queryRate,
+		AntiCount: p.AntiCount,
 	}
 }
 

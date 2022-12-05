@@ -46,6 +46,10 @@ const (
 	queueCap = 20000
 )
 
+// ThresholdsUpdateInterval is the default interval to update thresholds.
+// the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
+var ThresholdsUpdateInterval = 8 * time.Second
+
 // Denoising is an option to calculate flow base on the real heartbeats. Should
 // only turn off by the simulator and the test.
 var Denoising = true
@@ -60,33 +64,34 @@ var MinHotThresholds = [RegionStatCount]float64{
 	RegionWriteQueryNum: 32,
 }
 
+type thresholds struct {
+	updatedTime time.Time
+	rates       []float64
+}
+
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
-	kind               RWType
-	peersOfStore       map[uint64]*TopN               // storeID -> hot peers
-	storesOfRegion     map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	regionsOfStore     map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	topNTTL            time.Duration
-	reportIntervalSecs int
-	taskQueue          chan FlowItemTask
+	kind              RWType
+	peersOfStore      map[uint64]*TopN               // storeID -> hot peers
+	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
+	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
+	topNTTL           time.Duration
+	taskQueue         chan FlowItemTask
+	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
+	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(kind RWType) *hotPeerCache {
-	c := &hotPeerCache{
-		kind:           kind,
-		peersOfStore:   make(map[uint64]*TopN),
-		storesOfRegion: make(map[uint64]map[uint64]struct{}),
-		regionsOfStore: make(map[uint64]map[uint64]struct{}),
-		taskQueue:      make(chan FlowItemTask, queueCap),
+	return &hotPeerCache{
+		kind:              kind,
+		peersOfStore:      make(map[uint64]*TopN),
+		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
+		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
+		taskQueue:         make(chan FlowItemTask, queueCap),
+		thresholdsOfStore: make(map[uint64]*thresholds),
+		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
 	}
-	if kind == Write {
-		c.reportIntervalSecs = WriteReportInterval
-	} else {
-		c.reportIntervalSecs = ReadReportInterval
-	}
-	c.topNTTL = time.Duration(3*c.reportIntervalSecs) * time.Second
-	return c
 }
 
 // TODO: rename RegionStats as PeerStats
@@ -97,7 +102,7 @@ func (f *hotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 		values := peers.GetAll()
 		stat := make([]*HotPeerStat, 0, len(values))
 		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == peer.defaultAntiCount() {
+			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == f.kind.DefaultAntiCount() {
 				stat = append(stat, peer)
 			}
 		}
@@ -111,12 +116,12 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	case Remove:
 		f.removeItem(item)
 		item.Log("region heartbeat remove from cache", log.Debug)
-		incMetrics("remove_item", item.StoreID, item.Kind)
+		incMetrics("remove_item", item.StoreID, f.kind)
 		return
 	case Add:
-		incMetrics("add_item", item.StoreID, item.Kind)
+		incMetrics("add_item", item.StoreID, f.kind)
 	case Update:
-		incMetrics("update_item", item.StoreID, item.Kind)
+		incMetrics("update_item", item.StoreID, f.kind)
 	}
 	// for add and update
 	f.putItem(item)
@@ -176,7 +181,6 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
 	oldItem := f.getOldHotPeerStat(regionID, storeID)
-	thresholds := f.calcHotThresholds(storeID)
 
 	// check whether the peer is allowed to be inherited
 	source := direct
@@ -193,6 +197,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	// check new item whether is hot
 	if oldItem == nil {
 		regionStats := f.kind.RegionStats()
+		thresholds := f.calcHotThresholds(storeID)
 		isHot := slice.AnyOf(regionStats, func(i int) bool {
 			return deltaLoads[regionStats[i]]/float64(interval) >= thresholds[i]
 		})
@@ -202,24 +207,21 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	}
 
 	newItem := &HotPeerStat{
-		StoreID:        storeID,
-		RegionID:       regionID,
-		Kind:           f.kind,
-		Loads:          f.kind.GetLoadRatesFromPeer(peer),
-		LastUpdateTime: time.Now(),
-		isLeader:       region.GetLeader().GetStoreId() == storeID,
-		isLearner:      region.GetStoreLearner(storeID) != nil,
-		interval:       interval,
-		peers:          region.GetPeers(),
-		actionType:     Update,
-		thresholds:     thresholds,
-		source:         source,
+		StoreID:    storeID,
+		RegionID:   regionID,
+		Loads:      f.kind.GetLoadRatesFromPeer(peer),
+		isLeader:   region.GetLeader().GetStoreId() == storeID,
+		actionType: Update,
+		stores:     make([]uint64, len(region.GetPeers())),
+	}
+	for _, peer := range region.GetPeers() {
+		newItem.stores = append(newItem.stores, peer.GetStoreId())
 	}
 
 	if oldItem == nil {
 		return f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second)
 	}
-	return f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
+	return f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source)
 }
 
 // checkColdPeer checks the collect the un-heartbeat peer and maintain it.
@@ -247,23 +249,20 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 			newItem := &HotPeerStat{
 				StoreID:  storeID,
 				RegionID: regionID,
-				Kind:     f.kind,
 				// use 0 to make the cold newItem won't affect the loads.
-				Loads:          make([]float64, len(oldItem.Loads)),
-				LastUpdateTime: time.Now(),
-				isLeader:       oldItem.isLeader,
-				isLearner:      oldItem.isLearner,
-				interval:       interval,
-				peers:          oldItem.peers,
-				actionType:     Update,
-				thresholds:     oldItem.thresholds,
-				inCold:         true,
+				Loads:      make([]float64, len(oldItem.Loads)),
+				isLeader:   oldItem.isLeader,
+				actionType: Update,
+				inCold:     true,
+				stores:     oldItem.stores,
 			}
 			deltaLoads := make([]float64, RegionStatCount)
-			for i, loads := range oldItem.thresholds {
+			thresholds := f.calcHotThresholds(storeID)
+			source := direct
+			for i, loads := range thresholds {
 				deltaLoads[i] = loads * float64(interval)
 			}
-			stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second)
+			stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source)
 			if stat != nil {
 				ret = append(ret, stat)
 			}
@@ -294,19 +293,27 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
+	t, ok := f.thresholdsOfStore[storeID]
+	if ok && time.Since(t.updatedTime) <= ThresholdsUpdateInterval {
+		return t.rates
+	}
+	t = &thresholds{
+		updatedTime: time.Now(),
+		rates:       make([]float64, DimLen),
+	}
+	f.thresholdsOfStore[storeID] = t
 	statKinds := f.kind.RegionStats()
-	ret := make([]float64, DimLen)
 	for dim, kind := range statKinds {
-		ret[dim] = MinHotThresholds[kind]
+		t.rates[dim] = MinHotThresholds[kind]
 	}
 	tn, ok := f.peersOfStore[storeID]
 	if !ok || tn.Len() < TopNN {
-		return ret
+		return t.rates
 	}
-	for i := range ret {
-		ret[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, ret[i])
+	for i := range t.rates {
+		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
 	}
-	return ret
+	return t.rates
 }
 
 // gets the storeIDs, including old region and new region
@@ -336,8 +343,8 @@ func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
 
 func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool {
 	isOldPeer := func() bool {
-		for _, peer := range oldItem.peers {
-			if peer.GetStoreId() == storeID {
+		for _, id := range oldItem.stores {
+			if id == storeID {
 				return true
 			}
 		}
@@ -404,10 +411,10 @@ func (f *hotPeerCache) getHotPeerStat(regionID, storeID uint64) *HotPeerStat {
 	return nil
 }
 
-func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
+func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldItem *HotPeerStat, deltaLoads []float64, interval time.Duration, source sourceKind) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 
-	if newItem.source == inherit {
+	if source == inherit {
 		for _, dim := range oldItem.rollingLoads {
 			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
 		}
@@ -423,8 +430,8 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.
 		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
-		if newItem.Kind == Write {
-			inheritItem(newItem, oldItem)
+		if f.kind == Write {
+			f.inheritItem(newItem, oldItem)
 			return newItem
 		}
 	} else {
@@ -438,24 +445,25 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 	isFull := newItem.rollingLoads[0].isFull() // The intervals of dims are the same, so it is only necessary to determine whether any of them
 	if !isFull {
 		// not update hot degree and anti count
-		inheritItem(newItem, oldItem)
+		f.inheritItem(newItem, oldItem)
 	} else {
 		// If item is inCold, it means the pd didn't recv this item in the store heartbeat,
 		// thus we make it colder
 		if newItem.inCold {
-			coldItem(newItem, oldItem)
+			f.coldItem(newItem, oldItem)
 		} else {
+			thresholds := f.calcHotThresholds(newItem.StoreID)
 			if f.isOldColdPeer(oldItem, newItem.StoreID) {
-				if newItem.isHot() {
-					initItem(newItem)
+				if newItem.isHot(thresholds) {
+					f.initItem(newItem)
 				} else {
 					newItem.actionType = Remove
 				}
 			} else {
-				if newItem.isHot() {
-					hotItem(newItem, oldItem)
+				if newItem.isHot(thresholds) {
+					f.hotItem(newItem, oldItem)
 				} else {
-					coldItem(newItem, oldItem)
+					f.coldItem(newItem, oldItem)
 				}
 			}
 		}
@@ -467,13 +475,13 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
 	regionStats := f.kind.RegionStats()
 	// interval is not 0 which is guaranteed by the caller.
-	if interval.Seconds() >= float64(f.reportIntervalSecs) {
-		initItem(newItem)
+	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
+		f.initItem(newItem)
 	}
 	newItem.actionType = Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
-		ds := newDimStat(k, time.Duration(newItem.hotStatReportInterval())*time.Second)
+		ds := newDimStat(k, f.interval())
 		ds.Add(deltaLoads[k], interval)
 		if ds.isFull() {
 			ds.clearLastAverage()
@@ -516,7 +524,7 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
-func coldItem(newItem, oldItem *HotPeerStat) {
+func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
@@ -526,9 +534,9 @@ func coldItem(newItem, oldItem *HotPeerStat) {
 	}
 }
 
-func hotItem(newItem, oldItem *HotPeerStat) {
+func (f *hotPeerCache) hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	if oldItem.AntiCount < oldItem.defaultAntiCount() {
+	if oldItem.AntiCount < f.kind.DefaultAntiCount() {
 		newItem.AntiCount = oldItem.AntiCount + 1
 	} else {
 		newItem.AntiCount = oldItem.AntiCount
@@ -536,13 +544,17 @@ func hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.allowInherited = true
 }
 
-func initItem(item *HotPeerStat) {
+func (f *hotPeerCache) initItem(item *HotPeerStat) {
 	item.HotDegree = 1
-	item.AntiCount = item.defaultAntiCount()
+	item.AntiCount = f.kind.DefaultAntiCount()
 	item.allowInherited = true
 }
 
-func inheritItem(newItem, oldItem *HotPeerStat) {
+func (f *hotPeerCache) inheritItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree
 	newItem.AntiCount = oldItem.AntiCount
+}
+
+func (f *hotPeerCache) interval() time.Duration {
+	return time.Duration(f.kind.ReportInterval()) * time.Second
 }

@@ -466,7 +466,7 @@ func BenchmarkRegionTreeSequentialLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		index := i % MaxCount
-		data.tree.find(data.items[index])
+		data.tree.find(&regionItem{RegionInfo: data.items[index]})
 	}
 }
 
@@ -475,7 +475,7 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		index := i % MaxCount
-		data.tree.find(data.items[index])
+		data.tree.find(&regionItem{RegionInfo: data.items[index]})
 	}
 }
 

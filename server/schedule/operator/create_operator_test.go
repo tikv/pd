@@ -249,14 +249,14 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			OpMerge | OpRegion,
 			false,
 			[]OpStep{
-				AddLearner{ToStore: 3},
+				AddLearner{ToStore: 3, IsWitness: true},
 				ChangePeerV2Enter{
-					PromoteLearners: []PromoteLearner{{ToStore: 3}},
-					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+					PromoteLearners: []PromoteLearner{{ToStore: 3, IsWitness: true}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2, IsWitness: true}},
 				},
 				ChangePeerV2Leave{
-					PromoteLearners: []PromoteLearner{{ToStore: 3}},
-					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
+					PromoteLearners: []PromoteLearner{{ToStore: 3, IsWitness: true}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 2, IsWitness: true}},
 				},
 				RemovePeer{FromStore: 2},
 			},
@@ -313,6 +313,7 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 				suite.Equal(expectedSteps[i].(TransferLeader).ToStore, step.ToStore)
 			case AddLearner:
 				suite.Equal(expectedSteps[i].(AddLearner).ToStore, step.ToStore)
+				suite.Equal(expectedSteps[i].(AddLearner).IsWitness, step.IsWitness)
 			case RemovePeer:
 				suite.Equal(expectedSteps[i].(RemovePeer).FromStore, step.FromStore)
 			case ChangePeerV2Enter:
@@ -320,18 +321,22 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
 				for j, p := range expectedSteps[i].(ChangePeerV2Enter).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+					suite.Equal(p.IsWitness, step.PromoteLearners[j].IsWitness)
 				}
 				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+					suite.Equal(d.IsWitness, step.DemoteVoters[j].IsWitness)
 				}
 			case ChangePeerV2Leave:
 				suite.Len(step.PromoteLearners, len(expectedSteps[i].(ChangePeerV2Leave).PromoteLearners))
 				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Leave).DemoteVoters))
 				for j, p := range expectedSteps[i].(ChangePeerV2Leave).PromoteLearners {
 					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+					suite.Equal(p.IsWitness, step.PromoteLearners[j].IsWitness)
 				}
 				for j, d := range expectedSteps[i].(ChangePeerV2Leave).DemoteVoters {
 					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+					suite.Equal(d.IsWitness, step.DemoteVoters[j].IsWitness)
 				}
 			case MergeRegion:
 				suite.Equal(expectedSteps[i].(MergeRegion), step)

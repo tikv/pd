@@ -24,7 +24,7 @@ const defaultDegree = 4
 // PriorityQueue queue has priority  and preempt
 type PriorityQueue struct {
 	items    map[uint64]*Entry
-	btree    *btree.BTree
+	btree    *btree.BTreeG[*Entry]
 	capacity int
 }
 
@@ -32,7 +32,7 @@ type PriorityQueue struct {
 func NewPriorityQueue(capacity int) *PriorityQueue {
 	return &PriorityQueue{
 		items:    make(map[uint64]*Entry),
-		btree:    btree.New(defaultDegree),
+		btree:    btree.NewG[*Entry](defaultDegree),
 		capacity: capacity,
 	}
 }
@@ -49,12 +49,12 @@ func (pq *PriorityQueue) Put(priority int, value PriorityQueueItem) bool {
 	if !ok {
 		entry = &Entry{Priority: priority, Value: value}
 		if pq.Len() >= pq.capacity {
-			min := pq.btree.Min()
+			min, found := pq.btree.Min()
 			// avoid to capacity equal 0
-			if min == nil || !min.Less(entry) {
+			if !found || !min.Less(entry) {
 				return false
 			}
-			pq.Remove(min.(*Entry).Value.ID())
+			pq.Remove(min.Value.ID())
 		}
 	} else if entry.Priority != priority { // delete before update
 		pq.btree.Delete(entry)
@@ -73,7 +73,7 @@ func (pq *PriorityQueue) Get(id uint64) *Entry {
 
 // Peek return the highest priority entry
 func (pq *PriorityQueue) Peek() *Entry {
-	if max, ok := pq.btree.Max().(*Entry); ok {
+	if max, ok := pq.btree.Max(); ok {
 		return max
 	}
 	return nil
@@ -81,7 +81,7 @@ func (pq *PriorityQueue) Peek() *Entry {
 
 // Tail return the lowest priority entry
 func (pq *PriorityQueue) Tail() *Entry {
-	if min, ok := pq.btree.Min().(*Entry); ok {
+	if min, ok := pq.btree.Min(); ok {
 		return min
 	}
 	return nil
@@ -91,8 +91,8 @@ func (pq *PriorityQueue) Tail() *Entry {
 func (pq *PriorityQueue) Elems() []*Entry {
 	rs := make([]*Entry, pq.Len())
 	count := 0
-	pq.btree.Descend(func(i btree.Item) bool {
-		rs[count] = i.(*Entry)
+	pq.btree.Descend(func(i *Entry) bool {
+		rs[count] = i
 		count++
 		return true
 	})
@@ -119,8 +119,8 @@ type Entry struct {
 }
 
 // Less return true if the entry has smaller priority
-func (r *Entry) Less(other btree.Item) bool {
+func (r *Entry) Less(other *Entry) bool {
 	left := r.Priority
-	right := other.(*Entry).Priority
+	right := other.Priority
 	return left > right
 }
