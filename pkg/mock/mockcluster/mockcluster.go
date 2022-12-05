@@ -97,7 +97,7 @@ func (mc *Cluster) GetAllocator() id.Allocator {
 
 // ScanRegions scans region with start key, until number greater than limit.
 func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return mc.Regions.ScanRange(startKey, endKey, limit)
+	return mc.ScanRange(startKey, endKey, limit)
 }
 
 // LoadRegion puts region info without leader
@@ -111,11 +111,6 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
-}
-
-// GetStoreRegionCount gets region count with a given store.
-func (mc *Cluster) GetStoreRegionCount(storeID uint64) int {
-	return mc.Regions.GetStoreRegionCount(storeID)
 }
 
 // GetStore gets a store with a given store ID.
@@ -659,11 +654,11 @@ func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.Sto
 
 // UpdateStoreStatus updates store status.
 func (mc *Cluster) UpdateStoreStatus(id uint64) {
-	leaderCount := mc.Regions.GetStoreLeaderCount(id)
-	regionCount := mc.Regions.GetStoreRegionCount(id)
-	pendingPeerCount := mc.Regions.GetStorePendingPeerCount(id)
-	leaderSize := mc.Regions.GetStoreLeaderRegionSize(id)
-	regionSize := mc.Regions.GetStoreRegionSize(id)
+	leaderCount := mc.GetStoreLeaderCount(id)
+	regionCount := mc.GetStoreRegionCount(id)
+	pendingPeerCount := mc.GetStorePendingPeerCount(id)
+	leaderSize := mc.GetStoreLeaderRegionSize(id)
+	regionSize := mc.GetStoreRegionSize(id)
 	store := mc.Stores.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity

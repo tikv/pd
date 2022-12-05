@@ -89,6 +89,17 @@ func TestAdjustRule(t *testing.T) {
 		Role:        "voter",
 		Count:       3,
 	}, "group"))
+
+	re.Error(manager.adjustRule(&Rule{
+		GroupID:          "tiflash",
+		ID:               "id",
+		StartKeyHex:      hex.EncodeToString(codec.EncodeBytes([]byte{0})),
+		EndKeyHex:        hex.EncodeToString(codec.EncodeBytes([]byte{1})),
+		Role:             "learner",
+		Count:            1,
+		IsWitness:        true,
+		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
+	}, "tiflash"))
 }
 
 func TestLeaderCheck(t *testing.T) {
