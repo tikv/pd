@@ -294,7 +294,7 @@ func TestCollectMetrics(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		co.collectHotSpotMetrics()
 		co.collectSchedulerMetrics()
-		co.cluster.collectClusterMetrics()
+		co.cluster.collectStatsMetrics()
 	}
 	stores := co.cluster.GetStores()
 	regionStats := co.cluster.RegionWriteStats()
