@@ -25,13 +25,13 @@ import (
 	"go.uber.org/zap"
 )
 
-func newRedundantBalanceRegion() *Case {
+func newBalanceRegion() *Case {
 	var simCase Case
 
 	storeNum := simutil.CaseConfigure.StoreNum
 	regionNum := simutil.CaseConfigure.RegionNum
 	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
+		storeNum, regionNum = 100, 2000000
 	}
 
 	for i := 0; i < storeNum; i++ {

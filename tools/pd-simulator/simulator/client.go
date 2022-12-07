@@ -43,7 +43,7 @@ type Client interface {
 	Bootstrap(ctx context.Context, store *metapb.Store, region *metapb.Region) error
 	PutStore(ctx context.Context, store *metapb.Store) error
 	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
-	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
+	RegionHeartbeat(region *core.RegionInfo) error
 	PutPDConfig(*PDConfig) error
 
 	Close()
@@ -67,12 +67,14 @@ type client struct {
 	clientConn *grpc.ClientConn
 	httpClient *http.Client
 
-	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
 
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	stream pdpb.PD_RegionHeartbeatClient
+	errCh  chan error
 }
 
 // NewClient creates a PD client.
@@ -81,12 +83,12 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &client{
 		url:                      pdAddr,
-		reportRegionHeartbeatCh:  make(chan *core.RegionInfo, 1),
 		receiveRegionHeartbeatCh: make(chan *pdpb.RegionHeartbeatResponse, 1),
 		ctx:                      ctx,
 		cancel:                   cancel,
 		tag:                      tag,
 		httpClient:               &http.Client{},
+		errCh:                    make(chan error, 1),
 	}
 	cc, err := c.createConn()
 	if err != nil {
@@ -175,13 +177,13 @@ func (c *client) heartbeatStreamLoop() {
 		if stream == nil {
 			return
 		}
-		errCh := make(chan error, 1)
+
 		wg := &sync.WaitGroup{}
-		wg.Add(2)
-		go c.reportRegionHeartbeat(ctx, stream, errCh, wg)
-		go c.receiveRegionHeartbeat(ctx, stream, errCh, wg)
+		wg.Add(1)
+		go c.receiveRegionHeartbeat(ctx, stream, c.errCh, wg)
+		c.stream = stream
 		select {
-		case err := <-errCh:
+		case err := <-c.errCh:
 			simutil.Logger.Error("heartbeat stream get error", zap.String("tag", c.tag), zap.Error(err))
 			cancel()
 		case <-c.ctx.Done():
@@ -202,34 +204,6 @@ func (c *client) receiveRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regi
 		}
 		select {
 		case c.receiveRegionHeartbeatCh <- resp:
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_RegionHeartbeatClient, errCh chan error, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for {
-		select {
-		case r := <-c.reportRegionHeartbeatCh:
-			region := r.Clone()
-			request := &pdpb.RegionHeartbeatRequest{
-				Header:          c.requestHeader(),
-				Region:          region.GetMeta(),
-				Leader:          region.GetLeader(),
-				DownPeers:       region.GetDownPeers(),
-				PendingPeers:    region.GetPendingPeers(),
-				BytesWritten:    region.GetBytesWritten(),
-				BytesRead:       region.GetBytesRead(),
-				ApproximateSize: uint64(region.GetApproximateSize()),
-				ApproximateKeys: uint64(region.GetApproximateKeys()),
-			}
-			err := stream.Send(request)
-			if err != nil {
-				errCh <- err
-				simutil.Logger.Error("report regionHeartbeat error", zap.String("tag", c.tag), zap.Error(err))
-			}
 		case <-ctx.Done():
 			return
 		}
@@ -378,8 +352,23 @@ func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) err
 	return nil
 }
 
-func (c *client) RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
-	c.reportRegionHeartbeatCh <- region
+func (c *client) RegionHeartbeat(region *core.RegionInfo) error {
+	request := &pdpb.RegionHeartbeatRequest{
+		Header:          c.requestHeader(),
+		Region:          region.GetMeta(),
+		Leader:          region.GetLeader(),
+		DownPeers:       region.GetDownPeers(),
+		PendingPeers:    region.GetPendingPeers(),
+		BytesWritten:    region.GetBytesWritten(),
+		BytesRead:       region.GetBytesRead(),
+		ApproximateSize: uint64(region.GetApproximateSize()),
+		ApproximateKeys: uint64(region.GetApproximateKeys()),
+	}
+	err := c.stream.Send(request)
+	if err != nil {
+		c.errCh <- err
+		simutil.Logger.Error("report regionHeartbeat error", zap.String("tag", c.tag), zap.Error(err))
+	}
 	return nil
 }
 

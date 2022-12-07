@@ -39,18 +39,23 @@ const (
 // Node simulates a TiKV.
 type Node struct {
 	*metapb.Store
-	sync.RWMutex
-	stats                    *info.StoreStats
-	tick                     uint64
-	wg                       sync.WaitGroup
-	tasks                    map[uint64]*Task
+	stats struct {
+		sync.RWMutex
+		*info.StoreStats
+	}
+	tick uint64
+	wg   sync.WaitGroup
+
+	tasks struct {
+		sync.RWMutex
+		tasks map[uint64]*Task
+	}
 	client                   Client
 	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
-	sizeMutex                sync.Mutex
 	hasExtraUsedSpace        bool
 }
 
@@ -94,12 +99,18 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 	ratio := int64(time.Second) / config.SimTickInterval.Milliseconds()
 	speed := config.StoreIOMBPerSecond * units.MiB * ratio
 	return &Node{
-		Store:                    store,
-		stats:                    stats,
-		client:                   client,
-		ctx:                      ctx,
-		cancel:                   cancel,
-		tasks:                    make(map[uint64]*Task),
+		Store: store,
+		stats: struct {
+			sync.RWMutex
+			*info.StoreStats
+		}{StoreStats: stats},
+		client: client,
+		ctx:    ctx,
+		cancel: cancel,
+		tasks: struct {
+			sync.RWMutex
+			tasks map[uint64]*Task
+		}{tasks: make(map[uint64]*Task)},
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
@@ -142,10 +153,12 @@ func (n *Node) Tick(wg *sync.WaitGroup) {
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
-	n.stepHeartBeat()
+	n.tick++
+	n.reportRegionChange()
+	n.stepStoreHeartbeat()
+	n.stepRegionHeartbeat()
 	n.stepCompaction()
 	n.stepTask()
-	n.tick++
 }
 
 // GetState returns current node state.
@@ -154,29 +167,34 @@ func (n *Node) GetState() metapb.StoreState {
 }
 
 func (n *Node) stepTask() {
-	n.Lock()
-	defer n.Unlock()
-	for _, task := range n.tasks {
+	n.tasks.Lock()
+	defer n.tasks.Unlock()
+	for _, task := range n.tasks.tasks {
 		if isFinished := task.Step(n.raftEngine); isFinished {
 			simutil.Logger.Debug("task status",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
 				zap.String("task", task.Desc()))
-			delete(n.tasks, task.RegionID())
+			delete(n.tasks.tasks, task.RegionID())
 		}
 	}
 }
 
-func (n *Node) stepHeartBeat() {
+func (n *Node) stepRegionHeartbeat() {
+	config := n.raftEngine.storeConfig
+
+	period := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+	if n.tick%period == 0 {
+		n.regionHeartBeat()
+	}
+}
+
+func (n *Node) stepStoreHeartbeat() {
 	config := n.raftEngine.storeConfig
 
 	period := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 	if n.tick%period == 0 {
 		n.storeHeartBeat()
-	}
-	period = uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
-	if n.tick%period == 0 {
-		n.regionHeartBeat()
 	}
 }
 
@@ -191,7 +209,7 @@ func (n *Node) storeHeartBeat() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats)
+	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats.StoreStats)
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
 			zap.Uint64("node-id", n.GetId()),
@@ -201,8 +219,8 @@ func (n *Node) storeHeartBeat() {
 }
 
 func (n *Node) compaction() {
-	n.sizeMutex.Lock()
-	defer n.sizeMutex.Unlock()
+	n.stats.Lock()
+	defer n.stats.Unlock()
 	n.stats.Available += n.stats.ToCompactionSize
 	n.stats.UsedSize -= n.stats.ToCompactionSize
 	n.stats.ToCompactionSize = 0
@@ -212,51 +230,46 @@ func (n *Node) regionHeartBeat() {
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
-	regions := n.raftEngine.GetRegions()
+	regions := n.raftEngine.cachedRegions
 	for _, region := range regions {
 		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
-			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-			err := n.client.RegionHeartbeat(ctx, region)
+			err := n.client.RegionHeartbeat(region)
 			if err != nil {
 				simutil.Logger.Info("report heartbeat error",
 					zap.Uint64("node-id", n.Id),
 					zap.Uint64("region-id", region.GetID()),
 					zap.Error(err))
 			}
-			cancel()
 		}
 	}
 }
 
 func (n *Node) reportRegionChange() {
-	regionIDs := n.raftEngine.GetRegionChange(n.Id)
-	for _, regionID := range regionIDs {
-		region := n.raftEngine.GetRegion(regionID)
-		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-		err := n.client.RegionHeartbeat(ctx, region)
+	regions := n.raftEngine.GetRegionChange(n.Id)
+	for _, region := range regions {
+		err := n.client.RegionHeartbeat(region)
 		if err != nil {
 			simutil.Logger.Info("report heartbeat error",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", region.GetID()),
 				zap.Error(err))
 		}
-		n.raftEngine.ResetRegionChange(n.Id, regionID)
-		cancel()
+		n.raftEngine.ResetRegionChange(n.Id, region.GetID())
 	}
 }
 
 // AddTask adds task in this node.
 func (n *Node) AddTask(task *Task) {
-	n.Lock()
-	defer n.Unlock()
-	if t, ok := n.tasks[task.RegionID()]; ok {
+	n.tasks.Lock()
+	defer n.tasks.Unlock()
+	if t, ok := n.tasks.tasks[task.RegionID()]; ok {
 		simutil.Logger.Debug("task has already existed",
 			zap.Uint64("node-id", n.Id),
 			zap.Uint64("region-id", task.RegionID()),
 			zap.String("task", t.Desc()))
 		return
 	}
-	n.tasks[task.RegionID()] = task
+	n.tasks.tasks[task.RegionID()] = task
 }
 
 // Stop stops this node.
@@ -268,14 +281,14 @@ func (n *Node) Stop() {
 }
 
 func (n *Node) incUsedSize(size uint64) {
-	n.sizeMutex.Lock()
-	defer n.sizeMutex.Unlock()
+	n.stats.Lock()
+	defer n.stats.Unlock()
 	n.stats.Available -= size
 	n.stats.UsedSize += size
 }
 
 func (n *Node) decUsedSize(size uint64) {
-	n.sizeMutex.Lock()
-	defer n.sizeMutex.Unlock()
+	n.stats.Lock()
+	defer n.stats.Unlock()
 	n.stats.ToCompactionSize += size
 }

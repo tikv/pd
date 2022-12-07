@@ -30,7 +30,7 @@ import (
 
 const (
 	// tick
-	defaultSimTickInterval = 100 * time.Millisecond
+	defaultSimTickInterval = 1 * time.Second
 	// store
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreHeartbeat     = 10 * time.Second

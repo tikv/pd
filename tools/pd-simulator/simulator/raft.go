@@ -31,11 +31,16 @@ type RaftEngine struct {
 	syncutil.RWMutex
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
-	regionChange      map[uint64][]uint64
+	regionChangeMu    syncutil.RWMutex
+	regionChange      map[uint64][]*core.RegionInfo
 	regionSplitSize   int64
 	regionSplitKeys   int64
 	storeConfig       *SimConfig
 	useTiDBEncodedKey bool
+	cachedRegions     []*core.RegionInfo
+	changeMu          syncutil.RWMutex
+	toDelete          map[uint64]*core.RegionInfo
+	toAdd             map[uint64]*core.RegionInfo
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
@@ -43,10 +48,12 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 	r := &RaftEngine{
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,
-		regionChange:    make(map[uint64][]uint64),
+		regionChange:    make(map[uint64][]*core.RegionInfo),
 		regionSplitSize: conf.RegionSplitSize,
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
+		toDelete:        make(map[uint64]*core.RegionInfo),
+		toAdd:           make(map[uint64]*core.RegionInfo),
 	}
 	var splitKeys []string
 	if conf.TableNumber > 0 {
@@ -85,26 +92,53 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 	for _, node := range conn.Nodes {
 		node.raftEngine = r
 	}
+	r.cachedRegions = r.regionsInfo.GetRegions()
 
 	return r
 }
 
 func (r *RaftEngine) stepRegions() {
-	regions := r.GetRegions()
-	for _, region := range regions {
-		r.stepLeader(region)
-		r.stepSplit(region)
+	if len(r.toDelete) == 0 && len(r.toAdd) == 0 {
+		for _, region := range r.cachedRegions {
+			r.stepLeader(region)
+			r.stepSplit(region)
+		}
+	} else {
+		r.changeMu.Lock()
+		for i, region := range r.cachedRegions {
+			id := region.GetID()
+			if _, ok := r.toDelete[id]; ok {
+				r.cachedRegions = append(r.cachedRegions[:i], r.cachedRegions[:i+1]...)
+				delete(r.toDelete, id)
+				continue
+			}
+		}
+		for _, toAdd := range r.toAdd {
+			r.cachedRegions = append(r.cachedRegions, toAdd)
+		}
+		r.changeMu.Unlock()
+		for _, region := range r.cachedRegions {
+			r.stepLeader(region)
+			r.stepSplit(region)
+		}
 	}
 }
 
 func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
-	if region.GetLeader() != nil && r.conn.nodeHealth(region.GetLeader().GetStoreId()) {
+	// TODO: add check node health back
+	if region.GetLeader() != nil {
 		return
 	}
 	newLeader := r.electNewLeader(region)
 	newRegion := region.Clone(core.WithLeader(newLeader))
 	if newLeader == nil {
-		r.SetRegion(newRegion)
+		r.changeMu.Lock()
+		overlaps := r.SetRegion(newRegion)
+		r.toAdd[newRegion.GetID()] = newRegion
+		for _, overlap := range overlaps {
+			r.toDelete[overlap.GetID()] = overlap
+		}
+		r.changeMu.Unlock()
 		simutil.Logger.Info("region has no leader", zap.Uint64("region-id", region.GetID()))
 		return
 	}
@@ -112,7 +146,13 @@ func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
 		zap.Uint64("region-id", region.GetID()),
 		zap.Reflect("new-leader", newLeader),
 		zap.Reflect("old-leader", region.GetLeader()))
-	r.SetRegion(newRegion)
+	r.changeMu.Lock()
+	overlaps := r.SetRegion(newRegion)
+	r.toAdd[newRegion.GetID()] = newRegion
+	for _, overlap := range overlaps {
+		r.toDelete[overlap.GetID()] = overlap
+	}
+	r.changeMu.Unlock()
 	r.recordRegionChange(newRegion)
 }
 
@@ -159,8 +199,18 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 		core.WithStartKey(splitKey),
 	)
 
-	r.SetRegion(right)
-	r.SetRegion(left)
+	r.changeMu.Lock()
+	overlaps := r.SetRegion(right)
+	r.toAdd[right.GetID()] = right
+	r.toAdd[left.GetID()] = left
+	for _, overlap := range overlaps {
+		r.toDelete[overlap.GetID()] = overlap
+	}
+	overlaps = r.SetRegion(left)
+	for _, overlap := range overlaps {
+		r.toDelete[overlap.GetID()] = overlap
+	}
+	r.changeMu.Unlock()
 	simutil.Logger.Debug("region split",
 		zap.Uint64("region-id", region.GetID()),
 		zap.Reflect("origin", region.GetMeta()),
@@ -183,10 +233,10 @@ func (r *RaftEngine) NeedSplit(size, rows int64) bool {
 }
 
 func (r *RaftEngine) recordRegionChange(region *core.RegionInfo) {
-	r.Lock()
-	defer r.Unlock()
+	r.regionChangeMu.Lock()
+	defer r.regionChangeMu.Unlock()
 	n := region.GetLeader().GetStoreId()
-	r.regionChange[n] = append(r.regionChange[n], region.GetID())
+	r.regionChange[n] = append(r.regionChange[n], region)
 }
 
 func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
@@ -198,7 +248,13 @@ func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
 	for storeID := range storeIDs {
 		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
-	r.SetRegion(newRegion)
+	r.changeMu.Lock()
+	overlaps := r.SetRegion(newRegion)
+	r.toAdd[newRegion.GetID()] = newRegion
+	for _, overlap := range overlaps {
+		r.toDelete[overlap.GetID()] = overlap
+	}
+	r.changeMu.Unlock()
 }
 
 func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
@@ -209,7 +265,13 @@ func (r *RaftEngine) updateRegionReadBytes(readBytes map[uint64]int64) {
 			continue
 		}
 		newRegion := region.Clone(core.SetReadBytes(uint64(bytes)))
-		r.SetRegion(newRegion)
+		r.changeMu.Lock()
+		overlaps := r.SetRegion(newRegion)
+		r.toAdd[newRegion.GetID()] = newRegion
+		for _, overlap := range overlaps {
+			r.toDelete[overlap.GetID()] = overlap
+		}
+		r.changeMu.Unlock()
 	}
 }
 
@@ -245,19 +307,19 @@ func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 }
 
 // GetRegionChange returns a list of RegionID for a given store.
-func (r *RaftEngine) GetRegionChange(storeID uint64) []uint64 {
-	r.RLock()
-	defer r.RUnlock()
+func (r *RaftEngine) GetRegionChange(storeID uint64) []*core.RegionInfo {
+	r.regionChangeMu.Lock()
+	defer r.regionChangeMu.Unlock()
 	return r.regionChange[storeID]
 }
 
 // ResetRegionChange resets RegionInfo on a specific store with a given Region ID
 func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
-	r.Lock()
-	defer r.Unlock()
-	regionIDs := r.regionChange[storeID]
-	for i, id := range regionIDs {
-		if id == regionID {
+	r.regionChangeMu.Lock()
+	defer r.regionChangeMu.Unlock()
+	regions := r.regionChange[storeID]
+	for i, region := range regions {
+		if region.GetID() == regionID {
 			r.regionChange[storeID] = append(r.regionChange[storeID][:i], r.regionChange[storeID][i+1:]...)
 			return
 		}

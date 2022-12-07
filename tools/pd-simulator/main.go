@@ -184,17 +184,11 @@ func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, cle
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
 
-	simResult := "FAIL"
-
 EXIT:
 	for {
 		select {
 		case <-tick.C:
 			driver.Tick()
-			if driver.Check() {
-				simResult = "OK"
-				break EXIT
-			}
 		case <-sc:
 			break EXIT
 		}
@@ -205,12 +199,8 @@ EXIT:
 		clean[0]()
 	}
 
-	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
+	fmt.Printf("[%s] total iteration: %d, time cost: %v\n", simCase, driver.TickCount(), time.Since(start))
 	if analysis.GetTransferCounter().IsValid {
 		analysis.GetTransferCounter().PrintResult()
-	}
-
-	if simResult != "OK" {
-		os.Exit(1)
 	}
 }

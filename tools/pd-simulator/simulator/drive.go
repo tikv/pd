@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -141,36 +140,33 @@ func (d *Driver) Tick() {
 	d.raftEngine.stepRegions()
 	d.eventRunner.Tick(d.tickCount)
 	for _, n := range d.conn.Nodes {
-		n.reportRegionChange()
 		d.wg.Add(1)
 		go n.Tick(&d.wg)
 	}
 	d.wg.Wait()
 }
 
-// Check checks if the simulation is completed.
-func (d *Driver) Check() bool {
-	length := uint64(len(d.conn.Nodes) + 1)
-	for index := range d.conn.Nodes {
-		if index >= length {
-			length = index + 1
-		}
-	}
-	stats := make([]info.StoreStats, length)
-	for index, node := range d.conn.Nodes {
-		stats[index] = *node.stats
-	}
-	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
-}
-
 // Start starts all nodes.
 func (d *Driver) Start() error {
+	var initNode *Node
 	for _, n := range d.conn.Nodes {
 		err := n.Start()
 		if err != nil {
 			return err
 		}
+		initNode = n
 	}
+	// init regions
+	for _, region := range d.raftEngine.cachedRegions {
+		err := initNode.client.RegionHeartbeat(region)
+		if err != nil {
+			simutil.Logger.Info("init region error",
+				zap.Uint64("node-id", initNode.Id),
+				zap.Uint64("region-id", region.GetID()),
+				zap.Error(err))
+		}
+	}
+
 	d.ChangePDConfig()
 	return nil
 }

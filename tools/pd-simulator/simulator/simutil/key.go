@@ -31,19 +31,15 @@ const (
 
 // GenerateKeys generates ordered, unique strings.
 func GenerateKeys(size int) []string {
-	m := make(map[string]struct{}, size)
-	for len(m) < size {
+	v := make([]string, 0, size)
+	for len(v) < size {
 		k := make([]byte, keyLen)
 		for i := range k {
 			k[i] = keyChars[rand.Intn(len(keyChars))]
 		}
-		m[string(k)] = struct{}{}
+		v = append(v, string(k))
 	}
 
-	v := make([]string, 0, size)
-	for k := range m {
-		v = append(v, k)
-	}
 	sort.Strings(v)
 	return v
 }

@@ -26,7 +26,7 @@ import (
 func newBalanceLeader() *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
+	storeNum, regionNum := 100, 2000000
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
@@ -35,7 +35,7 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
+	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeNum)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-1)) + 1},
