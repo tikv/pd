@@ -58,12 +58,12 @@ func (h *etcdHandler) GetReadyStatus(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, "failed to find etcd leader url")
 		return
 	}
-	if leaderStatus, err := client.Maintenance.Status(client.Ctx(), h.svr.GetLeader().PeerUrls[0]); err != nil {
+	leaderStatus, err := client.Maintenance.Status(client.Ctx(), h.svr.GetLeader().PeerUrls[0])
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
-	} else {
-		leaderIndex = leaderStatus.RaftIndex
 	}
+	leaderIndex = leaderStatus.RaftIndex
 
 	if h.svr.GetMember() == nil || h.svr.GetMember().Etcd() == nil || h.svr.GetMember().Etcd().Server == nil {
 		h.rd.JSON(w, http.StatusInternalServerError, "failed to find PD's etcd server")
