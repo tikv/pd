@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package movingaverage
+package storelimit
 
 import (
 	"testing"
@@ -20,27 +20,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestQueue(t *testing.T) {
-	t.Parallel()
+func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
-	sq := NewSafeQueue()
-	sq.PushBack(1)
-	sq.PushBack(2)
-	v1 := sq.PopFront()
-	v2 := sq.PopFront()
-	re.Equal(1, v1.(int))
-	re.Equal(2, v2.(int))
-}
+	rate := int64(15)
+	limit := NewStoreRateLimit(float64(rate))
+	re.True(limit.Available(influence*rate, AddPeer))
+	re.True(limit.Take(influence*rate, AddPeer))
+	re.False(limit.Take(influence, AddPeer))
 
-func TestClone(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
-	s1 := NewSafeQueue()
-	s1.PushBack(1)
-	s1.PushBack(2)
-	s2 := s1.Clone()
-	s2.PopFront()
-	s2.PopFront()
-	re.Equal(2, s1.que.Len())
-	re.Equal(0, s2.que.Len())
+	limit.Reset(float64(rate), AddPeer)
+	re.False(limit.Available(influence, AddPeer))
+	re.False(limit.Take(influence, AddPeer))
+
+	limit.Reset(0, AddPeer)
+	re.True(limit.Available(influence, AddPeer))
+	re.True(limit.Take(influence, AddPeer))
 }

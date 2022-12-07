@@ -701,17 +701,15 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 	return failedPeers
 }
 
-var _ btree.Item = &regionItem{}
-
 type regionItem struct {
 	report  *pdpb.PeerReport
 	storeID uint64
 }
 
 // Less returns true if the region start key is less than the other.
-func (r *regionItem) Less(other btree.Item) bool {
+func (r *regionItem) Less(other *regionItem) bool {
 	left := r.Region().GetStartKey()
-	right := other.(*regionItem).Region().GetStartKey()
+	right := other.Region().GetStartKey()
 	return bytes.Compare(left, right) < 0
 }
 
@@ -778,13 +776,13 @@ const (
 
 type regionTree struct {
 	regions map[uint64]*regionItem
-	tree    *btree.BTree
+	tree    *btree.BTreeG[*regionItem]
 }
 
 func newRegionTree() *regionTree {
 	return &regionTree{
 		regions: make(map[uint64]*regionItem),
-		tree:    btree.New(defaultBTreeDegree),
+		tree:    btree.NewG[*regionItem](defaultBTreeDegree),
 	}
 }
 
@@ -812,8 +810,8 @@ func (t *regionTree) getOverlaps(item *regionItem) []*regionItem {
 
 	end := item.Region().GetEndKey()
 	var overlaps []*regionItem
-	t.tree.AscendGreaterOrEqual(result, func(i btree.Item) bool {
-		over := i.(*regionItem)
+	t.tree.AscendGreaterOrEqual(result, func(i *regionItem) bool {
+		over := i
 		if len(end) > 0 && bytes.Compare(end, over.Region().GetStartKey()) <= 0 {
 			return false
 		}
@@ -826,8 +824,8 @@ func (t *regionTree) getOverlaps(item *regionItem) []*regionItem {
 // find is a helper function to find an item that contains the regions start key.
 func (t *regionTree) find(item *regionItem) *regionItem {
 	var result *regionItem
-	t.tree.DescendLessOrEqual(item, func(i btree.Item) bool {
-		result = i.(*regionItem)
+	t.tree.DescendLessOrEqual(item, func(i *regionItem) bool {
+		result = i
 		return false
 	})
 
@@ -929,8 +927,8 @@ func (u *unsafeRecoveryController) generateTombstoneTiFlashLearnerPlan(newestReg
 	hasPlan := false
 
 	var err error
-	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
-		region := item.(*regionItem).Region()
+	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
+		region := item.Region()
 		if !u.canElectLeader(region, false) {
 			leader := u.selectLeader(peersMap, region)
 			if leader == nil {
@@ -969,9 +967,9 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 	var err error
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
-	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
-		report := item.(*regionItem).report
-		region := item.(*regionItem).Region()
+	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
+		report := item.report
+		region := item.Region()
 		if !u.canElectLeader(region, false) {
 			if hasForceLeader(region) {
 				// already is a force leader, skip
@@ -998,6 +996,21 @@ func (u *unsafeRecoveryController) generateForceLeaderPlan(newestRegionTree *reg
 				storeRecoveryPlan.ForceLeader = &pdpb.ForceLeader{}
 				for store := range u.failedStores {
 					storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, store)
+				}
+			}
+			if u.autoDetect {
+				// For auto detect, the failedStores is empty. So need to add the detected failed store to the list
+				for _, peer := range u.getFailedPeers(leader.Region()) {
+					found := false
+					for _, store := range storeRecoveryPlan.ForceLeader.FailedStores {
+						if store == peer.StoreId {
+							found = true
+							break
+						}
+					}
+					if !found {
+						storeRecoveryPlan.ForceLeader.FailedStores = append(storeRecoveryPlan.ForceLeader.FailedStores, peer.StoreId)
+					}
 				}
 			}
 			storeRecoveryPlan.ForceLeader.EnterForceLeaders = append(storeRecoveryPlan.ForceLeader.EnterForceLeaders, region.GetId())
@@ -1040,8 +1053,8 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 
 	// Check the regions in newest Region Tree to see if it can still elect leader
 	// considering the failed stores
-	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
-		region := item.(*regionItem).Region()
+	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
+		region := item.Region()
 		if !u.canElectLeader(region, false) {
 			leader := findForceLeader(peersMap, region)
 			if leader == nil {
@@ -1117,9 +1130,9 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 	// regions that cover them and evenly distribute newly created regions among all stores.
 	lastEnd := []byte("")
 	var lastStoreID uint64
-	newestRegionTree.tree.Ascend(func(item btree.Item) bool {
-		region := item.(*regionItem).Region()
-		storeID := item.(*regionItem).storeID
+	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
+		region := item.Region()
+		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
 			if u.cluster.GetStore(storeID).IsTiFlash() {
 				storeID = getRandomStoreID()
