@@ -47,7 +47,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
+type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {
@@ -66,7 +66,7 @@ type Case struct {
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
-	"redundant-balance-region":  newRedundantBalanceRegion,
+	"balance-region":            newBalanceRegion,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,

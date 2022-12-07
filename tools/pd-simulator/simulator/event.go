@@ -205,6 +205,10 @@ type DownNode struct{}
 // Run implements the event interface.
 func (e *DownNode) Run(raft *RaftEngine, tickCount int64) bool {
 	nodes := raft.conn.getNodes()
+	if len(nodes) == 0 {
+		simutil.Logger.Error("can not find any node")
+		return false
+	}
 	i := rand.Intn(len(nodes))
 	node := nodes[i]
 	if node == nil {
