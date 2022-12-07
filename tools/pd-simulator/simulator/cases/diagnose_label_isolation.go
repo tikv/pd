@@ -62,8 +62,14 @@ func newLabelNotMatch1() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {
@@ -128,8 +134,14 @@ func newLabelIsolation1() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {
@@ -189,8 +201,14 @@ func newLabelIsolation2() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {

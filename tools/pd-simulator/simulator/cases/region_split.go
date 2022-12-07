@@ -56,8 +56,14 @@ func newRegionSplit() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			regionCount := regions.GetStoreRegionCount(uint64(i))

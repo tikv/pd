@@ -54,8 +54,14 @@ func newRegionMerge() *Case {
 	// Checker description
 	threshold := 0.05
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		sum := 0
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			regionCount := regions.GetStoreRegionCount(uint64(i))
