@@ -15,34 +15,29 @@
 package cases
 
 import (
-	"time"
+	"math/rand"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRedundantBalanceRegion() *Case {
+func newRegionHeartbeat() *Case {
 	var simCase Case
 
 	storeNum := simutil.CaseConfigure.StoreNum
 	regionNum := simutil.CaseConfigure.RegionNum
 	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
+		storeNum, regionNum = 100, 2000000
 	}
 
 	for i := 0; i < storeNum; i++ {
-		s := &Store{
+		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
-		}
-		if i%2 == 1 {
-			s.HasExtraUsedSpace = true
-		}
-		simCase.Stores = append(simCase.Stores, s)
+		})
 	}
 
 	for i := 0; i < regionNum; i++ {
@@ -59,31 +54,46 @@ func newRedundantBalanceRegion() *Case {
 			ApproximateKeys: 960000,
 		})
 	}
+	rand.Seed(0) // Ensure consistent behavior multiple times
+	slice := make([]int, regionNum)
+	for i := range slice {
+		slice[i] = i
+	}
+	pick := func(ratio float64) []int {
+		rand.Shuffle(regionNum, func(i, j int) {
+			slice[i], slice[j] = slice[j], slice[i]
+		})
+		return append(slice[:0:0], slice[0:int(float64(regionNum)*ratio)]...)
+	}
+	var bytesUnit uint64 = 1 << 23 // 8MB
+	var keysUint uint64 = 1 << 13  // 8K
+	updateSpace := pick(0.6)
+	updateFlow := pick(0.4)
 
-	storesLastUpdateTime := make([]int64, storeNum+1)
-	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
-		curTime := time.Now().Unix()
-		storesAvailable := make([]uint64, 0, storeNum+1)
-		for i := 1; i <= storeNum; i++ {
-			available := stats[i].GetAvailable()
-			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 60 {
-				if storeLastAvailable[i] != available {
-					res = false
-				}
-				if stats[i].ToCompactionSize != 0 {
-					res = false
-				}
-				storesLastUpdateTime[i] = curTime
-				storeLastAvailable[i] = available
-			} else {
-				res = false
-			}
+	e := &RandomSchedulingDescriptor{}
+	e.Step = func(tick int64) map[uint64]Region {
+		updateRes := make(map[uint64]Region)
+		// update space
+		for _, i := range updateSpace {
+			region := simCase.Regions[i]
+			region.ApproximateSize += bytesUnit
+			region.ApproximateKeys += keysUint
+			updateRes[region.ID] = region
 		}
-		simutil.Logger.Info("current counts", zap.Uint64s("storesAvailable", storesAvailable))
-		return res
+		// update flow
+		for _, i := range updateFlow {
+			region := simCase.Regions[i]
+			region.BytesWritten += bytesUnit
+			region.BytesRead += bytesUnit
+			region.KeysWritten += keysUint
+			region.KeysRead += keysUint
+			updateRes[region.ID] = region
+		}
+		return updateRes
+	}
+	simCase.Events = []EventDescriptor{e}
+	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+		return false
 	}
 	return &simCase
 }

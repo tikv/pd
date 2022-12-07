@@ -58,6 +58,8 @@ func parserEvent(e cases.EventDescriptor) Event {
 		return &AddNodes{descriptor: t}
 	case *cases.DeleteNodesDescriptor:
 		return &DeleteNodes{descriptor: t}
+	case *cases.RandomSchedulingDescriptor:
+		return &RandomScheduling{descriptor: t}
 	}
 	return nil
 }
@@ -195,6 +197,33 @@ func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
 			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			raft.SetRegion(region)
 		}
+	}
+	return false
+}
+
+// RandomScheduling random scheduling.
+type RandomScheduling struct {
+	descriptor *cases.RandomSchedulingDescriptor
+}
+
+// Run implements the event interface.
+func (e *RandomScheduling) Run(raft *RaftEngine, tickCount int64) bool {
+	res := e.descriptor.Step(tickCount)
+	for id, r := range res {
+		region := raft.GetRegion(id)
+		if region == nil {
+			simutil.Logger.Error("region is not found", zap.Uint64("region-id", id))
+			continue
+		}
+		region = region.Clone(core.WithLeader(r.Leader),
+			core.SetApproximateKeys(int64(r.ApproximateKeys)),
+			core.SetApproximateSize(int64(r.ApproximateSize)),
+			core.SetReadBytes(r.BytesRead),
+			core.SetReadKeys(r.KeysRead),
+			core.SetWrittenBytes(r.BytesWritten),
+			core.SetWrittenKeys(r.KeysWritten),
+		)
+		raft.SetRegion(region)
 	}
 	return false
 }

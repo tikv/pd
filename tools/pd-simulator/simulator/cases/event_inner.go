@@ -68,3 +68,13 @@ type DeleteNodesDescriptor struct {
 func (w *DeleteNodesDescriptor) Type() string {
 	return "delete-nodes"
 }
+
+// RandomSchedulingDescriptor random scheduling.
+type RandomSchedulingDescriptor struct {
+	Step func(tick int64) map[uint64]Region
+}
+
+// Type implements the EventDescriptor interface.
+func (d *RandomSchedulingDescriptor) Type() string {
+	return "random-scheduling"
+}

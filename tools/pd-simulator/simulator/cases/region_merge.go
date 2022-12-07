@@ -44,11 +44,11 @@ func newRegionMerge() *Case {
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
-			Peers:  peers,
-			Leader: peers[0],
-			Size:   10 * units.MiB,
-			Keys:   100000,
+			ID:              IDAllocator.nextID(),
+			Peers:           peers,
+			Leader:          peers[0],
+			ApproximateSize: 10 * units.MiB,
+			ApproximateKeys: 100000,
 		})
 	}
 	// Checker description

@@ -46,11 +46,11 @@ func newAddNodes() *Case {
 			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
-			Peers:  peers,
-			Leader: peers[0],
-			Size:   96 * units.MiB,
-			Keys:   960000,
+			ID:              IDAllocator.nextID(),
+			Peers:           peers,
+			Leader:          peers[0],
+			ApproximateSize: 96 * units.MiB,
+			ApproximateKeys: 960000,
 		})
 	}
 

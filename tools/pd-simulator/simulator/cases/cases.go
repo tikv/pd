@@ -37,11 +37,15 @@ type Store struct {
 
 // Region is used to simulate a region.
 type Region struct {
-	ID     uint64
-	Peers  []*metapb.Peer
-	Leader *metapb.Peer
-	Size   int64
-	Keys   int64
+	ID              uint64
+	Peers           []*metapb.Peer
+	Leader          *metapb.Peer
+	ApproximateSize uint64
+	ApproximateKeys uint64
+	BytesWritten    uint64
+	BytesRead       uint64
+	KeysWritten     uint64
+	KeysRead        uint64
 }
 
 // CheckerFunc checks if the scheduler is finished.
@@ -103,6 +107,7 @@ var CaseMap = map[string]func() *Case{
 	"diagnose-label-not-match1": newLabelNotMatch1,
 	"diagnose-label-isolation1": newLabelIsolation1,
 	"diagnose-label-isolation2": newLabelIsolation2,
+	"region-heartbeat":          newRegionHeartbeat,
 }
 
 // NewCase creates a new case.

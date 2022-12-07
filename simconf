@@ -1,0 +1,5 @@
+case-name="region-heartbeat"
+sim-tick-interval="1s"
+[raftstore]
+capacity="10TB"
+

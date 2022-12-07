@@ -37,11 +37,11 @@ func newRegionSplit() *Case {
 		{Id: 4, StoreId: 1},
 	}
 	simCase.Regions = append(simCase.Regions, Region{
-		ID:     5,
-		Peers:  peers,
-		Leader: peers[0],
-		Size:   1 * units.MiB,
-		Keys:   10000,
+		ID:              5,
+		Peers:           peers,
+		Leader:          peers[0],
+		ApproximateSize: 1 * units.MiB,
+		ApproximateKeys: 10000,
 	})
 
 	simCase.RegionSplitSize = 128 * units.MiB

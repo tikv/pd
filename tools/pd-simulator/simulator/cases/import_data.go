@@ -49,11 +49,11 @@ func newImportData() *Case {
 			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
-			Peers:  peers,
-			Leader: peers[0],
-			Size:   32 * units.MiB,
-			Keys:   320000,
+			ID:              IDAllocator.nextID(),
+			Peers:           peers,
+			Leader:          peers[0],
+			ApproximateSize: 32 * units.MiB,
+			ApproximateKeys: 320000,
 		})
 	}
 
