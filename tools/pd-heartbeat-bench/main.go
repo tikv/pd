@@ -32,7 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
 	"go.uber.org/zap"

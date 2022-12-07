@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 // RequestInfo holds service information from http.Request

@@ -31,9 +31,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 

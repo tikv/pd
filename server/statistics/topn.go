@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // TopNItem represents a single object in TopN.

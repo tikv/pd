@@ -28,7 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/requestutil"
+	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
 func TestLabelMatcher(t *testing.T) {

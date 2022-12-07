@@ -19,7 +19,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 )

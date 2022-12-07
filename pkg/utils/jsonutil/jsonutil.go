@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/tikv/pd/pkg/reflectutil"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
 // AddKeyValue is used to add a key value pair into `old`

@@ -23,7 +23,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // TransferCounter is to count transfer schedule for judging whether redundant

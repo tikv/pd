@@ -18,8 +18,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/assertutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
 
