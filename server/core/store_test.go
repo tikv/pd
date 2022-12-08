@@ -124,9 +124,6 @@ func (s *testStoreSuite) TestLowSpaceRatio(c *C) {
 	store.regionCount = 31
 	c.Assert(store.IsLowSpace(0.8), Equals, true)
 	store.rawStats.Available = store.rawStats.Capacity >> 2
-<<<<<<< HEAD
-	c.Assert(store.IsLowSpace(0.8), Equals, false)
-=======
 	c.Assert(store.IsLowSpace(0.8), IsFalse)
 }
 
@@ -172,9 +169,8 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
 	}}
 	for _, v := range testdata {
-		score1 := v.bigger.regionScoreV2(0, 0.8)
-		score2 := v.small.regionScoreV2(0, 0.8)
+		score1 := v.bigger.regionScoreV2(0, 0.0, 0.8)
+		score2 := v.small.regionScoreV2(0, 0.0, 0.8)
 		c.Assert(score1, Greater, score2)
 	}
->>>>>>> 6cb4b270f (core: change scoreV2 to adapt the higher disk capacity and amp .  (#4837))
 }
