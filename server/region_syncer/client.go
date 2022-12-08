@@ -211,7 +211,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region = core.NewRegionInfo(r, regionLeader, core.SetFromHeartbeat(false))
 					}
 
-					origin, err := bc.PreCheckPutRegion(region)
+					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue

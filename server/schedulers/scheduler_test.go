@@ -118,7 +118,7 @@ func TestRejectLeader(t *testing.T) {
 			break
 		}
 	}
-	origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged := tc.SetRegion(region)
 	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)

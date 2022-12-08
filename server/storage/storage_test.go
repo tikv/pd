@@ -212,11 +212,11 @@ func TestLoadMinServiceGCSafePoint(t *testing.T) {
 func TestLoadRegions(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
-	cache := core.NewRegionsInfo()
+	cache := core.NewBasicCluster()
 
 	n := 10
 	regions := mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegions(context.Background(), cache.SetRegion))
+	re.NoError(storage.LoadRegions(context.Background(), cache.CheckAndPutRegion))
 
 	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
@@ -249,11 +249,11 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 func TestLoadRegionsToCache(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
-	cache := core.NewRegionsInfo()
+	cache := core.NewBasicCluster()
 
 	n := 10
 	regions := mustSaveRegions(re, storage, n)
-	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.CheckAndPutRegion))
 
 	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
@@ -262,7 +262,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 	n = 20
 	mustSaveRegions(re, storage, n)
-	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.SetRegion))
+	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.CheckAndPutRegion))
 	re.Equal(n, cache.GetRegionCount())
 }
 
@@ -270,11 +270,11 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/withRangeLimit", "return(500)"))
 	storage := NewStorageWithMemoryBackend()
-	cache := core.NewRegionsInfo()
+	cache := core.NewBasicCluster()
 
 	n := 1000
 	regions := mustSaveRegions(re, storage, n)
-	re.NoError(storage.LoadRegions(context.Background(), cache.SetRegion))
+	re.NoError(storage.LoadRegions(context.Background(), cache.CheckAndPutRegion))
 	re.Equal(n, cache.GetRegionCount())
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
@@ -287,13 +287,13 @@ func TestTrySwitchRegionStorage(t *testing.T) {
 	defaultStorage := NewStorageWithMemoryBackend()
 	localStorage := NewStorageWithMemoryBackend()
 	storage := NewCoreStorage(defaultStorage, localStorage)
-	defaultCache := core.NewRegionsInfo()
-	localCache := core.NewRegionsInfo()
+	defaultCache := core.NewBasicCluster()
+	localCache := core.NewBasicCluster()
 
 	TrySwitchRegionStorage(storage, false)
 	regions10 := mustSaveRegions(re, storage, 10)
-	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
-	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.CheckAndPutRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.CheckAndPutRegion))
 	re.Empty(localCache.GetMetaRegions())
 	re.Len(defaultCache.GetMetaRegions(), 10)
 	for _, region := range defaultCache.GetMetaRegions() {
@@ -302,8 +302,8 @@ func TestTrySwitchRegionStorage(t *testing.T) {
 
 	TrySwitchRegionStorage(storage, true)
 	regions20 := mustSaveRegions(re, storage, 20)
-	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.SetRegion))
-	re.NoError(localStorage.LoadRegions(context.Background(), localCache.SetRegion))
+	re.NoError(defaultStorage.LoadRegions(context.Background(), defaultCache.CheckAndPutRegion))
+	re.NoError(localStorage.LoadRegions(context.Background(), localCache.CheckAndPutRegion))
 	re.Len(defaultCache.GetMetaRegions(), 10)
 	re.Len(localCache.GetMetaRegions(), 20)
 	for _, region := range defaultCache.GetMetaRegions() {

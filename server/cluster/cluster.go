@@ -829,7 +829,7 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
-	origin, err := c.core.PreCheckPutRegion(region)
+	origin, _, err := c.core.PreCheckPutRegion(region)
 	if err != nil {
 		return err
 	}
