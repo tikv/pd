@@ -759,6 +759,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
+		r.t.Unlock()
 		return []*RegionInfo{region}
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
