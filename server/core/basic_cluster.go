@@ -28,7 +28,6 @@ type BasicCluster struct {
 	}
 
 	*RegionsInfo
-	updateSubtreeCh chan *updateSubtreeTask
 }
 
 // NewBasicCluster creates a BasicCluster.

@@ -276,7 +276,7 @@ func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
 	origin, overlaps, rangeChanged := r.regionsInfo.SetRegion(region)
-	r.regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	r.regionsInfo.UpdateSubTree(core.NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
 	return overlaps
 }
 

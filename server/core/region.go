@@ -730,7 +730,7 @@ func NewRegionsInfo() *RegionsInfo {
 		learners:        make(map[uint64]*regionTree),
 		witnesses:       make(map[uint64]*regionTree),
 		pendingPeers:    make(map[uint64]*regionTree),
-		updateSubtreeCh: make(chan *updateSubtreeTask),
+		updateSubtreeCh: make(chan *updateSubtreeTask, 10000),
 	}
 }
 
@@ -752,6 +752,7 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 // CheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	r.t.Lock()
+	defer r.t.Unlock()
 	origin := r.getRegionLocked(region.GetID())
 	var ols []*regionItem
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
@@ -761,19 +762,17 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
-		r.t.Unlock()
 		return []*RegionInfo{region}
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
-	r.t.Unlock()
-	r.UpdateSubTree(NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
+	r.updateSubtreeCh <- NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
 
 // PutRegion put a region.
 func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.SetRegion(region)
-	r.UpdateSubTree(NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged))
+	r.updateSubtreeCh <- NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
 
@@ -785,7 +784,7 @@ func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*reg
 }
 
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, *RegionInfo, bool, error) {
+func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
 	defer r.t.Unlock()
 	var ols []*regionItem
@@ -795,13 +794,11 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	}
 	err := check(region, origin, ols)
 	if err != nil {
-		return nil, nil, false, err
+		return nil, err
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
-	if err == nil {
-		r.updateSubtreeCh <- NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged)
-	}
-	return overlaps, origin, rangeChanged, nil
+	r.updateSubtreeCh <- NewUpdateSubtreeTask(region, origin, overlaps, rangeChanged)
+	return overlaps, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
