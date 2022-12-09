@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	tu "github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
