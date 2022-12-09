@@ -73,6 +73,14 @@ var (
 			Help:      "Time spent of patrol checks region.",
 		})
 
+	collectRegionStatsGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "statistics",
+			Name:      "collect_region_stats_time",
+			Help:      "Time spent of collecting region stats.",
+		})
+
 	updateStoreStatsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -152,4 +160,5 @@ func init() {
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
+	prometheus.MustRegister(collectRegionStatsGauge)
 }

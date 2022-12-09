@@ -52,8 +52,8 @@ const (
 	maxScheduleRetries         = 10
 	maxLoadConfigRetries       = 10
 
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
-	statsScanRegionLimit  = 1000
+	patrolScanRegionLimit = 128  // It takes about 14 minutes to iterate 1 million regions.
+	statsScanRegionLimit  = 1000 // It takes about 3.5 minutes to iterate 2 million regions.
 	defaultScrapInterval  = 15 * time.Second
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
@@ -231,6 +231,7 @@ func (c *coordinator) collectRegionStats() {
 				case <-timer.C:
 				}
 			}
+			collectRegionStatsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
 	}

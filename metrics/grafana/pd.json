@@ -796,7 +796,7 @@
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "B"
-        },
+        }
       ],
       "thresholds": [
         {
