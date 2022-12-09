@@ -44,8 +44,6 @@ const (
 	BalanceLeaderName = "balance-leader-scheduler"
 	// BalanceLeaderType is balance leader scheduler type.
 	BalanceLeaderType = "balance-leader"
-	// balanceLeaderRetryLimit is the limit to retry schedule for selected source store and target store.
-	balanceLeaderRetryLimit = 10
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -192,7 +190,7 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 	base := NewBaseScheduler(opController)
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
-		retryQuota:    newRetryQuota(balanceLeaderRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		retryQuota:    newRetryQuota(),
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),

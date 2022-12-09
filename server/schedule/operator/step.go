@@ -152,7 +152,11 @@ func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (ap AddPeer) String() string {
-	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
+	info := "peer"
+	if ap.IsWitness {
+		info = "witness peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, ap.PeerID, ap.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -175,7 +179,11 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if ap.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
 	if ap.IsLightWeight {
 		return
@@ -254,6 +262,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount += 1
 	to.RegionSize -= regionSize
 	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
@@ -312,6 +321,8 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount -= 1
+	to.RegionSize += regionSize
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -434,7 +445,11 @@ func (al AddLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (al AddLearner) String() string {
-	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
+	info := "learner peer"
+	if al.IsWitness {
+		info = "witness learner peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, al.PeerID, al.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -475,7 +490,11 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if al.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
 	if al.IsLightWeight {
 		return
@@ -589,9 +608,12 @@ func (rp RemovePeer) CheckInProgress(_ ClusterInformer, region *core.RegionInfo)
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	regionSize := region.GetApproximateSize()
+	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	if region.GetStorePeer(rp.FromStore).IsWitness {
+		from.WitnessCount--
+	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold

@@ -405,6 +405,18 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 	return nil
 }
 
+// GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
+func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
+	peers := r.GetVoters()
+	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
+	for _, peer := range peers {
+		if !peer.IsWitness {
+			nonWitnesses[peer.GetStoreId()] = peer
+		}
+	}
+	return nonWitnesses
+}
+
 // GetDiffFollowers returns the followers which is not located in the same
 // store as any other followers of the another specified region.
 func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
@@ -474,9 +486,25 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 	return (*metapb.Buckets)(buckets)
 }
 
+// GetStorePeerApproximateSize returns the approximate size of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
+	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+		return 0
+	}
+	return r.approximateSize
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
+}
+
+// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
+	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+		return 0
+	}
+	return r.approximateKeys
 }
 
 // GetApproximateKeys returns the approximate keys of the region.
@@ -914,7 +942,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		}
 	}
 
-	item := &regionItem{region}
+	item := &regionItem{region, 0}
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
@@ -924,6 +952,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
+		item.storeID = storeID
 		store.update(item, false)
 	}
 
@@ -1335,6 +1364,20 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
+// RandWitnessRegion randomly gets a store's witness region.
+func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegion(ranges)
+}
+
+// RandWitnessRegions randomly gets a store's n witness regions.
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
+}
+
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	r.st.RLock()
@@ -1410,8 +1453,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
-	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}, 0}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}, 0}
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int

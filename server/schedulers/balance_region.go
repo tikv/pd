@@ -57,8 +57,6 @@ func init() {
 }
 
 const (
-	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
-	balanceRegionRetryLimit = 10
 	// BalanceRegionName is balance region scheduler name.
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
@@ -86,7 +84,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
-		retryQuota:    newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
@@ -284,7 +282,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		}
 
 		oldPeer := solver.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: solver.target.GetID(), Role: oldPeer.Role}
+		newPeer := &metapb.Peer{StoreId: solver.target.GetID(), Role: oldPeer.Role, IsWitness: oldPeer.IsWitness}
 		solver.step++
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
