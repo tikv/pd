@@ -488,7 +488,8 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 
 // GetStorePeerApproximateSize returns the approximate size of the peer on the specified store.
 func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
-	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
 		return 0
 	}
 	return r.approximateSize
@@ -501,7 +502,8 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 
 // GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
 func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
-	if storeID != 0 && r.GetStorePeer(storeID).IsWitness {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
 		return 0
 	}
 	return r.approximateKeys
