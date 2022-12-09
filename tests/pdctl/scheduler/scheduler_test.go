@@ -138,6 +138,7 @@ func TestScheduler(t *testing.T) {
 		"balance-hot-region-scheduler":      true,
 		"split-bucket-scheduler":            true,
 		"transfer-witness-leader-scheduler": true,
+		"balance-witness-scheduler":         true,
 	}
 	checkSchedulerCommand(nil, expected)
 
@@ -152,6 +153,7 @@ func TestScheduler(t *testing.T) {
 		"balance-hot-region-scheduler":      true,
 		"split-bucket-scheduler":            true,
 		"transfer-witness-leader-scheduler": true,
+		"balance-witness-scheduler":         true,
 	}
 	checkSchedulerCommand(args, expected)
 
@@ -168,6 +170,7 @@ func TestScheduler(t *testing.T) {
 			"split-bucket-scheduler":            true,
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -184,6 +187,7 @@ func TestScheduler(t *testing.T) {
 			"split-bucket-scheduler":            true,
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -198,6 +202,7 @@ func TestScheduler(t *testing.T) {
 			"balance-hot-region-scheduler":      true,
 			"split-bucket-scheduler":            true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -209,6 +214,7 @@ func TestScheduler(t *testing.T) {
 			"split-bucket-scheduler":            true,
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -220,6 +226,7 @@ func TestScheduler(t *testing.T) {
 			"split-bucket-scheduler":            true,
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -235,6 +242,7 @@ func TestScheduler(t *testing.T) {
 			"split-bucket-scheduler":            true,
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -249,6 +257,7 @@ func TestScheduler(t *testing.T) {
 			"balance-hot-region-scheduler":      true,
 			"split-bucket-scheduler":            true,
 			"transfer-witness-leader-scheduler": true,
+			"balance-witness-scheduler":         true,
 		}
 		checkSchedulerCommand(args, expected)
 	}
@@ -260,6 +269,7 @@ func TestScheduler(t *testing.T) {
 		"split-bucket-scheduler":            true,
 		"shuffle-region-scheduler":          true,
 		"transfer-witness-leader-scheduler": true,
+		"balance-witness-scheduler":         true,
 	})
 	var roles []string
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
@@ -278,6 +288,7 @@ func TestScheduler(t *testing.T) {
 		"shuffle-region-scheduler":          true,
 		"grant-hot-region-scheduler":        true,
 		"transfer-witness-leader-scheduler": true,
+		"balance-witness-scheduler":         true,
 	})
 	var conf3 map[string]interface{}
 	expected3 := map[string]interface{}{
