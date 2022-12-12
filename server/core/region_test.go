@@ -466,7 +466,7 @@ func TestSetRegion(t *testing.T) {
 			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
 			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
 		}, peer1)
-		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 
@@ -480,13 +480,13 @@ func TestSetRegion(t *testing.T) {
 		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged := regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
 	re.Len(regions.GetRegions(), 97)
 
-	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
 	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102), Role: metapb.PeerRole_Learner}
@@ -498,7 +498,7 @@ func TestSetRegion(t *testing.T) {
 		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
@@ -508,7 +508,7 @@ func TestSetRegion(t *testing.T) {
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
 	re.NotNil(regions.GetRegion(21))
 	re.NotNil(regions.GetRegion(18))
-	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
@@ -524,7 +524,7 @@ func TestSetRegion(t *testing.T) {
 		SetWrittenBytes(40),
 		SetWrittenKeys(10),
 		SetReportInterval(0, 5))
-	origin, overlaps, rangeChanged = regions.SetRegionWithUpdate(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
@@ -636,7 +636,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 	b.ResetTimer()
@@ -690,7 +690,7 @@ func BenchmarkAddRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(items[i])
+		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
 }

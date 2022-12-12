@@ -14,7 +14,7 @@
 
 package cache
 
-import "github.com/tikv/pd/pkg/syncutil"
+import "github.com/tikv/pd/pkg/utils/syncutil"
 
 // Cache is an interface for cache system
 type Cache interface {
