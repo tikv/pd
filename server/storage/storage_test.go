@@ -268,7 +268,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 
 func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/withRangeLimit", "return(500)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit", "return(500)"))
 	storage := NewStorageWithMemoryBackend()
 	cache := core.NewBasicCluster()
 
@@ -279,7 +279,7 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/withRangeLimit"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit"))
 }
 
 func TestTrySwitchRegionStorage(t *testing.T) {

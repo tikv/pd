@@ -15,8 +15,8 @@
 package endpoint
 
 import (
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/storage/kv"
 )
 
 // StorageEndpoint is the base underlying storage endpoint for all other upper

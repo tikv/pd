@@ -773,7 +773,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// PUT GET failed
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed", `return(true)`))
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -787,13 +787,13 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// DELETE failed
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed"))
 	re.NoError(svr.SetReplicationConfig(*replicationCfg))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed", `return(true)`))
 	re.Error(svr.DeleteLabelProperty(typ, labelKey, labelValue))
 	re.Equal("testKey", persistOptions.GetLabelPropertyConfig()[typ][0].Key)
 	re.Equal("testValue", persistOptions.GetLabelPropertyConfig()[typ][0].Value)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed"))
 }
 
 func TestLoadClusterInfo(t *testing.T) {
