@@ -182,3 +182,4 @@ require (
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/phf/go-queue => github.com/lhy1024/go-queue v0.0.0-20221212180222-87a5e754e31c
