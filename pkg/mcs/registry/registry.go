@@ -15,6 +15,8 @@
 package registry
 
 import (
+	"net/http"
+
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
@@ -22,37 +24,40 @@ import (
 )
 
 var (
-	// ServerGRPCServiceregistry is the global grpc service registry.
-	ServerGRPCServiceregistry = make(GRPCServiceregistry)
+	// ServerServiceRegistry is the global grpc service registry.
+	ServerServiceRegistry = make(ServiceRegistry)
 )
 
-// GRPCServiceLoader is a function that creates a grpc service.
-type GRPCServiceLoader func(*server.Server) GRPCService
+// ServiceLoader is a function that creates a grpc service.
+type ServiceLoader func(*server.Server) RegistrableService
 
-// GRPCService is the interface that should wraps the RegisterService method.
-type GRPCService interface {
-	RegisterService(g *grpc.Server)
+// RegistrableService is the interface that should wraps the RegisterService method.
+type RegistrableService interface {
+	RegisterGRPCService(g *grpc.Server)
+	RegisterRESTServer(userDefineHandler map[string]http.Handler)
 }
 
-// GRPCServiceregistry is a map that stores all registered grpc services.
-type GRPCServiceregistry map[string]GRPCServiceLoader
+// ServiceRegistry is a map that stores all registered grpc services.
+type ServiceRegistry map[string]ServiceLoader
 
 // InstallAllServices installs all registered grpc services.
 // TODO: use `uber/fx` to manage the lifecycle of grpc services.
-func (r GRPCServiceregistry) InstallAllServices(srv *server.Server, g *grpc.Server) {
+func (r ServiceRegistry) InstallAllServices(srv *server.Server, g *grpc.Server, h map[string]http.Handler) {
 	for name, loader := range r {
-		loader(srv).RegisterService(g)
-		log.Info("grpc service registered", zap.String("service-name", name))
+		l := loader(srv)
+		l.RegisterGRPCService(g)
+		l.RegisterRESTServer(h)
+		log.Info("service registered", zap.String("service-name", name))
 	}
 }
 
 // RegisterService registers a grpc service.
-func (r GRPCServiceregistry) RegisterService(name string, service GRPCServiceLoader) {
+func (r ServiceRegistry) RegisterService(name string, service ServiceLoader) {
 	r[name] = service
 }
 
 func init() {
-	server.NewGRPCServiceregistry = func() server.GRPCServiceregistry {
-		return ServerGRPCServiceregistry
+	server.NewServiceregistry = func() server.Serviceregistry {
+		return ServerServiceRegistry
 	}
 }

@@ -16,6 +16,8 @@ package server
 
 import (
 	"context"
+	"io"
+	"net/http"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -25,6 +27,19 @@ import (
 	"google.golang.org/grpc"
 )
 
+// SetUpRestService is a hook to sets up the REST service.
+var SetUpRestService = func(srv *Service) (http.Handler, server.ServiceGroup) {
+	return dummyRestService{}, server.ServiceGroup{}
+}
+
+type dummyRestService struct{}
+
+func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+	w.Write([]byte("not implemented"))
+	return
+}
+
 // Service is the gRPC service for resource manager.
 type Service struct {
 	ctx     context.Context
@@ -33,7 +48,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService(svr *server.Server) registry.GRPCService {
+func NewService(svr *server.Server) registry.RegistrableService {
 	manager := NewManager(svr)
 	return &Service{
 		ctx:     svr.Context(),
@@ -41,42 +56,47 @@ func NewService(svr *server.Server) registry.GRPCService {
 	}
 }
 
-// RegisterService registers the service to gRPC server.
-func (s *Service) RegisterService(g *grpc.Server) {
+// RegisterGRPCService registers the service to gRPC server.
+func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	rmpb.RegisterResourceManagerServer(g, s)
+}
+
+func (s *Service) RegisterRESTServer(userDefineHandlers map[string]http.Handler) {
+	hander, group := SetUpRestService(s)
+	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, hander)
+}
+
+func (s *Service) GetManager() *Manager {
+	return s.manager
 }
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	_, cancel := context.WithCancel(stream.Context())
-	defer cancel()
-	return errors.New("not implemented")
-	// for {
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		break
-	// 	case <-s.ctx.Done():
-	// 		break
-	// 	}
-	// 	req, err := stream.Recv()
-	// 	if err == io.EOF {
-	// 		return nil
-	// 	}
-	// 	if err != nil {
-	// 		return errors.WithStack(err)
-	// 	}
-	// 	for _, request := range req.Requests {
-	// 		tag := &tipb.ResourceGroupTag{}
-	// 		if err := tag.Unmarshal(request.ResourceGroupTag); err != nil {
-	// 			return err
-	// 		}
-	// 		rg := s.manager.GetResourceGroup(string(tag.Name.GroupName))
-	// 		if rg == nil {
-	// 			return errors.New("resource group not found")
-	// 		}
-	// 		// TODO: implement
-	// 	}
-	// }
+	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.New("server closed")
+		default:
+		}
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		for _, req := range request.Requests {
+			tag := &tipb.ResourceGroupTag{}
+			if err := tag.Unmarshal(req.ResourceGroupTag); err != nil {
+				return err
+			}
+			rg := s.manager.GetResourceGroup(string(tag.GroupName))
+			if rg == nil {
+				return errors.New("resource group not found")
+			}
+			// TODO: implement
+		}
+	}
 }
 
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.

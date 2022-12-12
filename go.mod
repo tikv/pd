@@ -187,4 +187,4 @@ require (
 
 replace github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20221206202925-9023c6afcd28
 
-replace github.com/pingcap/tipb => github.com/nolouch/tipb v0.0.0-20221205200308-b69864ad228c
+replace github.com/pingcap/tipb => github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010

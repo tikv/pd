@@ -15,7 +15,6 @@
 package apis
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
@@ -28,29 +27,21 @@ import (
 )
 
 // APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/resource-groups/api/v1alpha/"
+const APIPathPrefix = "/resource-groups/api/v1/"
 
 var (
 	apiServiceGroup = server.ServiceGroup{
 		Name:       "resource-groups",
-		Version:    "v1alpha",
+		Version:    "v1",
 		IsCore:     false,
 		PathPrefix: APIPathPrefix,
 	}
 )
 
-// GetServiceBuilders returns all ServiceBuilders required by Dashboard
-func GetServiceBuilders() []server.HandlerBuilder {
-	//	var err error
-
-	// The order of execution must be sequential.
-	return []server.HandlerBuilder{
-		// Dashboard API Service
-		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
-			s := NewService(srv)
-			srv.AddStartCallback(s.Start)
-			return s.handler(), apiServiceGroup, nil
-		},
+func init() {
+	rmserver.SetUpRestService = func(srv *rmserver.Service) (http.Handler, server.ServiceGroup) {
+		s := NewService(srv)
+		return s.handler(), apiServiceGroup
 	}
 }
 
@@ -63,14 +54,14 @@ type Service struct {
 }
 
 // NewService returns a new Service.
-func NewService(srv *server.Server) *Service {
+func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.AllowAll())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
-		manager:          rmserver.NewManager(srv),
+		manager:          srv.GetManager(),
 		apiHandlerEngine: apiHandlerEngine,
 		baseEndpoint:     endpoint,
 	}
@@ -85,11 +76,6 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
 	configEndpoint.GET("/groups", s.getResourceGroupList)
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
-}
-
-// Start starts the Manager.
-func (s *Service) Start() {
-	s.manager.Init()
 }
 
 func (s *Service) handler() http.Handler {

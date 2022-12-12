@@ -323,8 +323,8 @@ github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWb
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nolouch/kvproto v0.0.0-20221206202925-9023c6afcd28 h1:wIWGFWrdbjWSBiOaAQR3F2NeghaLb0Bguq4DkeZAiPE=
 github.com/nolouch/kvproto v0.0.0-20221206202925-9023c6afcd28/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
-github.com/nolouch/tipb v0.0.0-20221205200308-b69864ad228c h1:76A2bShQoOwPI0V3G03aGdGQm5GS6yqJM/Ko6qiz8QE=
-github.com/nolouch/tipb v0.0.0-20221205200308-b69864ad228c/go.mod h1:A7mrd7WHBl1o63LE2bIBGEJMTNWXqhgmYiOvMLxozfs=
+github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010 h1:AmkVbExgGnTeRmmY/cF7g0m6Che/vC4WQCFHkd9qvgk=
+github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010/go.mod h1:A7mrd7WHBl1o63LE2bIBGEJMTNWXqhgmYiOvMLxozfs=
 github.com/oklog/ulid v1.3.1/go.mod h1:CirwcVhetQ6Lv90oh/F+FBtV6XMibvdAFo93nm5qn4U=
 github.com/oleiade/reflections v1.0.1 h1:D1XO3LVEYroYskEsoSiGItp9RUxG6jWnCVvrqH0HHQM=
 github.com/oleiade/reflections v1.0.1/go.mod h1:rdFxbxq4QXVZWj0F+e9jqjDkc7dbp97vkRixKo2JR60=

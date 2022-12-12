@@ -175,19 +175,20 @@ type Server struct {
 // HandlerBuilder builds a server HTTP handler.
 type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
 
-// GRPCServiceregistry used to install the registered services.
-type GRPCServiceregistry interface {
-	InstallAllServices(srv *Server, g *grpc.Server)
+// Serviceregistry used to install the registered services, including gRPC and HTTP API.
+type Serviceregistry interface {
+	InstallAllServices(srv *Server, g *grpc.Server, userDefineHandler map[string]http.Handler)
 }
 
-// NewGRPCServiceregistry is a hook for msc code which implements the micro service.
-var NewGRPCServiceregistry = func() GRPCServiceregistry {
-	return dummyGRPCServiceregistry{}
+// NewServiceregistry is a hook for msc code which implements the micro service.
+var NewServiceregistry = func() Serviceregistry {
+	return dummyServiceregistry{}
 }
 
-type dummyGRPCServiceregistry struct{}
+type dummyServiceregistry struct{}
 
-func (d dummyGRPCServiceregistry) InstallAllServices(srv *Server, g *grpc.Server) {}
+func (d dummyServiceregistry) InstallAllServices(srv *Server, g *grpc.Server, userDefineHandler map[string]http.Handler) {
+}
 
 // ServiceGroup used to register the service.
 type ServiceGroup struct {
@@ -197,6 +198,19 @@ type ServiceGroup struct {
 	PathPrefix string
 }
 
+func (sg *ServiceGroup) Path() string {
+	if len(sg.PathPrefix) > 0 {
+		return sg.PathPrefix
+	}
+	if sg.IsCore {
+		return CorePath
+	}
+	if len(sg.Name) > 0 && len(sg.Version) > 0 {
+		return path.Join(ExtensionsPath, sg.Name, sg.Version)
+	}
+	return ""
+}
+
 const (
 	// CorePath the core group, is at REST path `/pd/api/v1`.
 	CorePath = "/pd/api/v1"
@@ -204,9 +218,23 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
+// RegisterUserDefinedHandlers register the user defined handlers.
+func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *ServiceGroup, handler http.Handler) error {
+	pathPrefix := group.Path()
+	if _, ok := registerMap[pathPrefix]; ok {
+		return errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
+	}
+	if len(pathPrefix) == 0 {
+		return errs.ErrAPIInformationInvalid.FastGenByArgs(group.Name, group.Version)
+	}
+	registerMap[pathPrefix] = handler
+	log.Info("register REST path", zap.String("path", pathPrefix))
+	return nil
+}
+
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
-	registerMap := make(map[string]struct{})
+	registerMap := make(map[string]http.Handler)
 
 	apiService := negroni.New()
 	recovery := negroni.NewRecovery()
@@ -221,33 +249,22 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
 			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
-		var pathPrefix string
-		if len(info.PathPrefix) != 0 {
-			pathPrefix = info.PathPrefix
-		} else if info.IsCore {
-			pathPrefix = CorePath
-		} else {
-			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
+		if err := RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
+			return nil, err
 		}
-		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
-		}
-
-		log.Info("register REST path", zap.String("path", pathPrefix))
-		registerMap[pathPrefix] = struct{}{}
-		if len(info.PathPrefix) != 0 {
-			// If PathPrefix is specified, register directly into userHandlers
-			userHandlers[pathPrefix] = handler
-		} else {
-			// If PathPrefix is not specified, register into apiService,
-			// and finally apiService is registered in userHandlers.
+	}
+	// Combine the pd service to the router. the extension service will be added to the userHandlers.
+	for pathPrefix, handler := range registerMap {
+		if strings.Contains(pathPrefix, CorePath) || strings.Contains(pathPrefix, ExtensionsPath) {
 			router.PathPrefix(pathPrefix).Handler(handler)
-			if info.IsCore {
+			if pathPrefix == CorePath {
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated
 				router.Path("/pd/ping").Handler(handler)
 			}
+		} else {
+			userHandlers[pathPrefix] = handler
 		}
 	}
 	apiService.UseHandler(router)
@@ -297,13 +314,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		}
 		etcdCfg.UserHandlers = userHandlers
 	}
-
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		NewGRPCServiceregistry().InstallAllServices(s, gs)
+		NewServiceregistry().InstallAllServices(s, gs, etcdCfg.UserHandlers)
 	}
 
 	s.etcdCfg = etcdCfg
