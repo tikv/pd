@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/member"
 	"github.com/tikv/pd/server/storage/kv"
 	"go.etcd.io/etcd/clientv3"
@@ -51,6 +50,8 @@ const (
 	leaderTickInterval          = 50 * time.Millisecond
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
+	// The value should be the same as the variable defined in server's config.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 )
 
 var (
@@ -133,17 +134,17 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	cfg *config.Config,
+	cfg config,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		enableLocalTSO:         cfg.EnableLocalTSO,
+		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           cfg.TSOSaveInterval.Duration,
-		updatePhysicalInterval: cfg.TSOUpdatePhysicalInterval.Duration,
+		saveInterval:           cfg.GetTSOSaveInterval(),
+		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         &cfg.Security.TLSConfig,
+		securityConfig:         cfg.GetTLSConfig(),
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -312,7 +313,7 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
+	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
 	}
