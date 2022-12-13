@@ -67,7 +67,6 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
-	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -173,15 +172,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
-
-// ServiceGroup used to register the service.
-type ServiceGroup struct {
-	Name       string
-	Version    string
-	IsCore     bool
-	PathPrefix string
-}
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIServiceGroup, error)
 
 const (
 	// CorePath the core group, is at REST path `/pd/api/v1`.
@@ -190,60 +181,8 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
-	userHandlers := make(map[string]http.Handler)
-	registerMap := make(map[string]struct{})
-
-	apiService := negroni.New()
-	recovery := negroni.NewRecovery()
-	apiService.Use(recovery)
-	router := mux.NewRouter()
-
-	for _, build := range serviceBuilders {
-		handler, info, err := build(ctx, svr)
-		if err != nil {
-			return nil, err
-		}
-		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
-		}
-		var pathPrefix string
-		if len(info.PathPrefix) != 0 {
-			pathPrefix = info.PathPrefix
-		} else if info.IsCore {
-			pathPrefix = CorePath
-		} else {
-			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
-		}
-		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
-		}
-
-		log.Info("register REST path", zap.String("path", pathPrefix))
-		registerMap[pathPrefix] = struct{}{}
-		if len(info.PathPrefix) != 0 {
-			// If PathPrefix is specified, register directly into userHandlers
-			userHandlers[pathPrefix] = handler
-		} else {
-			// If PathPrefix is not specified, register into apiService,
-			// and finally apiService is registered in userHandlers.
-			router.PathPrefix(pathPrefix).Handler(handler)
-			if info.IsCore {
-				// Deprecated
-				router.Path("/pd/health").Handler(handler)
-				// Deprecated
-				router.Path("/pd/ping").Handler(handler)
-			}
-		}
-	}
-	apiService.UseHandler(router)
-	userHandlers[pdAPIPrefix] = apiService
-
-	return userHandlers, nil
-}
-
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
@@ -276,18 +215,26 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	if err != nil {
 		return nil, err
 	}
-	if len(serviceBuilders) != 0 {
-		userHandlers, err := combineBuilderServerHTTPService(ctx, s, serviceBuilders...)
+	if len(legacyServiceBuilders) != 0 {
+		userHandlers, err := combineBuilderServerHTTPService(ctx, s, legacyServiceBuilders...)
 		if err != nil {
 			return nil, err
 		}
 		etcdCfg.UserHandlers = userHandlers
 	}
+	// New way to register services.
+	registry := NewServiceregistry()
+
+	// Register the micro services REST path.
+	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+		// Register the micro services GRPC service.
+		NewServiceregistry().InstallAllGRPCServices(s, gs)
 	}
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.GetZapLogger()

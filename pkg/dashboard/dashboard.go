@@ -34,14 +34,14 @@ import (
 )
 
 var (
-	apiServiceGroup = server.ServiceGroup{
+	apiServiceGroup = server.APIServiceGroup{
 		Name:       "dashboard-api",
 		Version:    "v1",
 		IsCore:     false,
 		PathPrefix: config.APIPathPrefix,
 	}
 
-	uiServiceGroup = server.ServiceGroup{
+	uiServiceGroup = server.APIServiceGroup{
 		Name:       "dashboard-ui",
 		Version:    "v1",
 		IsCore:     false,
@@ -68,7 +68,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 	// The order of execution must be sequential.
 	return []server.HandlerBuilder{
 		// Dashboard API Service
-		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
+		func(ctx context.Context, srv *server.Server) (http.Handler, server.APIServiceGroup, error) {
 			distroutil.MustLoadAndReplaceStrings()
 
 			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {
@@ -98,7 +98,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},
 		// Dashboard UI
-		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
 			if err != nil {
 				return nil, uiServiceGroup, err
 			}

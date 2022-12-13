@@ -40,11 +40,11 @@ const (
 
 type runtimeServiceValidator struct {
 	s     *server.Server
-	group server.ServiceGroup
+	group server.APIServiceGroup
 }
 
 // NewRuntimeServiceValidator checks if the path is invalid.
-func NewRuntimeServiceValidator(s *server.Server, group server.ServiceGroup) negroni.Handler {
+func NewRuntimeServiceValidator(s *server.Server, group server.APIServiceGroup) negroni.Handler {
 	return &runtimeServiceValidator{s: s, group: group}
 }
 
@@ -58,7 +58,7 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 // IsServiceAllowed checks the service through the path.
-func IsServiceAllowed(s *server.Server, group server.ServiceGroup) bool {
+func IsServiceAllowed(s *server.Server, group server.APIServiceGroup) bool {
 	// for core path
 	if group.IsCore {
 		return true
