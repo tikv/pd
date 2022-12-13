@@ -361,6 +361,32 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 	return stores
 }
 
+func handleStoreHeartbeat(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regions *Regions) {
+	var heartbeatTicker = time.NewTicker(storeReportInterval * time.Second)
+	defer heartbeatTicker.Stop()
+	for {
+		select {
+		case <-heartbeatTicker.C:
+			cctx, cancel := context.WithCancel(ctx)
+			wg := &sync.WaitGroup{}
+			storesStats := regions.collectStoresStats(cfg.StoreCount)
+			for i := 0; i < cfg.StoreCount; i++ {
+				wg.Add(1)
+				storeStat := storesStats[i]
+				go func() {
+					defer wg.Done()
+					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
+				}()
+			}
+			wg.Wait()
+			cancel()
+		case <-ctx.Done():
+			return
+		}
+	}
+
+}
+
 func main() {
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
@@ -405,13 +431,12 @@ func main() {
 	regions := new(Regions)
 	regions.init(cfg)
 	log.Info("finish init regions")
-
+	go handleStoreHeartbeat(ctx, cfg, cli, regions)
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
 	}
-	var storeUpdateRound = 0
-	var heartbeatTicker = time.NewTicker(storeReportInterval * time.Second)
+	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
 	for {
 		select {
@@ -419,45 +444,30 @@ func main() {
 			if cfg.Round != 0 && regions.updateRound > cfg.Round {
 				exit(0)
 			}
-			storeUpdateRound++
+			rep := newReport(cfg)
+			r := rep.Stats()
+			startTime := time.Now()
 			wg := &sync.WaitGroup{}
-			// store heartbeat
-			storesStats := regions.collectStoresStats(cfg.StoreCount)
-			for i := 0; i < cfg.StoreCount; i++ {
+			for i := 1; i <= cfg.StoreCount; i++ {
+				id := uint64(i)
 				wg.Add(1)
-				storeStat := storesStats[i]
-				go func() {
-					defer wg.Done()
-					cli.StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
-				}()
+				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
 			}
-			// region heartbeat
-			if storeUpdateRound%6 == 0 {
-				rep := newReport(cfg)
-				r := rep.Stats()
-				startTime := time.Now()
-				for i := 1; i <= cfg.StoreCount; i++ {
-					id := uint64(i)
-					wg.Add(1)
-					go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
-				}
-				wg.Wait()
-				since := time.Since(startTime).Seconds()
-				close(rep.Results())
-				regions.result(cfg.RegionCount, since)
-				stats := <-r
-				log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-					zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-					zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-					zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-					zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-					zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
-				)
-				log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-				regions.update(cfg.Replica)
-			} else {
-				wg.Wait()
-			}
+			wg.Wait()
+
+			since := time.Since(startTime).Seconds()
+			close(rep.Results())
+			regions.result(cfg.RegionCount, since)
+			stats := <-r
+			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
+				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
+				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
+				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
+				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
+				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+			)
+			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
+			regions.update(cfg.Replica)
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
 			switch sig {
