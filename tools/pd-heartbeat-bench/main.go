@@ -384,7 +384,6 @@ func handleStoreHeartbeat(ctx context.Context, cfg *config.Config, cli pdpb.PDCl
 			return
 		}
 	}
-
 }
 
 func main() {
@@ -446,6 +445,7 @@ func main() {
 			}
 			rep := newReport(cfg)
 			r := rep.Stats()
+
 			startTime := time.Now()
 			wg := &sync.WaitGroup{}
 			for i := 1; i <= cfg.StoreCount; i++ {
