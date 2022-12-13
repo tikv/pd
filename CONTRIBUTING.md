@@ -1,6 +1,6 @@
 # How to contribute
 
-Thanks for your interest in contributing to PD! If you need any help or mentoring getting started, understanding the codebase, or making a PR (or anything else really), please ask on [#sig-scheduling (Slack channel)](https://slack.tidb.io/invite?team=tikv-wg&channel=sig-scheduling&ref=pingcap-community).
+Thanks for your interest in contributing to PD!
 
 ## Finding something to work on
 
