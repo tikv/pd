@@ -25,6 +25,6 @@ func TestClientBasic(t *testing.T) {
 	re := require.New(t)
 	cli := newClient("127.0.0.1:33790")
 	resp, err := cli.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{})
-	re.NoError(err)
+	re.ErrorContains(err, "connection refused")
 	re.Nil(resp)
 }

@@ -321,8 +321,8 @@ github.com/nfnt/resize v0.0.0-20160724205520-891127d8d1b5 h1:BvoENQQU+fZ9uukda/R
 github.com/nfnt/resize v0.0.0-20160724205520-891127d8d1b5/go.mod h1:jpp1/29i3P1S/RLdc7JQKbRpFeM1dOBd8T9ki5s+AY8=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWbfPhv4DMiApHyliiK5xCTNVSPiaAs=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
-github.com/nolouch/kvproto v0.0.0-20221213074425-42fece3c7539 h1:WIf/lRmCOxG71hBy8KCPEbzJ8Y0Xt+8XJVWwx3FsHQk=
-github.com/nolouch/kvproto v0.0.0-20221213074425-42fece3c7539/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
+github.com/nolouch/kvproto v0.0.0-20221213082243-56bb4e32d53b h1:rG3MISM8qS9FfxGIr37oY8zxXkVhkbUMOpyBVnvt7n4=
+github.com/nolouch/kvproto v0.0.0-20221213082243-56bb4e32d53b/go.mod h1:OYtxs0786qojVTmkVeufx93xe+jUgm56GUYRIKnmaGI=
 github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010 h1:AmkVbExgGnTeRmmY/cF7g0m6Che/vC4WQCFHkd9qvgk=
 github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010/go.mod h1:A7mrd7WHBl1o63LE2bIBGEJMTNWXqhgmYiOvMLxozfs=
 github.com/oklog/ulid v1.3.1/go.mod h1:CirwcVhetQ6Lv90oh/F+FBtV6XMibvdAFo93nm5qn4U=

@@ -22,7 +22,6 @@ import (
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/tipb/go-tipb"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/server"
 	"google.golang.org/grpc"
@@ -90,17 +89,13 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
-			tag := &tipb.ResourceGroupTag{}
-			if err := tag.Unmarshal(req.ResourceGroupTag); err != nil {
-				return err
-			}
-			rg := s.manager.GetResourceGroup(string(tag.GroupName))
+			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
 			if rg == nil {
 				return errors.New("resource group not found")
 			}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
-				ResourceGroupTag: req.ResourceGroupTag,
+				ResourceGroupName: rg.Name,
 			}
 			for _, requested := range req.RequestedResource {
 				switch requested.Type {
@@ -122,7 +117,6 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					return errors.New("not supports the resource type")
 				}
 			}
-			resp.ResourceGroupTag = req.ResourceGroupTag
 			resps.Responses = append(resps.Responses, resp)
 		}
 		stream.Send(resps)
@@ -131,11 +125,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
-	tag := &tipb.ResourceGroupTag{}
-	if err := tag.Unmarshal(req.ResourceGroupTag); err != nil {
-		return nil, err
-	}
-	rg := s.manager.GetResourceGroup(string(tag.GroupName))
+	rg := s.manager.GetResourceGroup(req.ResourceGroupName)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}

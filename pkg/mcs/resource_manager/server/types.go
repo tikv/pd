@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/tipb/go-tipb"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
@@ -35,6 +34,7 @@ type ResourceGroup struct {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	rg := &ResourceGroup{
+		Name: group.ResourceGroupName,
 		RRU: GroupTokenBucket{
 			TokenBucketState: TokenBucket{
 				TokenBucket: group.Settings.RRU,
@@ -56,11 +56,6 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 			},
 		},
 	}
-	if group.ResourceGroupTag != nil {
-		pb := &tipb.ResourceGroupTag{}
-		pb.Unmarshal(group.ResourceGroupTag)
-		rg.Name = string(pb.GroupName)
-	}
 	return rg
 }
 
@@ -75,6 +70,7 @@ func (rg *ResourceGroup) IntoNodeResourceGroup(num int) *NodeResourceGroup {
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
 func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 	group := &rmpb.ResourceGroup{
+		ResourceGroupName: rg.Name,
 		Settings: &rmpb.GroupSettings{
 			RRU:            rg.RRU.GetTokenBucket(),
 			WRU:            rg.WRU.GetTokenBucket(),
@@ -82,10 +78,6 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			WriteBandwidth: rg.IOWriteBandwidth.GetTokenBucket(),
 		},
 	}
-	pb := &tipb.ResourceGroupTag{
-		GroupName: []byte(rg.Name),
-	}
-	group.ResourceGroupTag, _ = pb.Marshal()
 	return group
 }
 
@@ -105,13 +97,4 @@ func (r *NodeResourceGroup) ToJSON() []byte {
 		panic(err)
 	}
 	return res
-}
-
-// DecodeResourceTag decodes a resource tag from bytes.
-func DecodeResourceTag(tagBytes []byte) *tipb.ResourceGroupTag {
-	tag := &tipb.ResourceGroupTag{}
-	if err := tag.Unmarshal(tagBytes); err != nil {
-		panic(err)
-	}
-	return tag
 }
