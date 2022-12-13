@@ -40,8 +40,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -53,7 +55,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/keyspace"
@@ -64,7 +65,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/urfave/negroni"
@@ -132,7 +132,7 @@ type Server struct {
 	// a unique ID.
 	idAllocator id.Allocator
 	// for encryption
-	encryptionKeyManager *encryptionkm.KeyManager
+	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
 	// safepoint manager
@@ -415,7 +415,7 @@ func (s *Server) startServer(ctx context.Context) error {
 			return err
 		}
 	}
-	s.encryptionKeyManager, err = encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
