@@ -177,7 +177,8 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, 
 
 // Serviceregistry used to install the registered services, including gRPC and HTTP API.
 type Serviceregistry interface {
-	InstallAllServices(srv *Server, g *grpc.Server, userDefineHandler map[string]http.Handler)
+	InstallAllGRPCServices(srv *Server, g *grpc.Server)
+	InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler)
 }
 
 // NewServiceregistry is a hook for msc code which implements the micro service.
@@ -187,7 +188,10 @@ var NewServiceregistry = func() Serviceregistry {
 
 type dummyServiceregistry struct{}
 
-func (d dummyServiceregistry) InstallAllServices(srv *Server, g *grpc.Server, userDefineHandler map[string]http.Handler) {
+func (d dummyServiceregistry) InstallAllGRPCServices(srv *Server, g *grpc.Server) {
+}
+
+func (d dummyServiceregistry) InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler) {
 }
 
 // ServiceGroup used to register the service.
@@ -198,6 +202,7 @@ type ServiceGroup struct {
 	PathPrefix string
 }
 
+// Path returns the path of the service.
 func (sg *ServiceGroup) Path() string {
 	if len(sg.PathPrefix) > 0 {
 		return sg.PathPrefix
@@ -314,12 +319,16 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 		}
 		etcdCfg.UserHandlers = userHandlers
 	}
+	registry := NewServiceregistry()
+	// Register the micro services REST path.
+	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		NewServiceregistry().InstallAllServices(s, gs, etcdCfg.UserHandlers)
+		// Register the micro services GRPC service.
+		NewServiceregistry().InstallAllGRPCServices(s, gs)
 	}
 
 	s.etcdCfg = etcdCfg

@@ -15,7 +15,6 @@
 package server
 
 import (
-	"context"
 	"math"
 	"time"
 
@@ -24,22 +23,21 @@ import (
 
 const defaultRefillRate = 10000
 
-const defaultInitialRUs = 10 * 10000
+const defaultInitialTokens = 10 * 10000
 
 // GroupTokenBucket is a token bucket for a resource group.
 type GroupTokenBucket struct {
-	Name        string                    `json:"name"`
-	LastUpdate  time.Time                 `json:"last_update"`
-	TokenBucket TokenBucket               `json:"token_bucket"`
-	Initialized bool                      `json:"initialized"`
-	Consumption *rmpb.TokenBucketsRequest `json:"consumption"`
+	TokenBucketState TokenBucket               `json:"token_bucket"`
+	Consumption      *rmpb.TokenBucketsRequest `json:"consumption"`
+	LastUpdate       time.Time                 `json:"last_update"`
+	Initialized      bool                      `json:"initialized"`
 }
 
 // Update updates the token bucket.
 func (t *GroupTokenBucket) Update(now time.Time) {
 	if !t.Initialized {
-		t.TokenBucket.Settings.Fillrate = defaultRefillRate
-		t.TokenBucket.Tokens = defaultInitialRUs
+		t.TokenBucketState.Settings.Fillrate = defaultRefillRate
+		t.TokenBucketState.Tokens = defaultInitialTokens
 		t.LastUpdate = now
 		t.Initialized = true
 		return
@@ -47,9 +45,14 @@ func (t *GroupTokenBucket) Update(now time.Time) {
 
 	delta := now.Sub(t.LastUpdate)
 	if delta > 0 {
-		t.TokenBucket.Update(delta)
+		t.TokenBucketState.Update(delta)
 		t.LastUpdate = now
 	}
+}
+
+// GetTokenBucket returns the token bucket.
+func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
+	return t.TokenBucketState.TokenBucket
 }
 
 // TokenBucket is a token bucket.
@@ -66,7 +69,7 @@ func (s *TokenBucket) Update(sinceDuration time.Duration) {
 
 // Request requests tokens from the token bucket.
 func (s *TokenBucket) Request(
-	ctx context.Context, neededTokens float64, targetPeriodMs int64,
+	neededTokens float64, targetPeriodMs uint64,
 ) *rmpb.TokenBucket {
 	var res rmpb.TokenBucket
 	// TODO: consider the shares for dispatch the fill rate

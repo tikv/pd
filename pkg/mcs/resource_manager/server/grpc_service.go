@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -27,8 +28,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// SetUpRestService is a hook to sets up the REST service.
-var SetUpRestService = func(srv *Service) (http.Handler, server.ServiceGroup) {
+// SetUpRestHandler is a hook to sets up the REST service.
+var SetUpRestHandler = func(srv *Service) (http.Handler, server.ServiceGroup) {
 	return dummyRestService{}, server.ServiceGroup{}
 }
 
@@ -37,7 +38,6 @@ type dummyRestService struct{}
 func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("not implemented"))
-	return
 }
 
 // Service is the gRPC service for resource manager.
@@ -61,11 +61,13 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	rmpb.RegisterResourceManagerServer(g, s)
 }
 
-func (s *Service) RegisterRESTServer(userDefineHandlers map[string]http.Handler) {
-	hander, group := SetUpRestService(s)
+// RegisterRESTHandler registers the service to REST server.
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+	hander, group := SetUpRestHandler(s)
 	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, hander)
 }
 
+// GetManager returns the resource manager.
 func (s *Service) GetManager() *Manager {
 	return s.manager
 }
@@ -85,6 +87,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		targetPeriodMs := request.GetTargetRequestPeriodMs()
+		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			tag := &tipb.ResourceGroupTag{}
 			if err := tag.Unmarshal(req.ResourceGroupTag); err != nil {
@@ -94,8 +98,34 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			if rg == nil {
 				return errors.New("resource group not found")
 			}
-			// TODO: implement
+			now := time.Now()
+			resp := &rmpb.TokenBucketResponse{
+				ResourceGroupTag: req.ResourceGroupTag,
+			}
+			for _, requested := range req.RequestedResource {
+				switch requested.Type {
+				case rmpb.ResourceType_RRU:
+					rg.RRU.Update(now)
+					tokens := rg.RRU.TokenBucketState.Request(float64(requested.Value), targetPeriodMs)
+					resp.GrantedTokens = append(resp.GrantedTokens, &rmpb.GrantedTokenBucket{
+						Type:          rmpb.ResourceType_RRU,
+						GrantedTokens: tokens,
+					})
+				case rmpb.ResourceType_WRU:
+					rg.WRU.Update(now)
+					tokens := rg.WRU.TokenBucketState.Request(float64(requested.Value), targetPeriodMs)
+					resp.GrantedTokens = append(resp.GrantedTokens, &rmpb.GrantedTokenBucket{
+						Type:          rmpb.ResourceType_WRU,
+						GrantedTokens: tokens,
+					})
+				default:
+					return errors.New("not supports the resource type")
+				}
+			}
+			resp.ResourceGroupTag = req.ResourceGroupTag
+			resps.Responses = append(resps.Responses, resp)
 		}
+		stream.Send(resps)
 	}
 }
 
@@ -105,16 +135,33 @@ func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGro
 	if err := tag.Unmarshal(req.ResourceGroupTag); err != nil {
 		return nil, err
 	}
-	// TODO: implement
-	return nil, errors.New("not implemented")
+	rg := s.manager.GetResourceGroup(string(tag.GroupName))
+	if rg == nil {
+		return nil, errors.New("resource group not found")
+	}
+	return &rmpb.GetResourceGroupResponse{
+		Group: rg.IntoProtoResourceGroup(),
+	}, nil
 }
 
 // ListResourceGroups implements ResourceManagerServer.ListResourceGroups.
 func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
-	return nil, errors.New("not implemented")
+	groups := s.manager.GetResourceGroupList()
+	resp := &rmpb.ListResourceGroupsResponse{
+		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
+	}
+	for _, group := range groups {
+		resp.Groups = append(resp.Groups, group.IntoProtoResourceGroup())
+	}
+	return resp, nil
 }
 
 // AddResourceGroup implements ResourceManagerServer.AddResourceGroup.
 func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.AddResourceGroupRequest) (*rmpb.AddResourceGroupRespose, error) {
-	return nil, errors.New("not implemented")
+	rg := FromProtoResourceGroup(req.GetGroup())
+	err := s.manager.PutResourceGroup(rg)
+	if err != nil {
+		return nil, err
+	}
+	return &rmpb.AddResourceGroupRespose{Responses: []byte("Successful!")}, nil
 }

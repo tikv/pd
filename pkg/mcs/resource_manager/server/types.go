@@ -17,67 +17,75 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/tipb/go-tipb"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
-	ID               int64             `json:"id"`
-	Name             string            `json:"name"`
-	RRUPerSec        uint64            `json:"rru_per_sec"`
-	WRUPerSec        uint64            `json:"wru_per_sec"`
-	CPU              resource.Quantity `json:"cpu"`
-	IOReadBandwidth  resource.Quantity `json:"io_read_bandwidth"`
-	IOWriteBandwidth resource.Quantity `json:"io_write_bandwidth"`
+	Name             string           `json:"name"`
+	RRU              GroupTokenBucket `json:"rru"`
+	WRU              GroupTokenBucket `json:"wru"`
+	CPU              GroupTokenBucket `json:"cpu,omitempty"`
+	IOReadBandwidth  GroupTokenBucket `json:"io_read_bandwidth,omitempty"`
+	IOWriteBandwidth GroupTokenBucket `json:"io_write_bandwidth,omitempty"`
 }
 
-// Validate validates the resource group.
-func (rg *ResourceGroup) Validate() error {
-	if rg.IOReadBandwidth.IsZero() && rg.IOWriteBandwidth.IsZero() {
-		return errors.New("resource group is invalid, need set io quota")
+// FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
+func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
+	rg := &ResourceGroup{
+		RRU: GroupTokenBucket{
+			TokenBucketState: TokenBucket{
+				TokenBucket: group.Settings.RRU,
+			},
+		},
+		WRU: GroupTokenBucket{
+			TokenBucketState: TokenBucket{
+				TokenBucket: group.Settings.WRU,
+			},
+		},
+		IOReadBandwidth: GroupTokenBucket{
+			TokenBucketState: TokenBucket{
+				TokenBucket: group.Settings.ReadBandwidth,
+			},
+		},
+		IOWriteBandwidth: GroupTokenBucket{
+			TokenBucketState: TokenBucket{
+				TokenBucket: group.Settings.WriteBandwidth,
+			},
+		},
 	}
-	if rg.IOReadBandwidth.IsZero() || rg.IOWriteBandwidth.IsZero() {
-		return errors.New("resource group is invalid, need set io read/write quota both")
+	if group.ResourceGroupTag != nil {
+		pb := &tipb.ResourceGroupTag{}
+		pb.Unmarshal(group.ResourceGroupTag)
+		rg.Name = string(pb.GroupName)
 	}
-	return nil
+	return rg
 }
 
 // IntoNodeResourceGroup converts a ResourceGroup to a NodeResourceGroup.
 func (rg *ResourceGroup) IntoNodeResourceGroup(num int) *NodeResourceGroup {
-	var read, write int64
-	read = rg.IOReadBandwidth.Value() / int64(num)
-	write = rg.IOWriteBandwidth.Value() / int64(num)
 	return &NodeResourceGroup{
-		ID:               rg.ID,
-		Name:             rg.Name,
-		CPU:              float64(rg.CPU.MilliValue()) / float64(num),
-		IOReadBandwidth:  read,
-		IOWriteBandwidth: write,
+		Name: rg.Name,
+		CPU:  float64(rg.CPU.GetTokenBucket().Settings.Fillrate) / float64(num),
 	}
 }
 
-// IntoProto converts a ResourceGroup to a rmpb.ResourceGroup.
-func (rg *ResourceGroup) IntoProto() *rmpb.ResourceGroup {
+// IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
+func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 	group := &rmpb.ResourceGroup{
 		Settings: &rmpb.GroupSettings{
-			RRU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{Fillrate: rg.RRUPerSec},
-			},
-			WRU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{Fillrate: rg.WRUPerSec},
-			},
-			ReadBandwidth: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{Fillrate: uint64(rg.IOReadBandwidth.Value())},
-			},
-			WriteBandwidth: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{Fillrate: uint64(rg.IOReadBandwidth.Value())},
-			},
+			RRU:            rg.RRU.GetTokenBucket(),
+			WRU:            rg.WRU.GetTokenBucket(),
+			ReadBandwidth:  rg.IOReadBandwidth.GetTokenBucket(),
+			WriteBandwidth: rg.IOWriteBandwidth.GetTokenBucket(),
 		},
 	}
+	pb := &tipb.ResourceGroupTag{
+		GroupName: []byte(rg.Name),
+	}
+	group.ResourceGroupTag, _ = pb.Marshal()
 	return group
 }
 

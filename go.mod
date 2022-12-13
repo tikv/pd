@@ -48,10 +48,12 @@ require (
 	golang.org/x/tools v0.1.10
 	google.golang.org/grpc v1.26.0
 	gotest.tools/gotestsum v1.7.0
-	k8s.io/apimachinery v0.25.4
 )
 
-require gopkg.in/inf.v0 v0.9.1 // indirect
+require (
+	github.com/google/go-cmp v0.5.8 // indirect
+	github.com/onsi/gomega v1.20.1 // indirect
+)
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -185,6 +187,6 @@ require (
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20221206202925-9023c6afcd28
+replace github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20221213074425-42fece3c7539
 
 replace github.com/pingcap/tipb => github.com/nolouch/tipb v0.0.0-20221212075615-a846af5ec010

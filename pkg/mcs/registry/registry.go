@@ -25,35 +25,61 @@ import (
 
 var (
 	// ServerServiceRegistry is the global grpc service registry.
-	ServerServiceRegistry = make(ServiceRegistry)
+	ServerServiceRegistry = newServiceRegistry()
 )
 
-// ServiceLoader is a function that creates a grpc service.
-type ServiceLoader func(*server.Server) RegistrableService
+// ServiceBuilder is a function that creates a grpc service.
+type ServiceBuilder func(*server.Server) RegistrableService
 
 // RegistrableService is the interface that should wraps the RegisterService method.
 type RegistrableService interface {
 	RegisterGRPCService(g *grpc.Server)
-	RegisterRESTServer(userDefineHandler map[string]http.Handler)
+	RegisterRESTHandler(userDefineHandler map[string]http.Handler)
 }
 
 // ServiceRegistry is a map that stores all registered grpc services.
-type ServiceRegistry map[string]ServiceLoader
+type ServiceRegistry struct {
+	builders map[string]ServiceBuilder
+	services map[string]RegistrableService
+}
 
-// InstallAllServices installs all registered grpc services.
+func newServiceRegistry() *ServiceRegistry {
+	return &ServiceRegistry{
+		builders: make(map[string]ServiceBuilder),
+		services: make(map[string]RegistrableService),
+	}
+}
+
+// InstallAllGRPCServices installs all registered grpc services.
 // TODO: use `uber/fx` to manage the lifecycle of grpc services.
-func (r ServiceRegistry) InstallAllServices(srv *server.Server, g *grpc.Server, h map[string]http.Handler) {
-	for name, loader := range r {
+func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Server) {
+	for name, loader := range r.builders {
+		if l, ok := r.services[name]; ok {
+			l.RegisterGRPCService(g)
+			continue
+		}
 		l := loader(srv)
 		l.RegisterGRPCService(g)
-		l.RegisterRESTServer(h)
-		log.Info("service registered", zap.String("service-name", name))
+		log.Info("grpc service registered", zap.String("service-name", name))
+	}
+}
+
+// InstallAllRESTHandler installs all registered REST services.
+func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string]http.Handler) {
+	for name, loader := range r.builders {
+		if l, ok := r.services[name]; ok {
+			l.RegisterRESTHandler(h)
+			continue
+		}
+		l := loader(srv)
+		l.RegisterRESTHandler(h)
+		log.Info("restful API service registered", zap.String("service-name", name))
 	}
 }
 
 // RegisterService registers a grpc service.
-func (r ServiceRegistry) RegisterService(name string, service ServiceLoader) {
-	r[name] = service
+func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
+	r.builders[name] = service
 }
 
 func init() {

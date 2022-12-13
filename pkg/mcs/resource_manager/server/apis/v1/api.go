@@ -39,7 +39,7 @@ var (
 )
 
 func init() {
-	rmserver.SetUpRestService = func(srv *rmserver.Service) (http.Handler, server.ServiceGroup) {
+	rmserver.SetUpRestHandler = func(srv *rmserver.Service) (http.Handler, server.ServiceGroup) {
 		s := NewService(srv)
 		return s.handler(), apiServiceGroup
 	}

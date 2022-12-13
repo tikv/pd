@@ -49,6 +49,7 @@ func NewManager(srv *server.Server) *Manager {
 		storage:   srv.GetStorage,
 		getStores: getStores,
 	}
+	srv.AddStartCallback(m.Init)
 	return m
 }
 
