@@ -15,8 +15,8 @@
 package endpoint
 
 import (
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/encryptionkm"
 )
 
 // StorageEndpoint is the base underlying storage endpoint for all other upper
@@ -24,14 +24,14 @@ import (
 // which provides the default implementations for all kinds of storages.
 type StorageEndpoint struct {
 	kv.Base
-	encryptionKeyManager *encryptionkm.KeyManager
+	encryptionKeyManager *encryption.Manager
 }
 
 // NewStorageEndpoint creates a new base storage endpoint with the given KV and encryption key manager.
 // It should be embedded inside a storage backend.
 func NewStorageEndpoint(
 	kvBase kv.Base,
-	encryptionKeyManager *encryptionkm.KeyManager,
+	encryptionKeyManager *encryption.Manager,
 ) *StorageEndpoint {
 	return &StorageEndpoint{
 		kvBase,

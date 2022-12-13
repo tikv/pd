@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package encryptionkm
+package encryption
 
 import (
 	"context"
@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/election"
-	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -116,11 +115,11 @@ func TestNewKeyManagerBasic(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t, re)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Check config.
 	re.Equal(encryptionpb.EncryptionMethod_PLAINTEXT, m.method)
@@ -141,12 +140,12 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	// Custom config
 	rotatePeriod, err := time.ParseDuration("100h")
 	re.NoError(err)
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod:  "aes128-ctr",
 		DataKeyRotationPeriod: typeutil.NewDuration(rotatePeriod),
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -154,7 +153,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	err = config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Check config.
 	re.Equal(encryptionpb.EncryptionMethod_AES128_CTR, m.method)
@@ -178,11 +177,11 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	// Store initial keys in etcd.
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -197,7 +196,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Check config.
 	re.Equal(encryptionpb.EncryptionMethod_PLAINTEXT, m.method)
@@ -217,11 +216,11 @@ func TestGetCurrentKey(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t, re)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Test encryption disabled.
 	currentKeyID, currentKey, err := m.GetCurrentKey()
@@ -262,7 +261,7 @@ func TestGetKey(t *testing.T) {
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -283,11 +282,11 @@ func TestGetKey(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err = config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Get existing key.
 	key, err := m.GetKey(uint64(123))
@@ -317,7 +316,7 @@ func TestLoadKeyEmpty(t *testing.T) {
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -332,11 +331,11 @@ func TestLoadKeyEmpty(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err = config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
@@ -361,7 +360,7 @@ func TestWatcher(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
@@ -373,7 +372,7 @@ func TestWatcher(t *testing.T) {
 	_, err = m.GetKey(456)
 	re.Error(err)
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -427,11 +426,11 @@ func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t, re)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
-	m, err := NewKeyManager(client, config)
+	m, err := NewManager(client, config)
 	re.NoError(err)
 	re.Nil(m.keys.Load())
 	// Set leadership
@@ -462,11 +461,11 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Config with encryption on.
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -538,11 +537,11 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with different encrption method.
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod: "aes256-ctr",
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -593,7 +592,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -608,11 +607,11 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with different encrption method.
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -664,7 +663,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -681,12 +680,12 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
 	re.NoError(err)
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod:  "aes128-ctr",
 		DataKeyRotationPeriod: typeutil.NewDuration(rotationPeriod),
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -740,7 +739,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -755,11 +754,11 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with a different master key.
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile2,
 			},
 		},
@@ -804,7 +803,7 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	helper.newMasterKey = func(
 		meta *encryptionpb.MasterKey,
 		ciphertext []byte,
-	) (*encryption.MasterKey, error) {
+	) (*MasterKey, error) {
 		if newMasterKeyCalled < 2 {
 			// initial load and save. no ciphertextKey
 			re.Nil(ciphertext)
@@ -813,10 +812,10 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 			re.Equal(ciphertext, outputCiphertextKey)
 		}
 		newMasterKeyCalled += 1
-		return encryption.NewCustomMasterKeyForTest(outputMasterKey, outputCiphertextKey), nil
+		return NewCustomMasterKeyForTest(outputMasterKey, outputCiphertextKey), nil
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -831,11 +830,11 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with a different master key.
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -880,7 +879,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 		reloadEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -895,7 +894,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Use default config.
-	config := &encryption.Config{}
+	config := &Config{}
 	err = config.Adjust()
 	re.NoError(err)
 	// Create the key manager.
@@ -947,7 +946,7 @@ func TestKeyRotation(t *testing.T) {
 		tickerEvent <- e
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -964,12 +963,12 @@ func TestKeyRotation(t *testing.T) {
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
 	re.NoError(err)
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod:  "aes128-ctr",
 		DataKeyRotationPeriod: typeutil.NewDuration(rotationPeriod),
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -1053,7 +1052,7 @@ func TestKeyRotationConflict(t *testing.T) {
 		}
 	}
 	// Update keys in etcd
-	masterKeyMeta := newMasterKey(keyFile)
+	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
@@ -1070,12 +1069,12 @@ func TestKeyRotationConflict(t *testing.T) {
 	// Config with 100s rotation period.
 	rotationPeriod, err := time.ParseDuration("100s")
 	re.NoError(err)
-	config := &encryption.Config{
+	config := &Config{
 		DataEncryptionMethod:  "aes128-ctr",
 		DataKeyRotationPeriod: typeutil.NewDuration(rotationPeriod),
-		MasterKey: encryption.MasterKeyConfig{
+		MasterKey: MasterKeyConfig{
 			Type: "file",
-			MasterKeyFileConfig: encryption.MasterKeyFileConfig{
+			MasterKeyFileConfig: MasterKeyFileConfig{
 				FilePath: keyFile,
 			},
 		},
@@ -1113,7 +1112,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	re.True(proto.Equal(storedKeys, keys))
 }
 
-func newMasterKey(keyFile string) *encryptionpb.MasterKey {
+func newTestMasterKey(keyFile string) *encryptionpb.MasterKey {
 	return &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
