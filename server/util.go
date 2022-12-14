@@ -26,8 +26,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )

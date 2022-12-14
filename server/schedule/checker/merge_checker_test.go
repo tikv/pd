@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -32,7 +33,6 @@ import (
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/goleak"
 )
 

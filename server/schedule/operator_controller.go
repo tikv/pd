@@ -27,12 +27,12 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
