@@ -72,7 +72,7 @@ func (t *TimeMedian) Interval() time.Duration {
 	if t == nil {
 		return 0
 	}
-	return time.Duration(t.aot.size) * time.Second
+	return time.Duration(t.aot.avgInterval) * time.Second
 }
 
 // Clear clears the TimeMedian.

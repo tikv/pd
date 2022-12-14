@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -93,7 +94,6 @@ func (d *dimStat) Clone() *dimStat {
 }
 
 func GCDimStat(d *dimStat) {
-	movingaverage.GCAvgOverTime(d.lastAverage)
 	movingaverage.GCTimeMedian(d.rolling)
 }
 
