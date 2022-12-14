@@ -167,7 +167,7 @@ func (stat *HotPeerStat) GetActionType() ActionType {
 
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
-	if stat.rollingLoads != nil && len(stat.rollingLoads) > 0 && stat.rollingLoads[dim] != nil {
+	if stat.rollingLoads != nil && len(stat.rollingLoads) > dim && stat.rollingLoads[dim] != nil {
 		return math.Round(stat.rollingLoads[dim].Get())
 	}
 	return math.Round(stat.Loads[dim])
