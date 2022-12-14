@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server/config"
 )
 

@@ -27,8 +27,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/netutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/pkg/transport"

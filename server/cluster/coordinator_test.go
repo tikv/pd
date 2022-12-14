@@ -29,8 +29,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
@@ -628,7 +628,7 @@ func TestShouldRun(t *testing.T) {
 	re.NoError(tc.LoadRegion(6, 2, 1, 4))
 	re.NoError(tc.LoadRegion(7, 2, 1, 4))
 	re.False(co.shouldRun())
-	re.Equal(2, tc.core.Regions.GetStoreRegionCount(4))
+	re.Equal(2, tc.GetStoreRegionCount(4))
 
 	testCases := []struct {
 		regionID  uint64
@@ -670,7 +670,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		re.NoError(tc.LoadRegion(uint64(i+1), 1, 2, 3))
 	}
 	re.False(co.shouldRun())
-	re.Equal(10, tc.core.Regions.GetStoreRegionCount(1))
+	re.Equal(10, tc.GetStoreRegionCount(1))
 
 	testCases := []struct {
 		regionID  uint64

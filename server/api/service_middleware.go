@@ -23,10 +23,10 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/jsonutil"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/reflectutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 

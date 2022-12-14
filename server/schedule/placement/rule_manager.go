@@ -28,11 +28,12 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
@@ -210,6 +211,9 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
+		}
+		if r.IsWitness && c.Key == core.EngineKey && slices.Contains(c.Values, core.EngineTiFlash) {
+			return errs.ErrRuleContent.FastGenByArgs("witness can't combine with tiflash")
 		}
 	}
 

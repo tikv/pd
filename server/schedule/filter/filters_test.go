@@ -108,6 +108,7 @@ func TestRuleFitFilter(t *testing.T) {
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
+		{StoreId: 7, Id: 7, IsWitness: true},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
 	testCases := []struct {
@@ -126,6 +127,8 @@ func TestRuleFitFilter(t *testing.T) {
 		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
 		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
+		// store 7 and store 1 is the peers of this region, but it's a witness, so it won't allow transferring leader to store 7.
+		{7, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
 	}
 	// Init cluster
 	for _, testCase := range testCases {
