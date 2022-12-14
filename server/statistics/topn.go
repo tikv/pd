@@ -106,7 +106,10 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
 	for _, stn := range tn.topns {
-		item = stn.Remove(id)
+		removed := stn.Remove(id)
+		if removed != nil {
+			item = removed
+		}
 	}
 	_ = tn.ttlLst.Remove(id)
 	tn.maintain()
@@ -120,6 +123,7 @@ func (tn *TopN) maintain() {
 			stn.Remove(id)
 		}
 		hotPeerStatPool.Put(item.(*HotPeerStat))
+		item.(*HotPeerStat).LogDebug("topn_maintain")
 		hotPool.WithLabelValues("peer_statistic", "put", "topn_maintain").Inc()
 	}
 }

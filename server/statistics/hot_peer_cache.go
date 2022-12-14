@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const (
@@ -208,6 +209,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	}
 
 	newItem := hotPeerStatPool.GetPeerStat()
+	newItem.LogDebug("check_peer")
 	hotPool.WithLabelValues("peer_statistic", "get", "check_peer").Inc()
 	newItem.StoreID = storeID
 	newItem.RegionID = regionID
@@ -249,6 +251,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 			}
 
 			newItem := hotPeerStatPool.GetPeerStat()
+			newItem.LogDebug("check_cold_peer")
 			hotPool.WithLabelValues("peer_statistic", "get", "check_cold_peer").Inc()
 			newItem.StoreID = storeID
 			newItem.RegionID = regionID
@@ -422,6 +425,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 		for _, dim := range oldItem.rollingLoads {
 			r := hotPeerStatPool.GetDimStat(f.kind)
 			r.CopyFrom(dim)
+			log.Info("dim", zap.Uint64("regionID", region.GetID()), zap.Uint64("storeID", oldItem.StoreID), zap.Uint64("dim", dim.id))
 			newItem.rollingLoads = append(newItem.rollingLoads, r)
 		}
 		newItem.allowInherited = false
@@ -485,12 +489,16 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		f.initItem(newItem)
 	}
 	newItem.actionType = Add
-	newItem.rollingLoads = make([]*dimStat, len(regionStats))
+	if newItem.rollingLoads == nil {
+		newItem.rollingLoads = make([]*dimStat, DimLen)
+	}
+	cacheInterval := f.interval()
 	for i, k := range regionStats {
 		ds := hotPeerStatPool.GetDimStat(f.kind)
-		ds.init(f.interval())
+		ds.init(cacheInterval)
+		log.Info("dim", zap.Uint64("regionID", newItem.RegionID), zap.Uint64("storeID", newItem.StoreID), zap.Uint64("dim", ds.id))
 		ds.Add(deltaLoads[k], interval)
-		if ds.isFull(f.interval()) {
+		if ds.isFull(cacheInterval) {
 			ds.clearLastAverage()
 		}
 		newItem.rollingLoads[i] = ds
@@ -521,8 +529,11 @@ func (f *hotPeerCache) putItem(item *HotPeerStat) {
 
 func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	if peers, ok := f.peersOfStore[item.StoreID]; ok {
-		item := peers.Remove(item.RegionID).(*HotPeerStat)
-		hotPeerStatPool.Put(item)
+		item := peers.Remove(item.RegionID)
+		if item != nil {
+			hotPeerStatPool.Put(item.(*HotPeerStat))
+			item.(*HotPeerStat).LogDebug("topn_remove")
+		}
 		hotPool.WithLabelValues("peer_statistic", "put", "topn_remove").Inc()
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {

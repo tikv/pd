@@ -43,21 +43,24 @@ func (h *HotPeerStatPool) GetPeerStat() *HotPeerStat {
 }
 
 func (h *HotPeerStatPool) Put(item *HotPeerStat) {
+	if item == nil {
+		return
+	}
 	dimStatPool := h.readDim
 	if item.Kind() == Write {
 		dimStatPool = h.writeDim
 	}
 	for i := range item.rollingLoads {
 		dimStatPool.Put(item.rollingLoads[i])
-		item.rollingLoads[i] = nil
 	}
+	item.rollingLoads = nil
 	h.hotPeer.Put(item)
 }
 
 var hotPeerStatPool = &HotPeerStatPool{
 	hotPeer: &sync.Pool{
 		New: func() interface{} {
-			return new(HotPeersStat)
+			return new(HotPeerStat)
 		},
 	},
 	readDim: &sync.Pool{

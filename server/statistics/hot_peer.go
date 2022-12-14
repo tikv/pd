@@ -15,9 +15,12 @@
 package statistics
 
 import (
+	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -27,6 +30,7 @@ import (
 
 type dimStat struct {
 	syncutil.RWMutex
+	id              uint64
 	rolling         *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
 	lastIntervalSum int                       // lastIntervalSum and lastDelta are used to calculate the average speed of the last interval.
 	lastDelta       float64
@@ -66,6 +70,7 @@ func (d *dimStat) clearLastAverage() {
 }
 
 func (d *dimStat) init(reportInterval time.Duration) {
+	d.id = uint64(time.Now().UnixNano()*1000 + int64(rand.Intn(1000)))
 	d.allocRolling(reportInterval)
 	d.lastIntervalSum = 0
 	d.lastDelta = 0
@@ -162,7 +167,7 @@ func (stat *HotPeerStat) GetActionType() ActionType {
 
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
-	if stat.rollingLoads != nil {
+	if stat.rollingLoads != nil && len(stat.rollingLoads) > 0 && stat.rollingLoads[dim] != nil {
 		return math.Round(stat.rollingLoads[dim].Get())
 	}
 	return math.Round(stat.Loads[dim])
@@ -170,7 +175,7 @@ func (stat *HotPeerStat) GetLoad(dim int) float64 {
 
 // GetLoads returns denoising loads if possible.
 func (stat *HotPeerStat) GetLoads() []float64 {
-	if stat.rollingLoads != nil {
+	if stat.rollingLoads != nil && len(stat.rollingLoads) > 0 && stat.rollingLoads[0] != nil {
 		ret := make([]float64, len(stat.rollingLoads))
 		for dim := range ret {
 			ret[dim] = math.Round(stat.rollingLoads[dim].Get())
@@ -183,6 +188,7 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 // Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := hotPeerStatPool.GetPeerStat()
+	ret.LogDebug("clone hot peer stat")
 	hotPool.WithLabelValues("peer_scheduler", "get", "clone").Inc()
 	ret.StoreID = stat.StoreID
 	ret.RegionID = stat.RegionID
@@ -262,4 +268,20 @@ func (stat *HotPeerStat) Kind() RWType {
 		return Read
 	}
 	return Write
+}
+
+// Log is used to output some info
+func (stat *HotPeerStat) LogDebug(str string) {
+	ids := make([]uint64, 0)
+	for _, ds := range stat.rollingLoads {
+		if ds == nil {
+			continue
+		}
+		ids = append(ids, ds.id)
+	}
+	log.Info(str,
+		zap.Uint64("region-id", stat.RegionID),
+		zap.Uint64("store-id", stat.StoreID),
+		zap.String("address", fmt.Sprintf("%p", stat)),
+		zap.Uint64s("ids", ids))
 }
