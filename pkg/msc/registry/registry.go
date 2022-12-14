@@ -13,8 +13,8 @@
 // limitations under the License.
 
 // Package registry is used to register the services.
-// TODO: Remove the `pd/server“ dependencies
-// TODO: Use `uber/fx` to manage the lifecycle of services.
+// TODO: Remove the `pd/server` dependencies
+// TODO: Use the `uber/fx` to manage the lifecycle of services.
 package registry
 
 import (
@@ -41,7 +41,7 @@ type RegistrableService interface {
 }
 
 // ServiceRegistry is a map that stores all registered grpc services.
-// It implements the `server.Serviceregistry` interface.
+// It implements the `Serviceregistry` interface.
 type ServiceRegistry struct {
 	builders map[string]ServiceBuilder
 	services map[string]RegistrableService
@@ -59,11 +59,12 @@ func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Ser
 	for name, builder := range r.builders {
 		if l, ok := r.services[name]; ok {
 			l.RegisterGRPCService(g)
+			log.Info("gRPC service already registered", zap.String("service-name", name))
 			continue
 		}
 		l := builder(srv)
 		l.RegisterGRPCService(g)
-		log.Info("grpc service registered", zap.String("service-name", name))
+		log.Info("gRPC service register success", zap.String("service-name", name))
 	}
 }
 
@@ -72,11 +73,12 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string
 	for name, builder := range r.builders {
 		if l, ok := r.services[name]; ok {
 			l.RegisterRESTHandler(h)
+			log.Info("restful API service already registered", zap.String("service-name", name))
 			continue
 		}
 		l := builder(srv)
 		l.RegisterRESTHandler(h)
-		log.Info("restful API service registered", zap.String("service-name", name))
+		log.Info("restful API service register success", zap.String("service-name", name))
 	}
 }
 
