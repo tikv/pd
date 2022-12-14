@@ -207,16 +207,17 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		}
 	}
 
-	newItem := hotPeerStatPool.Get().(*HotPeerStat)
+	newItem := hotPeerStatPool.GetPeerStat()
 	hotPool.WithLabelValues("peer_statistic", "get", "check_peer").Inc()
 	newItem.StoreID = storeID
 	newItem.RegionID = regionID
+	newItem.HotDegree = 0
+	newItem.AntiCount = 0
 	newItem.actionType = Update
 	newItem.isLeader = region.GetLeader().GetStoreId() == storeID
 	newItem.inCold = false
 	newItem.allowInherited = false
-	newItem.HotDegree = 0
-	newItem.AntiCount = 0
+	newItem.lastTransferLeaderTime = time.Time{}
 	newItem.rollingLoads = nil
 	newItem.updateStores(region)
 	newItem.updateLoads(f.kind, deltaLoads, interval)
@@ -247,7 +248,7 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 				continue
 			}
 
-			newItem := hotPeerStatPool.Get().(*HotPeerStat)
+			newItem := hotPeerStatPool.GetPeerStat()
 			hotPool.WithLabelValues("peer_statistic", "get", "check_cold_peer").Inc()
 			newItem.StoreID = storeID
 			newItem.RegionID = regionID
@@ -419,7 +420,9 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone()) // dimStatPool.Get().(*dimStat)
+			r := hotPeerStatPool.GetDimStat(f.kind)
+			r.CopyFrom(dim)
+			newItem.rollingLoads = append(newItem.rollingLoads, r)
 		}
 		newItem.allowInherited = false
 	} else {
@@ -484,15 +487,8 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	newItem.actionType = Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
-		// var ds *dimStat
-		// switch f.kind {
-		// case Read:
-		// 	ds = readDimStatPool.Get().(*dimStat)
-		// case Write:
-		// 	ds = writeDimStatPool.Get().(*dimStat)
-		// }
-		// ds.clear()
-		ds := newDimStat(f.interval()) // dimStatPool.Get().(*dimStat)
+		ds := hotPeerStatPool.GetDimStat(f.kind)
+		ds.init(f.interval())
 		ds.Add(deltaLoads[k], interval)
 		if ds.isFull(f.interval()) {
 			ds.clearLastAverage()
@@ -526,7 +522,7 @@ func (f *hotPeerCache) putItem(item *HotPeerStat) {
 func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	if peers, ok := f.peersOfStore[item.StoreID]; ok {
 		item := peers.Remove(item.RegionID).(*HotPeerStat)
-		collectPool(f.kind, item)
+		hotPeerStatPool.Put(item)
 		hotPool.WithLabelValues("peer_statistic", "put", "topn_remove").Inc()
 	}
 	if stores, ok := f.storesOfRegion[item.RegionID]; ok {

@@ -58,13 +58,11 @@ func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
 }
 
-// Clone returns a copy of TimeMedian
-func (t *TimeMedian) Clone() *TimeMedian {
-	return &TimeMedian{
-		aot:           t.aot.Clone(),
-		mf:            t.mf.Clone(),
-		instantaneous: t.instantaneous,
-	}
+// CopyFrom copies the given TimeMedian.
+func (t *TimeMedian) CopyFrom(origin *TimeMedian) {
+	t.aot.CopyFrom(origin.aot)
+	t.mf.CopyFrom(origin.mf)
+	t.instantaneous = origin.instantaneous
 }
 
 // Interval returns the interval of the TimeMedian.
@@ -79,14 +77,4 @@ func (t *TimeMedian) Interval() time.Duration {
 func (t *TimeMedian) Clear() {
 	t.aot.Clear()
 	t.mf.Reset()
-}
-
-// func (t *TimeMedian) CopyFrom(other *TimeMedian) {
-// 	t.aot.CopyFrom(other.aot)
-// 	t.mf.CopyFrom(other.mf)
-// 	t.instantaneous = other.instantaneous
-// }
-
-func GCTimeMedian(t *TimeMedian) {
-	GCAvgOverTime(t.aot)
 }

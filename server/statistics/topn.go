@@ -119,7 +119,7 @@ func (tn *TopN) maintain() {
 		for _, stn := range tn.topns {
 			stn.Remove(id)
 		}
-		collectPool(item.(*HotPeerStat).Kind(), item.(*HotPeerStat))
+		hotPeerStatPool.Put(item.(*HotPeerStat))
 		hotPool.WithLabelValues("peer_statistic", "put", "topn_maintain").Inc()
 	}
 }

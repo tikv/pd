@@ -63,13 +63,9 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	for aot.que.Len() > 0 {
-		aot.que.PopFront()
-	}
-	aot.margin = deltaWithInterval{
-		delta:    0,
-		interval: 0,
-	}
+	aot.que.Clean()
+	aot.margin.delta = 0
+	aot.margin.interval = 0
 	aot.intervalSum = 0
 	aot.deltaSum = 0
 }
@@ -106,44 +102,28 @@ func (aot *AvgOverTime) IsFull() bool {
 	return aot.intervalSum >= aot.avgInterval
 }
 
-// Clone returns a copy of AvgOverTime
-func (aot *AvgOverTime) Clone() *AvgOverTime {
-	q := queue.New()
-	for i := 0; i < aot.que.Len(); i++ {
-		v := aot.que.PopFront()
-		aot.que.PushBack(v)
-		q.PushBack(v)
-	}
-	margin := deltaWithInterval{
-		delta:    aot.margin.delta,
-		interval: aot.margin.interval,
-	}
-	return &AvgOverTime{
-		que:         q,
-		margin:      margin,
-		deltaSum:    aot.deltaSum,
-		intervalSum: aot.intervalSum,
-		avgInterval: aot.avgInterval,
-	}
-}
-
 // GetIntervalSum returns the sum of interval
 func (aot *AvgOverTime) GetIntervalSum() time.Duration {
 	return aot.intervalSum
 }
 
-// // CopyFrom copies the AvgOverTime from another AvgOverTime
-// func (aot *AvgOverTime) CopyFrom(other *AvgOverTime) {
-// 	aot.que = other.que
-// 	aot.margin = deltaWithInterval{
-// 		delta:    other.margin.delta,
-// 		interval: other.margin.interval,
-// 	}
-// 	aot.deltaSum = other.deltaSum
-// 	aot.intervalSum = other.intervalSum
-// 	aot.avgInterval = other.avgInterval
-// }
-
-func GCAvgOverTime(*AvgOverTime) {
-
+// CopyFrom copies the AvgOverTime from origin
+func (aot *AvgOverTime) CopyFrom(origin *AvgOverTime) {
+	if aot.que == nil {
+		aot.que = queue.New()
+	}
+	aot.que.Clean()
+	if origin == nil {
+		return
+	}
+	for i := 0; i < origin.que.Len(); i++ {
+		v := origin.que.PopFront()
+		origin.que.PushBack(v)
+		aot.que.PushBack(v)
+	}
+	aot.margin.delta = origin.margin.delta
+	aot.margin.interval = origin.margin.interval
+	aot.deltaSum = origin.deltaSum
+	aot.intervalSum = origin.intervalSum
+	aot.avgInterval = origin.avgInterval
 }

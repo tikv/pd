@@ -22,21 +22,53 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-var hotPeerStatPool *sync.Pool = &sync.Pool{
-	New: func() interface{} {
-		return new(HotPeerStat)
-	},
+// HotPeerStatPool is used to store the hot peer stat.
+type HotPeerStatPool struct {
+	readDim  *sync.Pool
+	writeDim *sync.Pool
+	hotPeer  *sync.Pool
 }
 
-var readDimStatPool *sync.Pool = &sync.Pool{
-	New: func() interface{} {
-		return new(dimStat)
-	},
+func (h *HotPeerStatPool) GetDimStat(kind RWType) *dimStat {
+	switch kind {
+	case Read:
+		return h.readDim.Get().(*dimStat)
+	default: // Write:
+		return h.writeDim.Get().(*dimStat)
+	}
 }
 
-var writeDimStatPool *sync.Pool = &sync.Pool{
-	New: func() interface{} {
-		return new(dimStat)
+func (h *HotPeerStatPool) GetPeerStat() *HotPeerStat {
+	return h.hotPeer.Get().(*HotPeerStat)
+}
+
+func (h *HotPeerStatPool) Put(item *HotPeerStat) {
+	dimStatPool := h.readDim
+	if item.Kind() == Write {
+		dimStatPool = h.writeDim
+	}
+	for i := range item.rollingLoads {
+		dimStatPool.Put(item.rollingLoads[i])
+		item.rollingLoads[i] = nil
+	}
+	h.hotPeer.Put(item)
+}
+
+var hotPeerStatPool = &HotPeerStatPool{
+	hotPeer: &sync.Pool{
+		New: func() interface{} {
+			return new(HotPeersStat)
+		},
+	},
+	readDim: &sync.Pool{
+		New: func() interface{} {
+			return new(dimStat)
+		},
+	},
+	writeDim: &sync.Pool{
+		New: func() interface{} {
+			return new(dimStat)
+		},
 	},
 }
 
@@ -44,27 +76,10 @@ var writeDimStatPool *sync.Pool = &sync.Pool{
 func HotPeerStatGC(stLoadInfos map[uint64]*StoreLoadDetail) {
 	for _, load := range stLoadInfos {
 		for _, hotPeer := range load.HotPeers {
-			collectPool(hotPeer.Kind(), hotPeer)
+			hotPeerStatPool.Put(hotPeer)
 			hotPool.WithLabelValues("peer_scheduler", "put", "gc").Inc()
 		}
 	}
-}
-
-func collectPool(kind RWType, item *HotPeerStat) {
-	// switch kind {
-	// case Read:
-	// 	for _, r := range item.rollingLoads {
-	// 		readDimStatPool.Put(r)
-	// 	}
-	// case Write:
-	// 	for _, r := range item.rollingLoads {
-	// 		writeDimStatPool.Put(r)
-	// 	}
-	// }
-	// for _, r := range item.rollingLoads {
-	// 	GCDimStat(r)
-	// }
-	// hotPeerStatPool.Put(item)
 }
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.

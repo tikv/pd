@@ -32,14 +32,6 @@ type dimStat struct {
 	lastDelta       float64
 }
 
-func newDimStat(reportInterval time.Duration) *dimStat {
-	return &dimStat{
-		rolling:         movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
-		lastIntervalSum: 0,
-		lastDelta:       0,
-	}
-}
-
 func (d *dimStat) Add(delta float64, interval time.Duration) {
 	d.Lock()
 	defer d.Unlock()
@@ -73,9 +65,10 @@ func (d *dimStat) clearLastAverage() {
 	d.lastDelta = 0
 }
 
-func (d *dimStat) clear() {
-	d.clearLastAverage()
-	d.rolling.Clear()
+func (d *dimStat) init(reportInterval time.Duration) {
+	d.allocRolling(reportInterval)
+	d.lastIntervalSum = 0
+	d.lastDelta = 0
 }
 
 func (d *dimStat) Get() float64 {
@@ -84,23 +77,21 @@ func (d *dimStat) Get() float64 {
 	return d.rolling.Get()
 }
 
-func (d *dimStat) Clone() *dimStat {
-	d.RLock()
-	defer d.RUnlock()
-	return &dimStat{
-		rolling:         d.rolling.Clone(),
-		lastIntervalSum: d.lastIntervalSum,
+func (d *dimStat) CopyFrom(origin *dimStat) {
+	reportInterval := origin.rolling.Interval()
+	d.allocRolling(reportInterval)
+	d.rolling.CopyFrom(origin.rolling)
+	d.lastIntervalSum = origin.lastIntervalSum
+	d.lastDelta = origin.lastDelta
+}
+
+func (d *dimStat) allocRolling(reportInterval time.Duration) {
+	if d.rolling != nil {
+		d.rolling.Clear()
+		return
 	}
+	d.rolling = movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval)
 }
-
-func GCDimStat(d *dimStat) {
-	movingaverage.GCTimeMedian(d.rolling)
-}
-
-// func (d *dimStat) CopyFrom(from *dimStat) {
-// 	d.rolling.CopyFrom(from.rolling)
-// 	d.lastAverage.CopyFrom(from.lastAverage)
-// }
 
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
@@ -191,8 +182,8 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 
 // Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
+	ret := hotPeerStatPool.GetPeerStat()
 	hotPool.WithLabelValues("peer_scheduler", "get", "clone").Inc()
-	ret := hotPeerStatPool.Get().(*HotPeerStat)
 	ret.StoreID = stat.StoreID
 	ret.RegionID = stat.RegionID
 	ret.HotDegree = stat.HotDegree
@@ -202,6 +193,7 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret.actionType = stat.actionType
 	ret.inCold = stat.inCold
 	ret.allowInherited = stat.allowInherited
+	ret.stores = stat.stores
 	if len(ret.Loads) != DimLen {
 		ret.Loads = make([]float64, DimLen)
 	}
