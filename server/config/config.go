@@ -34,8 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"

@@ -25,8 +25,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -89,7 +90,7 @@ func TestAdjustRule2(t *testing.T) {
 
 func TestGetSetRule(t *testing.T) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -135,7 +136,7 @@ func TestGetSetRule(t *testing.T) {
 
 func TestIndex(t *testing.T) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -177,7 +178,7 @@ func TestIndex(t *testing.T) {
 
 func TestSaveLoadRule(t *testing.T) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -222,7 +223,7 @@ func expectSameRules(re *require.Assertions, r1, r2 *LabelRule) {
 
 func TestKeyRange(t *testing.T) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -263,7 +264,7 @@ func TestKeyRange(t *testing.T) {
 
 func TestLabelerRuleTTL(t *testing.T) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
@@ -336,7 +337,7 @@ func checkRuleInMemoryAndStoage(re *require.Assertions, labeler *RegionLabeler, 
 func TestGC(t *testing.T) {
 	re := require.New(t)
 	// set gcInterval to 1 hour.
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Hour)
 	re.NoError(err)
 	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}

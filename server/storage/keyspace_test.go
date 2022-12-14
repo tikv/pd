@@ -20,7 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 func TestSaveLoadKeyspace(t *testing.T) {
