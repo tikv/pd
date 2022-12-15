@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core/storelimit"
 )
 
 func TestCollect(t *testing.T) {

@@ -17,7 +17,7 @@ package statistics
 import (
 	"time"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // HotPeersStat records all hot regions statistics

@@ -14,7 +14,7 @@
 
 package statistics
 
-import "github.com/tikv/pd/server/core"
+import "github.com/tikv/pd/pkg/core"
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {

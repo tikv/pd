@@ -27,10 +27,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -122,7 +122,7 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	oc.SetOperator(op2)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
-	operator.SetOperatorStatusReachTime(op1, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+	op1.SetStatusReachTime(operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
@@ -233,8 +233,8 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 		op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
 		op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 1})
 		suite.True(oc.checkAddOperator(false, op1, op2))
-		operator.SetOperatorStatusReachTime(op1, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
-		operator.SetOperatorStatusReachTime(op2, operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		op1.SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		op2.SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
 		suite.False(oc.checkAddOperator(false, op1, op2))
 		suite.Equal(operator.EXPIRED, op1.Status())
 		suite.Equal(operator.EXPIRED, op2.Status())
@@ -246,7 +246,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
 		suite.True(oc.checkAddOperator(false, op))
 		op.Start()
-		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+		op.SetStatusReachTime(operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
 		suite.True(op.CheckTimeout())
 		suite.False(oc.checkAddOperator(false, op))
 	}

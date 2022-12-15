@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 const (
@@ -149,6 +149,11 @@ func (o *Operator) SchedulerKind() OpKind {
 // Status returns operator status.
 func (o *Operator) Status() OpStatus {
 	return o.status.Status()
+}
+
+// SetStatusReachTime sets the reach time of the operator, only for test purpose.
+func (o *Operator) SetStatusReachTime(st OpStatus, t time.Time) {
+	o.status.setTime(st, t)
 }
 
 // CheckAndGetStatus returns operator status after `CheckExpired` and `CheckTimeout`.
