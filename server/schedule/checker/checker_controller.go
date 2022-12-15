@@ -20,7 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"

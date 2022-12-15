@@ -26,12 +26,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -172,8 +172,8 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				checkerCounter.WithLabelValues("rule_checker", "replace-down").Inc()
 				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
 			}
-			// When witness placement rule is enabled, promotes the witness to voter when region has down peer.
-			if c.isWitnessEnabled() {
+			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
+			if c.isWitnessEnabled() && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					checkerCounter.WithLabelValues("rule_checker", "promote-witness").Inc()
 					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
@@ -230,7 +230,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		return nil, errNoStoreToReplace
 	}
 	var isWitness bool
-	if c.isWitnessEnabled() {
+	if c.isWitnessEnabled() && !core.IsStoreContainLabel(c.cluster.GetStore(store).GetMeta(), core.EngineKey, core.EngineTiFlash) {
 		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
 		// exceeds the threshold(30min), add a witness and remove the down peer. Then witness is
 		// promoted to non-witness gradually to improve availability.

@@ -26,7 +26,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/reflectutil"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )

@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
@@ -59,7 +59,7 @@ type StoreInfo struct {
 	lastPersistTime     time.Time
 	leaderWeight        float64
 	regionWeight        float64
-	limiter             map[storelimit.Type]*storelimit.StoreLimit
+	limiter             storelimit.StoreLimit
 	minResolvedTS       uint64
 	lastAwakenTime      time.Time
 }
@@ -71,7 +71,7 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		storeStats:    newStoreStats(),
 		leaderWeight:  1.0,
 		regionWeight:  1.0,
-		limiter:       make(map[storelimit.Type]*storelimit.StoreLimit),
+		limiter:       storelimit.NewStoreRateLimit(0.0),
 		minResolvedTS: 0,
 	}
 	for _, opt := range opts {
@@ -114,10 +114,7 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.limiter != nil && s.limiter[limitType] != nil {
-		return s.limiter[limitType].Available(storelimit.RegionInfluence[limitType])
-	}
-	return true
+	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType)
 }
 
 // IsTiFlash returns true if the store is tiflash.
@@ -265,10 +262,10 @@ func (s *StoreInfo) NeedPersist() bool {
 }
 
 // GetStoreLimit return the limit of a specific store.
-func (s *StoreInfo) GetStoreLimit(limitType storelimit.Type) *storelimit.StoreLimit {
+func (s *StoreInfo) GetStoreLimit() storelimit.StoreLimit {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.limiter[limitType]
+	return s.limiter
 }
 
 const minWeight = 1e-6

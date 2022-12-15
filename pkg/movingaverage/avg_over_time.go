@@ -16,6 +16,8 @@ package movingaverage
 
 import (
 	"time"
+
+	"github.com/phf/go-queue/queue"
 )
 
 type deltaWithInterval struct {
@@ -29,7 +31,7 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *SafeQueue        // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
+	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
 	margin      deltaWithInterval // The last element from `PopFront` in `que`
 	deltaSum    float64           // Including `margin` and all elements in `que`
 	intervalSum time.Duration     // Including `margin` and all elements in `que`
@@ -39,7 +41,7 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que: NewSafeQueue(),
+		que: queue.New(),
 		margin: deltaWithInterval{
 			delta:    0,
 			interval: 0,
@@ -61,7 +63,7 @@ func (aot *AvgOverTime) Get() float64 {
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	for aot.que.que.Len() > 0 {
+	for aot.que.Len() > 0 {
 		aot.que.PopFront()
 	}
 	aot.margin = deltaWithInterval{
@@ -106,13 +108,18 @@ func (aot *AvgOverTime) IsFull() bool {
 
 // Clone returns a copy of AvgOverTime
 func (aot *AvgOverTime) Clone() *AvgOverTime {
-	que := aot.que.Clone()
+	q := queue.New()
+	for i := 0; i < aot.que.Len(); i++ {
+		v := aot.que.PopFront()
+		aot.que.PushBack(v)
+		q.PushBack(v)
+	}
 	margin := deltaWithInterval{
 		delta:    aot.margin.delta,
 		interval: aot.margin.interval,
 	}
 	return &AvgOverTime{
-		que:         que,
+		que:         q,
 		margin:      margin,
 		deltaSum:    aot.deltaSum,
 		intervalSum: aot.intervalSum,
