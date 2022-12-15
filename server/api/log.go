@@ -20,7 +20,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )

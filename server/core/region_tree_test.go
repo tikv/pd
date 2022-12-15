@@ -356,7 +356,7 @@ func TestRandomRegionDiscontinuous(t *testing.T) {
 
 func updateNewItem(tree *regionTree, region *RegionInfo) {
 	item := &regionItem{RegionInfo: region}
-	tree.update(item)
+	tree.update(item, false)
 }
 
 func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {

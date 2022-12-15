@@ -26,7 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type testBalanceSpeedCase struct {
@@ -1310,7 +1310,7 @@ func TestScatterRangeBalance(t *testing.T) {
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
-		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 	for i := 0; i < 100; i++ {
@@ -1379,7 +1379,7 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
@@ -1490,7 +1490,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		origin, overlaps, rangeChanged := tc.SetRegionWithUpdate(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
