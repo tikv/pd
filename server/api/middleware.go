@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/requestutil"
+	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"

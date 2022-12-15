@@ -32,10 +32,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 )
 
@@ -45,7 +44,7 @@ import (
 // Close() must be called after the use.
 type HotRegionStorage struct {
 	*kv.LevelDBKV
-	ekm                     *encryptionkm.KeyManager
+	ekm                     *encryption.Manager
 	hotRegionLoopWg         sync.WaitGroup
 	batchHotInfo            map[string]*HistoryHotRegion
 	hotRegionInfoCtx        context.Context
@@ -137,7 +136,7 @@ func (h HotRegionType) String() string {
 func NewHotRegionsStorage(
 	ctx context.Context,
 	filePath string,
-	ekm *encryptionkm.KeyManager,
+	ekm *encryption.Manager,
 	hotRegionStorageHandler HotRegionStorageHandler,
 ) (*HotRegionStorage, error) {
 	levelDB, err := kv.NewLevelDBKV(filePath)
@@ -368,7 +367,7 @@ func (h *HotRegionStorage) delete(reservedDays int) error {
 // HotRegionStorageIterator iterates over a historyHotRegion.
 type HotRegionStorageIterator struct {
 	iters                []iterator.Iterator
-	encryptionKeyManager *encryptionkm.KeyManager
+	encryptionKeyManager *encryption.Manager
 }
 
 // Next moves the iterator to the next key/value pair.

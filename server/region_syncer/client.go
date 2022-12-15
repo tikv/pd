@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -211,7 +211,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						region = core.NewRegionInfo(r, regionLeader, core.SetFromHeartbeat(false))
 					}
 
-					origin, err := bc.PreCheckPutRegion(region)
+					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue

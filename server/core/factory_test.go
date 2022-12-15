@@ -19,7 +19,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func BenchmarkDeepClone(b *testing.B) {

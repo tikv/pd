@@ -29,11 +29,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
@@ -41,7 +42,6 @@ import (
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -1678,7 +1678,7 @@ func Test(t *testing.T) {
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
 
-		origin, overlaps, rangeChanged := cache.SetRegionWithUpdate(region)
+		origin, overlaps, rangeChanged := cache.SetRegion(region)
 		cache.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), region)
 		checkRegion(re, cache.GetRegionByKey(regionKey), region)
@@ -1692,7 +1692,7 @@ func Test(t *testing.T) {
 		// Update leader to peer np-1.
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
-		origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
 		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
@@ -1707,7 +1707,7 @@ func Test(t *testing.T) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
 		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1729,7 +1729,7 @@ func Test(t *testing.T) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	origin, overlaps, rangeChanged := cache.SetRegionWithUpdate(overlapRegion)
+	origin, overlaps, rangeChanged := cache.SetRegion(overlapRegion)
 	cache.UpdateSubTree(overlapRegion, origin, overlaps, rangeChanged)
 	re.Nil(cache.GetRegion(n - 2))
 	re.NotNil(cache.GetRegion(n - 1))
@@ -1739,7 +1739,7 @@ func Test(t *testing.T) {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
-			origin, overlaps, rangeChanged = cache.SetRegionWithUpdate(newRegion)
+			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
 			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
