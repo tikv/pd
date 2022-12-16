@@ -19,7 +19,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 )
@@ -27,8 +27,8 @@ import (
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, error) {
-	group := server.ServiceGroup{
+func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, server.APIServiceGroup, error) {
+	group := server.APIServiceGroup{
 		Name:   "core",
 		IsCore: true,
 	}

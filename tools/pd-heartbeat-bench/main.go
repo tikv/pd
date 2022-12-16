@@ -32,7 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
 	"go.uber.org/zap"
@@ -210,6 +210,12 @@ func (rs *Regions) init(cfg *config.Config) {
 			Term:            1,
 		}
 		id += 1
+		if i == 0 {
+			region.Region.StartKey = []byte("")
+		}
+		if i == cfg.RegionCount-1 {
+			region.Region.EndKey = []byte("")
+		}
 
 		peers := make([]*metapb.Peer, 0, cfg.Replica)
 		for j := 0; j < cfg.Replica; j++ {

@@ -26,7 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type testBalanceSpeedCase struct {
@@ -640,17 +640,24 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
 	suite.NoError(err)
 	ops, _ := lb.Schedule(suite.tc, false)
 	suite.Equal(uint64(1), ops[0].RegionID())
-	suite.tc.RemoveRegion(suite.tc.GetRegion(1))
+	r := suite.tc.GetRegion(1)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
 	suite.tc.AddLeaderRegionWithRange(2, "p", "r", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	suite.Equal(uint64(2), ops[0].RegionID())
-	suite.tc.RemoveRegion(suite.tc.GetRegion(2))
+	r = suite.tc.GetRegion(2)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
+
 	suite.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	suite.Empty(ops)
-	suite.tc.RemoveRegion(suite.tc.GetRegion(3))
+	r = suite.tc.GetRegion(3)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
 	suite.tc.AddLeaderRegionWithRange(4, "", "", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -1303,7 +1310,8 @@ func TestScatterRangeBalance(t *testing.T) {
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 	for i := 0; i < 100; i++ {
 		_, err := tc.AllocPeer(1)
@@ -1319,9 +1327,9 @@ func TestScatterRangeBalance(t *testing.T) {
 
 	scheduleAndApplyOperator(tc, hb, 100)
 	for i := 1; i <= 5; i++ {
-		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		leaderCount := tc.GetStoreLeaderCount(uint64(i))
 		re.LessOrEqual(leaderCount, 12)
-		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
+		regionCount = tc.GetStoreRegionCount(uint64(i))
 		re.LessOrEqual(regionCount, 32)
 	}
 }
@@ -1371,7 +1379,8 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 0; i < 100; i++ {
@@ -1392,14 +1401,14 @@ func TestBalanceLeaderLimit(t *testing.T) {
 	maxLeaderCount := 0
 	minLeaderCount := 99
 	for i := 1; i <= 5; i++ {
-		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		leaderCount := tc.GetStoreLeaderCount(uint64(i))
 		if leaderCount < minLeaderCount {
 			minLeaderCount = leaderCount
 		}
 		if leaderCount > maxLeaderCount {
 			maxLeaderCount = leaderCount
 		}
-		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
+		regionCount = tc.GetStoreRegionCount(uint64(i))
 		re.LessOrEqual(regionCount, 32)
 	}
 	re.Greater(maxLeaderCount-minLeaderCount, 10)
@@ -1481,7 +1490,8 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 1; i <= 3; i++ {

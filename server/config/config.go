@@ -29,13 +29,13 @@ import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/metricutil"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
@@ -253,8 +253,8 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
-	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
-	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
@@ -550,7 +550,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
-	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+	adjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
@@ -1294,6 +1294,26 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 // GetConfigFile gets the config file.
 func (c *Config) GetConfigFile() string {
 	return c.configFile
+}
+
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (c *Config) IsLocalTSOEnabled() bool {
+	return c.EnableLocalTSO
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
+	return c.TSOUpdatePhysicalInterval.Duration
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (c *Config) GetTSOSaveInterval() time.Duration {
+	return c.TSOSaveInterval.Duration
+}
+
+// GetTLSConfig returns the TLS config.
+func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
+	return &c.Security.TLSConfig
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.

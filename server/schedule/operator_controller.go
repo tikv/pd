@@ -26,13 +26,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -484,16 +484,13 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			log.Info("missing store", zap.Uint64("store-id", storeID))
 			continue
 		}
+		limit := store.GetStoreLimit()
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := store.GetStoreLimit(v)
-			if storeLimit == nil {
-				continue
-			}
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			storeLimit.Take(stepCost)
+			limit.Take(stepCost, v)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -849,7 +846,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost) {
+			if !limiter.Available(stepCost, v) {
 				return true
 			}
 		}
@@ -858,18 +855,15 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-	if s.GetStoreLimit(limitType) == nil {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	return s.GetStoreLimit(limitType)
+
+	limit := s.GetStoreLimit()
+	limit.Reset(ratePerSec, limitType)
+	return limit
 }
