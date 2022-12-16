@@ -124,7 +124,8 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regions *Regions) {
+	storesStats := regions.collectStoresStats(cfg.StoreCount)
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -140,11 +141,20 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient) {
 		if resp.GetHeader().GetError() != nil {
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
-		cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: &pdpb.StoreStats{
-			StoreId:   i,
-			Capacity:  capacity,
-			Available: capacity,
-		}})
+		go func(ctx context.Context, storeID uint64) {
+			var heartbeatTicker = time.NewTicker(10 * time.Second)
+			defer heartbeatTicker.Stop()
+			for {
+				select {
+				case <-heartbeatTicker.C:
+					cctx, cancel := context.WithCancel(ctx)
+					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[i]})
+					cancel()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(ctx, i)
 	}
 }
 
@@ -424,13 +434,12 @@ func main() {
 	}()
 	cli := newClient(cfg)
 	initClusterID(ctx, cli)
-	bootstrap(ctx, cli)
-	putStores(ctx, cfg, cli)
-	log.Info("finish put stores")
 	regions := new(Regions)
 	regions.init(cfg)
 	log.Info("finish init regions")
-	go handleStoreHeartbeat(ctx, cfg, cli, regions)
+	bootstrap(ctx, cli)
+	putStores(ctx, cfg, cli, regions)
+	log.Info("finish put stores")
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
