@@ -569,8 +569,8 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
-		switch step.(type) {
-		case ChangePeerV2Leave:
+
+		if _, ok := step.(ChangePeerV2Leave); ok {
 			// Ref https://github.com/tikv/pd/issues/5788
 			pendingPeers := region.GetLearners()
 			region = region.Clone(core.WithPendingPeers(pendingPeers))
