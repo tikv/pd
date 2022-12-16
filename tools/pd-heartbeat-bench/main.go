@@ -148,7 +148,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regio
 				select {
 				case <-heartbeatTicker.C:
 					cctx, cancel := context.WithCancel(ctx)
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[i]})
+					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[storeID-1]})
 					cancel()
 				case <-ctx.Done():
 					return
@@ -369,31 +369,6 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 		}
 	}
 	return stores
-}
-
-func handleStoreHeartbeat(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regions *Regions) {
-	var heartbeatTicker = time.NewTicker(storeReportInterval * time.Second)
-	defer heartbeatTicker.Stop()
-	for {
-		select {
-		case <-heartbeatTicker.C:
-			cctx, cancel := context.WithCancel(ctx)
-			wg := &sync.WaitGroup{}
-			storesStats := regions.collectStoresStats(cfg.StoreCount)
-			for i := 0; i < cfg.StoreCount; i++ {
-				wg.Add(1)
-				storeStat := storesStats[i]
-				go func() {
-					defer wg.Done()
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storeStat})
-				}()
-			}
-			wg.Wait()
-			cancel()
-		case <-ctx.Done():
-			return
-		}
-	}
 }
 
 func main() {
