@@ -39,7 +39,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
 )
 
@@ -536,10 +536,9 @@ func TestCheckCache(t *testing.T) {
 	re.Len(co.checkers.GetWaitingRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
-	opt := tc.GetOpts()
-	cfg := opt.GetScheduleConfig()
+	cfg := tc.GetScheduleConfig()
 	cfg.ReplicaScheduleLimit = 10
-	tc.GetOpts().SetScheduleConfig(cfg)
+	tc.SetScheduleConfig(cfg)
 	co.wg.Add(1)
 	co.patrolRegions()
 	oc := co.opController

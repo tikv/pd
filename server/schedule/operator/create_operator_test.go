@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
+	sc "github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -44,11 +46,11 @@ func TestCreateOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *createOperatorTestSuite) SetupTest() {
-	opts := config.NewTestOptions()
+	opts := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, opts)
 	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "noleader", Value: "true"}},
+		sc.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	suite.cluster.SetLocationLabels([]string{"zone", "host"})
 	suite.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
@@ -1142,7 +1144,7 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opts := config.NewTestOptions()
+	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
 	re.NoError(cluster.SetRules([]*placement.Rule{
 		{

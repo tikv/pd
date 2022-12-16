@@ -26,9 +26,11 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
+	sc "github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
@@ -45,11 +47,11 @@ func TestReplicaCheckerTestSuite(t *testing.T) {
 }
 
 func (suite *replicaCheckerTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	suite.rc = NewReplicaChecker(suite.cluster, cache.NewDefaultCache(10))
+	suite.rc = NewReplicaChecker(suite.cluster, suite.cluster.GetOpts(), cache.NewDefaultCache(10))
 	stats := &pdpb.StoreStats{
 		Capacity:  100,
 		Available: 100,
@@ -116,7 +118,7 @@ func (suite *replicaCheckerTestSuite) TestReplacePendingPeer() {
 
 func (suite *replicaCheckerTestSuite) TestReplaceOfflinePeer() {
 	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "noleader", Value: "true"}},
+		sc.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
 	peers := []*metapb.Peer{
 		{
@@ -204,11 +206,11 @@ func (suite *replicaCheckerTestSuite) downPeerAndCheck(aliveRole metapb.PeerRole
 }
 
 func (suite *replicaCheckerTestSuite) TestBasic() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetMaxSnapshotCount(2)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	// Add stores 1,2,3,4.
 	tc.AddRegionStore(1, 4)
@@ -277,14 +279,14 @@ func (suite *replicaCheckerTestSuite) TestBasic() {
 }
 
 func (suite *replicaCheckerTestSuite) TestLostStore() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	// now region peer in store 1,2,3.but we just have store 1,2
 	// This happens only in recovering the PD tc
@@ -296,14 +298,13 @@ func (suite *replicaCheckerTestSuite) TestLostStore() {
 }
 
 func (suite *replicaCheckerTestSuite) TestOffline() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
-
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(3, 3, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
@@ -348,13 +349,13 @@ func (suite *replicaCheckerTestSuite) TestOffline() {
 }
 
 func (suite *replicaCheckerTestSuite) TestDistinctScore() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 9, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 8, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -427,13 +428,13 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 }
 
 func (suite *replicaCheckerTestSuite) TestDistinctScore2() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetMaxReplicas(5)
 	tc.SetLocationLabels([]string{"zone", "host"})
 
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
@@ -457,11 +458,11 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore2() {
 }
 
 func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetLocationLabels([]string{"zone"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.UpdateStorageRatio(1, 0.5, 0.5)
@@ -493,10 +494,10 @@ func (suite *replicaCheckerTestSuite) TestStorageThreshold() {
 }
 
 func (suite *replicaCheckerTestSuite) TestOpts() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddRegionStore(1, 100)
 	tc.AddRegionStore(2, 100)
@@ -524,11 +525,11 @@ func (suite *replicaCheckerTestSuite) TestOpts() {
 
 // See issue: https://github.com/tikv/pd/issues/3705
 func (suite *replicaCheckerTestSuite) TestFixDownPeer() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
@@ -555,11 +556,11 @@ func (suite *replicaCheckerTestSuite) TestFixDownPeer() {
 
 // See issue: https://github.com/tikv/pd/issues/3705
 func (suite *replicaCheckerTestSuite) TestFixOfflinePeer() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetLocationLabels([]string{"zone"})
-	rc := NewReplicaChecker(tc, cache.NewDefaultCache(10))
+	rc := NewReplicaChecker(tc, tc.GetOpts(), cache.NewDefaultCache(10))
 
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})

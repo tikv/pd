@@ -1212,10 +1212,6 @@ type StoreLabel struct {
 	Value string `toml:"value" json:"value"`
 }
 
-// RejectLeader is the label property type that suggests a store should not
-// have any region leaders.
-const RejectLeader = "reject-leader"
-
 // LabelPropertyConfig is the config section to set properties to store labels.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelPropertyConfig map[string][]StoreLabel

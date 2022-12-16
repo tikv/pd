@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -29,7 +29,7 @@ import (
 
 func TestSplit(t *testing.T) {
 	re := require.New(t)
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	cfg.GetReplicationConfig().EnablePlacementRules = true
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

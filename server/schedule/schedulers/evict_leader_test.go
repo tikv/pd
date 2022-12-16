@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -23,11 +24,12 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
-func TestTransferWitnessLeader(t *testing.T) {
+func TestEvictLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -36,12 +38,13 @@ func TestTransferWitnessLeader(t *testing.T) {
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
-	// Add regions 1 with leader in stores 1
+	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
 	tc.AddLeaderRegion(1, 1, 2, 3)
+	tc.AddLeaderRegion(2, 2, 1)
+	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	re.NoError(err)
-	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
@@ -49,11 +52,11 @@ func TestTransferWitnessLeader(t *testing.T) {
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 }
 
-func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
+func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	re.NoError(err)
 
 	// Add stores 1, 2, 3
@@ -71,14 +74,10 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 
 	// only pending
 	tc.PutRegion(region.Clone(withPendingPeer))
-	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ := sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
-	ops, _ = sl.Schedule(tc, false)
-	re.Nil(ops)
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
-	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
@@ -87,4 +86,23 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	re.Empty(ops)
 }
 
-// TODO: add more tests with witness
+func TestConfigClone(t *testing.T) {
+	re := require.New(t)
+
+	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
+	con2 := emptyConf.Clone()
+	re.Empty(emptyConf.getKeyRangesByID(1))
+	re.NoError(con2.BuildWithArgs([]string{"1"}))
+	re.NotEmpty(con2.getKeyRangesByID(1))
+	re.Empty(emptyConf.getKeyRangesByID(1))
+
+	con3 := con2.Clone()
+	con3.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
+	re.Empty(emptyConf.getKeyRangesByID(1))
+	re.False(len(con3.getRanges(1)) == len(con2.getRanges(1)))
+
+	con4 := con3.Clone()
+	re.True(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
+	con4.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
+	re.False(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
+}
