@@ -148,7 +148,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regio
 				select {
 				case <-heartbeatTicker.C:
 					cctx, cancel := context.WithCancel(ctx)
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[storeID-1]})
+					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[storeID]})
 					cancel()
 				case <-ctx.Done():
 					return
@@ -328,11 +328,11 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 }
 
 func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
-	stores := make([]*pdpb.StoreStats, storeCount)
+	stores := make([]*pdpb.StoreStats, storeCount+1)
 	now := uint64(time.Now().Unix())
-	for i := 0; i < storeCount; i++ {
+	for i := 1; i <= storeCount; i++ {
 		stores[i] = &pdpb.StoreStats{
-			StoreId:    uint64(i + 1),
+			StoreId:    uint64(i),
 			Capacity:   capacity,
 			Available:  capacity,
 			QueryStats: &pdpb.QueryStats{},
@@ -345,12 +345,12 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 	}
 	for _, region := range rs.regions {
 		for _, peer := range region.Region.Peers {
-			store := stores[peer.StoreId-1]
+			store := stores[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
 			store.Available -= region.ApproximateSize
 			store.RegionCount += 1
 		}
-		store := stores[region.Leader.StoreId-1]
+		store := stores[region.Leader.StoreId]
 		if region.BytesWritten != 0 {
 			store.BytesWritten += region.BytesWritten
 			store.BytesRead += region.BytesRead
