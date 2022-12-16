@@ -220,7 +220,6 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	newItem.inCold = false
 	newItem.allowInherited = false
 	newItem.lastTransferLeaderTime = time.Time{}
-	newItem.rollingLoads = nil
 	newItem.updateStores(region)
 	newItem.updateLoads(f.kind, deltaLoads, interval)
 	if oldItem == nil {
@@ -258,7 +257,6 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 			newItem.isLeader = oldItem.isLeader
 			newItem.actionType = Update
 			newItem.inCold = true
-			newItem.rollingLoads = nil
 			newItem.stores = oldItem.stores
 			newItem.updateLoads(f.kind, nil, interval)
 			deltaLoads := make([]float64, RegionStatCount)
@@ -422,15 +420,19 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 	regionStats := f.kind.RegionStats()
 
 	if source == inherit {
-		for _, dim := range oldItem.rollingLoads {
-			r := hotPeerStatPool.GetDimStat(f.kind)
-			r.CopyFrom(dim)
+		if newItem.rollingLoads == nil {
+			newItem.rollingLoads = make([]*dimStat, DimLen)
+		}
+		for i, old := range oldItem.rollingLoads {
+			dim := hotPeerStatPool.GetDimStat(f.kind)
+			dim.CopyFrom(old)
 			log.Info("dim", zap.Uint64("regionID", region.GetID()), zap.Uint64("storeID", oldItem.StoreID), zap.Uint64("dim", dim.id))
-			newItem.rollingLoads = append(newItem.rollingLoads, r)
+			newItem.rollingLoads[i] = dim
 		}
 		newItem.allowInherited = false
 	} else {
 		newItem.rollingLoads = oldItem.rollingLoads
+		oldItem.rollingLoads = nil
 		newItem.allowInherited = oldItem.allowInherited
 	}
 
@@ -483,26 +485,25 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 }
 
 func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []float64, interval time.Duration) *HotPeerStat {
-	regionStats := f.kind.RegionStats()
 	// interval is not 0 which is guaranteed by the caller.
 	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
 		f.initItem(newItem)
 	}
-	newItem.actionType = Add
+	regionStats := f.kind.RegionStats()
+	cacheInterval := f.interval()
 	if newItem.rollingLoads == nil {
 		newItem.rollingLoads = make([]*dimStat, DimLen)
 	}
-	cacheInterval := f.interval()
 	for i, k := range regionStats {
 		ds := hotPeerStatPool.GetDimStat(f.kind)
 		ds.init(cacheInterval)
-		log.Info("dim", zap.Uint64("regionID", newItem.RegionID), zap.Uint64("storeID", newItem.StoreID), zap.Uint64("dim", ds.id))
 		ds.Add(deltaLoads[k], interval)
 		if ds.isFull(cacheInterval) {
 			ds.clearLastAverage()
 		}
 		newItem.rollingLoads[i] = ds
 	}
+	newItem.actionType = Add
 	return newItem
 }
 
