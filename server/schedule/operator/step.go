@@ -755,7 +755,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(peer.GetId()) == nil
+		return peer.GetId() == dv.PeerID
 	}
 	return false
 }
