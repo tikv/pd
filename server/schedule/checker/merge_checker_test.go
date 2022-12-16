@@ -28,9 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
-	sc "github.com/tikv/pd/server/schedule/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -61,9 +60,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		sc.RejectLeader: {{Key: "reject", Value: "leader"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "reject", "leader")
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},

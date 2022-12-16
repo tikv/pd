@@ -23,11 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -37,7 +38,7 @@ import (
 func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, *config.PersistOptions, *mockcluster.Cluster, *schedule.OperatorController) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	var stream *hbstream.HeartbeatStreams
 	if len(needToRunStream) == 0 {

@@ -28,8 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/server/config"
-	sc "github.com/tikv/pd/server/schedule/config"
+	"github.com/tikv/pd/server/schedule/config"
 )
 
 type operatorTestSuite struct {
@@ -50,9 +49,7 @@ func (suite *operatorTestSuite) SetupTest() {
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		sc.RejectLeader: {{Key: "reject", Value: "leader"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "reject", "leader")
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},

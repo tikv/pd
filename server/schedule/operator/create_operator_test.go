@@ -28,8 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
-	sc "github.com/tikv/pd/server/schedule/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -49,9 +48,7 @@ func (suite *createOperatorTestSuite) SetupTest() {
 	opts := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, opts)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		sc.RejectLeader: {{Key: "noleader", Value: "true"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "noleader", "true")
 	suite.cluster.SetLocationLabels([]string{"zone", "host"})
 	suite.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
 	suite.cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})

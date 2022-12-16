@@ -1,6 +1,7 @@
 package config
 
 import (
+	"sync"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -12,6 +13,19 @@ import (
 // RejectLeader is the label property type that suggests a store should not
 // have any region leaders.
 const RejectLeader = "reject-leader"
+
+var schedulerMap sync.Map
+
+// RegisterScheduler registers the scheduler type.
+func RegisterScheduler(typ string) {
+	schedulerMap.Store(typ, struct{}{})
+}
+
+// IsSchedulerRegistered checks if the named scheduler type is registered.
+func IsSchedulerRegistered(name string) bool {
+	_, ok := schedulerMap.Load(name)
+	return ok
+}
 
 // Config is the interface that wraps the Config related method.
 type Config interface {

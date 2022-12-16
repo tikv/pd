@@ -907,11 +907,6 @@ func (c *ScheduleConfig) Validate() error {
 	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
 		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
 	}
-	for _, scheduleConfig := range c.Schedulers {
-		if !IsSchedulerRegistered(scheduleConfig.Type) {
-			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
-		}
-	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}

@@ -14,13 +14,16 @@
 
 package mockconfig
 
-import "github.com/tikv/pd/server/config"
+import (
+	"github.com/tikv/pd/server/config"
+	sc "github.com/tikv/pd/server/schedule/config"
+)
 
 // NewTestOptions creates default options for testing.
 func NewTestOptions() *config.PersistOptions {
 	// register default schedulers in case config check fail.
 	for _, d := range config.DefaultSchedulers {
-		config.RegisterScheduler(d.Type)
+		sc.RegisterScheduler(d.Type)
 	}
 	c := config.NewConfig()
 	c.Adjust(nil, false)
