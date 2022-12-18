@@ -38,6 +38,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var statisticsInterval = time.Second
+
 type baseHotScheduler struct {
 	*BaseScheduler
 	// store information, including pending Influence by resource type
@@ -52,9 +54,11 @@ type baseHotScheduler struct {
 	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*pendingInfluence
-	types          []statistics.RWType
-	r              *rand.Rand
+	regionPendings  map[uint64]*pendingInfluence
+	types           []statistics.RWType
+	r               *rand.Rand
+	updateReadTime  time.Time
+	updateWriteTime time.Time
 }
 
 func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotScheduler {
@@ -92,14 +96,20 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 	switch rw {
 	case statistics.Read:
 		// update read statistics
-		regionRead := cluster.RegionReadStats()
-		prepare(regionRead, core.LeaderKind)
-		prepare(regionRead, core.RegionKind)
+		if time.Since(h.updateReadTime) >= statisticsInterval {
+			regionRead := cluster.RegionReadStats()
+			prepare(regionRead, core.LeaderKind)
+			prepare(regionRead, core.RegionKind)
+			h.updateReadTime = time.Now()
+		}
 	case statistics.Write:
 		// update write statistics
-		regionWrite := cluster.RegionWriteStats()
-		prepare(regionWrite, core.LeaderKind)
-		prepare(regionWrite, core.RegionKind)
+		if time.Since(h.updateWriteTime) >= statisticsInterval {
+			regionWrite := cluster.RegionWriteStats()
+			prepare(regionWrite, core.LeaderKind)
+			prepare(regionWrite, core.RegionKind)
+			h.updateWriteTime = time.Now()
+		}
 	}
 }
 

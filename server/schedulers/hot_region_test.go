@@ -196,6 +196,7 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 
 	opt.SetPlacementRuleEnabled(false)
@@ -387,6 +388,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -598,6 +600,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -634,6 +637,7 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -693,6 +697,7 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -741,6 +746,7 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -776,6 +782,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
@@ -838,6 +845,7 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -929,6 +937,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetEnablePlacementRules(true)
@@ -1136,6 +1145,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1171,6 +1181,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1349,6 +1360,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1820,6 +1832,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1939,6 +1952,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2045,6 +2059,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2105,6 +2120,7 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2148,6 +2164,7 @@ func TestCompatibility(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
