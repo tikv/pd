@@ -18,10 +18,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/errcode"
-	cors "github.com/rs/cors/wrapper/gin"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/server"
 )
@@ -57,7 +57,7 @@ type Service struct {
 func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
-	apiHandlerEngine.Use(cors.AllowAll())
+	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	manager := srv.GetManager()
@@ -88,9 +88,10 @@ func (s *Service) handler() http.Handler {
 }
 
 // @Summary add a resource group
-// @Param address path string true "ip:port"
+// @Param group body of "ResourceGroup", json format.
 // @Success 200 "added successfully"
-// @Failure 401 {object} rest.ErrorResponse
+// @Failure 400 {object} error
+// @Failure 500 {object} error
 // @Router /config/group/ [POST]
 func (s *Service) postResourceGroup(c *gin.Context) {
 	var group rmserver.ResourceGroup
@@ -105,10 +106,11 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, "Success!")
 }
 
-// @Summary add a resource group
-// @Param address path string true "ip:port"
+// @Summary updates an exists resource group
+// @Param group body of "ResourceGroup", json format.
 // @Success 200 "added successfully"
-// @Failure 401 {object} rest.ErrorResponse
+// @Failure 400 {object} error
+// @Failure 500 {object} error
 // @Router /config/group/ [PUT]
 func (s *Service) putResourceGroup(c *gin.Context) {
 	var group rmserver.ResourceGroup
@@ -124,11 +126,11 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 }
 
 // @ID getResourceGroup
-// @Summary Get current alert count from AlertManager
+// @Summary Get resource group by name.
 // @Success 200 {object} int
 // @Param name string true "groupName"
 // @Router /config/group/{name} [GET]
-// @Failure 404 {object} rest.ErrorResponse
+// @Failure 404 {object} error
 func (s *Service) getResourceGroup(c *gin.Context) {
 	group := s.manager.GetResourceGroup(c.Param("name"))
 	if group == nil {
@@ -138,7 +140,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 }
 
 // @ID getResourceGroupList
-// @Summary Get current alert count from AlertManager
+// @Summary get all resource group with a list.
 // @Success 200 {array} ResourceGroup
 // @Router /config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
@@ -147,7 +149,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 }
 
 // @ID getResourceGroup
-// @Summary Get current alert count from AlertManager
+// @Summary delete resource group by name.
 // @Success 200 "deleted successfully"
 // @Param name string true "groupName"
 // @Router /config/group/{name} [DELETE]

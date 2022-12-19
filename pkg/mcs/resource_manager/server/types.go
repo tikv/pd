@@ -17,7 +17,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -46,10 +45,23 @@ type NativeResourceSettings struct {
 	IOWriteBandwidth GroupTokenBucket `json:"io_write_bandwidth,omitempty"`
 }
 
+// Copy copies the resource group.
+func (rg *ResourceGroup) Copy() *ResourceGroup {
+	// TODO: use a better way to copy
+	res, err := json.Marshal(rg)
+	if err != nil {
+		panic(err)
+	}
+	var newRG ResourceGroup
+	err = json.Unmarshal(res, &newRG)
+	if err != nil {
+		panic(err)
+	}
+	return &newRG
+}
+
 // CheckAndInit checks the validity of the resource group and initializes the default values if not setting.
 func (rg *ResourceGroup) CheckAndInit() error {
-	res, _ := json.Marshal(rg)
-	fmt.Println("CheckAndInit", string(res))
 	if len(rg.Name) == 0 || len(rg.Name) > 32 {
 		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}

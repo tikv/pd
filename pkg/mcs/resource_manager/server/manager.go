@@ -133,7 +133,7 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
-		res = append(res, group)
+		res = append(res, group.Copy())
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {

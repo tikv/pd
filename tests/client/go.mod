@@ -42,18 +42,19 @@ require (
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gin-contrib/gzip v0.0.1 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/gin-gonic/gin v1.7.4 // indirect
+	github.com/gin-gonic/gin v1.8.1 // indirect
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.19.6 // indirect
 	github.com/go-openapi/spec v0.20.4 // indirect
 	github.com/go-openapi/swag v0.19.15 // indirect
-	github.com/go-playground/locales v0.13.0 // indirect
-	github.com/go-playground/universal-translator v0.17.0 // indirect
-	github.com/go-playground/validator/v10 v10.4.1 // indirect
+	github.com/go-playground/locales v0.14.0 // indirect
+	github.com/go-playground/universal-translator v0.18.0 // indirect
+	github.com/go-playground/validator/v10 v10.10.0 // indirect
 	github.com/go-resty/resty/v2 v2.6.0 // indirect
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/goccy/go-graphviz v0.0.9 // indirect
+	github.com/goccy/go-json v0.9.7 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -77,9 +78,9 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.3 // indirect
-	github.com/leodido/go-urn v1.2.0 // indirect
+	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
-	github.com/mattn/go-isatty v0.0.12 // indirect
+	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mattn/go-sqlite3 v1.14.9 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/minio/sio v0.3.0 // indirect
@@ -87,6 +88,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.0.1 // indirect
 	github.com/petermattis/goid v0.0.0-20211229010228-4d14c490ee36 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
