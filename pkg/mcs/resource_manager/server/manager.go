@@ -66,10 +66,10 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 	if err != nil {
 		return err
 	}
+	m.Lock()
 	if err := m.storage().SaveResourceGroup(group.Name, group); err != nil {
 		return err
 	}
-	m.Lock()
 	m.groups[group.Name] = group
 	m.Unlock()
 	return nil
