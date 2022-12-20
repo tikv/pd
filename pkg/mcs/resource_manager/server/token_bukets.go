@@ -17,6 +17,7 @@ package server
 import (
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
@@ -30,6 +31,24 @@ type GroupTokenBucket struct {
 	Consumption       *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
 	LastUpdate        *time.Time                `json:"last_update,omitempty"`
 	Initialized       bool                      `json:"initialized"`
+}
+
+// patch patches the token bucket settings.
+func (t *GroupTokenBucket) patch(settings *rmpb.TokenBucket) {
+	if settings == nil {
+		return
+	}
+	tb := proto.Clone(t.TokenBucket).(*rmpb.TokenBucket)
+	if settings.GetSettings() != nil {
+		if tb == nil {
+			tb = &rmpb.TokenBucket{}
+		}
+		tb.Settings = settings.GetSettings()
+	}
+
+	// the settings in token is delta of the last update and now.
+	tb.Tokens += settings.GetTokens()
+	t.TokenBucket = tb
 }
 
 // Update updates the token bucket.
@@ -47,11 +66,6 @@ func (t *GroupTokenBucket) Update(now time.Time) {
 		t.Tokens += float64(t.Settings.Fillrate) * delta.Seconds()
 		t.LastUpdate = &now
 	}
-}
-
-// GetTokenBucket returns the token bucket.
-func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
-	return t.TokenBucket
 }
 
 // Request requests tokens from the token bucket.

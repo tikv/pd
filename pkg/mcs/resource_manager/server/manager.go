@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/errors"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
@@ -87,23 +88,25 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 }
 
 // ModifyResourceGroup modifies a exists resource group.
-func (m *Manager) ModifyResourceGroup(group *ResourceGroup) error {
-	m.RLock()
-	_, ok := m.groups[group.Name]
-	m.RUnlock()
+func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
+	if group == nil || group.Name == "" {
+		return errors.New("invalid group name")
+	}
+	m.Lock()
+	defer m.Unlock()
+	curGroup, ok := m.groups[group.Name]
 	if !ok {
 		return errors.New("not exists the group")
 	}
-	err := group.CheckAndInit()
+	newGroup := curGroup.Copy()
+	err := newGroup.PatchSettings(group.GetSettings())
 	if err != nil {
 		return err
 	}
-	if err := m.storage().SaveResourceGroup(group.Name, group); err != nil {
+	if m.storage().SaveResourceGroup(group.Name, newGroup); err != nil {
 		return err
 	}
-	m.Lock()
-	m.groups[group.Name] = group
-	m.Unlock()
+	m.groups[group.Name] = newGroup
 	return nil
 }
 
@@ -118,17 +121,17 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	return nil
 }
 
-// GetResourceGroup returns a resource group.
+// GetResourceGroup returns a copy of a resource group.
 func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
-		return group
+		return group.Copy()
 	}
 	return nil
 }
 
-// GetResourceGroupList returns a resource group list.
+// GetResourceGroupList returns copies of resource group list.
 func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))

@@ -102,7 +102,7 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 	if err != nil {
 		return nil, err
 	}
-	return &rmpb.PutResourceGroupResponse{ResponseBody: "Success!"}, nil
+	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // DeleteResourceGroup implements ResourceManagerServer.DeleteResourceGroup.
@@ -111,20 +111,19 @@ func (s *Service) DeleteResourceGroup(ctx context.Context, req *rmpb.DeleteResou
 	if err != nil {
 		return nil, err
 	}
-	return &rmpb.DeleteResourceGroupResponse{ResponseBody: "Success!"}, nil
+	return &rmpb.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // ModifyResourceGroup implements ResourceManagerServer.ModifyResourceGroup.
 func (s *Service) ModifyResourceGroup(ctx context.Context, req *rmpb.PutResourceGroupRequest) (*rmpb.PutResourceGroupResponse, error) {
-	rg := FromProtoResourceGroup(req.GetGroup())
-	err := s.manager.ModifyResourceGroup(rg)
+	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
 	}
-	return &rmpb.PutResourceGroupResponse{ResponseBody: "Success!"}, nil
+	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	return errors.New("not implemented")
+	return errors.New("Not implemented")
 }

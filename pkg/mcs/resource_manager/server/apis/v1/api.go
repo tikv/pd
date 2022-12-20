@@ -21,7 +21,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/errcode"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/server"
 )
@@ -94,32 +94,33 @@ func (s *Service) handler() http.Handler {
 // @Failure 500 {object} error
 // @Router /config/group/ [POST]
 func (s *Service) postResourceGroup(c *gin.Context) {
-	var group rmserver.ResourceGroup
+	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
-		c.JSON(http.StatusBadRequest, err)
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.manager.AddResourceGroup(&group); err != nil {
-		c.JSON(http.StatusInternalServerError, err)
+	nGroup := rmserver.FromProtoResourceGroup(&group)
+	if err := s.manager.AddResourceGroup(nGroup); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, "Success!")
 }
 
 // @Summary updates an exists resource group
-// @Param group body of "ResourceGroup", json format.
+// @Param group body of "resource", json format.
 // @Success 200 "added successfully"
 // @Failure 400 {object} error
 // @Failure 500 {object} error
 // @Router /config/group/ [PUT]
 func (s *Service) putResourceGroup(c *gin.Context) {
-	var group rmserver.ResourceGroup
+	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
-		c.JSON(http.StatusBadRequest, err)
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.manager.ModifyResourceGroup(&group); err != nil {
-		c.JSON(http.StatusInternalServerError, err)
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.JSON(http.StatusOK, "Success!")
@@ -134,7 +135,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 func (s *Service) getResourceGroup(c *gin.Context) {
 	group := s.manager.GetResourceGroup(c.Param("name"))
 	if group == nil {
-		c.JSON(http.StatusNotFound, errcode.NewNotFoundErr(errors.New("resource group not found")))
+		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
 	c.JSON(http.StatusOK, group)
 }
@@ -156,7 +157,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 // @Failure 404 {object} error
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
-		c.JSON(http.StatusNotFound, err)
+		c.String(http.StatusNotFound, err.Error())
 	}
 	c.JSON(http.StatusOK, "Success!")
 }

@@ -119,12 +119,12 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 			},
 		},
 		{"test3", rmpb.GroupMode_NativeMode, false, true,
-			`{"name":"test3","mode":1,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fillrate":10000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+			`{"name":"test3","mode":1,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fillrate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
 			func(gs *rmpb.GroupSettings) {
 				gs.ResourceSettings = &rmpb.GroupResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 10000,
+							Fillrate: 1000000,
 						},
 					},
 				}
@@ -144,7 +144,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 	// Test Resource Group CURD via gRPC
 	for i, tcase := range testCasesSet1 {
 		group := &rmpb.ResourceGroup{
-			ResourceGroupName: tcase.name,
+			Name: tcase.name,
 			Settings: &rmpb.GroupSettings{
 				Mode: tcase.mode,
 			},
@@ -154,7 +154,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		checkErr(err, tcase.addSuccess)
 		if tcase.addSuccess {
 			finalNum++
-			re.Contains(resp.ResponseBody, "Success!")
+			re.Contains(resp.Body, "Success!")
 		}
 
 		// Modify Resource Group
@@ -162,13 +162,13 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		mresp, err := grpcclient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
 		checkErr(err, tcase.modifySuccess)
 		if tcase.modifySuccess {
-			re.Contains(mresp.ResponseBody, "Success!")
+			re.Contains(mresp.Body, "Success!")
 		}
 
 		// Get Resource Group
 		gresp, err := grpcclient.GetResourceGroup(ctx, &rmpb.GetResourceGroupRequest{ResourceGroupName: tcase.name})
 		re.NoError(err)
-		re.Equal(tcase.name, gresp.Group.ResourceGroupName)
+		re.Equal(tcase.name, gresp.Group.Name)
 		if tcase.modifySuccess {
 			re.Equal(group, gresp.Group)
 		}
@@ -182,9 +182,9 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 
 			for _, g := range lresp.Groups {
 				// Delete Resource Group
-				dresp, err := grpcclient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{ResourceGroupName: g.ResourceGroupName})
+				dresp, err := grpcclient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{ResourceGroupName: g.Name})
 				re.NoError(err)
-				re.Contains(dresp.ResponseBody, "Success!")
+				re.Contains(dresp.Body, "Success!")
 			}
 		}
 	}
@@ -194,12 +194,12 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 	for i, tcase := range testCasesSet1 {
 		// Create Resource Group
 		group := &rmpb.ResourceGroup{
-			ResourceGroupName: tcase.name,
+			Name: tcase.name,
 			Settings: &rmpb.GroupSettings{
 				Mode: tcase.mode,
 			},
 		}
-		createJSON, err := json.Marshal(server.FromProtoResourceGroup(group))
+		createJSON, err := json.Marshal(group)
 		re.NoError(err)
 		resp, err := http.Post(leader.GetAddr()+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
@@ -213,7 +213,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 
 		// Modify Resource Group
 		tcase.modifySettings(group.Settings)
-		modifyJSON, err := json.Marshal(server.FromProtoResourceGroup(group))
+		modifyJSON, err := json.Marshal(group)
 		re.NoError(err)
 		req, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))
 		re.NoError(err)
@@ -247,7 +247,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 			re.Equal(http.StatusOK, resp.StatusCode)
 			respString, err := io.ReadAll(resp.Body)
 			re.NoError(err)
-			groups := make([]server.ResourceGroup, 0)
+			groups := make([]*server.ResourceGroup, 0)
 			json.Unmarshal(respString, &groups)
 			re.Equal(finalNum, len(groups))
 
