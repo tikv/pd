@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 )
 
@@ -31,24 +30,13 @@ type Manager struct {
 	sync.RWMutex
 	groups  map[string]*ResourceGroup
 	storage func() storage.Storage
-	// TODO: dispatch resource group to storage node
-	getStores func() ([]*core.StoreInfo, error)
 }
 
 // NewManager returns a new Manager.
 func NewManager(srv *server.Server) *Manager {
-	getStores := func() ([]*core.StoreInfo, error) {
-		rc := srv.GetRaftCluster()
-		if rc == nil {
-			return nil, errors.New("RaftCluster is nil")
-		}
-		return rc.GetStores(), nil
-	}
-
 	m := &Manager{
-		groups:    make(map[string]*ResourceGroup),
-		storage:   srv.GetStorage,
-		getStores: getStores,
+		groups:  make(map[string]*ResourceGroup),
+		storage: srv.GetStorage,
 	}
 	srv.AddStartCallback(m.Init)
 	return m
@@ -87,7 +75,7 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 	return nil
 }
 
-// ModifyResourceGroup modifies a exists resource group.
+// ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
 		return errors.New("invalid group name")
