@@ -124,8 +124,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regions *Regions) {
-	storesStats := regions.collectStoresStats(cfg.StoreCount)
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -147,9 +146,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regio
 			for {
 				select {
 				case <-heartbeatTicker.C:
-					cctx, cancel := context.WithCancel(ctx)
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[storeID]})
-					cancel()
+					stores.heartbeat(ctx, cli, storeID)
 				case <-ctx.Done():
 					return
 				}
@@ -333,11 +330,31 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
 }
 
-func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
-	stores := make([]*pdpb.StoreStats, storeCount+1)
+type Stores struct {
+	sync.RWMutex
+	stat []*pdpb.StoreStats
+}
+
+func newStores(stores int) *Stores {
+	return &Stores{
+		stat: make([]*pdpb.StoreStats, stores+1),
+	}
+}
+
+func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
+	s.RLock()
+	defer s.RUnlock()
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID]})
+}
+
+func (s *Stores) update(rs *Regions) {
+	s.Lock()
+	defer s.Unlock()
 	now := uint64(time.Now().Unix())
-	for i := 1; i <= storeCount; i++ {
-		stores[i] = &pdpb.StoreStats{
+	for i := range s.stat {
+		s.stat[i] = &pdpb.StoreStats{
 			StoreId:    uint64(i),
 			Capacity:   capacity,
 			Available:  capacity,
@@ -351,12 +368,12 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 	}
 	for _, region := range rs.regions {
 		for _, peer := range region.Region.Peers {
-			store := stores[peer.StoreId]
+			store := s.stat[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
 			store.Available -= region.ApproximateSize
 			store.RegionCount += 1
 		}
-		store := stores[region.Leader.StoreId]
+		store := s.stat[region.Leader.StoreId]
 		if region.BytesWritten != 0 {
 			store.BytesWritten += region.BytesWritten
 			store.BytesRead += region.BytesRead
@@ -374,7 +391,6 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 			})
 		}
 	}
-	return stores
 }
 
 func main() {
@@ -418,8 +434,10 @@ func main() {
 	regions := new(Regions)
 	regions.init(cfg)
 	log.Info("finish init regions")
+	stores := newStores(cfg.StoreCount)
+	stores.update(regions)
 	bootstrap(ctx, cli)
-	putStores(ctx, cfg, cli, regions)
+	putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
@@ -458,6 +476,7 @@ func main() {
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg.Replica)
+			stores.update(regions)
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
 			switch sig {
