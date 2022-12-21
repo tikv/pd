@@ -15,28 +15,25 @@
 package statistics
 
 import (
+	"fmt"
 	"math"
+	"math/rand"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
 type dimStat struct {
 	syncutil.RWMutex
+	id              uint64
 	rolling         *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
 	lastIntervalSum int                       // lastIntervalSum and lastDelta are used to calculate the average speed of the last interval.
 	lastDelta       float64
-}
-
-func newDimStat(reportInterval time.Duration) *dimStat {
-	return &dimStat{
-		rolling:         movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval),
-		lastIntervalSum: 0,
-		lastDelta:       0,
-	}
 }
 
 func (d *dimStat) Add(delta float64, interval time.Duration) {
@@ -72,19 +69,33 @@ func (d *dimStat) clearLastAverage() {
 	d.lastDelta = 0
 }
 
+func (d *dimStat) init(reportInterval time.Duration) {
+	d.id = uint64(time.Now().UnixNano()*1000 + int64(rand.Intn(1000)))
+	d.allocRolling(reportInterval)
+	d.lastIntervalSum = 0
+	d.lastDelta = 0
+}
+
 func (d *dimStat) Get() float64 {
 	d.RLock()
 	defer d.RUnlock()
 	return d.rolling.Get()
 }
 
-func (d *dimStat) Clone() *dimStat {
-	d.RLock()
-	defer d.RUnlock()
-	return &dimStat{
-		rolling:         d.rolling.Clone(),
-		lastIntervalSum: d.lastIntervalSum,
+func (d *dimStat) CopyFrom(origin *dimStat) {
+	reportInterval := origin.rolling.Interval()
+	d.allocRolling(reportInterval)
+	d.rolling.CopyFrom(origin.rolling)
+	d.lastIntervalSum = origin.lastIntervalSum
+	d.lastDelta = origin.lastDelta
+}
+
+func (d *dimStat) allocRolling(reportInterval time.Duration) {
+	if d.rolling != nil {
+		d.rolling.Clear()
+		return
 	}
+	d.rolling = movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, reportInterval)
 }
 
 // HotPeerStat records each hot peer's statistics
@@ -134,7 +145,6 @@ func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Fi
 		zap.Float64s("loads-instant", stat.Loads),
 		zap.Int("hot-degree", stat.HotDegree),
 		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Duration("sum-interval", stat.getIntervalSum()),
 		zap.Bool("allow-inherited", stat.allowInherited),
 		zap.String("action-type", stat.actionType.String()),
 		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
@@ -177,13 +187,26 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 
 // Clone clones the HotPeerStat.
 func (stat *HotPeerStat) Clone() *HotPeerStat {
-	ret := *stat
-	ret.Loads = make([]float64, DimLen)
+	ret := hotPeerStatPool.GetPeerStat()
+	ret.LogDebug("clone hot peer stat")
+	hotPool.WithLabelValues("peer_scheduler", "get", "clone").Inc()
+	ret.StoreID = stat.StoreID
+	ret.RegionID = stat.RegionID
+	ret.HotDegree = stat.HotDegree
+	ret.AntiCount = stat.AntiCount
+	ret.lastTransferLeaderTime = stat.lastTransferLeaderTime
+	ret.isLeader = stat.isLeader
+	ret.actionType = stat.actionType
+	ret.inCold = stat.inCold
+	ret.allowInherited = stat.allowInherited
+	ret.stores = stat.stores
+	if len(ret.Loads) != DimLen {
+		ret.Loads = make([]float64, DimLen)
+	}
 	for i := 0; i < DimLen; i++ {
 		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
-	ret.rollingLoads = nil
-	return &ret
+	return ret
 }
 
 func (stat *HotPeerStat) isHot(thresholds []float64) bool {
@@ -210,4 +233,54 @@ func (stat *HotPeerStat) getIntervalSum() time.Duration {
 // GetStores returns the stores of all peers in the region.
 func (stat *HotPeerStat) GetStores() []uint64 {
 	return stat.stores
+}
+
+func (stat *HotPeerStat) updateLoads(kind RWType, loads []float64, interval uint64) {
+	if len(stat.Loads) != DimLen {
+		stat.Loads = make([]float64, DimLen)
+	}
+	for dim, k := range kind.RegionStats() {
+		if loads == nil {
+			stat.Loads[dim] = 0
+			continue
+		}
+		stat.Loads[dim] = loads[k] / float64(interval)
+	}
+}
+
+func (stat *HotPeerStat) updateStores(region *core.RegionInfo) {
+	peers := region.GetPeers()
+	if len(stat.stores) != len(peers) {
+		stat.stores = make([]uint64, len(peers))
+	}
+	for i, peer := range peers {
+		stat.stores[i] = peer.GetStoreId()
+	}
+}
+
+func (stat *HotPeerStat) Kind() RWType {
+	if len(stat.rollingLoads) == 0 {
+		return Write
+	}
+	k := stat.rollingLoads[0].rolling.Interval()
+	if k == ReadReportInterval {
+		return Read
+	}
+	return Write
+}
+
+// Log is used to output some info
+func (stat *HotPeerStat) LogDebug(str string) {
+	ids := make([]uint64, 0)
+	for _, ds := range stat.rollingLoads {
+		if ds == nil {
+			continue
+		}
+		ids = append(ids, ds.id)
+	}
+	log.Info(str,
+		zap.Uint64("region-id", stat.RegionID),
+		zap.Uint64("store-id", stat.StoreID),
+		zap.String("address", fmt.Sprintf("%p", stat)),
+		zap.Uint64s("ids", ids))
 }

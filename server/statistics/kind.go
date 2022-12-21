@@ -14,10 +14,6 @@
 
 package statistics
 
-import (
-	"github.com/tikv/pd/server/core"
-)
-
 const (
 	// BytePriority indicates hot-region-scheduler prefer byte dim
 	BytePriority = "byte"
@@ -226,17 +222,6 @@ func (rw RWType) DefaultAntiCount() int {
 	default: // Case Read
 		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
-}
-
-// GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
-func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
-	deltaLoads := peer.GetLoads()
-	interval := peer.GetInterval()
-	loads := make([]float64, DimLen)
-	for dim, k := range rw.RegionStats() {
-		loads[dim] = deltaLoads[k] / float64(interval)
-	}
-	return loads
 }
 
 // SetFullLoadRates set load rates to full as read or write type.

@@ -99,3 +99,22 @@ func (r *MedianFilter) Clone() *MedianFilter {
 		result:        r.result,
 	}
 }
+
+// CopyFrom copies the MedianFilter from origin.
+func (r *MedianFilter) CopyFrom(origin *MedianFilter) {
+	if r.records == nil {
+		r.records = make([]float64, len(origin.records))
+	}
+	if origin == nil {
+		r.Reset()
+		return
+	}
+	for i := range r.records {
+		r.records[i] = origin.records[i]
+	}
+	r.size = origin.size
+	r.count = origin.count
+	r.instantaneous = origin.instantaneous
+	r.isUpdated = origin.isUpdated
+	r.result = origin.result
+}

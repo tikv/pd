@@ -16,9 +16,7 @@ package statistics
 
 import (
 	"context"
-	"time"
 
-	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/core"
 )
 
@@ -188,19 +186,6 @@ func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
 	return w.writeCache.collectExpiredItems(region)
-}
-
-// GetFilledPeriod returns filled period.
-// This is used for mockcluster, for test purpose.
-func (w *HotCache) GetFilledPeriod(kind RWType) int {
-	var reportIntervalSecs int
-	switch kind {
-	case Write:
-		reportIntervalSecs = w.writeCache.kind.ReportInterval()
-	case Read:
-		reportIntervalSecs = w.readCache.kind.ReportInterval()
-	}
-	return movingaverage.NewTimeMedian(DefaultAotSize, rollingWindowsSize, time.Duration(reportIntervalSecs)*time.Second).GetFilledPeriod()
 }
 
 // GetThresholds returns thresholds.

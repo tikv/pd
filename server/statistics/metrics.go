@@ -178,6 +178,21 @@ var (
 			Name:      "hot_peers_summary",
 			Help:      "Hot peers summary for each store",
 		}, []string{"type", "store"})
+
+	hotPool = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "pool",
+			Help:      "hot pool",
+		}, []string{"type", "rw", "location"})
+	hotThreshold = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "threshold",
+			Help:      "hot pool",
+		}, []string{"type", "rw", "store"})
 )
 
 var (
@@ -205,4 +220,6 @@ func init() {
 	prometheus.MustRegister(regionAbnormalPeerDuration)
 	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 	prometheus.MustRegister(hotPeerSummary)
+	prometheus.MustRegister(hotPool)
+	prometheus.MustRegister(hotThreshold)
 }

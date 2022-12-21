@@ -23,18 +23,14 @@ import "time"
 type TimeMedian struct {
 	aot           *AvgOverTime
 	mf            *MedianFilter
-	aotSize       int
-	mfSize        int
 	instantaneous float64
 }
 
 // NewTimeMedian returns a TimeMedian with given size.
 func NewTimeMedian(aotSize, mfSize int, reportInterval time.Duration) *TimeMedian {
 	return &TimeMedian{
-		aot:     NewAvgOverTime(time.Duration(aotSize) * reportInterval),
-		mf:      NewMedianFilter(mfSize),
-		aotSize: aotSize,
-		mfSize:  mfSize,
+		aot: NewAvgOverTime(time.Duration(aotSize) * reportInterval),
+		mf:  NewMedianFilter(mfSize),
 	}
 }
 
@@ -57,23 +53,28 @@ func (t *TimeMedian) Set(avg float64) {
 	t.mf.Set(avg)
 }
 
-// GetFilledPeriod returns filled period.
-func (t *TimeMedian) GetFilledPeriod() int { // it is unrelated with mfSize
-	return t.aotSize
-}
-
 // GetInstantaneous returns instantaneous speed
 func (t *TimeMedian) GetInstantaneous() float64 {
 	return t.instantaneous
 }
 
-// Clone returns a copy of TimeMedian
-func (t *TimeMedian) Clone() *TimeMedian {
-	return &TimeMedian{
-		aot:           t.aot.Clone(),
-		mf:            t.mf.Clone(),
-		aotSize:       t.aotSize,
-		mfSize:        t.mfSize,
-		instantaneous: t.instantaneous,
+// CopyFrom copies the given TimeMedian.
+func (t *TimeMedian) CopyFrom(origin *TimeMedian) {
+	t.aot.CopyFrom(origin.aot)
+	t.mf.CopyFrom(origin.mf)
+	t.instantaneous = origin.instantaneous
+}
+
+// Interval returns the interval of the TimeMedian.
+func (t *TimeMedian) Interval() time.Duration {
+	if t == nil {
+		return 0
 	}
+	return time.Duration(t.aot.avgInterval) * time.Second
+}
+
+// Clear clears the TimeMedian.
+func (t *TimeMedian) Clear() {
+	t.aot.Clear()
+	t.mf.Reset()
 }

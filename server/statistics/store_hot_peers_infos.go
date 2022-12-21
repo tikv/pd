@@ -17,9 +17,73 @@ package statistics
 import (
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/tikv/pd/server/core"
 )
+
+// HotPeerStatPool is used to store the hot peer stat.
+type HotPeerStatPool struct {
+	readDim  *sync.Pool
+	writeDim *sync.Pool
+	hotPeer  *sync.Pool
+}
+
+func (h *HotPeerStatPool) GetDimStat(kind RWType) *dimStat {
+	switch kind {
+	case Read:
+		return h.readDim.Get().(*dimStat)
+	default: // Write:
+		return h.writeDim.Get().(*dimStat)
+	}
+}
+
+func (h *HotPeerStatPool) GetPeerStat() *HotPeerStat {
+	return h.hotPeer.Get().(*HotPeerStat)
+}
+
+func (h *HotPeerStatPool) Put(item *HotPeerStat) {
+	if item == nil {
+		return
+	}
+	dimStatPool := h.readDim
+	if item.Kind() == Write {
+		dimStatPool = h.writeDim
+	}
+	for i := range item.rollingLoads {
+		dimStatPool.Put(item.rollingLoads[i])
+	}
+	item.rollingLoads = nil
+	h.hotPeer.Put(item)
+}
+
+var hotPeerStatPool = &HotPeerStatPool{
+	hotPeer: &sync.Pool{
+		New: func() interface{} {
+			return new(HotPeerStat)
+		},
+	},
+	readDim: &sync.Pool{
+		New: func() interface{} {
+			return new(dimStat)
+		},
+	},
+	writeDim: &sync.Pool{
+		New: func() interface{} {
+			return new(dimStat)
+		},
+	},
+}
+
+// HotPeerStatGC collects the hot peer stat from schedulers.
+func HotPeerStatGC(stLoadInfos map[uint64]*StoreLoadDetail) {
+	for _, load := range stLoadInfos {
+		for _, hotPeer := range load.HotPeers {
+			hotPeerStatPool.Put(hotPeer)
+			hotPool.WithLabelValues("peer_scheduler", "put", "gc").Inc()
+		}
+	}
+}
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
@@ -155,15 +219,16 @@ func summaryStoresLoadByEngine(
 		}
 
 		// Find all hot peers first
-		var hotPeers []*HotPeerStat
-		peerLoadSum := make([]float64, DimLen)
 		// TODO: To remove `filterHotPeers`, we need to:
 		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
-		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(i)
+		peerLoadSum := make([]float64, DimLen)
+		peers := filterHotPeers(kind, storeHotPeers[id])
+		hotPeers := make([]*HotPeerStat, len(peers))
+		for i, peer := range peers {
+			for j := range peerLoadSum {
+				peerLoadSum[j] += peer.Loads[j]
 			}
-			hotPeers = append(hotPeers, peer.Clone())
+			hotPeers[i] = peer.Clone()
 		}
 		{
 			// Metric for debug.
