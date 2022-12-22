@@ -330,6 +330,7 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
 }
 
+// Stores contains store stats with lock.
 type Stores struct {
 	sync.RWMutex
 	stat []*pdpb.StoreStats
