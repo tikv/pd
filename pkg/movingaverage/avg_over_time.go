@@ -133,9 +133,9 @@ func (aot *AvgOverTime) GetIntervalSum() time.Duration {
 }
 
 // GetInstantaneous returns the value just added.
-func (r *AvgOverTime) GetInstantaneous() float64 {
-	if r.que.Len() == 0 || r.que.Back() == nil {
+func (aot *AvgOverTime) GetInstantaneous() float64 {
+	if aot.que.Len() == 0 || aot.que.Back() == nil {
 		return 0
 	}
-	return r.que.Back().(deltaWithInterval).delta
+	return aot.que.Back().(deltaWithInterval).delta
 }
