@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,7 +46,7 @@ const (
 	queryUnit            = 1 * units.KiB
 	regionReportInterval = 60 // 60s
 	storeReportInterval  = 10 // 10s
-	capacity             = 2 * units.TiB
+	capacity             = 4 * units.TiB
 )
 
 var clusterID uint64
@@ -332,49 +333,45 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 
 // Stores contains store stats with lock.
 type Stores struct {
-	sync.RWMutex
-	stat []*pdpb.StoreStats
+	stat []atomic.Value
 }
 
-func newStores(stores int) *Stores {
+func newStores(storeCount int) *Stores {
 	return &Stores{
-		stat: make([]*pdpb.StoreStats, stores+1),
+		stat: make([]atomic.Value, storeCount+1),
 	}
 }
 
 func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
-	s.RLock()
-	defer s.RUnlock()
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID]})
+	cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
 }
 
 func (s *Stores) update(rs *Regions) {
-	s.Lock()
-	defer s.Unlock()
+	stats := make([]*pdpb.StoreStats, len(s.stat))
 	now := uint64(time.Now().Unix())
-	for i := range s.stat {
-		s.stat[i] = &pdpb.StoreStats{
+	for i := range stats {
+		stats[i] = &pdpb.StoreStats{
 			StoreId:    uint64(i),
 			Capacity:   capacity,
 			Available:  capacity,
 			QueryStats: &pdpb.QueryStats{},
 			PeerStats:  make([]*pdpb.PeerStat, 0),
 			Interval: &pdpb.TimeInterval{
-				StartTimestamp: now,
-				EndTimestamp:   now + storeReportInterval,
+				StartTimestamp: now - storeReportInterval,
+				EndTimestamp:   now,
 			},
 		}
 	}
 	for _, region := range rs.regions {
 		for _, peer := range region.Region.Peers {
-			store := s.stat[peer.StoreId]
+			store := stats[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
 			store.Available -= region.ApproximateSize
 			store.RegionCount += 1
 		}
-		store := s.stat[region.Leader.StoreId]
+		store := stats[region.Leader.StoreId]
 		if region.BytesWritten != 0 {
 			store.BytesWritten += region.BytesWritten
 			store.BytesRead += region.BytesRead
@@ -391,6 +388,9 @@ func (s *Stores) update(rs *Regions) {
 				QueryStats:   region.QueryStats,
 			})
 		}
+	}
+	for i := range stats {
+		s.stat[i].Store(stats[i])
 	}
 }
 
@@ -477,7 +477,7 @@ func main() {
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg.Replica)
-			stores.update(regions)
+			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
 			switch sig {
