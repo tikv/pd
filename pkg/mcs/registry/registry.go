@@ -63,8 +63,9 @@ func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Ser
 			continue
 		}
 		l := builder(srv)
+		r.services[name] = l
 		l.RegisterGRPCService(g)
-		log.Info("gRPC service register success", zap.String("service-name", name))
+		log.Info("gRPC service registered successfully", zap.String("service-name", name))
 	}
 }
 
@@ -77,8 +78,9 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string
 			continue
 		}
 		l := builder(srv)
+		r.services[name] = l
 		l.RegisterRESTHandler(h)
-		log.Info("restful API service register success", zap.String("service-name", name))
+		log.Info("restful API service registered successfully", zap.String("service-name", name))
 	}
 }
 

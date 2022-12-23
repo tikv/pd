@@ -12,5 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package mcs used to implement the core logic of the external services which rely on the PD banckend provider.
-package mcs
+package install
+
+import (
+	"github.com/tikv/pd/pkg/mcs/registry"
+	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+
+	// init API gorup
+	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1"
+)
+
+func init() {
+	Install(registry.ServerServiceRegistry)
+}
+
+// Install registers the API group and grpc service.
+func Install(register *registry.ServiceRegistry) {
+	register.RegisterService("ResourceManager", rm_server.NewService)
+}
