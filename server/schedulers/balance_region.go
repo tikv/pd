@@ -65,6 +65,18 @@ const (
 	BalanceRegionType = "balance-region"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	balanceRegionScheduleCounter      = balanceRegionCounter.WithLabelValues(BalanceRegionName, "schedule")
+	balanceRegionNoRegionCounter      = balanceRegionCounter.WithLabelValues(BalanceRegionName, "no-region")
+	balanceRegionHotCounter           = balanceRegionCounter.WithLabelValues(BalanceRegionName, "region-hot")
+	balanceRegionNoLeaderCounter      = balanceRegionCounter.WithLabelValues(BalanceRegionName, "no-leader")
+	balanceRegionNewOpCounter         = balanceRegionCounter.WithLabelValues(BalanceRegionName, "new-operator")
+	balanceRegionSkipCounter          = balanceRegionCounter.WithLabelValues(BalanceRegionName, "skip")
+	balanceRegionCreateOpFailCounter  = balanceRegionCounter.WithLabelValues(BalanceRegionName, "create-operator-fail")
+	balanceRegionNoReplacementCounter = balanceRegionCounter.WithLabelValues(BalanceRegionName, "no-replacement")
+)
+
 type balanceRegionSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
@@ -145,7 +157,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	balanceRegionScheduleCounter.Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
@@ -208,7 +220,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 					append(baseRegionFilters, pendingFilter)...)
 			}
 			if solver.region == nil {
-				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
+				balanceRegionNoRegionCounter.Inc()
 				continue
 			}
 			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.region.GetID()))
@@ -218,7 +230,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				if collector != nil {
 					collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
 				}
-				schedulerCounter.WithLabelValues(s.GetName(), "region-hot").Inc()
+				balanceRegionHotCounter.Inc()
 				continue
 			}
 			// Check region leader
@@ -227,7 +239,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 				if collector != nil {
 					collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
 				}
-				schedulerCounter.WithLabelValues(s.GetName(), "no-leader").Inc()
+				balanceRegionNoLeaderCounter.Inc()
 				continue
 			}
 			solver.step++
@@ -236,7 +248,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
 				s.retryQuota.ResetLimit(solver.source)
-				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+				op.Counters = append(op.Counters, balanceRegionNewOpCounter)
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
 			solver.step--
@@ -276,7 +288,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !solver.shouldBalance(s.GetName()) {
-			schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+			balanceRegionSkipCounter.Inc()
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 			}
@@ -288,7 +300,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		solver.step++
 		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
+			balanceRegionCreateOpFailCounter.Inc()
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
 			}
@@ -302,6 +314,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			// todo: pre-allocate gauge metrics
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
@@ -310,7 +323,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		return op
 	}
 
-	schedulerCounter.WithLabelValues(s.GetName(), "no-replacement").Inc()
+	balanceRegionNoReplacementCounter.Inc()
 	if len(candidates.Stores) != 0 {
 		solver.step--
 	}

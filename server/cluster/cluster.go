@@ -64,8 +64,12 @@ var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
-	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
-	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
+	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
+	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
+	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
+	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -795,7 +799,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	region := c.core.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
+		regionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	// use CAS to update the bucket information.
@@ -806,7 +810,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
-			bucketEventCounter.WithLabelValues("version_not_match").Inc()
+			versionNotMatchCounter.Inc()
 			return nil
 		}
 		failpoint.Inject("concurrentBucketHeartbeat", func() {
@@ -816,7 +820,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 			return nil
 		}
 	}
-	bucketEventCounter.WithLabelValues("update_failed").Inc()
+	updateFailedCounter.Inc()
 	return nil
 }
 

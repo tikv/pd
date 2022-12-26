@@ -39,6 +39,13 @@ const (
 	transferWitnessLeaderRecvMaxRegionSize = 1000
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	transferWitnessLeaderCounter              = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "schedule")
+	transferWitnessLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "new-operator")
+	transferWitnessLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "no-target-store")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(TransferWitnessLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -82,7 +89,7 @@ func (s *trasferWitnessLeaderScheduler) IsScheduleAllowed(cluster schedule.Clust
 }
 
 func (s *trasferWitnessLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	transferWitnessLeaderCounter.Inc()
 	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, transferWitnessLeaderBatchSize), nil
 }
 
@@ -98,7 +105,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name,
 			}
 			if op != nil {
 				op.SetPriorityLevel(core.Urgent)
-				op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
+				op.Counters = append(op.Counters, transferWitnessLeaderNewOperatorCounter)
 				ops = append(ops, op)
 			}
 		default:
@@ -124,7 +131,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ 
 	targets := candidates.PickAll()
 	// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
 	if target == nil {
-		schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
+		transferWitnessLeaderNoTargetStoreCounter.Inc()
 		return nil, errors.New("no target store to schedule")
 	}
 	targetIDs := make([]uint64, 0, len(targets))

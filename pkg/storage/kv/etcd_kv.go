@@ -34,6 +34,14 @@ const (
 	slowRequestTime = time.Second
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	txnFailedCounter       = txnCounter.WithLabelValues("failed")
+	txnSuccessCounter      = txnCounter.WithLabelValues("success")
+	txnFailedDurationHist  = txnDuration.WithLabelValues("failed")
+	txnSuccessDurationHist = txnDuration.WithLabelValues("success")
+)
+
 type etcdKVBase struct {
 	client   *clientv3.Client
 	rootPath string
@@ -162,12 +170,14 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 			zap.Duration("cost", cost),
 			errs.ZapError(err))
 	}
-	label := "success"
+
 	if err != nil {
-		label = "failed"
+		txnFailedCounter.Inc()
+		txnFailedDurationHist.Observe(cost.Seconds())
+	} else {
+		txnSuccessCounter.Inc()
+		txnSuccessDurationHist.Observe(cost.Seconds())
 	}
-	txnCounter.WithLabelValues(label).Inc()
-	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.WithStack(err)
 }

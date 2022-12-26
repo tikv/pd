@@ -45,6 +45,12 @@ const (
 	GrantHotRegionType = "grant-hot-region"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	grantHotRegionCounter     = schedulerCounter.WithLabelValues(GrantHotRegionName, "schedule")
+	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(GrantHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -261,7 +267,7 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 }
 
 func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	grantHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
 	return s.dispatch(rw, cluster), nil
@@ -308,7 +314,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcSt
 			return []*operator.Operator{op}
 		}
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+	grantHotRegionSkipCounter.Inc()
 	return nil
 }
 

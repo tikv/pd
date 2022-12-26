@@ -53,6 +53,8 @@ const (
 	finished
 )
 
+// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+
 func responseToTask(engine *RaftEngine, resp *pdpb.RegionHeartbeatResponse) *Task {
 	var (
 		regionID = resp.GetRegionId()

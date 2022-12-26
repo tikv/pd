@@ -57,6 +57,17 @@ const (
 	transferOut = "transfer-out"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	balanceLeaderScheduleCounter         = schedulerCounter.WithLabelValues(BalanceLeaderName, "schedule")
+	balanceLeaderNoLeaderRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-leader-region")
+	balanceLeaderRegionHotCounter        = schedulerCounter.WithLabelValues(BalanceLeaderName, "region-hot")
+	balanceLeaderNoTargetStoreCounter    = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-target-store")
+	balanceLeaderNoFollowerRegionCounter = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
+	balanceLeaderSkipCounter             = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
+	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -354,7 +365,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		collector = plan.NewCollector(basePlan)
 	}
 	batch := l.conf.Batch
-	schedulerCounter.WithLabelValues(l.GetName(), "schedule").Inc()
+	balanceLeaderScheduleCounter.Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
@@ -456,7 +467,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "no-leader-region").Inc()
+		balanceLeaderNoLeaderRegionCounter.Inc()
 		return nil
 	}
 	if solver.IsRegionHot(solver.region) {
@@ -464,7 +475,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		if collector != nil {
 			collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
 		}
-		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
+		balanceLeaderRegionHotCounter.Inc()
 		return nil
 	}
 	solver.step++
@@ -488,7 +499,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		}
 	}
 	log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-	schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
+	balanceLeaderNoTargetStoreCounter.Inc()
 	return nil
 }
 
@@ -500,12 +511,12 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.TargetStoreID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "no-follower-region").Inc()
+		balanceLeaderNoFollowerRegionCounter.Inc()
 		return nil
 	}
 	if solver.IsRegionHot(solver.region) {
 		log.Debug("region is hot region, ignore it", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "region-hot").Inc()
+		balanceLeaderRegionHotCounter.Inc()
 		return nil
 	}
 	leaderStoreID := solver.region.GetLeader().GetStoreId()
@@ -516,7 +527,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 			zap.Uint64("region-id", solver.region.GetID()),
 			zap.Uint64("store-id", leaderStoreID),
 		)
-		schedulerCounter.WithLabelValues(l.GetName(), "no-leader").Inc()
+		balanceLeaderNoLeaderRegionCounter.Inc()
 		return nil
 	}
 	finalFilters := l.filters
@@ -529,7 +540,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		PickFirst()
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-		schedulerCounter.WithLabelValues(l.GetName(), "no-target-store").Inc()
+		balanceLeaderNoTargetStoreCounter.Inc()
 		return nil
 	}
 	return l.createOperator(solver, collector)
@@ -544,7 +555,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	defer func() { solver.step-- }()
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(l.GetName()), solver.targetStoreScore(l.GetName())
 	if !solver.shouldBalance(l.GetName()) {
-		schedulerCounter.WithLabelValues(l.GetName(), "skip").Inc()
+		balanceLeaderSkipCounter.Inc()
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}
@@ -561,10 +572,11 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 		return nil
 	}
 	op.Counters = append(op.Counters,
-		schedulerCounter.WithLabelValues(l.GetName(), "new-operator"),
+		balanceLeaderNewOpCounter,
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(l.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
+		// todo: pre-allocate gauge metrics
 		l.counter.WithLabelValues("move-leader", solver.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", solver.TargetMetricLabel()+"-in"),
 	)

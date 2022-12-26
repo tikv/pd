@@ -64,6 +64,7 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance region scheduler.",
 	}, []string{"type", "store"})
 
+// todo: pre-allocate gauge metrics
 var hotSchedulerResultCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -80,6 +81,7 @@ var balanceDirectionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of direction of balance related schedulers.",
 	}, []string{"type", "source", "target"})
 
+// todo: pre-allocate gauge metrics
 var hotDirectionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",

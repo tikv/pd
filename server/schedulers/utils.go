@@ -39,6 +39,8 @@ const (
 	defaultRetryQuotaAttenuation         = 2
 )
 
+// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+
 type solver struct {
 	*balanceSchedulerPlan
 	schedule.Cluster
