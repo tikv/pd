@@ -182,6 +182,8 @@ func (rw RWType) String() string {
 	return "unimplemented"
 }
 
+var RWTypes = []string{Read.String(), Write.String()}
+
 var (
 	writeRegionStats = []RegionStatKind{RegionWriteBytes, RegionWriteKeys, RegionWriteQueryNum}
 	readRegionStats  = []RegionStatKind{RegionReadBytes, RegionReadKeys, RegionReadQueryNum}
@@ -263,6 +265,7 @@ const (
 	Add ActionType = iota
 	Remove
 	Update
+	ActionTypeLen
 )
 
 func (t ActionType) String() string {

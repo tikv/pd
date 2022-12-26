@@ -1000,7 +1000,7 @@ func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error
 		return nil, nil
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, storage.ReadType.String())
+	return h.packHotRegions(hotReadPeerRegions, statistics.Read.String())
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
@@ -1010,7 +1010,7 @@ func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, erro
 		return nil, nil
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, storage.WriteType.String())
+	return h.packHotRegions(hotWritePeerRegions, statistics.Write.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {

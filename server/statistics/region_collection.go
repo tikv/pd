@@ -101,6 +101,16 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	return res
 }
 
+// GetStats returns stats, only used for test.
+func (r *RegionStatistics) GetStats() map[RegionStatisticType]map[uint64]*RegionInfo {
+	return r.stats
+}
+
+// GetOfflineStats returns offline stats, only used for test.
+func (r *RegionStatistics) GetOfflineStats() map[RegionStatisticType]map[uint64]*core.RegionInfo {
+	return r.offlineStats
+}
+
 // IsRegionStatsType returns whether the status of the region is the given type.
 func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisticType) bool {
 	r.RLock()

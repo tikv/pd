@@ -24,8 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/server/statistics"
 )
 
 type MockPackHotRegionInfo struct {
@@ -65,7 +70,7 @@ func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Ti
 			PeerID:        rand.Uint64(),
 			IsLeader:      i%2 == 0,
 			IsLearner:     i%2 == 0,
-			HotRegionType: HotRegionTypes[i%2],
+			HotRegionType: statistics.RWTypes[i%2],
 			HotDegree:     int64(rand.Int() % 100),
 			FlowBytes:     rand.Float64() * 100,
 			KeyRate:       rand.Float64() * 100,
@@ -115,7 +120,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: statistics.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -123,7 +128,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: statistics.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -131,7 +136,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: statistics.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -149,12 +154,12 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      4,
 			StoreID:       1,
-			HotRegionType: WriteType.String(),
+			HotRegionType: statistics.Write.String(),
 		},
 	}
 	store.pullHotRegionInfo()
 	store.flush()
-	iter := store.NewIterator([]string{ReadType.String()},
+	iter := store.NewIterator([]string{statistics.Read.String()},
 		now.UnixNano()/int64(time.Millisecond),
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
@@ -182,7 +187,7 @@ func TestHotRegionDelete(t *testing.T) {
 		historyHotRegion := HistoryHotRegion{
 			UpdateTime:    deleteDate.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: statistics.Read.String(),
 		}
 		historyHotRegions = append(historyHotRegions, historyHotRegion)
 		deleteDate = deleteDate.AddDate(0, 0, -1)
@@ -191,7 +196,7 @@ func TestHotRegionDelete(t *testing.T) {
 	store.pullHotRegionInfo()
 	store.flush()
 	store.delete(defaultRemainDay)
-	iter := store.NewIterator(HotRegionTypes,
+	iter := store.NewIterator(statistics.RWTypes,
 		deleteDate.UnixNano()/int64(time.Millisecond),
 		time.Now().UnixNano()/int64(time.Millisecond))
 	num := 0
@@ -258,7 +263,7 @@ func BenchmarkRead(b *testing.B) {
 	startTime := endTime
 	endTime = newTestHotRegions(regionStorage, packHotRegionInfo, 144*7, 1000, endTime)
 	b.ResetTimer()
-	iter := regionStorage.NewIterator(HotRegionTypes, startTime.UnixNano()/int64(time.Millisecond),
+	iter := regionStorage.NewIterator(statistics.RWTypes, startTime.UnixNano()/int64(time.Millisecond),
 		endTime.AddDate(0, 1, 0).UnixNano()/int64(time.Millisecond))
 	next, err := iter.Next()
 	for next != nil && err == nil {
@@ -323,4 +328,154 @@ func DirSizeB(path string) (int64, error) {
 		return err
 	})
 	return size, err
+}
+
+func TestRegionStatistics(t *testing.T) {
+	re := require.New(t)
+	store := NewStorageWithMemoryBackend()
+	manager := placement.NewRuleManager(store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"})
+	re.NoError(err)
+	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
+	peers := []*metapb.Peer{
+		{Id: 5, StoreId: 1},
+		{Id: 6, StoreId: 2},
+		{Id: 4, StoreId: 3},
+		{Id: 8, StoreId: 7, Role: metapb.PeerRole_Learner},
+	}
+
+	metaStores := []*metapb.Store{
+		{Id: 1, Address: "mock://tikv-1"},
+		{Id: 2, Address: "mock://tikv-2"},
+		{Id: 3, Address: "mock://tikv-3"},
+		{Id: 7, Address: "mock://tikv-7"},
+	}
+
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
+	for _, m := range metaStores {
+		s := core.NewStoreInfo(m)
+		stores = append(stores, s)
+	}
+
+	downPeers := []*pdpb.PeerStats{
+		{Peer: peers[0], DownSeconds: 3608},
+		{Peer: peers[1], DownSeconds: 3608},
+	}
+
+	store3 := stores[3].Clone(core.OfflineStore(false))
+	stores[3] = store3
+	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
+	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
+	region1 := core.NewRegionInfo(r1, peers[0])
+	region2 := core.NewRegionInfo(r2, peers[0])
+	regionStats := statistics.NewRegionStatistics(opt, manager, nil)
+	regionStats.Observe(region1, stores)
+	re.Len(regionStats.GetStats()[statistics.ExtraPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.LearnerPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.EmptyRegion], 1)
+	re.Len(regionStats.GetStats()[statistics.UndersizedRegion], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.ExtraPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.LearnerPeer], 1)
+
+	region1 = region1.Clone(
+		core.WithDownPeers(downPeers),
+		core.WithPendingPeers(peers[0:1]),
+		core.SetApproximateSize(144),
+	)
+	regionStats.Observe(region1, stores)
+	re.Len(regionStats.GetStats()[statistics.ExtraPeer], 1)
+	re.Empty(regionStats.GetStats()[statistics.MissPeer])
+	re.Len(regionStats.GetStats()[statistics.DownPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.PendingPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.LearnerPeer], 1)
+	re.Empty(regionStats.GetStats()[statistics.EmptyRegion])
+	re.Len(regionStats.GetStats()[statistics.OversizedRegion], 1)
+	re.Empty(regionStats.GetStats()[statistics.UndersizedRegion])
+	re.Len(regionStats.GetOfflineStats()[statistics.ExtraPeer], 1)
+	re.Empty(regionStats.GetOfflineStats()[statistics.MissPeer])
+	re.Len(regionStats.GetOfflineStats()[statistics.DownPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.PendingPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.LearnerPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.OfflinePeer], 1)
+
+	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
+	regionStats.Observe(region2, stores[0:2])
+	re.Len(regionStats.GetStats()[statistics.ExtraPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.MissPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.DownPeer], 2)
+	re.Len(regionStats.GetStats()[statistics.PendingPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.LearnerPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.OversizedRegion], 1)
+	re.Len(regionStats.GetStats()[statistics.UndersizedRegion], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.ExtraPeer], 1)
+	re.Empty(regionStats.GetOfflineStats()[statistics.MissPeer])
+	re.Len(regionStats.GetOfflineStats()[statistics.DownPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.PendingPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.LearnerPeer], 1)
+	re.Len(regionStats.GetOfflineStats()[statistics.OfflinePeer], 1)
+
+	region1 = region1.Clone(core.WithRemoveStorePeer(7))
+	regionStats.Observe(region1, stores[0:3])
+	re.Empty(regionStats.GetStats()[statistics.ExtraPeer])
+	re.Len(regionStats.GetStats()[statistics.MissPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.DownPeer], 2)
+	re.Len(regionStats.GetStats()[statistics.PendingPeer], 1)
+	re.Empty(regionStats.GetStats()[statistics.LearnerPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.ExtraPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.MissPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.DownPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.PendingPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.LearnerPeer])
+	re.Empty(regionStats.GetOfflineStats()[statistics.OfflinePeer])
+
+	store3 = stores[3].Clone(core.UpStore())
+	stores[3] = store3
+	regionStats.Observe(region1, stores)
+	re.Empty(regionStats.GetStats()[statistics.OfflinePeer])
+}
+
+func TestRegionStatisticsWithPlacementRule(t *testing.T) {
+	re := require.New(t)
+	store := NewStorageWithMemoryBackend()
+	manager := placement.NewRuleManager(store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"})
+	re.NoError(err)
+	opt := config.NewTestOptions()
+	opt.SetPlacementRuleEnabled(true)
+	peers := []*metapb.Peer{
+		{Id: 5, StoreId: 1},
+		{Id: 6, StoreId: 2},
+		{Id: 4, StoreId: 3},
+		{Id: 8, StoreId: 7, Role: metapb.PeerRole_Learner},
+	}
+	metaStores := []*metapb.Store{
+		{Id: 1, Address: "mock://tikv-1"},
+		{Id: 2, Address: "mock://tikv-2"},
+		{Id: 3, Address: "mock://tikv-3"},
+		{Id: 7, Address: "mock://tikv-7"},
+	}
+
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
+	for _, m := range metaStores {
+		s := core.NewStoreInfo(m)
+		stores = append(stores, s)
+	}
+	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb")}
+	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff")}
+	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh")}
+	region2 := core.NewRegionInfo(r2, peers[0])
+	region3 := core.NewRegionInfo(r3, peers[0])
+	region4 := core.NewRegionInfo(r4, peers[0])
+	regionStats := statistics.NewRegionStatistics(opt, manager, nil)
+	// r2 didn't match the rules
+	regionStats.Observe(region2, stores)
+	re.Len(regionStats.GetStats()[statistics.MissPeer], 1)
+	regionStats.Observe(region3, stores)
+	// r3 didn't match the rules
+	re.Len(regionStats.GetStats()[statistics.ExtraPeer], 1)
+	regionStats.Observe(region4, stores)
+	// r4 match the rules
+	re.Len(regionStats.GetStats()[statistics.MissPeer], 1)
+	re.Len(regionStats.GetStats()[statistics.ExtraPeer], 1)
 }

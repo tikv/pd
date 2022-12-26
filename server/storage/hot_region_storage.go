@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -105,32 +106,6 @@ const (
 	// delete will run at this o`clock.
 	defaultDeleteTime = 4
 )
-
-// HotRegionType stands for hot type.
-type HotRegionType uint32
-
-// Flags for flow.
-const (
-	WriteType HotRegionType = iota
-	ReadType
-)
-
-// HotRegionTypes stands for hot type.
-var HotRegionTypes = []string{
-	WriteType.String(),
-	ReadType.String(),
-}
-
-// String return HotRegionType in string format.
-func (h HotRegionType) String() string {
-	switch h {
-	case WriteType:
-		return "write"
-	case ReadType:
-		return "read"
-	}
-	return "unimplemented"
-}
 
 // NewHotRegionsStorage create storage to store hot regions info.
 func NewHotRegionsStorage(
@@ -258,14 +233,14 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotReadRegions, ReadType.String()); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, statistics.Read.String()); err != nil {
 		return err
 	}
 	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, WriteType.String())
+	err = h.packHistoryHotRegions(historyHotWriteRegions, statistics.Write.String())
 	return err
 }
 
@@ -348,7 +323,7 @@ func (h *HotRegionStorage) delete(reservedDays int) error {
 	defer h.mu.Unlock()
 	db := h.LevelDBKV
 	batch := new(leveldb.Batch)
-	for _, hotRegionType := range HotRegionTypes {
+	for _, hotRegionType := range statistics.RWTypes {
 		startKey := HotRegionStorePath(hotRegionType, 0, 0)
 		endTime := time.Now().AddDate(0, 0, 0-reservedDays).UnixNano() / int64(time.Millisecond)
 		endKey := HotRegionStorePath(hotRegionType, endTime, math.MaxInt64)

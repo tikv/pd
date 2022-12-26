@@ -199,7 +199,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 }
 
 func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
-	var hotRegionTypes = storage.HotRegionTypes
+	hotRegionTypes := statistics.RWTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
 	}
