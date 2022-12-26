@@ -1488,7 +1488,7 @@ func opCounter(typ string) prometheus.Counter {
 		return hotSchedulerMoveLeaderCounter
 	case "move-peer":
 		return hotSchedulerMovePeerCounter
-	default: //transfer-leader
+	default: // transfer-leader
 		return hotSchedulerTransferLeaderCounter
 	}
 }
