@@ -20,6 +20,11 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
+var (
+	readTaskMetrics  = hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String())
+	writeTaskMetrics = hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String())
+)
+
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
@@ -105,8 +110,8 @@ func (w *HotCache) GetHotPeerStat(kind RWType, regionID, storeID uint64) *HotPee
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	writeMetricsTask := newCollectMetricsTask("write")
-	readMetricsTask := newCollectMetricsTask("read")
+	writeMetricsTask := newCollectMetricsTask(Write.String())
+	readMetricsTask := newCollectMetricsTask(Read.String())
 	w.CheckWriteAsync(writeMetricsTask)
 	w.CheckReadAsync(readMetricsTask)
 }
@@ -114,16 +119,6 @@ func (w *HotCache) CollectMetrics() {
 // ResetMetrics resets the hot cache metrics.
 func (w *HotCache) ResetMetrics() {
 	hotCacheStatusGauge.Reset()
-}
-
-func incMetrics(name string, storeID uint64, kind RWType) {
-	store := storeTag(storeID)
-	switch kind {
-	case Write:
-		hotCacheStatusGauge.WithLabelValues(name, store, "write").Inc()
-	case Read:
-		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
-	}
 }
 
 func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
@@ -141,7 +136,7 @@ func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.readCache)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String()).Set(float64(len(w.readCache.taskQueue)))
+		readTaskMetrics.Set(float64(len(w.readCache.taskQueue)))
 	}
 }
 
@@ -149,7 +144,7 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.writeCache)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String()).Set(float64(len(w.writeCache.taskQueue)))
+		writeTaskMetrics.Set(float64(len(w.writeCache.taskQueue)))
 	}
 }
 
