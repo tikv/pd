@@ -76,7 +76,7 @@ func init() {
 		if conf.Batch == 0 {
 			conf.Batch = balanceWitnessBatchSize
 		}
-		return newbalanceWitnessScheduler(opController, conf), nil
+		return newBalanceWitnessScheduler(opController, conf), nil
 	})
 }
 
@@ -180,9 +180,9 @@ type balanceWitnessScheduler struct {
 	filterCounter *filter.Counter
 }
 
-// newbalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
+// newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
 // each store balanced.
-func newbalanceWitnessScheduler(opController *schedule.OperatorController, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
+func newBalanceWitnessScheduler(opController *schedule.OperatorController, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,

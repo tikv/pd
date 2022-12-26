@@ -28,8 +28,6 @@ import (
 
 type regionItem struct {
 	*RegionInfo
-	// it may be 0 if it's not in store dedicated region tree
-	storeID uint64
 }
 
 // GetStartKey returns the start key of the region.
@@ -111,7 +109,7 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // insert the region.
 func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
 	region := item.RegionInfo
-	t.totalSize += region.GetStorePeerApproximateSize(item.storeID)
+	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
@@ -132,7 +130,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 			zap.Uint64("region-id", old.GetID()),
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		t.totalSize -= old.GetStorePeerApproximateSize(overlap.storeID)
+		t.totalSize -= old.approximateSize
 		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
 		t.totalWriteBytesRate -= regionWriteBytesRate
 		t.totalWriteKeysRate -= regionWriteKeysRate
@@ -143,12 +141,12 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 
 // updateStat is used to update statistics when regionItem.RegionInfo is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
-	t.totalSize += region.GetApproximateSize()
+	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 
-	t.totalSize -= origin.GetApproximateSize()
+	t.totalSize -= origin.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
@@ -167,7 +165,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 		return
 	}
 
-	t.totalSize -= result.GetStorePeerApproximateSize(result.storeID)
+	t.totalSize -= result.GetApproximateSize()
 	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate

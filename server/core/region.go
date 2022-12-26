@@ -944,7 +944,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		}
 	}
 
-	item := &regionItem{region, 0}
+	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
@@ -954,7 +954,6 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		item.storeID = storeID
 		store.update(item, false)
 	}
 
@@ -1455,8 +1454,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}, 0}
-	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}, 0}
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
 	// it returns 0 if startKey is nil.
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
