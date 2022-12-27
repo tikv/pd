@@ -166,23 +166,23 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 
 /// REST API and GRPC services relative Utils.
 
-// Serviceregistry used to install the registered services, including gRPC and HTTP API.
-type Serviceregistry interface {
+// ServiceRegistry used to install the registered services, including gRPC and HTTP API.
+type ServiceRegistry interface {
 	InstallAllGRPCServices(srv *Server, g *grpc.Server)
 	InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler)
 }
 
-// NewServiceregistry is a hook for msc code which implements the micro service.
-var NewServiceregistry = func() Serviceregistry {
-	return dummyServiceregistry{}
+// NewServiceRegistry is a hook for msc code which implements the micro service.
+var NewServiceRegistry = func() ServiceRegistry {
+	return dummyServiceRegistry{}
 }
 
-type dummyServiceregistry struct{}
+type dummyServiceRegistry struct{}
 
-func (d dummyServiceregistry) InstallAllGRPCServices(srv *Server, g *grpc.Server) {
+func (d dummyServiceRegistry) InstallAllGRPCServices(srv *Server, g *grpc.Server) {
 }
 
-func (d dummyServiceregistry) InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler) {
+func (d dummyServiceRegistry) InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler) {
 }
 
 // APIServiceGroup used to register the HTTP REST API.
