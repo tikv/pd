@@ -348,27 +348,30 @@ func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 
 // gets the storeIDs, including old region and new region
 func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
-	storeIDs := make(map[uint64]struct{})
 	regionPeers := region.GetPeers()
 	ret := make([]uint64, 0, len(regionPeers))
+	isInSlice := func(id uint64) bool {
+		for _, storeID := range ret {
+			if storeID == id {
+				return true
+			}
+		}
+		return false
+	}
 	// old stores
-	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
+	if ids, ok := f.storesOfRegion[region.GetID()]; ok {
 		for storeID := range ids {
-			storeIDs[storeID] = struct{}{}
 			ret = append(ret, storeID)
 		}
 	}
-
 	// new stores
 	for _, peer := range regionPeers {
 		storeID := peer.GetStoreId()
-		if _, ok := storeIDs[storeID]; !ok {
-			storeIDs[storeID] = struct{}{}
-			ret = append(ret, storeID)
+		if isInSlice(storeID) {
+			continue
 		}
+		ret = append(ret, storeID)
 	}
-
 	return ret
 }
 
