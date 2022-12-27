@@ -67,6 +67,8 @@ var MinHotThresholds = [RegionStatCount]float64{
 type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
+	topNLen     int
+	metrics     [DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -287,15 +289,12 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 	return
 }
 
-func (f *hotPeerCache) collectMetrics(typ string) {
-	for storeID, peers := range f.peersOfStore {
-		store := storeTag(storeID)
-		thresholds := f.calcHotThresholds(storeID)
-		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
-		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
-		// for compatibility
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
+func (f *hotPeerCache) collectMetrics() {
+	for _, thresholds := range f.thresholdsOfStore {
+		thresholds.metrics[ByteDim].Set(thresholds.rates[ByteDim])
+		thresholds.metrics[KeyDim].Set(thresholds.rates[KeyDim])
+		thresholds.metrics[QueryDim].Set(thresholds.rates[QueryDim])
+		thresholds.metrics[DimLen].Set(float64(thresholds.topNLen))
 	}
 }
 
@@ -309,25 +308,40 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
+	// check whether the thresholds is updated recently
 	t, ok := f.thresholdsOfStore[storeID]
 	if ok && time.Since(t.updatedTime) <= ThresholdsUpdateInterval {
 		return t.rates
 	}
-	t = &thresholds{
-		updatedTime: time.Now(),
-		rates:       make([]float64, DimLen),
+	// if no exist, or the thresholds is outdated, we need to update it.
+	if !ok {
+		store := storeTag(storeID)
+		kind := f.kind.String()
+		t = &thresholds{
+			rates: make([]float64, DimLen),
+			metrics: [DimLen + 1]prometheus.Gauge{
+				ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
+				KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
+				QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
+				DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
+			},
+		}
 	}
+	// update the thresholds
 	f.thresholdsOfStore[storeID] = t
+	t.updatedTime = time.Now()
 	statKinds := f.kind.RegionStats()
 	for dim, kind := range statKinds {
 		t.rates[dim] = MinHotThresholds[kind]
 	}
-	tn, ok := f.peersOfStore[storeID]
-	if !ok || tn.Len() < TopNN {
-		return t.rates
-	}
-	for i := range t.rates {
-		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+	if tn, ok := f.peersOfStore[storeID]; ok {
+		t.topNLen = tn.Len()
+		if t.topNLen < TopNN {
+			return t.rates
+		}
+		for i := range t.rates {
+			t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+		}
 	}
 	return t.rates
 }

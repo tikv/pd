@@ -110,10 +110,8 @@ func (w *HotCache) GetHotPeerStat(kind RWType, regionID, storeID uint64) *HotPee
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	writeMetricsTask := newCollectMetricsTask(Write.String())
-	readMetricsTask := newCollectMetricsTask(Read.String())
-	w.CheckWriteAsync(writeMetricsTask)
-	w.CheckReadAsync(readMetricsTask)
+	w.CheckWriteAsync(newCollectMetricsTask())
+	w.CheckReadAsync(newCollectMetricsTask())
 }
 
 // ResetMetrics resets the hot cache metrics.
