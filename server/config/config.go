@@ -61,6 +61,7 @@ type Config struct {
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
 	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
+	ServiceModes        string `toml:"service-modes" json:"service-modes"`
 
 	Name              string `toml:"name" json:"name"`
 	DataDir           string `toml:"data-dir" json:"data-dir"`
@@ -185,6 +186,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
 	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
+	fs.StringVar(&cfg.ServiceModes, "service-modes", allModes(), "service modes support to start separately (default 'all')")
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
@@ -201,6 +203,33 @@ func NewConfig() *Config {
 	return cfg
 }
 
+// ServiceMode is the mode of the service.
+type ServiceMode int
+
+const (
+	APIService ServiceMode = iota
+	TSOService
+	ResourceManagerService
+	SchedulerService
+	ServiceModeCount
+)
+
+// String
+func (s ServiceMode) String() string {
+	switch s {
+	case APIService:
+		return "api"
+	case TSOService:
+		return "tso"
+	case ResourceManagerService:
+		return "resource"
+	case SchedulerService:
+		return "scheduler"
+	default:
+		return "unknown"
+	}
+}
+
 const (
 	defaultLeaderLease             = int64(3)
 	defaultCompactionMode          = "periodic"
@@ -215,6 +244,7 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
+	defaultMode                = APIService.String()
 	defaultInitialClusterState = embed.ClusterStateFlagNew
 	defaultInitialClusterToken = "pd-cluster"
 
@@ -524,6 +554,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
+	adjustString(&c.ServiceModes, allModes())
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381

@@ -111,3 +111,44 @@ func parseUrls(s string) ([]url.URL, error) {
 
 	return urls, nil
 }
+
+func parseMode(modes string) ([]ServiceMode, error) {
+	items := strings.Split(modes, ",")
+	rets := make([]ServiceMode, 0)
+	for _, item := range items {
+		ret, err := parseServiceMode(item)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rets {
+			if r == ret {
+				return nil, errors.Errorf("duplicate service mode %s", item)
+			}
+		}
+		rets = append(rets, ret)
+	}
+	return rets, nil
+}
+
+func parseServiceMode(mode string) (ServiceMode, error) {
+	switch mode {
+	case TSOService.String():
+		return TSOService, nil
+	case APIService.String():
+		return APIService, nil
+	case ResourceManagerService.String():
+		return ResourceManagerService, nil
+	case SchedulerService.String():
+		return SchedulerService, nil
+	default:
+		return ServiceModeCount, errors.Errorf("invalid service mode %s", mode)
+	}
+}
+
+func allModes() string {
+	var modes []string
+	for i := 0; i < int(ServiceModeCount); i++ {
+		modes = append(modes, ServiceMode(i).String())
+	}
+	return strings.Join(modes, ",")
+}

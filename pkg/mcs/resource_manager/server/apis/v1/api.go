@@ -75,7 +75,7 @@ func NewService(srv *rmserver.Service) *Service {
 func (s *Service) RegisterRouter() {
 	configEndpoint := s.baseEndpoint.Group("/config")
 	configEndpoint.POST("/group", s.postResourceGroup)
-	configEndpoint.PUT("group", s.putResourceGroup)
+	configEndpoint.PUT("/group", s.putResourceGroup)
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
 	configEndpoint.GET("/groups", s.getResourceGroupList)
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
