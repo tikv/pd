@@ -185,7 +185,7 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 		to.RegionSize += regionSize
 	}
 	to.RegionCount++
-	if ap.IsLightWeight {
+	if ap.IsLightWeight || ap.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -496,7 +496,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 		to.RegionSize += regionSize
 	}
 	to.RegionCount++
-	if al.IsLightWeight {
+	if al.IsLightWeight || al.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -614,6 +614,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	peer := region.GetStorePeer(rp.FromStore)
 	if peer != nil && peer.IsWitness {
 		from.WitnessCount--
+		return
 	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
