@@ -373,6 +373,16 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
+// GetStoreWitness returns the witness peer in specified store.
+func (r *RegionInfo) GetStoreWitness(storeID uint64) *metapb.Peer {
+	for _, peer := range r.witnesses {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
 // GetStoreIDs returns a map indicate the region distributed.
 func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
