@@ -89,14 +89,18 @@ func (suite *globalConfigTestSuite) TestLoad() {
 	}()
 	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"test", "test")
 	suite.NoError(err)
-	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
 	suite.NoError(err)
 	suite.Len(res.Items, 1)
 	suite.Equal("test", res.Items[0].Value)
 }
 
 func (suite *globalConfigTestSuite) TestLoadError() {
-	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{Names: []string{"test"}})
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
 	suite.NoError(err)
 	suite.NotNil(res.Items[0].Error)
 }
@@ -109,7 +113,10 @@ func (suite *globalConfigTestSuite) TestStore() {
 		}
 	}()
 	changes := []*pdpb.GlobalConfigItem{{Name: "1", Value: "1"}, {Name: "2", Value: "2"}, {Name: "3", Value: "3"}}
-	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{Changes: changes})
+	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+		Changes:    changes,
+	})
 	suite.NoError(err)
 	for i := 1; i <= 3; i++ {
 		res, err := suite.server.GetClient().Get(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
@@ -127,26 +134,35 @@ func (suite *globalConfigTestSuite) TestWatch() {
 		}
 	}()
 	server := testReceiver{re: suite.Require()}
-	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{}, server)
+	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	}, server)
 	for i := 0; i < 3; i++ {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
 		suite.NoError(err)
 	}
 }
 
-func (suite *globalConfigTestSuite) loadGlobalConfig(ctx context.Context, names []string) ([]*pdpb.GlobalConfigItem, error) {
-	res, err := pdpb.NewPDClient(suite.client).LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
+func (suite *globalConfigTestSuite) loadGlobalConfig(ctx context.Context) ([]*pdpb.GlobalConfigItem, error) {
+	res, err := pdpb.NewPDClient(suite.client).LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
 	return res.GetItems(), err
 }
 
 func (suite *globalConfigTestSuite) storeGlobalConfig(ctx context.Context, changes []*pdpb.GlobalConfigItem) error {
-	_, err := pdpb.NewPDClient(suite.client).StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: changes})
+	_, err := pdpb.NewPDClient(suite.client).StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+		Changes:    changes,
+	})
 	return err
 }
 
 func (suite *globalConfigTestSuite) watchGlobalConfig(ctx context.Context) (chan []*pdpb.GlobalConfigItem, error) {
 	globalConfigWatcherCh := make(chan []*pdpb.GlobalConfigItem, 16)
-	res, err := pdpb.NewPDClient(suite.client).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
+	res, err := pdpb.NewPDClient(suite.client).WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
 	if err != nil {
 		close(globalConfigWatcherCh)
 		return nil, err
@@ -185,14 +201,14 @@ func (suite *globalConfigTestSuite) TestClientLoad() {
 	}()
 	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"test", "test")
 	suite.NoError(err)
-	res, err := suite.loadGlobalConfig(suite.server.Context(), []string{"test"})
+	res, err := suite.loadGlobalConfig(suite.server.Context())
 	suite.NoError(err)
 	suite.Len(res, 1)
-	suite.Equal(&pdpb.GlobalConfigItem{Name: "test", Value: "test", Error: nil}, res[0])
+	suite.Equal(&pdpb.GlobalConfigItem{Name: globalConfigPath + "test", Value: "test", Error: nil}, res[0])
 }
 
 func (suite *globalConfigTestSuite) TestClientLoadError() {
-	res, err := suite.loadGlobalConfig(suite.server.Context(), []string{"test"})
+	res, err := suite.loadGlobalConfig(suite.server.Context())
 	suite.NoError(err)
 	suite.NotNil(res[0].Error)
 }

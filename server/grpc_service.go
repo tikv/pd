@@ -51,9 +51,6 @@ const (
 	// tso
 	maxMergeTSORequests    = 10000
 	defaultTSOProxyTimeout = 3 * time.Second
-
-	// global config
-	globalConfigPath = "/global/config/"
 )
 
 // gRPC errors
@@ -1888,9 +1885,9 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := globalConfigPath + item.GetName()
+		name := item.GetName()
 		value := item.GetValue()
-		ops[i] = clientv3.OpPut(name, value)
+		ops[i] = clientv3.OpPut(request.GetConfigPath()+name, value)
 	}
 	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
@@ -1900,38 +1897,39 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	if !res.Succeeded {
 		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
-	return &pdpb.StoreGlobalConfigResponse{}, err
+	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
 
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
-	names := request.Names
-	res := make([]*pdpb.GlobalConfigItem, len(names))
-	for i, name := range names {
-		r, err := s.client.Get(ctx, globalConfigPath+name)
-		if err != nil {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		} else if len(r.Kvs) == 0 {
-			msg := "key " + name + " not found"
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		} else {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value)}
+	configPath := request.GetConfigPath()
+	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
+	if err != nil {
+		item := &pdpb.GlobalConfigItem{Name: configPath, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
+		return &pdpb.LoadGlobalConfigResponse{Items: []*pdpb.GlobalConfigItem{item}}, err
+	} else if len(r.Kvs) == 0 {
+		msg := "key " + configPath + " not found"
+		item := &pdpb.GlobalConfigItem{Name: configPath, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
+		return &pdpb.LoadGlobalConfigResponse{Items: []*pdpb.GlobalConfigItem{item}}, nil
+	} else {
+		res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
+		for i, value := range r.Kvs {
+			res[i] = &pdpb.GlobalConfigItem{Name: string(value.Key), Value: string(value.Value)}
 		}
+		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 	}
-	return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 }
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end
 // or stoped by whatever reason
 // just reconnect to it.
-func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	err := s.sendAllGlobalConfig(ctx, server)
-	if err != nil {
+	if err := s.sendAllGlobalConfig(ctx, server, req.GetConfigPath()); err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, globalConfigPath, clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, req.GetConfigPath(), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -1945,8 +1943,7 @@ func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server 
 				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value)})
 			}
 			if len(cfgs) > 0 {
-				err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs})
-				if err != nil {
+				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs}); err != nil {
 					return err
 				}
 			}
@@ -1954,8 +1951,8 @@ func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server 
 	}
 }
 
-func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer) error {
-	configList, err := s.client.Get(ctx, globalConfigPath, clientv3.WithPrefix())
+func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer, configPath string) error {
+	configList, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}
@@ -1963,8 +1960,7 @@ func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_Wat
 	for i, kv := range configList.Kvs {
 		ls[i] = &pdpb.GlobalConfigItem{Name: string(kv.Key), Value: string(kv.Value)}
 	}
-	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
-	return err
+	return server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
