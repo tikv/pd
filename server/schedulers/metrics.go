@@ -134,6 +134,7 @@ func init() {
 	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
