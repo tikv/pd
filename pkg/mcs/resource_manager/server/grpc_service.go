@@ -16,12 +16,16 @@ package server
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/server"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -125,5 +129,50 @@ func (s *Service) ModifyResourceGroup(ctx context.Context, req *rmpb.PutResource
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	return errors.New("Not implemented")
+	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.New("server closed")
+		default:
+		}
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		targetPeriodMs := request.GetTargetRequestPeriodMs()
+		resps := &rmpb.TokenBucketsResponse{}
+		for _, req := range request.Requests {
+			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			if rg == nil {
+				return errors.New("resource group not found")
+			}
+			now := time.Now()
+			resp := &rmpb.TokenBucketResponse{
+				ResourceGroupName: rg.Name,
+			}
+			switch rg.Mode {
+			case rmpb.GroupMode_RUMode:
+				for _, re := range req.GetRuItems().GetRequestRU() {
+					switch re.Type {
+					case rmpb.RequestUnitType_RRU:
+						rg.UpdateRRU(now)
+						tokens := rg.RequestRRU(float64(re.Value), targetPeriodMs)
+						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+					case rmpb.RequestUnitType_WRU:
+						rg.UpdateWRU(now)
+						tokens := rg.RequestWRU(float64(re.Value), targetPeriodMs)
+						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+					}
+				}
+			case rmpb.GroupMode_NativeMode:
+				return errors.New("not supports the resource type")
+			}
+			log.Debug("finish token request from", zap.String("resource group", req.ResourceGroupName))
+			resps.Responses = append(resps.Responses, resp)
+		}
+		stream.Send(resps)
+	}
 }

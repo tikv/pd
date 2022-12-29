@@ -18,6 +18,7 @@ package server
 import (
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -146,32 +147,62 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	case rmpb.GroupMode_RUMode:
 		if settings := group.GetSettings().GetRUSettings(); settings != nil {
 			ruSettings = &RequestUnitSettings{
-				RRU: GroupTokenBucket{
-					TokenBucket: settings.GetRRU(),
-				},
-				WRU: GroupTokenBucket{
-					TokenBucket: settings.GetWRU(),
-				},
+				RRU: NewGroupTokenBucket(settings.GetRRU()),
+				WRU: NewGroupTokenBucket(settings.GetWRU()),
 			}
 			rg.RUSettings = ruSettings
 		}
 	case rmpb.GroupMode_NativeMode:
 		if settings := group.GetSettings().GetResourceSettings(); settings != nil {
 			resourceSettings = &NativeResourceSettings{
-				CPU: GroupTokenBucket{
-					TokenBucket: settings.GetCpu(),
-				},
-				IOReadBandwidth: GroupTokenBucket{
-					TokenBucket: settings.GetIoRead(),
-				},
-				IOWriteBandwidth: GroupTokenBucket{
-					TokenBucket: settings.GetIoWrite(),
-				},
+				CPU:              NewGroupTokenBucket(settings.GetCpu()),
+				IOReadBandwidth:  NewGroupTokenBucket(settings.GetIoRead()),
+				IOWriteBandwidth: NewGroupTokenBucket(settings.GetIoWrite()),
 			}
 			rg.ResourceSettings = resourceSettings
 		}
 	}
 	return rg
+}
+
+// UpdateRRU updates the RRU of the resource group.
+func (rg *ResourceGroup) UpdateRRU(now time.Time) {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings != nil {
+		rg.RUSettings.RRU.update(now)
+	}
+}
+
+// UpdateWRU updates the WRU of the resource group.
+func (rg *ResourceGroup) UpdateWRU(now time.Time) {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings != nil {
+		rg.RUSettings.WRU.update(now)
+	}
+}
+
+// RequestRRU requests the RRU of the resource group.
+func (rg *ResourceGroup) RequestRRU(neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings == nil {
+		return nil
+	}
+	tb, trickleTimeMs := rg.RUSettings.RRU.request(neededTokens, targetPeriodMs)
+	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_RRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+}
+
+// RequestWRU requests the WRU of the resource group.
+func (rg *ResourceGroup) RequestWRU(neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings == nil {
+		return nil
+	}
+	tb, trickleTimeMs := rg.RUSettings.WRU.request(neededTokens, targetPeriodMs)
+	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_WRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
