@@ -273,31 +273,52 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
+	isUnhealthyPeer := func(id uint64) bool {
+		for _, pendingPeer := range region.GetPendingPeers() {
+			if pendingPeer.GetId() == id {
+				return true
+			}
+		}
+		for _, downPeer := range region.GetDownPeers() {
+			if downPeer.Peer.GetId() == id {
+				return true
+			}
+		}
+		return false
+	}
 	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
 	// by RuleFits is not pending or down.
+	hasUnhealthyFit := false
+loopFits:
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
-			checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-			return nil, nil
+			hasUnhealthyFit = true
+			break
 		}
 		for _, p := range rf.Peers {
-			for _, pendingPeer := range region.GetPendingPeers() {
-				if pendingPeer.Id == p.Id {
-					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-					return nil, nil
-				}
-			}
-			for _, downPeer := range region.GetDownPeers() {
-				if downPeer.Peer.Id == p.Id {
-					checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
-					return nil, nil
-				}
+			if isUnhealthyPeer(p.GetId()) {
+				hasUnhealthyFit = true
+				break loopFits
 			}
 		}
 	}
-	checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
-	peer := fit.OrphanPeers[0]
-	return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, peer.StoreId)
+	// If hasUnhealthyFit is false, it is safe to delete the OrphanPeer.
+	if !hasUnhealthyFit {
+		checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
+		return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, fit.OrphanPeers[0].StoreId)
+	}
+	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
+	// Ref https://github.com/tikv/pd/issues/4045
+	if len(fit.OrphanPeers) >= 2 {
+		for _, orphanPeer := range fit.OrphanPeers {
+			if isUnhealthyPeer(orphanPeer.GetId()) {
+				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
+				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+			}
+		}
+	}
+	checkerCounter.WithLabelValues("rule_checker", "skip-remove-orphan-peer").Inc()
+	return nil, nil
 }
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
