@@ -27,7 +27,7 @@ func IsSchedulerRegistered(name string) bool {
 	return ok
 }
 
-// Config is the interface that wraps the Config related method.
+// Config is the interface that wraps the Config related methods.
 type Config interface {
 	GetReplicaScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
@@ -84,7 +84,7 @@ type Config interface {
 	SetMaxReplicas(int)
 }
 
-// StoreConfig is the interface that wraps the StoreConfig related method.
+// StoreConfig is the interface that wraps the StoreConfig related methods.
 type StoreConfig interface {
 	GetRegionMaxSize() uint64
 	CheckRegionSize(uint64, uint64) error
