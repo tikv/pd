@@ -63,8 +63,8 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 
 // RegisterRESTHandler registers the service to REST server.
 func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
-	hander, group := SetUpRestHandler(s)
-	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, hander)
+	handler, group := SetUpRestHandler(s)
+	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 // GetManager returns the resource manager.

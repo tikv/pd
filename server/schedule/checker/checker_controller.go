@@ -50,7 +50,6 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-// TODO: isSupportMerge should be removed.
 func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{

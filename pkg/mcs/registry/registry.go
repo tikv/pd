@@ -41,7 +41,7 @@ type RegistrableService interface {
 }
 
 // ServiceRegistry is a map that stores all registered grpc services.
-// It implements the `Serviceregistry` interface.
+// It implements the `ServiceRegistry` interface.
 type ServiceRegistry struct {
 	builders map[string]ServiceBuilder
 	services map[string]RegistrableService
@@ -90,7 +90,7 @@ func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
 }
 
 func init() {
-	server.NewServiceregistry = func() server.Serviceregistry {
+	server.NewServiceRegistry = func() server.ServiceRegistry {
 		return ServerServiceRegistry
 	}
 }
