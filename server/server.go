@@ -223,7 +223,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := NewServiceregistry()
+	registry := NewServiceRegistry()
 
 	// Register the micro services REST path.
 	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
@@ -234,8 +234,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		// Register the micro services GRPC service.
-		NewServiceregistry().InstallAllGRPCServices(s, gs)
+		registry.InstallAllGRPCServices(s, gs)
 	}
+
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()

@@ -23,12 +23,11 @@ type MedianFilter struct {
 	// It is not thread safe to read and write records at the same time.
 	// If there are concurrent read and write, the read may get an old value.
 	// And we should avoid concurrent write.
-	records       []float64
-	size          uint64
-	count         uint64
-	instantaneous float64
-	isUpdated     bool
-	result        float64
+	records   []float64
+	size      uint64
+	count     uint64
+	isUpdated bool
+	result    float64
 }
 
 // NewMedianFilter returns a MedianFilter.
@@ -43,7 +42,6 @@ func NewMedianFilter(size int) *MedianFilter {
 
 // Add adds a data point.
 func (r *MedianFilter) Add(n float64) {
-	r.instantaneous = n
 	r.records[r.count%r.size] = n
 	r.count++
 	r.isUpdated = true
@@ -68,14 +66,12 @@ func (r *MedianFilter) Get() float64 {
 
 // Reset cleans the data set.
 func (r *MedianFilter) Reset() {
-	r.instantaneous = 0
 	r.count = 0
 	r.isUpdated = true
 }
 
 // Set = Reset + Add.
 func (r *MedianFilter) Set(n float64) {
-	r.instantaneous = n
 	r.records[0] = n
 	r.count = 1
 	r.isUpdated = true
@@ -83,7 +79,7 @@ func (r *MedianFilter) Set(n float64) {
 
 // GetInstantaneous returns the value just added.
 func (r *MedianFilter) GetInstantaneous() float64 {
-	return r.instantaneous
+	return r.records[(r.count-1)%r.size]
 }
 
 // Clone returns a copy of MedianFilter
@@ -91,11 +87,10 @@ func (r *MedianFilter) Clone() *MedianFilter {
 	records := make([]float64, len(r.records))
 	copy(records, r.records)
 	return &MedianFilter{
-		records:       records,
-		size:          r.size,
-		count:         r.count,
-		instantaneous: r.instantaneous,
-		isUpdated:     r.isUpdated,
-		result:        r.result,
+		records:   records,
+		size:      r.size,
+		count:     r.count,
+		isUpdated: r.isUpdated,
+		result:    r.result,
 	}
 }

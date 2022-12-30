@@ -407,7 +407,7 @@ func TestScheduler(t *testing.T) {
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
 	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-	re.Equal(expected1, conf1)
+	re.Equal(expected1["write-peer-priorities"], []interface{}{"byte", "key"})
 
 	// test remove and add
 	mustExec([]string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
