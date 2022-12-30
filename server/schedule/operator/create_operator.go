@@ -103,6 +103,14 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 		Build(kind)
 }
 
+// CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
+func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(sourceStoreID).
+		BecomeWitness(targetStoreID).
+		Build(OpWitness)
+}
+
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
 func CreateReplaceLeaderPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
@@ -297,12 +305,12 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeWitness(peer.GetStoreId()).
-		Build(0)
+		Build(OpWitness)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
-		Build(0)
+		Build(OpWitness)
 }
