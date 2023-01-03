@@ -159,7 +159,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					switch re.Type {
 					case rmpb.RequestUnitType_RRU:
 						rg.UpdateRRU(now)
-						tokens := rg.RequestRRU(float64(re.Value), targetPeriodMs)
+						tokens := rg.RequestRRU(re.Value, targetPeriodMs)
 						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 					case rmpb.RequestUnitType_WRU:
 						rg.UpdateWRU(now)

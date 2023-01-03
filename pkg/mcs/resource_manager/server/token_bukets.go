@@ -21,8 +21,6 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
-const defaultRefillRate = 10000
-
 const defaultInitialTokens = 10 * 10000
 
 const defaultMaxTokens = 1e7
@@ -72,8 +70,9 @@ func (t *GroupTokenBucket) patch(settings *rmpb.TokenBucket) {
 // update updates the token bucket.
 func (t *GroupTokenBucket) update(now time.Time) {
 	if !t.Initialized {
-		t.Settings.Fillrate = defaultRefillRate
-		t.Tokens = defaultInitialTokens
+		if t.Tokens < defaultInitialTokens {
+			t.Tokens = defaultInitialTokens
+		}
 		t.LastUpdate = &now
 		t.Initialized = true
 		return
@@ -90,7 +89,6 @@ func (t *GroupTokenBucket) update(now time.Time) {
 	if t.Tokens > defaultMaxTokens {
 		t.Tokens = defaultMaxTokens
 	}
-
 }
 
 // request requests tokens from the token bucket.
@@ -101,7 +99,6 @@ func (t *GroupTokenBucket) request(
 	res.Settings = &rmpb.TokenLimitSettings{}
 	// TODO: consider the shares for dispatch the fill rate
 	res.Settings.Fillrate = 0
-
 	if neededTokens <= 0 {
 		return &res, 0
 	}
@@ -120,16 +117,15 @@ func (t *GroupTokenBucket) request(
 		neededTokens -= grantedTokens
 	}
 
-	now := time.Now()
 	var periodFilled float64
-	var trickleTime int64 = int64(targetPeriodMs)
-	if t.LoanExpireTime != nil && t.LoanExpireTime.After(now) {
-		duration := t.LoanExpireTime.Sub(now)
+	var trickleTime = int64(targetPeriodMs)
+	if t.LoanExpireTime != nil && t.LoanExpireTime.After(*t.LastUpdate) {
+		duration := t.LoanExpireTime.Sub(*t.LastUpdate)
 		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * duration.Seconds()
 		trickleTime = duration.Milliseconds()
 	} else {
-		now.Add(t.LoanMaxPeriod)
-		t.LoanExpireTime = &now
+		et := t.LastUpdate.Add(t.LoanMaxPeriod)
+		t.LoanExpireTime = &et
 		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * t.LoanMaxPeriod.Seconds()
 	}
 	periodFilled += t.Tokens
