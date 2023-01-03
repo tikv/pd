@@ -163,7 +163,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 					case rmpb.RequestUnitType_WRU:
 						rg.UpdateWRU(now)
-						tokens := rg.RequestWRU(float64(re.Value), targetPeriodMs)
+						tokens := rg.RequestWRU(re.Value, targetPeriodMs)
 						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 					}
 				}
