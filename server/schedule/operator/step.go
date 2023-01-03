@@ -285,7 +285,7 @@ type BecomeNonWitness struct {
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(bn.StoreID)
-	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness() && (region.GetPendingPeer(peer.GetId()) == nil))
+	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness())
 }
 
 func (bn BecomeNonWitness) String() string {
