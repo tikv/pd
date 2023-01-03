@@ -1046,6 +1046,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+	//nolint
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
@@ -2072,4 +2073,16 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Header:    s.header(),
 		Timestamp: timestamp,
 	}, nil
+}
+
+// TODO: implement these two methods.
+
+// List implements gRPC PDServer.
+func (s *GrpcServer) List(request *pdpb.ListRequest, stream pdpb.PD_ListServer) error {
+	return nil
+}
+
+// Watch implements gRPC PDServer.
+func (s *GrpcServer) Watch(request *pdpb.WatchRequest, stream pdpb.PD_WatchServer) error {
+	return nil
 }
