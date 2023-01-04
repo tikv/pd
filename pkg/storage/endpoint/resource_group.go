@@ -17,20 +17,20 @@ package endpoint
 // ResourceGroupStorage defines the storage operations on the rule.
 type ResourceGroupStorage interface {
 	LoadResourceGroups(f func(k, v string)) error
-	SaveResourceGroup(groupName string, groupPayload interface{}) error
-	DeleteResourceGroup(groupName string) error
+	SaveResourceGroup(prefix string, groupPayload interface{}) error
+	DeleteResourceGroup(prefix string) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
 // SaveResourceGroup stores a resource group to storage.
-func (se *StorageEndpoint) SaveResourceGroup(groupName string, payload interface{}) error {
-	return se.saveJSON(resourceGroupPath, groupName, payload)
+func (se *StorageEndpoint) SaveResourceGroup(prefix string, payload interface{}) error {
+	return se.saveJSON(resourceGroupPath, prefix, payload)
 }
 
 // DeleteResourceGroup removes a resource group from storage.
-func (se *StorageEndpoint) DeleteResourceGroup(groupName string) error {
-	return se.Remove(resourceGroupKeyPath(groupName))
+func (se *StorageEndpoint) DeleteResourceGroup(prefix string) error {
+	return se.Remove(resourceGroupKeyPath(prefix))
 }
 
 // LoadResourceGroups loads all resource groups from storage.

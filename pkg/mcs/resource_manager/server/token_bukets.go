@@ -54,7 +54,7 @@ func (t *GroupTokenBucket) patch(settings *rmpb.TokenBucket) {
 // Update updates the token bucket.
 func (t *GroupTokenBucket) Update(now time.Time) {
 	if !t.Initialized {
-		t.Settings.Fillrate = defaultRefillRate
+		t.Settings.FillRate = defaultRefillRate
 		t.Tokens = defaultInitialTokens
 		t.LastUpdate = &now
 		t.Initialized = true
@@ -63,7 +63,7 @@ func (t *GroupTokenBucket) Update(now time.Time) {
 
 	delta := now.Sub(*t.LastUpdate)
 	if delta > 0 {
-		t.Tokens += float64(t.Settings.Fillrate) * delta.Seconds()
+		t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 		t.LastUpdate = &now
 	}
 }
