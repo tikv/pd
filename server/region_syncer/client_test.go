@@ -74,7 +74,7 @@ func TestErrorCode(t *testing.T) {
 	conn, err := grpcutil.GetClientConn(ctx, "127.0.0.1", nil)
 	re.NoError(err)
 	cancel()
-	_, err = rc.syncRegion(ctx, conn)
+	_, err = rc.listRegion(ctx, conn)
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())

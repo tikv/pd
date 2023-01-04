@@ -16,10 +16,10 @@ package syncer
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -87,22 +87,34 @@ func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.Client
 	return cc, nil
 }
 
-func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
+func (s *RegionSyncer) watchRegion(ctx context.Context, conn *grpc.ClientConn) (WatchClientStream, error) {
 	cli := pdpb.NewPDClient(conn)
-	syncStream, err := cli.SyncRegions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	err = syncStream.Send(&pdpb.SyncRegionRequest{
-		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
-		Member:     s.server.GetMemberInfo(),
-		StartIndex: s.history.GetNextIndex(),
+	stream, err := cli.Watch(ctx, &pdpb.WatchRequest{
+		Header:   &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Revision: s.history.GetNextIndex(),
+		Resource: "regionstat",
+		Name:     s.server.Name(),
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return syncStream, nil
+	return stream, nil
+}
+
+func (s *RegionSyncer) listRegion(ctx context.Context, conn *grpc.ClientConn) (ListClientStream, error) {
+	cli := pdpb.NewPDClient(conn)
+	stream, err := cli.List(ctx, &pdpb.ListRequest{
+		Header:   &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Revision: 0,
+		Resource: "regionstat",
+		Name:     s.server.Name(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return stream, nil
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
@@ -118,7 +130,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 
 	go func() {
 		defer s.wg.Done()
-		// used to load region from kv storage to cache storage.
+		// used to load region from kv storage to cache storage
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
 		log.Info("region syncer start load region")
@@ -144,6 +156,64 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			break
 		}
 		defer conn.Close()
+		var done bool
+
+		for {
+			if done {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			stream, err := s.listRegion(ctx, conn)
+			if err != nil {
+				if ev, ok := status.FromError(err); ok {
+					if ev.Code() == codes.Canceled {
+						return
+					}
+				}
+				log.Error("server failed to establish list stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				time.Sleep(time.Second)
+				continue
+			}
+			for {
+				resp, err := stream.Recv()
+				if err == io.EOF {
+					done = true
+					break
+				}
+				if err != nil {
+					log.Error("synchronize the full regions with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
+					if err = stream.CloseSend(); err != nil {
+						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+					}
+					time.Sleep(time.Second)
+					break
+				}
+				if s.history.GetNextIndex() != resp.GetRevision() {
+					log.Warn("server revision not match the leader",
+						zap.String("server", s.server.Name()),
+						zap.Uint64("own", s.history.GetNextIndex()),
+						zap.Uint64("leader", resp.GetRevision()),
+						zap.Int("records-length", len(resp.GetItems())))
+					// reset index
+					s.history.ResetWithIndex(resp.GetRevision())
+				}
+				items := resp.GetItems()
+				for _, item := range items {
+					regionStat := item.GetRegionStat()
+					region := core.NewRegionInfo(regionStat.GetRegion(), regionStat.GetLeader(),
+						core.SetWrittenBytes(regionStat.GetRegionStats().BytesWritten),
+						core.SetWrittenKeys(regionStat.GetRegionStats().KeysWritten),
+						core.SetReadBytes(regionStat.GetRegionStats().BytesRead),
+						core.SetReadKeys(regionStat.GetRegionStats().KeysRead),
+						core.SetFromHeartbeat(false))
+					s.save(bc, regionStorage, region, regionStat)
+				}
+			}
+		}
 
 		// Start syncing data.
 		for {
@@ -153,88 +223,75 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			default:
 			}
 
-			stream, err := s.syncRegion(ctx, conn)
+			stream, err := s.watchRegion(ctx, conn)
 			if err != nil {
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {
 						return
 					}
 				}
-				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				log.Error("server failed to establish watch stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				time.Sleep(time.Second)
 				continue
 			}
 
-			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
+			log.Info("server starts to synchronize increment with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := stream.Recv()
 				if err != nil {
-					log.Error("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
+					log.Error("synchronize the incremental regions leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
 					time.Sleep(time.Second)
 					break
 				}
-				if s.history.GetNextIndex() != resp.GetStartIndex() {
+				if s.history.GetNextIndex() != resp.GetRevision() {
 					log.Warn("server sync index not match the leader",
 						zap.String("server", s.server.Name()),
 						zap.Uint64("own", s.history.GetNextIndex()),
-						zap.Uint64("leader", resp.GetStartIndex()),
-						zap.Int("records-length", len(resp.GetRegions())))
+						zap.Uint64("leader", resp.GetRevision()),
+						zap.Int("records-length", len(resp.GetEvents())))
 					// reset index
-					s.history.ResetWithIndex(resp.GetStartIndex())
+					s.history.ResetWithIndex(resp.GetRevision())
 				}
-				stats := resp.GetRegionStats()
-				regions := resp.GetRegions()
-				buckets := resp.GetBuckets()
-				regionLeaders := resp.GetRegionLeaders()
-				hasStats := len(stats) == len(regions)
-				hasBuckets := len(buckets) == len(regions)
-				for i, r := range regions {
-					var (
-						region       *core.RegionInfo
-						regionLeader *metapb.Peer
-					)
-					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
-						regionLeader = regionLeaders[i]
-					}
-					if hasStats {
-						region = core.NewRegionInfo(r, regionLeader,
-							core.SetWrittenBytes(stats[i].BytesWritten),
-							core.SetWrittenKeys(stats[i].KeysWritten),
-							core.SetReadBytes(stats[i].BytesRead),
-							core.SetReadKeys(stats[i].KeysRead),
-							core.SetFromHeartbeat(false),
-						)
-					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetFromHeartbeat(false))
-					}
-
-					origin, _, err := bc.PreCheckPutRegion(region)
-					if err != nil {
-						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
-						continue
-					}
-					_, saveKV, _, _ := regionGuide(region, origin)
-					overlaps := bc.PutRegion(region)
-
-					if hasBuckets {
-						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
-							region.UpdateBuckets(buckets[i], old)
-						}
-					}
-					if saveKV {
-						err = regionStorage.SaveRegion(r)
-					}
-					if err == nil {
-						s.history.Record(region)
-					}
-					for _, old := range overlaps {
-						_ = regionStorage.DeleteRegion(old.GetMeta())
-					}
+				event := resp.GetEvents()
+				for _, e := range event {
+					regionStat := e.Item.GetRegionStat()
+					region := core.NewRegionInfo(regionStat.GetRegion(), regionStat.GetLeader(),
+						core.SetWrittenBytes(regionStat.GetRegionStats().BytesWritten),
+						core.SetWrittenKeys(regionStat.GetRegionStats().KeysWritten),
+						core.SetReadBytes(regionStat.GetRegionStats().BytesRead),
+						core.SetReadKeys(regionStat.GetRegionStats().KeysRead),
+						core.SetFromHeartbeat(false))
+					s.save(bc, regionStorage, region, regionStat)
 				}
 			}
 		}
 	}()
+}
+
+func (s *RegionSyncer) save(bc *core.BasicCluster, regionStorage storage.Storage, region *core.RegionInfo, regionStat *pdpb.RegionStats) {
+	origin, _, err := bc.PreCheckPutRegion(region)
+	if err != nil {
+		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
+		return
+	}
+	_, saveKV, _, _ := regionGuide(region, origin)
+	overlaps := bc.PutRegion(region)
+
+	if regionStat.GetBuckets() != nil {
+		if old := origin.GetBuckets(); regionStat.GetBuckets().GetVersion() > old.GetVersion() {
+			region.UpdateBuckets(regionStat.GetBuckets(), old)
+		}
+	}
+	if saveKV {
+		err = regionStorage.SaveRegion(region.GetMeta())
+	}
+	if err == nil {
+		s.history.Record(region)
+	}
+	for _, old := range overlaps {
+		_ = regionStorage.DeleteRegion(old.GetMeta())
+	}
 }

@@ -166,3 +166,5 @@ replace (
 	google.golang.org/grpc v1.43.0 => google.golang.org/grpc v1.26.0
 	google.golang.org/protobuf v1.26.0 => github.com/golang/protobuf v1.3.4
 )
+
+replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230104065102-9cafeae9e9ad

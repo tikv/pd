@@ -138,7 +138,7 @@ require (
 	github.com/prometheus/procfs v0.0.3 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
-	github.com/sergi/go-diff v1.0.1-0.20180205163309-da645544ed44 // indirect
+	github.com/sergi/go-diff v1.2.0 // indirect
 	github.com/shirou/gopsutil v3.21.3+incompatible // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
@@ -190,4 +190,4 @@ require (
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230103073644-3b000e40407e
+replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230104065102-9cafeae9e9ad

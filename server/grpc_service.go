@@ -1369,14 +1369,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	if s.IsClosed() || s.cluster == nil {
-		return ErrNotStarted
-	}
-	ctx := s.cluster.Context()
-	if ctx == nil {
-		return ErrNotStarted
-	}
-	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
+	return nil
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -2074,14 +2067,41 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 	}, nil
 }
 
-// TODO: implement these two methods.
-
 // List implements gRPC PDServer.
-func (s *GrpcServer) List(ctx context.Context, request *pdpb.ListRequest) (*pdpb.ListResponse, error) {
-	return &pdpb.ListResponse{}, nil
+func (s *GrpcServer) List(request *pdpb.ListRequest, stream pdpb.PD_ListServer) error {
+	if s.IsClosed() || s.cluster == nil {
+		return ErrNotStarted
+	}
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	clusterID := request.GetHeader().GetClusterId()
+	if clusterID != s.ClusterID() {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.ClusterID(), clusterID)
+	}
+
+	syncer := s.cluster.GetRegionSyncer()
+	start := time.Now()
+	if err := syncer.FullSync(ctx, stream); err != nil {
+		return err
+	}
+	log.Info("requested server has completed full synchronization with server",
+		zap.String("requested-server", request.GetName()), zap.String("server", s.Name()), zap.Duration("cost", time.Since(start)))
+	return nil
 }
 
 // Watch implements gRPC PDServer.
-func (s *GrpcServer) Watch(request *pdpb.WatchRequest, server pdpb.PD_WatchServer) error {
+func (s *GrpcServer) Watch(request *pdpb.WatchRequest, stream pdpb.PD_WatchServer) error {
+	if s.IsClosed() || s.cluster == nil {
+		return ErrNotStarted
+	}
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	syncer := s.cluster.GetRegionSyncer()
+	syncer.BindStream(request.GetName(), stream)
+	<-ctx.Done()
 	return nil
 }
