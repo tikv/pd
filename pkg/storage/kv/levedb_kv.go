@@ -17,12 +17,11 @@ package kv
 import (
 	"context"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // LevelDBKV is a kv store using LevelDB.
