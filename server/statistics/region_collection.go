@@ -191,7 +191,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
-	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and ``UndersizedRegion` are updated.
+	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and `UndersizedRegion` are updated.
 	conditions := map[RegionStatisticType]bool{
 		MissPeer:    len(region.GetPeers()) < desiredReplicas,
 		ExtraPeer:   len(region.GetPeers()) > desiredReplicas,

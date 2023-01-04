@@ -22,15 +22,15 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -307,12 +307,12 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			continue
 		}
 		var filters []filter.Filter
-		pendingFilter := filter.NewRegionPengdingFilter()
+		pendingFilter := filter.NewRegionPendingFilter()
 		downFilter := filter.NewRegionDownFilter()
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), pendingFilter, downFilter)
+		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			// try to pick unhealthy region
-			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges))
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil)
 			if region == nil {
 				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
 				continue
@@ -330,7 +330,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), filters...)
+			FilterTarget(cluster.GetOpts(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
 		targets := candidates.PickAll()
@@ -348,7 +348,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
 		}
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.Urgent)
 		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
 		ops = append(ops, op)
 	}

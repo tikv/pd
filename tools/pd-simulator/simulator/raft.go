@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -32,7 +32,6 @@ type RaftEngine struct {
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
 	regionChange      map[uint64][]uint64
-	schedulerStats    *schedulerStatistics
 	regionSplitSize   int64
 	regionSplitKeys   int64
 	storeConfig       *SimConfig
@@ -45,7 +44,6 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,
 		regionChange:    make(map[uint64][]uint64),
-		schedulerStats:  newSchedulerStatistics(),
 		regionSplitSize: conf.RegionSplitSize,
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
@@ -70,17 +68,17 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
+		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(region.Size),
-			core.SetApproximateKeys(region.Keys),
+			core.SetApproximateSize(int64(regionSize)),
+			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
-		regionSize := uint64(region.Size)
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(regionSize)
+			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
 		}
 	}
 
@@ -139,7 +137,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	if r.useTiDBEncodedKey {
 		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
 		if err != nil {
-			simutil.Logger.Fatal("generate TiDB encoded split key failed", zap.Error(err))
+			simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
 		}
 	} else {
 		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())
@@ -277,7 +275,9 @@ func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
-	return r.regionsInfo.SetRegion(region)
+	origin, overlaps, rangeChanged := r.regionsInfo.SetRegion(region)
+	r.regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
 }
 
 // GetRegionByKey searches the RegionInfo from regionTree

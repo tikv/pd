@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -114,13 +115,13 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 3},
 	}
 	op := suite.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
-	suite.Equal(core.HighPriority, op.GetPriorityLevel())
+	suite.Equal(core.Urgent, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Nil(op.Check(region))
 
 	suite.Equal(SUCCESS, op.Status())
-	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-time.Second))
 	suite.False(op.CheckTimeout())
 
 	// addPeer1, transferLeader1, removePeer2
@@ -130,15 +131,15 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 2},
 	}
 	op = suite.newTestOperator(1, OpLeader|OpRegion, steps...)
+	suite.Equal(core.Medium, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
 	suite.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
 	suite.False(op.CheckTimeout())
-	op.stepsTime[op.currentStep-1] = op.GetReachTimeOf(STARTED).Unix()
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowStepWaitTime-2*FastStepWaitTime-time.Second))
 	suite.True(op.CheckTimeout())
 	res, err := json.Marshal(op)
 	suite.NoError(err)
@@ -149,7 +150,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	op = suite.newTestOperator(1, OpLeader, steps...)
 	op.Start()
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastOperatorWaitTime-time.Second))
+	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
 	suite.True(op.CheckTimeout())
 
 	// case2: check timeout operator will return false not panic.
@@ -158,7 +159,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	suite.True(op.status.To(STARTED))
 	suite.True(op.status.To(TIMEOUT))
 	suite.False(op.CheckSuccess())
-	suite.False(op.CheckTimeout())
+	suite.True(op.CheckTimeout())
 }
 
 func (suite *operatorTestSuite) TestInfluence() {
@@ -310,7 +311,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		suite.Equal(CREATED, op.Status())
 		suite.True(op.Start())
 		op.currentStep = int32(len(op.steps))
-		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowOperatorWaitTime))
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime))
 		suite.False(op.CheckTimeout())
 		suite.Equal(SUCCESS, op.Status())
 	}
@@ -373,7 +374,7 @@ func (suite *operatorTestSuite) TestCheck() {
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
 		suite.Equal(STARTED, op.Status())
-		op.stepsTime[op.currentStep-1] = time.Now().Add(-SlowOperatorWaitTime).Unix()
+		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-2*FastStepWaitTime))
 		suite.NotNil(op.Check(region))
 		suite.Equal(TIMEOUT, op.Status())
 	}
@@ -388,7 +389,7 @@ func (suite *operatorTestSuite) TestCheck() {
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
 		suite.Equal(STARTED, op.Status())
-		op.status.setTime(STARTED, time.Now().Add(-SlowOperatorWaitTime))
+		op.status.setTime(STARTED, time.Now().Add(-SlowStepWaitTime))
 		region = suite.newTestRegion(1, 1, [2]uint64{1, 1})
 		suite.Nil(op.Check(region))
 		suite.Equal(SUCCESS, op.Status())
@@ -435,83 +436,45 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 	testData := []struct {
 		step       []OpStep
 		regionSize int64
-		start      time.Time
-		expect     bool
+		expect     time.Duration
 	}{
 		{
 			// case1: 10GB region will have 60,000s to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
 			regionSize: 10 * 1000,
-			start:      time.Now().Add(-(time.Second*(6*10*1000) + time.Second)),
-			expect:     true,
-		},
-		{
-			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10 * 1000,
-			start:      time.Now().Add(-(time.Second*(6*10*1000) - time.Second)),
-			expect:     false,
+			expect:     time.Second * (6 * 10 * 1000),
 		}, {
-			// case2: 10MB region will have at least SlowOperatorWaitTime(10min) to executor.
+			// case2: 10MB region will have at least SlowStepWaitTime(10min) to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
 			regionSize: 10,
-			start:      time.Now().Add(-(SlowOperatorWaitTime + time.Second)),
-			expect:     true,
-		}, {
-			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10,
-			start:      time.Now().Add(-(time.Second*(6*10) - time.Second)),
-			expect:     false,
+			expect:     SlowStepWaitTime,
 		}, {
 			// case3:  10GB region will have 1000s to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(time.Second*(1000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
+			expect:     time.Second * (10 * 1000 * 0.6),
 		}, {
+			// case4: 10MB will have at lease FastStepWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(time.Second*(1000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
-		}, {
-			// case4: 10MB will have at lease FastOperatorWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
-			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(FastOperatorWaitTime + time.Second)),
 			regionSize: 10,
-			expect:     true,
-		}, {
-			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			start:      time.Now().Add(-(FastOperatorWaitTime - time.Second)),
-			regionSize: 10,
-			expect:     false,
+			expect:     FastStepWaitTime,
 		}, {
 			// case5: 10GB region will have 1000*3 for ChangePeerV2Enter, ChangePeerV2Leave.
 			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
 				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-			start:      time.Now().Add(-(time.Second*(3000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
-		}, {
-			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
-				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-			start:      time.Now().Add(-(time.Second*(3000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
+			expect:     time.Second * (10 * 1000 * 0.6 * 3),
 		}, {
 			//case6: 10GB region will have 1000*10s for ChangePeerV2Enter, ChangePeerV2Leave.
 			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) + time.Second)),
 			regionSize: 10 * 1000,
-			expect:     true,
-		}, {
-			step:       []OpStep{MergeRegion{}},
-			start:      time.Now().Add(-(time.Second*(10000) - time.Second)),
-			regionSize: 10 * 1000,
-			expect:     false,
+			expect:     time.Second * (10 * 1000 * 0.6 * 10),
 		},
 	}
-	for _, v := range testData {
+	for i, v := range testData {
+		fmt.Printf("case:%d\n", i)
 		for _, step := range v.step {
-			suite.Equal(step.Timeout(v.start, v.regionSize), v.expect)
+			suite.Equal(v.expect, step.Timeout(v.regionSize))
 		}
 	}
 }

@@ -30,12 +30,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -195,11 +195,14 @@ const (
 	maxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
 	leaderScheduleLimitKey         = "schedule.leader-schedule-limit"
 	regionScheduleLimitKey         = "schedule.region-schedule-limit"
+	witnessScheduleLimitKey        = "schedule.witness-schedule-limit"
 	replicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	schedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	enableLocationReplacement      = "schedule.enable-location-replacement"
+	// it's related to schedule, but it's not an explicit config
+	enableTiKVSplitRegion = "schedule.enable-tikv-split-region"
 )
 
 var supportedTTLConfigs = []string{
@@ -214,6 +217,7 @@ var supportedTTLConfigs = []string{
 	hotRegionScheduleLimitKey,
 	schedulerMaxWaitingOperatorKey,
 	enableLocationReplacement,
+	enableTiKVSplitRegion,
 	"default-add-peer",
 	"default-remove-peer",
 }
@@ -266,6 +270,35 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
 	v := o.GetScheduleConfig().Clone()
 	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
+}
+
+// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
+func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
+	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
+}
+
+// IsDiagnosticAllowed returns whether is enable to use diagnostic.
+func (o *PersistOptions) IsDiagnosticAllowed() bool {
+	return o.GetScheduleConfig().EnableDiagnostic
+}
+
+// SetEnableDiagnostic to set the option for diagnose. It's only used to test.
+func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
+}
+
+// IsWitnessAllowed returns whether is enable to use witness.
+func (o *PersistOptions) IsWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableWitness
+}
+
+// SetEnableWitness to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableWitness(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enable
 	o.SetScheduleConfig(v)
 }
 
@@ -362,6 +395,11 @@ func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 	return o.getTTLUintOr(regionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
+}
+
+// GetWitnessScheduleLimit returns the limit for region schedule.
+func (o *PersistOptions) GetWitnessScheduleLimit() uint64 {
+	return o.getTTLUintOr(witnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
@@ -519,16 +557,14 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
+	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
+}
+
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
-	if v, ok := o.GetTTLData(enableLocationReplacement); ok {
-		result, err := strconv.ParseBool(v)
-		if err == nil {
-			return result
-		}
-		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().EnableLocationReplacement
+	return o.getTTLBoolOr(enableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
@@ -548,6 +584,13 @@ func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 // IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
 func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
+}
+
+// SetEnableUseJointConsensus to set the option for using joint consensus. It's only used to test.
+func (o *PersistOptions) SetEnableUseJointConsensus(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableJointConsensus = enable
+	o.SetScheduleConfig(v)
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
@@ -728,6 +771,26 @@ func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
 
 func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 	if v, ok, err := o.getTTLUint(key); ok {
+		if err == nil {
+			return v
+		}
+		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+	}
+	return defaultValue
+}
+
+func (o *PersistOptions) getTTLBool(key string) (result bool, contains bool, err error) {
+	stringForm, ok := o.GetTTLData(key)
+	if !ok {
+		return
+	}
+	result, err = strconv.ParseBool(stringForm)
+	contains = true
+	return
+}
+
+func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
+	if v, ok, err := o.getTTLBool(key); ok {
 		if err == nil {
 			return v
 		}

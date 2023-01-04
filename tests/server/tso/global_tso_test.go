@@ -26,8 +26,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
@@ -64,7 +66,7 @@ func TestConcurrentlyReset(t *testing.T) {
 			for i := 0; i <= 100; i++ {
 				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
 				ts := uint64(physical << 18)
-				leader.GetServer().GetHandler().ResetTS(ts)
+				leader.GetServer().GetHandler().ResetTS(ts, false, false)
 			}
 		}()
 	}
@@ -184,4 +186,49 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+}
+
+func TestLogicalOverflow(t *testing.T) {
+	re := require.New(t)
+
+	runCase := func(updateInterval time.Duration) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+		})
+		defer cluster.Destroy()
+		re.NoError(err)
+		re.NoError(cluster.RunInitialServers())
+		cluster.WaitLeader()
+
+		leaderServer := cluster.GetServer(cluster.GetLeader())
+		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+		clusterID := leaderServer.GetClusterID()
+
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+
+		begin := time.Now()
+		for i := 0; i < 2; i += 1 { // the 2nd request may (but not must) overflow, as max logical interval is 262144
+			req := &pdpb.TsoRequest{
+				Header:     testutil.NewRequestHeader(clusterID),
+				Count:      150000,
+				DcLocation: tso.GlobalDCLocation,
+			}
+			re.NoError(tsoClient.Send(req))
+			_, err = tsoClient.Recv()
+			re.NoError(err)
+		}
+		elapse := time.Since(begin)
+		if updateInterval >= 20*time.Millisecond { // on small interval, the physical may update before overflow
+			re.GreaterOrEqual(elapse, updateInterval)
+		}
+		re.Less(elapse, updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+	}
+
+	for _, updateInterval := range []int{1, 5, 30, 50} {
+		runCase(time.Duration(updateInterval) * time.Millisecond)
+	}
 }

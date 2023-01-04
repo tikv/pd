@@ -28,16 +28,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/storage/kv"
 	"github.com/tikv/pd/server/tso"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -462,6 +461,21 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	}, nil
 }
 
+// IsSnapshotRecovering implements gRPC PDServer.
+func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
+	// recovering mark is stored in etcd directly, there's no need to forward.
+	marked, err := s.Server.IsSnapshotRecovering(ctx)
+	if err != nil {
+		return &pdpb.IsSnapshotRecoveringResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	return &pdpb.IsSnapshotRecoveringResponse{
+		Header: s.header(),
+		Marked: marked,
+	}, nil
+}
+
 // GetStore implements gRPC PDServer.
 func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
@@ -621,13 +635,14 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}, nil
 	}
 
+	resp := &pdpb.StoreHeartbeatResponse{Header: s.header()}
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
 		start := time.Now()
 
-		err := rc.HandleStoreHeartbeat(request.GetStats())
+		err := rc.HandleStoreHeartbeat(request, resp)
 		if err != nil {
 			return &pdpb.StoreHeartbeatResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
@@ -644,12 +659,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		rc.GetReplicationMode().UpdateStoreDRStatus(request.GetStats().GetStoreId(), status)
 	}
 
-	resp := &pdpb.StoreHeartbeatResponse{
-		Header:            s.header(),
-		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
-		ClusterVersion:    rc.GetClusterVersion(),
-	}
+	resp.ReplicationStatus = rc.GetReplicationMode().GetReplicationStatus()
+	resp.ClusterVersion = rc.GetClusterVersion()
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
+
 	return resp, nil
 }
 
@@ -745,10 +758,20 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
+		failpoint.Inject("grpcClientClosed", func() {
+			err = status.Error(codes.Canceled, "grpc client closed")
+			request = nil
+		})
 		if err == io.EOF {
 			return nil
 		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
 		forwardedHost := getForwardedHost(stream.Context())
+		failpoint.Inject("grpcClientClosed", func() {
+			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
+		})
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1308,7 +1331,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 	if op != nil {
-		op.AttachKind(operator.OpAdmin)
 		rc.GetOperatorController().AddOperator(op)
 	}
 
@@ -1490,6 +1512,9 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
 	return &pdpb.ResponseHeader{ClusterId: s.clusterID}
 }
 
@@ -1511,6 +1536,13 @@ func (s *GrpcServer) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.GetClusterVersion())
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
+		Message: msg,
+	})
+}
+
+func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
+	return s.errorHeader(&pdpb.Error{
+		Type:    pdpb.ErrorType_INVALID_VALUE,
 		Message: msg,
 	})
 }
@@ -1667,19 +1699,13 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	ops, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
 	if err != nil {
 		return 0, err
 	}
-	for _, op := range ops {
-		op.AttachKind(operator.OpAdmin)
-		if ok := cluster.GetOperatorController().AddOperator(op); !ok {
-			failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
-		}
-	}
 	percentage := 100
 	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(len(ops)+len(failures))
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
 			r := make([]error, 0, len(failures))
 			for _, err := range failures {
@@ -1774,6 +1800,9 @@ func getForwardedHost(ctx context.Context) string {
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
+	failpoint.Inject("useForwardRequest", func() {
+		failpoint.Return(false)
+	})
 	if forwardedHost == "" {
 		return true
 	}
@@ -1982,8 +2011,8 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	storeID := request.StoreId
-	minResolvedTS := request.MinResolvedTs
+	storeID := request.GetStoreId()
+	minResolvedTS := request.GetMinResolvedTs()
 	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
 		return nil, err
 	}
@@ -1992,5 +2021,55 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		zap.Uint64("min resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: s.header(),
+	}, nil
+}
+
+// SetExternalTimestamp implements gRPC PDServer.
+func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := request.GetTimestamp()
+	if err := s.SetExternalTS(timestamp); err != nil {
+		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
+	}
+	log.Debug("set external timestamp",
+		zap.Uint64("timestamp", timestamp))
+	return &pdpb.SetExternalTimestampResponse{
+		Header: s.header(),
+	}, nil
+}
+
+// GetExternalTimestamp implements gRPC PDServer.
+func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
+	forwardedHost := getForwardedHost(ctx)
+	if !s.isLocalRequest(forwardedHost) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := s.GetExternalTS()
+	return &pdpb.GetExternalTimestampResponse{
+		Header:    s.header(),
+		Timestamp: timestamp,
 	}, nil
 }

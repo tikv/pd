@@ -24,7 +24,7 @@ import (
 const swaggerPrefix = "/swagger/"
 
 var (
-	swaggerServiceGroup = server.ServiceGroup{
+	swaggerServiceGroup = server.APIServiceGroup{
 		Name:       "swagger",
 		Version:    "v1",
 		IsCore:     false,
@@ -33,7 +33,7 @@ var (
 )
 
 // NewHandler creates a HTTP handler for Swagger.
-func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+func NewHandler(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
 	swaggerHandler := http.NewServeMux()
 	swaggerHandler.Handle(swaggerPrefix, handler())
 	return swaggerHandler, swaggerServiceGroup, nil

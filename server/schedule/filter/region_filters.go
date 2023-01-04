@@ -17,6 +17,7 @@ package filter
 import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
@@ -39,9 +40,19 @@ func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo)
 }
 
 // SelectOneRegion selects one region that be selected from the list.
-func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.RegionInfo {
+func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
-		if slice.AllOf(filters, func(i int) bool { return filters[i].Select(r).IsOK() }) {
+		if len(filters) == 0 || slice.AllOf(filters,
+			func(i int) bool {
+				status := filters[i].Select(r)
+				if !status.IsOK() {
+					if collector != nil {
+						collector.Collect(plan.SetResource(r), plan.SetStatus(status))
+					}
+					return false
+				}
+				return true
+			}) {
 			return r
 		}
 	}
@@ -50,19 +61,19 @@ func SelectOneRegion(regions []*core.RegionInfo, filters ...RegionFilter) *core.
 
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
-	// Return true if the region can be used to schedule.
-	Select(region *core.RegionInfo) plan.Status
+	// Return plan.Status show whether be filtered
+	Select(region *core.RegionInfo) *plan.Status
 }
 
-type regionPengdingFilter struct {
+type regionPendingFilter struct {
 }
 
-// NewRegionPengdingFilter creates a RegionFilter that filters all regions with pending peers.
-func NewRegionPengdingFilter() RegionFilter {
-	return &regionPengdingFilter{}
+// NewRegionPendingFilter creates a RegionFilter that filters all regions with pending peers.
+func NewRegionPendingFilter() RegionFilter {
+	return &regionPendingFilter{}
 }
 
-func (f *regionPengdingFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionPendingFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
@@ -77,27 +88,38 @@ func NewRegionDownFilter() RegionFilter {
 	return &regionDownFilter{}
 }
 
-func (f *regionDownFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
 	}
 	return statusOK
 }
 
-type regionReplicatedFilter struct {
+// RegionReplicatedFilter filters all unreplicated regions.
+type RegionReplicatedFilter struct {
 	cluster regionHealthCluster
+	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
 func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
-	return &regionReplicatedFilter{cluster: cluster}
+	return &RegionReplicatedFilter{cluster: cluster}
 }
 
-func (f *regionReplicatedFilter) Select(region *core.RegionInfo) plan.Status {
+// GetFit returns the region fit.
+func (f *RegionReplicatedFilter) GetFit() *placement.RegionFit {
+	return f.fit
+}
+
+// Select returns Ok if the given region satisfy the replication.
+// it will cache the lasted region fit if the region satisfy the replication.
+func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
-		if !isRegionPlacementRuleSatisfied(f.cluster, region) {
-			return statusRegionRule
+		fit := f.cluster.GetRuleManager().FitRegion(f.cluster, region)
+		if !fit.IsSatisfied() {
+			return statusRegionNotMatchRule
 		}
+		f.fit = fit
 		return statusOK
 	}
 	if !isRegionReplicasSatisfied(f.cluster, region) {
@@ -115,7 +137,7 @@ func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
-func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
+func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 	if !isEmptyRegionAllowBalance(f.cluster, region) {
 		return statusRegionEmpty
 	}
@@ -125,4 +147,20 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) plan.Status {
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
 func isEmptyRegionAllowBalance(cluster regionHealthCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
+}
+
+type regionWitnessFilter struct {
+	storeID uint64
+}
+
+// NewRegionWitnessFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+func NewRegionWitnessFilter(storeID uint64) RegionFilter {
+	return &regionWitnessFilter{storeID: storeID}
+}
+
+func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
+	if region.GetStoreWitness(f.storeID) != nil {
+		return statusRegionWitnessPeer
+	}
+	return statusOK
 }

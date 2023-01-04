@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/core/storelimit"
 )
 
@@ -28,7 +29,7 @@ type StoreCreateOption func(region *StoreInfo)
 // SetStoreAddress sets the address for the store.
 func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Address = address
 		meta.StatusAddress = statusAddress
 		meta.PeerAddress = peerAddress
@@ -39,7 +40,7 @@ func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOpti
 // SetStoreLabels sets the labels for the store.
 func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Labels = labels
 		store.meta = meta
 	}
@@ -48,7 +49,7 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 // SetStoreStartTime sets the start timestamp for the store.
 func SetStoreStartTime(startTS int64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.StartTimestamp = startTS
 		store.meta = meta
 	}
@@ -57,7 +58,7 @@ func SetStoreStartTime(startTS int64) StoreCreateOption {
 // SetStoreVersion sets the version for the store.
 func SetStoreVersion(githash, version string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Version = version
 		meta.GitHash = githash
 		store.meta = meta
@@ -67,7 +68,7 @@ func SetStoreVersion(githash, version string) StoreCreateOption {
 // SetStoreDeployPath sets the deploy path for the store.
 func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.DeployPath = deployPath
 		store.meta = meta
 	}
@@ -76,7 +77,7 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 // OfflineStore offline a store
 func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.State = metapb.StoreState_Offline
 		meta.NodeState = metapb.NodeState_Removing
 		meta.PhysicallyDestroyed = physicallyDestroyed
@@ -87,7 +88,7 @@ func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
 // UpStore up a store
 func UpStore() StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.State = metapb.StoreState_Up
 		meta.NodeState = metapb.NodeState_Serving
 		store.meta = meta
@@ -97,7 +98,7 @@ func UpStore() StoreCreateOption {
 // TombstoneStore set a store to tombstone.
 func TombstoneStore() StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := store.cloneMetaStore()
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.State = metapb.StoreState_Tombstone
 		meta.NodeState = metapb.NodeState_Removed
 		store.meta = meta
@@ -146,6 +147,13 @@ func SetLeaderCount(leaderCount int) StoreCreateOption {
 func SetRegionCount(regionCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.regionCount = regionCount
+	}
+}
+
+// SetWitnessCount sets the witness count for the store.
+func SetWitnessCount(witnessCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.witnessCount = witnessCount
 	}
 }
 
@@ -228,10 +236,17 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	return func(store *StoreInfo) {
 		store.mu.Lock()
 		defer store.mu.Unlock()
-		if len(ratePerSec) == 0 {
-			store.limiter[limitType] = nil
-			return
+		rate := float64(0)
+		if len(ratePerSec) > 0 {
+			rate = ratePerSec[0]
 		}
-		store.limiter[limitType] = storelimit.NewStoreLimit(ratePerSec[0], storelimit.RegionInfluence[limitType])
+		store.limiter.Reset(rate, limitType)
+	}
+}
+
+// SetLastAwakenTime sets last awaken time for the store.
+func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.lastAwakenTime = lastAwaken
 	}
 }

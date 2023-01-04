@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"fmt"
-	"github.com/pingcap/errors"
 	"math"
 	"path"
 	"strconv"
@@ -25,18 +24,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/election"
-	"github.com/tikv/pd/server/member"
-	"github.com/tikv/pd/server/storage/kv"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -45,17 +44,19 @@ import (
 const (
 	// GlobalDCLocation is the Global TSO Allocator's DC location label.
 	GlobalDCLocation            = "global"
-	checkStep                   = 1 * time.Minute
-	patrolStep                  = 1 * time.Second
+	checkStep                   = time.Minute
+	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
+	// The value should be the same as the variable defined in server's config.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 )
 
 var (
 	// PriorityCheck exported is only for test.
-	PriorityCheck = 1 * time.Minute
+	PriorityCheck = time.Minute
 )
 
 // AllocatorGroupFilter is used to select AllocatorGroup.
@@ -133,17 +134,17 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	cfg *config.Config,
+	cfg config,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		enableLocalTSO:         cfg.EnableLocalTSO,
+		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           cfg.TSOSaveInterval.Duration,
-		updatePhysicalInterval: cfg.TSOUpdatePhysicalInterval.Duration,
+		saveInterval:           cfg.GetTSOSaveInterval(),
+		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         &cfg.Security.TLSConfig,
+		securityConfig:         cfg.GetTLSConfig(),
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -245,6 +246,25 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 	return infoPtr.clone(), true
 }
 
+// CleanUpDCLocation cleans up certain server's DCLocationInfo
+func (am *AllocatorManager) CleanUpDCLocation() error {
+	serverID := am.member.ID()
+	dcLocationKey := am.member.GetDCLocationPath(serverID)
+	// remove dcLocationKey from etcd
+	if resp, err := kv.
+		NewSlowLogTxn(am.member.Client()).
+		Then(clientv3.OpDelete(dcLocationKey)).
+		Commit(); err != nil {
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	} else if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	log.Info("delete the dc-location key previously written in etcd",
+		zap.Uint64("server-id", serverID))
+	go am.ClusterDCLocationChecker()
+	return nil
+}
+
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,
 // which satisfies dcLocation -> DCLocationInfo.
 func (am *AllocatorManager) GetClusterDCLocations() map[string]DCLocationInfo {
@@ -293,7 +313,7 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if am.updatePhysicalInterval != config.DefaultTSOUpdatePhysicalInterval {
+	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
 		log.Warn("tso update physical interval is non-default",
 			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
 	}
@@ -1104,6 +1124,15 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 		return nil, err
 	}
 	return maxTSO, nil
+}
+
+// GetGlobalTSO returns global tso.
+func (am *AllocatorManager) GetGlobalTSO() (*pdpb.Timestamp, error) {
+	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
+	if err != nil {
+		return nil, err
+	}
+	return globalAllocator.(*GlobalTSOAllocator).getCurrentTSO()
 }
 
 func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {

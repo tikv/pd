@@ -75,7 +75,7 @@ func TestPutItem(t *testing.T) {
 		regionCount: 2,
 		treeLen:     2,
 	}, {
-		// // case 5: region 1,2,3 will be merged.
+		// case 5: region 1,2,3 will be merged.
 		regionID:    4,
 		keys:        [][]byte{[]byte(""), []byte("")},
 		regionCount: 1,

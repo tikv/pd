@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -46,8 +46,9 @@ var listMemberRetryTimes = 20
 // and returns the initial configuration of the PD cluster.
 //
 // TL;TR: The join functionality is safe. With data, join does nothing, w/o data
-//        and it is not a member of cluster, join does MemberAdd, it returns an
-//        error if PD tries to join itself, missing data or join a duplicated PD.
+//
+//	and it is not a member of cluster, join does MemberAdd, it returns an
+//	error if PD tries to join itself, missing data or join a duplicated PD.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -56,29 +57,29 @@ var listMemberRetryTimes = 20
 //
 // If there is no data directory, there are following cases:
 //
-//  - A new PD joins an existing cluster.
-//      What join does: MemberAdd, MemberList, then generate initial-cluster.
+//   - A new PD joins an existing cluster.
+//     What join does: MemberAdd, MemberList, then generate initial-cluster.
 //
-//  - A failed PD re-joins the previous cluster.
-//      What join does: return an error. (etcd reports: raft log corrupted,
-//                      truncated, or lost?)
+//   - A failed PD re-joins the previous cluster.
+//     What join does: return an error. (etcd reports: raft log corrupted,
+//     truncated, or lost?)
 //
-//  - A deleted PD joins to previous cluster.
-//      What join does: MemberAdd, MemberList, then generate initial-cluster.
-//                      (it is not in the member list and there is no data, so
-//                       we can treat it as a new PD.)
+//   - A deleted PD joins to previous cluster.
+//     What join does: MemberAdd, MemberList, then generate initial-cluster.
+//     (it is not in the member list and there is no data, so
+//     we can treat it as a new PD.)
 //
 // If there is a data directory, there are following special cases:
 //
-//  - A failed PD tries to join the previous cluster but it has been deleted
-//    during its downtime.
-//      What join does: return "" (etcd will connect to other peers and find
-//                      that the PD itself has been removed.)
+//   - A failed PD tries to join the previous cluster but it has been deleted
+//     during its downtime.
+//     What join does: return "" (etcd will connect to other peers and find
+//     that the PD itself has been removed.)
 //
-//  - A deleted PD joins the previous cluster.
-//      What join does: return "" (as etcd will read data directory and find
-//                      that the PD itself has been removed, so an empty string
-//                      is fine.)
+//   - A deleted PD joins the previous cluster.
+//     What join does: return "" (as etcd will read data directory and find
+//     that the PD itself has been removed, so an empty string
+//     is fine.)
 func PrepareJoinCluster(cfg *config.Config) error {
 	// - A PD tries to join itself.
 	if cfg.Join == "" {

@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -34,116 +35,149 @@ const (
 	leaderTolerantSizeRatio      float64 = 5.0
 	minTolerantSizeRatio         float64 = 1.0
 	influenceAmp                 int64   = 5
+	defaultMaxRetryLimit                 = 10
 	defaultMinRetryLimit                 = 1
 	defaultRetryQuotaAttenuation         = 2
 )
 
-type balancePlan struct {
+type solver struct {
+	*balanceSchedulerPlan
 	schedule.Cluster
 	kind              core.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
-
-	source *core.StoreInfo
-	target *core.StoreInfo
-	region *core.RegionInfo
+	tolerantSource    int64
+	fit               *placement.RegionFit
 
 	sourceScore float64
 	targetScore float64
 }
 
-func newBalancePlan(kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *balancePlan {
-	return &balancePlan{
-		Cluster:           cluster,
-		kind:              kind,
-		opInfluence:       opInfluence,
-		tolerantSizeRatio: adjustTolerantRatio(cluster, kind),
+func newSolver(basePlan *balanceSchedulerPlan, kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+	return &solver{
+		balanceSchedulerPlan: basePlan,
+		Cluster:              cluster,
+		kind:                 kind,
+		opInfluence:          opInfluence,
+		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
 	}
 }
 
-func (p *balancePlan) GetOpInfluence(storeID uint64) int64 {
+func (p *solver) GetOpInfluence(storeID uint64) int64 {
 	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
 }
 
-func (p *balancePlan) SourceStoreID() uint64 {
+func (p *solver) SourceStoreID() uint64 {
 	return p.source.GetID()
 }
 
-func (p *balancePlan) SourceMetricLabel() string {
+func (p *solver) SourceMetricLabel() string {
 	return strconv.FormatUint(p.SourceStoreID(), 10)
 }
 
-func (p *balancePlan) TargetStoreID() uint64 {
+func (p *solver) TargetStoreID() uint64 {
 	return p.target.GetID()
 }
 
-func (p *balancePlan) TargetMetricLabel() string {
+func (p *solver) TargetMetricLabel() string {
 	return strconv.FormatUint(p.TargetStoreID(), 10)
 }
 
-func (p *balancePlan) shouldBalance(scheduleName string) bool {
+func (p *solver) sourceStoreScore(scheduleName string) float64 {
+	sourceID := p.source.GetID()
+	tolerantResource := p.getTolerantResource()
+	// to avoid schedule too much, if A's core greater than B and C a little
+	// we want that A should be moved out one region not two
+	influence := p.GetOpInfluence(sourceID)
+	if influence > 0 {
+		influence = -influence
+	}
+
+	opts := p.GetOpts()
+	if opts.IsDebugMetricsEnabled() {
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
+		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
+	}
+	var score float64
+	switch p.kind.Resource {
+	case core.LeaderKind:
+		sourceDelta := influence - tolerantResource
+		score = p.source.LeaderScore(p.kind.Policy, sourceDelta)
+	case core.RegionKind:
+		sourceDelta := influence*influenceAmp - tolerantResource
+		score = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+	case core.WitnessKind:
+		sourceDelta := influence - tolerantResource
+		score = p.source.WitnessScore(sourceDelta)
+	}
+	return score
+}
+
+func (p *solver) targetStoreScore(scheduleName string) float64 {
+	targetID := p.target.GetID()
+	// to avoid schedule too much, if A's score less than B and C in small range,
+	// we want that A can be moved in one region not two
+	tolerantResource := p.getTolerantResource()
+	// to avoid schedule call back
+	// A->B, A's influence is negative, so A will be target, C may move region to A
+	influence := p.GetOpInfluence(targetID)
+	if influence < 0 {
+		influence = -influence
+	}
+
+	opts := p.GetOpts()
+	if opts.IsDebugMetricsEnabled() {
+		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
+	}
+	var score float64
+	switch p.kind.Resource {
+	case core.LeaderKind:
+		targetDelta := influence + tolerantResource
+		score = p.target.LeaderScore(p.kind.Policy, targetDelta)
+	case core.RegionKind:
+		targetDelta := influence*influenceAmp + tolerantResource
+		score = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+	case core.WitnessKind:
+		targetDelta := influence + tolerantResource
+		score = p.target.WitnessScore(targetDelta)
+	}
+	return score
+}
+
+// Both of the source store's score and target store's score should be calculated before calling this function.
+// It will not calculate the score again.
+func (p *solver) shouldBalance(scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
 	sourceID := p.source.GetID()
 	targetID := p.target.GetID()
-	tolerantResource := p.getTolerantResource()
-	// to avoid schedule too much, if A's core greater than B and C a little
-	// we want that A should be moved out one region not two
-	sourceInfluence := p.GetOpInfluence(sourceID)
-	// A->B, B's influence is positive , so B can become source schedule, it will move region from B to C
-	if sourceInfluence > 0 {
-		sourceInfluence = -sourceInfluence
-	}
-	// to avoid schedule too much, if A's score less than B and C in small range,
-	// we want that A can be moved in one region not two
-	targetInfluence := p.GetOpInfluence(targetID)
-	// to avoid schedule call back
-	// A->B, A's influence is negative, so A will be target, C may move region to A
-	if targetInfluence < 0 {
-		targetInfluence = -targetInfluence
-	}
-	opts := p.GetOpts()
-	switch p.kind.Resource {
-	case core.LeaderKind:
-		sourceDelta, targetDelta := sourceInfluence-tolerantResource, targetInfluence+tolerantResource
-		p.sourceScore = p.source.LeaderScore(p.kind.Policy, sourceDelta)
-		p.targetScore = p.target.LeaderScore(p.kind.Policy, targetDelta)
-	case core.RegionKind:
-		sourceDelta, targetDelta := sourceInfluence*influenceAmp-tolerantResource, targetInfluence*influenceAmp+tolerantResource
-		p.sourceScore = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
-		p.targetScore = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
-	}
-	if opts.IsDebugMetricsEnabled() {
-		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(sourceInfluence))
-		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(targetInfluence))
-		tolerantResourceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), strconv.FormatUint(targetID, 10)).Set(float64(tolerantResource))
-	}
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := p.sourceScore > p.targetScore
 
-	if !shouldBalance {
+	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", p.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
-			zap.Int64("source-influence", sourceInfluence),
 			zap.Int64("target-size", p.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
-			zap.Int64("target-influence", targetInfluence),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
-			zap.Int64("tolerant-resource", tolerantResource))
+			zap.Int64("tolerant-resource", p.getTolerantResource()))
 	}
 	return shouldBalance
 }
 
-func (p *balancePlan) getTolerantResource() int64 {
-	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
-		return int64(p.tolerantSizeRatio)
+func (p *solver) getTolerantResource() int64 {
+	if p.tolerantSource > 0 {
+		return p.tolerantSource
 	}
-	regionSize := p.region.GetApproximateSize()
-	if regionSize < p.GetAverageRegionSize() {
-		regionSize = p.GetAverageRegionSize()
+
+	if (p.kind.Resource == core.LeaderKind || p.kind.Resource == core.WitnessKind) && p.kind.Policy == core.ByCount {
+		p.tolerantSource = int64(p.tolerantSizeRatio)
+	} else {
+		regionSize := p.GetAverageRegionSize()
+		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
-	return int64(float64(regionSize) * p.tolerantSizeRatio)
+	return p.tolerantSource
 }
 
 func adjustTolerantRatio(cluster schedule.Cluster, kind core.ScheduleKind) float64 {
@@ -300,11 +334,11 @@ type retryQuota struct {
 	limits map[uint64]int
 }
 
-func newRetryQuota(initialLimit, minLimit, attenuation int) *retryQuota {
+func newRetryQuota() *retryQuota {
 	return &retryQuota{
-		initialLimit: initialLimit,
-		minLimit:     minLimit,
-		attenuation:  attenuation,
+		initialLimit: defaultMaxRetryLimit,
+		minLimit:     defaultMinRetryLimit,
+		attenuation:  defaultRetryQuotaAttenuation,
 		limits:       make(map[uint64]int),
 	}
 }

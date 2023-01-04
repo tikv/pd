@@ -24,8 +24,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -34,7 +34,7 @@ import (
 
 const (
 	watchInterval = 100 * time.Millisecond
-	timeout       = 1 * time.Minute
+	timeout       = time.Minute
 )
 
 // SplitRegionsHandler used to handle region splitting

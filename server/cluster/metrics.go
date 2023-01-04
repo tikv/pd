@@ -57,12 +57,28 @@ var (
 			Help:      "Status of the hotspot.",
 		}, []string{"address", "store", "type"})
 
+	hotPendingSum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "hot_pending_sum",
+			Help:      "Pending influence sum of store in hot region scheduler.",
+		}, []string{"store", "rw", "dim"})
+
 	patrolCheckRegionsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "checker",
 			Name:      "patrol_regions_time",
 			Help:      "Time spent of patrol checks region.",
+		})
+
+	updateStoreStatsGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "update_stores_stats_time",
+			Help:      "Time spent of updating store stats.",
 		})
 
 	clusterStateCPUGauge = prometheus.NewGauge(
@@ -135,4 +151,5 @@ func init() {
 	prometheus.MustRegister(storesSpeedGauge)
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
+	prometheus.MustRegister(updateStoreStatsGauge)
 }

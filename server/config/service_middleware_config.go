@@ -17,7 +17,7 @@ package config
 import "github.com/tikv/pd/pkg/ratelimit"
 
 const (
-	defaultEnableAuditMiddleware     = false
+	defaultEnableAuditMiddleware     = true
 	defaultEnableRateLimitMiddleware = false
 )
 

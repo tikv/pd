@@ -20,7 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -50,7 +50,6 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-// TODO: isSupportMerge should be removed.
 func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
@@ -59,7 +58,7 @@ func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *p
 		opController:      opController,
 		learnerChecker:    NewLearnerChecker(cluster),
 		replicaChecker:    NewReplicaChecker(cluster, regionWaitingList),
-		ruleChecker:       NewRuleChecker(cluster, ruleManager, regionWaitingList),
+		ruleChecker:       NewRuleChecker(ctx, cluster, ruleManager, regionWaitingList),
 		splitChecker:      NewSplitChecker(cluster, ruleManager, labeler),
 		mergeChecker:      NewMergeChecker(ctx, cluster),
 		jointStateChecker: NewJointStateChecker(cluster),

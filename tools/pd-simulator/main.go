@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -45,9 +46,9 @@ var (
 	pdAddr                      = flag.String("pd", "", "pd address")
 	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
 	caseName                    = flag.String("case", "", "case name")
-	serverLogLevel              = flag.String("serverLog", "fatal", "pd server log level")
-	simLogLevel                 = flag.String("simLog", "fatal", "simulator log level")
-	simLogFile                  = flag.String("simLogFile", "", "simulator log file")
+	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")
+	simLogLevel                 = flag.String("simLog", "info", "simulator log level")
+	simLogFile                  = flag.String("log-file", "", "simulator log file")
 	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
 	storeNum                    = flag.Int("storeNum", 0, "storeNum")
 	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
@@ -55,6 +56,8 @@ var (
 )
 
 func main() {
+	// wait PD start. Otherwise it will happen error when getting cluster ID.
+	time.Sleep(3 * time.Second)
 	// ignore some undefined flag
 	flag.CommandLine.ParseErrorsWhitelist.UnknownFlags = true
 	flag.Parse()
@@ -95,7 +98,7 @@ func main() {
 
 func run(simCase string, simConfig *simulator.SimConfig) {
 	if *pdAddr != "" {
-		go runMetrics()
+		go runHTTPServer()
 		simStart(*pdAddr, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -113,8 +116,18 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 	}
 }
 
-func runMetrics() {
+func runHTTPServer() {
 	http.Handle("/metrics", promhttp.Handler())
+	// profile API
+	http.HandleFunc("/pprof/profile", pprof.Profile)
+	http.HandleFunc("/pprof/trace", pprof.Trace)
+	http.HandleFunc("/pprof/symbol", pprof.Symbol)
+	http.Handle("/pprof/heap", pprof.Handler("heap"))
+	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
+	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
+	http.Handle("/pprof/block", pprof.Handler("block"))
+	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
+	// nolint
 	http.ListenAndServe(*statusAddress, nil)
 }
 
@@ -193,7 +206,6 @@ EXIT:
 	}
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
-	driver.PrintStatistics()
 	if analysis.GetTransferCounter().IsValid {
 		analysis.GetTransferCounter().PrintResult()
 	}

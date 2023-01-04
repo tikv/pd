@@ -19,9 +19,10 @@ type PriorityLevel int
 
 // Built-in priority level
 const (
-	LowPriority PriorityLevel = iota
-	NormalPriority
-	HighPriority
+	Low PriorityLevel = iota
+	Medium
+	High
+	Urgent
 )
 
 // ScheduleKind distinguishes resources and schedule policy.
@@ -46,6 +47,8 @@ const (
 	LeaderKind ResourceKind = iota
 	// RegionKind indicates the region kind resource
 	RegionKind
+	// WitnessKind indicates the witness kind resource
+	WitnessKind
 )
 
 func (k ResourceKind) String() string {
@@ -54,6 +57,8 @@ func (k ResourceKind) String() string {
 		return "leader"
 	case RegionKind:
 		return "region"
+	case WitnessKind:
+		return "witness"
 	default:
 		return "unknown"
 	}

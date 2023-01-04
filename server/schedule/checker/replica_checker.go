@@ -72,17 +72,17 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	if op := r.checkDownPeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkOfflinePeer(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkMakeUpReplica(region); op != nil {
 		checkerCounter.WithLabelValues("replica_checker", "new-operator").Inc()
-		op.SetPriorityLevel(core.HighPriority)
+		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkRemoveExtraReplica(region); op != nil {

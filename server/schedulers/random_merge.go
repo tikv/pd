@@ -19,13 +19,13 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 const (
@@ -104,15 +104,15 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetOpts(), &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
+		FilterSource(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
 		RandomPick()
 	if store == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
 		return nil, nil
 	}
-	pendingFilter := filter.NewRegionPengdingFilter()
+	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), pendingFilter, downFilter)
+	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
 	if region == nil {
 		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
 		return nil, nil
@@ -137,6 +137,8 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil, nil
 	}
+	ops[0].SetPriorityLevel(core.Low)
+	ops[1].SetPriorityLevel(core.Low)
 	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
 	return ops, nil
 }

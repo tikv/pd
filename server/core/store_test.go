@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestDistinctScore(t *testing.T) {
@@ -94,7 +95,7 @@ func TestCloneStore(t *testing.T) {
 func TestCloneMetaStore(t *testing.T) {
 	re := require.New(t)
 	store := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
-	store2 := NewStoreInfo(store).cloneMetaStore()
+	store2 := typeutil.DeepClone(NewStoreInfo(store).meta, StoreFactory)
 	re.Equal(store2.Labels, store.Labels)
 	store2.Labels[0].Value = "changed value"
 	re.NotEqual(store2.Labels, store.Labels)
@@ -135,7 +136,7 @@ func TestLowSpaceRatio(t *testing.T) {
 	store.rawStats.Available = store.rawStats.Capacity >> 3
 
 	re.False(store.IsLowSpace(0.8))
-	store.regionCount = 31
+	store.regionCount = 51
 	re.True(store.IsLowSpace(0.8))
 	store.rawStats.Available = store.rawStats.Capacity >> 2
 	re.False(store.IsLowSpace(0.8))

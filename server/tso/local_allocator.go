@@ -22,10 +22,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/tsoutil"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/election"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -93,8 +93,8 @@ func (lta *LocalTSOAllocator) UpdateTSO() error {
 }
 
 // SetTSO sets the physical part with given TSO.
-func (lta *LocalTSOAllocator) SetTSO(tso uint64) error {
-	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tso, false)
+func (lta *LocalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+	return lta.timestampOracle.resetUserTimestampInner(lta.leadership, tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate a given number of TSOs.

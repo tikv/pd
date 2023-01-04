@@ -28,19 +28,20 @@ import (
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
 const (
-	modeMajority   = "majority"
-	modeDRAutoSync = "dr-auto-sync"
+	modeMajority                 = "majority"
+	modeDRAutoSync               = "dr-auto-sync"
+	defaultDRTiKVSyncTimeoutHint = time.Minute
 )
 
 func modeToPB(m string) pb.ReplicationMode {
@@ -139,10 +140,11 @@ func (m *ModeManager) GetReplicationStatus() *pb.ReplicationStatus {
 	case modeMajority:
 	case modeDRAutoSync:
 		p.DrAutoSync = &pb.DRAutoSync{
-			LabelKey:            m.config.DRAutoSync.LabelKey,
-			State:               pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
-			StateId:             m.drAutoSync.StateID,
-			WaitSyncTimeoutHint: int32(m.config.DRAutoSync.TiKVSyncTimeoutHint.Seconds()),
+			LabelKey: m.config.DRAutoSync.LabelKey,
+			State:    pb.DRAutoSyncState(pb.DRAutoSyncState_value[strings.ToUpper(m.drAutoSync.State)]),
+			StateId:  m.drAutoSync.StateID,
+			// TODO: make it works, ref https://github.com/tikv/tikv/issues/7945
+			WaitSyncTimeoutHint: int32(defaultDRTiKVSyncTimeoutHint.Seconds()),
 			AvailableStores:     m.drAutoSync.AvailableStores,
 			PauseRegionSplit:    m.config.DRAutoSync.PauseRegionSplit && m.drAutoSync.State != drStateSync,
 		}
@@ -367,7 +369,7 @@ func (m *ModeManager) drGetState() string {
 
 const (
 	idleTimeout  = time.Minute
-	tickInterval = time.Second * 10
+	tickInterval = 500 * time.Millisecond
 )
 
 // Run starts the background job.

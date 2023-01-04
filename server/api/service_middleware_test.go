@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/ratelimit"
-	tu "github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -59,7 +59,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.EnableAudit)
+	suite.True(sc.EnableAudit)
 
 	ms := map[string]interface{}{
 		"enable-audit":      "true",

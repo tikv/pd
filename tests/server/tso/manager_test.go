@@ -25,8 +25,8 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
@@ -147,7 +147,7 @@ func TestNextLeaderKey(t *testing.T) {
 	defer cancel()
 	tso.PriorityCheck = 5 * time.Second
 	defer func() {
-		tso.PriorityCheck = 1 * time.Minute
+		tso.PriorityCheck = time.Minute
 	}()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",

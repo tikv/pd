@@ -1,0 +1,134 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package server
+
+import (
+	"encoding/json"
+	"sort"
+	"sync"
+
+	"github.com/pingcap/errors"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/storage"
+)
+
+// Manager is the manager of resource group.
+type Manager struct {
+	sync.RWMutex
+	groups  map[string]*ResourceGroup
+	storage func() storage.Storage
+}
+
+// NewManager returns a new Manager.
+func NewManager(srv *server.Server) *Manager {
+	m := &Manager{
+		groups:  make(map[string]*ResourceGroup),
+		storage: srv.GetStorage,
+	}
+	srv.AddStartCallback(m.Init)
+	return m
+}
+
+// Init initializes the resource group manager.
+func (m *Manager) Init() {
+	handler := func(k, v string) {
+		var group ResourceGroup
+		if err := json.Unmarshal([]byte(v), &group); err != nil {
+			panic(err)
+		}
+		m.groups[group.Name] = &group
+	}
+	m.storage().LoadResourceGroups(handler)
+}
+
+// AddResourceGroup puts a resource group.
+func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
+	m.RLock()
+	_, ok := m.groups[group.Name]
+	m.RUnlock()
+	if ok {
+		return errors.New("this group already exists")
+	}
+	err := group.CheckAndInit()
+	if err != nil {
+		return err
+	}
+	m.Lock()
+	if err := m.storage().SaveResourceGroup(group.Name, group); err != nil {
+		return err
+	}
+	m.groups[group.Name] = group
+	m.Unlock()
+	return nil
+}
+
+// ModifyResourceGroup modifies an existing resource group.
+func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
+	if group == nil || group.Name == "" {
+		return errors.New("invalid group name")
+	}
+	m.Lock()
+	defer m.Unlock()
+	curGroup, ok := m.groups[group.Name]
+	if !ok {
+		return errors.New("not exists the group")
+	}
+	newGroup := curGroup.Copy()
+	err := newGroup.PatchSettings(group.GetSettings())
+	if err != nil {
+		return err
+	}
+	if m.storage().SaveResourceGroup(group.Name, newGroup); err != nil {
+		return err
+	}
+	m.groups[group.Name] = newGroup
+	return nil
+}
+
+// DeleteResourceGroup deletes a resource group.
+func (m *Manager) DeleteResourceGroup(name string) error {
+	if err := m.storage().DeleteResourceGroup(name); err != nil {
+		return err
+	}
+	m.Lock()
+	delete(m.groups, name)
+	m.Unlock()
+	return nil
+}
+
+// GetResourceGroup returns a copy of a resource group.
+func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
+	m.RLock()
+	defer m.RUnlock()
+	if group, ok := m.groups[name]; ok {
+		return group.Copy()
+	}
+	return nil
+}
+
+// GetResourceGroupList returns copies of resource group list.
+func (m *Manager) GetResourceGroupList() []*ResourceGroup {
+	m.RLock()
+	res := make([]*ResourceGroup, 0, len(m.groups))
+	for _, group := range m.groups {
+		res = append(res, group.Copy())
+	}
+	m.RUnlock()
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Name < res[j].Name
+	})
+	return res
+}
