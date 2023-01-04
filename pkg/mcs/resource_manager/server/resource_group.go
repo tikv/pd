@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	// ResourceGroupPathPrefix is the prefix of the resource group path to store group settings.
+	// GroupSettingsPathPrefix is the prefix of the resource group path to store group settings.
 	GroupSettingsPathPrefix = "/settings"
 )
 
@@ -214,8 +214,6 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
-	rg.RLock()
-	defer rg.RUnlock()
 	metaGroup := rg.IntoProtoResourceGroup()
 	return storage.SaveResourceGroup(path.Join(GroupSettingsPathPrefix, rg.Name), metaGroup)
 }

@@ -190,4 +190,4 @@ require (
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20230104035728-9dcd8bcfcf2b
+replace github.com/pingcap/kvproto => github.com/nolouch/kvproto v0.0.0-20230104065311-4791dd0c973f
