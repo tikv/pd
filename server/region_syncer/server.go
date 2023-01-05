@@ -131,7 +131,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			if b := first.GetBuckets(); b != nil {
 				bucket = b
 			}
-			events = append(events, &pdpb.Event{Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
+			events = append(events, &pdpb.Event{EventType: pdpb.EventType_Modified, Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
 				Region:      first.GetMeta(),
 				RegionStats: first.GetStat(),
 				Leader:      first.GetLeader(),
@@ -146,7 +146,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				if b := region.GetBuckets(); b != nil {
 					bucket = b
 				}
-				events = append(events, &pdpb.Event{Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
+				events = append(events, &pdpb.Event{EventType: pdpb.EventType_Modified, Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
 					Region:      region.GetMeta(),
 					RegionStats: region.GetStat(),
 					Leader:      region.GetLeader(),

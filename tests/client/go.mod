@@ -3,7 +3,6 @@ module github.com/tikv/pd/tests/client
 go 1.19
 
 require (
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20221221093947-0a9b14f1fc26
 	github.com/stretchr/testify v1.8.0
@@ -55,6 +54,7 @@ require (
 	github.com/go-sql-driver/mysql v1.6.0 // indirect
 	github.com/goccy/go-graphviz v0.0.9 // indirect
 	github.com/goccy/go-json v0.9.7 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.1+incompatible // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect

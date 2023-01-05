@@ -14,7 +14,9 @@
 
 package informer
 
-import "github.com/pingcap/kvproto/pkg/pdpb"
+import (
+	"github.com/pingcap/kvproto/pkg/pdpb"
+)
 
 type reflector struct {
 	// The destination to sync up with the watch source
@@ -70,7 +72,7 @@ func (r *reflector) list() (uint64, error) {
 // syncWith updates the store's items with the given list.
 func (r *reflector) syncWith(items []interface{}) error {
 	for _, item := range items {
-		err := r.store.Update(item)
+		err := r.store.Add(item)
 		if err != nil {
 			return err
 		}
@@ -89,26 +91,28 @@ loop:
 		select {
 		case <-stopCh:
 			return nil
-		case event, ok := <-w.ResultChan():
+		case events, ok := <-w.ResultChan():
 			if !ok {
 				break loop
 			}
-			item := event.Item
-			switch event.EventType {
-			case pdpb.EventType_Added:
-				err := r.store.Add(item)
-				if err != nil {
-					return err
-				}
-			case pdpb.EventType_Modified:
-				err := r.store.Update(item)
-				if err != nil {
-					return err
-				}
-			case pdpb.EventType_Deleted:
-				err := r.store.Delete(item)
-				if err != nil {
-					return err
+			for _, event := range events {
+				item := event.Item
+				switch event.EventType {
+				case pdpb.EventType_Added:
+					err := r.store.Add(item)
+					if err != nil {
+						return err
+					}
+				case pdpb.EventType_Modified:
+					err := r.store.Update(item)
+					if err != nil {
+						return err
+					}
+				case pdpb.EventType_Deleted:
+					err := r.store.Delete(item)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}

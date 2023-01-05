@@ -16,8 +16,9 @@ package pd
 
 import (
 	"context"
-	"go.uber.org/zap"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"

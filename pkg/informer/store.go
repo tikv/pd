@@ -67,6 +67,7 @@ func (s *store) Add(obj interface{}) error {
 	if err != nil {
 		return err
 	}
+
 	return s.cacheStorage.Save(key, value)
 }
 

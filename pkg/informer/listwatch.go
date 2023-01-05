@@ -14,7 +14,9 @@
 
 package informer
 
-import "github.com/pingcap/kvproto/pkg/pdpb"
+import (
+	"github.com/pingcap/kvproto/pkg/pdpb"
+)
 
 // Lister is any object that knows how to perform an initial list.
 type Lister interface {
@@ -44,8 +46,18 @@ type ListWatch struct {
 	WatchFunc WatchFunc
 }
 
+// List a set of apiserver resources
+func (lw *ListWatch) List(options Options) ([]interface{}, uint64, error) {
+	return lw.ListFunc(options)
+}
+
+// Watch a set of apiserver resources
+func (lw *ListWatch) Watch(options Options) (Interface, error) {
+	return lw.WatchFunc(options)
+}
+
 // Interface can be implemented by anything that knows how to watch and report changes.
 type Interface interface {
 	Stop()
-	ResultChan() <-chan *pdpb.Event
+	ResultChan() <-chan []*pdpb.Event
 }

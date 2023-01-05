@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
@@ -56,6 +57,7 @@ const (
 	defaultBTreeDegree = 64
 )
 
+// RegionTree is used to maintain the region info.
 type RegionTree struct {
 	tree *btree.BTreeG[*regionItem]
 	// Statistics
@@ -64,6 +66,7 @@ type RegionTree struct {
 	totalWriteKeysRate  float64
 }
 
+// NewRegionTree return a region tree instance
 func NewRegionTree() *RegionTree {
 	return &RegionTree{
 		tree:                btree.NewG[*regionItem](defaultBTreeDegree),
@@ -73,20 +76,36 @@ func NewRegionTree() *RegionTree {
 	}
 }
 
+// Add implements the informer interface.
 func (t *RegionTree) Add(item interface{}) error {
 	return t.Update(item)
 }
 
+// Update implements the informer interface.
 func (t *RegionTree) Update(item interface{}) error {
-	t.update(&regionItem{item.(*RegionInfo)}, false)
+	// TODO: support region without statistics
+	regionStat := item.(*pdpb.Item).GetRegionStat()
+	region := NewRegionInfo(regionStat.GetRegion(), regionStat.GetLeader(),
+		SetWrittenBytes(regionStat.GetRegionStats().GetBytesWritten()),
+		SetWrittenKeys(regionStat.GetRegionStats().GetKeysWritten()),
+		SetReadBytes(regionStat.GetRegionStats().GetBytesRead()),
+		SetReadKeys(regionStat.GetRegionStats().GetKeysRead()),
+		// TODO: make bucket work as expected
+		SetBuckets(regionStat.GetBuckets()),
+		SetFromHeartbeat(false))
+	t.update(&regionItem{region}, false)
 	return nil
 }
 
+// Delete implements the informer interface.
 func (t *RegionTree) Delete(item interface{}) error {
-	t.remove(item.(*RegionInfo))
+	regionStat := item.(*pdpb.Item).GetRegionStat()
+	region := NewRegionInfo(regionStat.GetRegion(), regionStat.GetLeader())
+	t.remove(region)
 	return nil
 }
 
+// List implements the informer interface.
 func (t *RegionTree) List(start, end string, limit int) ([]interface{}, error) {
 	var res []interface{}
 	t.scanRange([]byte(start), func(region *RegionInfo) bool {
@@ -102,6 +121,7 @@ func (t *RegionTree) List(start, end string, limit int) ([]interface{}, error) {
 	return res, nil
 }
 
+// GetByKey implements the informer interface.
 func (t *RegionTree) GetByKey(key string) (item interface{}, err error) {
 	item = t.search([]byte(key))
 	return
@@ -141,7 +161,7 @@ func (t *RegionTree) overlaps(item *regionItem) []*regionItem {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *RegionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
+func (t *RegionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo { //revive:disable
 	region := item.RegionInfo
 	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
@@ -349,6 +369,7 @@ func (t *RegionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
 	return nil
 }
 
+// RandomRegions returns a set of random regions.
 func (t *RegionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	if t.length() == 0 {
 		return nil
@@ -364,6 +385,7 @@ func (t *RegionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	return regions
 }
 
+// TotalSize returns the total size of regions.
 func (t *RegionTree) TotalSize() int64 {
 	if t.length() == 0 {
 		return 0
@@ -371,6 +393,7 @@ func (t *RegionTree) TotalSize() int64 {
 	return t.totalSize
 }
 
+// TotalWriteRate returns the write rate of regions.
 func (t *RegionTree) TotalWriteRate() (bytesRate, keysRate float64) {
 	if t.length() == 0 {
 		return 0, 0

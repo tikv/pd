@@ -39,13 +39,13 @@ func (t *testLW) Watch(options Options) (Interface, error) {
 
 // FakeWatcher lets you test anything that consumes a watch.Interface; threadsafe.
 type FakeWatcher struct {
-	result  chan *pdpb.Event
+	result  chan []*pdpb.Event
 	stopped bool
 }
 
 func NewFakeWatcher() *FakeWatcher {
 	return &FakeWatcher{
-		result: make(chan *pdpb.Event),
+		result: make(chan []*pdpb.Event),
 	}
 }
 
@@ -57,13 +57,13 @@ func (f *FakeWatcher) Stop() {
 	}
 }
 
-func (f *FakeWatcher) ResultChan() <-chan *pdpb.Event {
+func (f *FakeWatcher) ResultChan() <-chan []*pdpb.Event {
 	return f.result
 }
 
 // Add sends an add event.
 func (f *FakeWatcher) watch(event *pdpb.Event) {
-	f.result <- event
+	f.result <- []*pdpb.Event{event}
 }
 
 func Test(t *testing.T) {

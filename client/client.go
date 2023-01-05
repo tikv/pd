@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -137,6 +138,7 @@ type Client interface {
 
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
+	InformerClient
 	// Close closes the client.
 	Close()
 }
@@ -1929,4 +1931,122 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 		return errors.WithStack(errors.New(header.GetError().String()))
 	}
 	return nil
+}
+
+// InformerClient ...
+type InformerClient interface {
+	List(ctx context.Context) ([]interface{}, uint64, error)
+	Watch(ctx context.Context) (*Watcher, error)
+}
+
+// Watcher ...
+type Watcher struct {
+	ch chan []*pdpb.Event
+}
+
+func newWatcher() *Watcher {
+	return &Watcher{ch: make(chan []*pdpb.Event)}
+}
+
+// ResultChan ...
+func (w *Watcher) ResultChan() <-chan []*pdpb.Event {
+	return w.ch
+}
+
+// Stop ...
+func (w *Watcher) Stop() {
+	close(w.ch)
+}
+
+// RevisionKey ...
+type RevisionKey struct{}
+
+// ResourceKey ...
+type ResourceKey struct{}
+
+// NameKey ...
+type NameKey struct{}
+
+// List ...
+func (c *client) List(ctx context.Context) ([]interface{}, uint64, error) {
+	req := &pdpb.ListRequest{
+		Header:   c.requestHeader(),
+		Revision: 0,
+		Resource: ctx.Value(ResourceKey{}).(string),
+		Name:     ctx.Value(NameKey{}).(string),
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	stream, err := c.getClient().List(ctx, req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var (
+		items    []interface{}
+		revision uint64
+	)
+LOOP:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, 0, err
+		default:
+			resp, err := stream.Recv()
+			if err == io.EOF {
+				break LOOP
+			}
+			if err != nil {
+				return nil, 0, err
+			}
+
+			for _, item := range resp.GetItems() {
+				items = append(items, item)
+			}
+			revision = resp.GetRevision()
+		}
+	}
+	return items, revision, nil
+}
+
+// Watch ...
+func (c *client) Watch(ctx context.Context) (*Watcher, error) {
+	watcher := newWatcher()
+	req := &pdpb.WatchRequest{
+		Header:   c.requestHeader(),
+		Revision: ctx.Value(RevisionKey{}).(uint64),
+		Resource: ctx.Value(ResourceKey{}).(string),
+		Name:     ctx.Value(NameKey{}).(string),
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	stream, err := c.getClient().Watch(ctx, req)
+	if err != nil {
+		watcher.Stop()
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in informer client `Watch`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				watcher.Stop()
+				return
+			default:
+				resp, err := stream.Recv()
+				if err != nil {
+					return
+				}
+				events := make([]*pdpb.Event, len(resp.GetEvents()))
+				for i, e := range resp.GetEvents() {
+					events[i] = e
+				}
+				watcher.ch <- events
+			}
+		}
+	}()
+	return watcher, err
 }
