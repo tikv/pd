@@ -28,7 +28,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	tbSetting := &rmpb.TokenBucket{
 		Tokens: 200000,
 		Settings: &rmpb.TokenLimitSettings{
-			Fillrate:   2000,
+			FillRate:   2000,
 			BurstLimit: 20000000,
 		},
 	}
@@ -37,12 +37,12 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	time1 := time.Now()
 	tb.update(time1)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
-	re.Equal(tbSetting.Settings.Fillrate, tb.Settings.Fillrate)
+	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 
 	tbSetting = &rmpb.TokenBucket{
 		Tokens: -100000,
 		Settings: &rmpb.TokenLimitSettings{
-			Fillrate:   1000,
+			FillRate:   1000,
 			BurstLimit: 10000000,
 		},
 	}
@@ -50,8 +50,8 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 
 	time2 := time.Now()
 	tb.update(time2)
-	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.Fillrate)+1e7)
-	re.Equal(tbSetting.Settings.Fillrate, tb.Settings.Fillrate)
+	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
+	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 }
 
 func TestGroupTokenBucketRequest(t *testing.T) {
@@ -59,7 +59,7 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	tbSetting := &rmpb.TokenBucket{
 		Tokens: 200000,
 		Settings: &rmpb.TokenLimitSettings{
-			Fillrate:   2000,
+			FillRate:   2000,
 			BurstLimit: 20000000,
 		},
 	}
@@ -77,9 +77,9 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	time2 := time.Now()
 	gtb.update(time2)
 	tb, trickle = gtb.request(100000, uint64(time.Second)*10/uint64(time.Millisecond))
-	re.LessOrEqual(math.Abs(tb.Tokens-19000*(1-loanReserveRatio)), time1.Add(gtb.LoanMaxPeriod).Sub(time2).Seconds()*(1-loanReserveRatio)*float64(tb.Settings.Fillrate)+1e7)
+	re.LessOrEqual(math.Abs(tb.Tokens-19000*(1-loanReserveRatio)), time1.Add(gtb.LoanMaxPeriod).Sub(time2).Seconds()*(1-loanReserveRatio)*float64(tb.Settings.FillRate)+1e7)
 	re.Equal(trickle, time1.Add(gtb.LoanMaxPeriod).Sub(time2).Milliseconds())
 	tb, trickle = gtb.request(2000, uint64(time.Second)*10/uint64(time.Millisecond))
-	re.LessOrEqual(tb.Tokens, time1.Add(gtb.LoanMaxPeriod).Sub(time2).Seconds()*loanReserveRatio*float64(tb.Settings.Fillrate)+1e7)
+	re.LessOrEqual(tb.Tokens, time1.Add(gtb.LoanMaxPeriod).Sub(time2).Seconds()*loanReserveRatio*float64(tb.Settings.FillRate)+1e7)
 	re.Equal(trickle, time1.Add(gtb.LoanMaxPeriod).Sub(time2).Milliseconds())
 }

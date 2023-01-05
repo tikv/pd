@@ -87,7 +87,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 		return errors.New("not exists the group")
 	}
 	newGroup := curGroup.Copy()
-	err := newGroup.PatchSettings(group.GetSettings())
+	err := newGroup.PatchSettings(group)
 	if err != nil {
 		return err
 	}

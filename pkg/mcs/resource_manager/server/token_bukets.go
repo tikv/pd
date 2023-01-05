@@ -21,6 +21,8 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
+const defaultRefillRate = 10000
+
 const defaultInitialTokens = 10 * 10000
 
 const defaultMaxTokens = 1e7
@@ -33,14 +35,18 @@ var loanReserveRatio float64 = 0.05
 // TODO: statistics Consumption
 type GroupTokenBucket struct {
 	*rmpb.TokenBucket `json:"token_bucket,omitempty"`
-	Consumption       *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
-	LastUpdate        *time.Time                `json:"last_update,omitempty"`
-	Initialized       bool                      `json:"initialized"`
-	LoanExpireTime    *time.Time                `json:"loan_time,omitempty"`
-	LoanMaxPeriod     time.Duration             `json:"loan_max_perio,omitempty"`
-	MaxTokens         float64                   `json:"max_tokens,omitempty"`
+	// LoanMaxPeriod represents the maximum loan period, which together with the fill rate determines the loan amount
+	LoanMaxPeriod time.Duration `json:"loan_max_perio,omitempty"`
+	// MaxTokens limits the number of tokens that can be accumulated
+	MaxTokens float64 `json:"max_tokens,omitempty"`
+
+	Consumption    *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
+	LastUpdate     *time.Time                `json:"last_update,omitempty"`
+	Initialized    bool                      `json:"initialized"`
+	LoanExpireTime *time.Time                `json:"loan_time,omitempty"`
 }
 
+// NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 	return GroupTokenBucket{
 		TokenBucket:   tokenBucket,
@@ -70,6 +76,9 @@ func (t *GroupTokenBucket) patch(settings *rmpb.TokenBucket) {
 // update updates the token bucket.
 func (t *GroupTokenBucket) update(now time.Time) {
 	if !t.Initialized {
+		if t.Settings.FillRate == 0 {
+			t.Settings.FillRate = defaultRefillRate
+		}
 		if t.Tokens < defaultInitialTokens {
 			t.Tokens = defaultInitialTokens
 		}
@@ -80,14 +89,14 @@ func (t *GroupTokenBucket) update(now time.Time) {
 
 	delta := now.Sub(*t.LastUpdate)
 	if delta > 0 {
-		t.Tokens += float64(t.Settings.Fillrate) * delta.Seconds()
+		t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 		t.LastUpdate = &now
 	}
 	if t.Tokens >= 0 {
 		t.LoanExpireTime = nil
 	}
-	if t.Tokens > defaultMaxTokens {
-		t.Tokens = defaultMaxTokens
+	if t.Tokens > t.MaxTokens {
+		t.Tokens = t.MaxTokens
 	}
 }
 
@@ -97,12 +106,13 @@ func (t *GroupTokenBucket) request(
 ) (*rmpb.TokenBucket, int64) {
 	var res rmpb.TokenBucket
 	res.Settings = &rmpb.TokenLimitSettings{}
-	// TODO: consider the shares for dispatch the fill rate
-	res.Settings.Fillrate = 0
+	// FillRate is used for the token server unavailable in abnormal situation.
+	res.Settings.FillRate = 0
 	if neededTokens <= 0 {
 		return &res, 0
 	}
 
+	// If the current tokens can directly meet the requirement, returns the need token
 	if t.Tokens >= neededTokens {
 		t.Tokens -= neededTokens
 		// granted the total request tokens
@@ -110,6 +120,7 @@ func (t *GroupTokenBucket) request(
 		return &res, 0
 	}
 
+	// Firstly allocate the remaining tokens
 	var grantedTokens float64
 	if t.Tokens > 0 {
 		grantedTokens = t.Tokens
@@ -117,20 +128,27 @@ func (t *GroupTokenBucket) request(
 		neededTokens -= grantedTokens
 	}
 
+	// Consider using a loan to get tokens
 	var periodFilled float64
-	var trickleTime = int64(targetPeriodMs)
-	if t.LoanExpireTime != nil && t.LoanExpireTime.After(*t.LastUpdate) {
-		duration := t.LoanExpireTime.Sub(*t.LastUpdate)
-		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * duration.Seconds()
-		trickleTime = duration.Milliseconds()
-	} else {
+	var trickleTime = time.Duration(targetPeriodMs) * time.Millisecond
+	// If the loan has been used, and within the expiration date of the loan,
+	// We calculate `periodFilled` which is the number of tokens that can be allocated
+	// according to fillrate, remaining loan time and retention ratio
+	if t.LoanExpireTime != nil {
+		if t.LoanExpireTime.After(*t.LastUpdate) {
+			duration := t.LoanExpireTime.Sub(*t.LastUpdate)
+			periodFilled = float64(t.Settings.FillRate) * (1 - loanReserveRatio) * duration.Seconds()
+			trickleTime = duration
+		}
+	} else { // Apply for a loan
 		et := t.LastUpdate.Add(t.LoanMaxPeriod)
 		t.LoanExpireTime = &et
-		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * t.LoanMaxPeriod.Seconds()
+		periodFilled = float64(t.Settings.FillRate) * (1 - loanReserveRatio) * t.LoanMaxPeriod.Seconds()
 	}
+	// have to deduct what resource group already owe
 	periodFilled += t.Tokens
-	if periodFilled <= float64(t.Settings.Fillrate)*loanReserveRatio {
-		periodFilled = float64(t.Settings.Fillrate) * loanReserveRatio
+	if periodFilled <= float64(t.Settings.FillRate)*loanReserveRatio*trickleTime.Seconds() {
+		periodFilled = float64(t.Settings.FillRate) * loanReserveRatio * trickleTime.Seconds()
 	}
 	if periodFilled >= neededTokens {
 		grantedTokens += neededTokens
@@ -140,5 +158,5 @@ func (t *GroupTokenBucket) request(
 		t.Tokens -= periodFilled
 	}
 	res.Tokens = grantedTokens
-	return &res, trickleTime
+	return &res, trickleTime.Milliseconds()
 }
