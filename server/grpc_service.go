@@ -2073,3 +2073,15 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Timestamp: timestamp,
 	}, nil
 }
+
+// TODO: implement these two methods.
+
+// List implements gRPC PDServer.
+func (s *GrpcServer) List(request *pdpb.ListRequest, stream pdpb.PD_ListServer) error {
+	return nil
+}
+
+// Watch implements gRPC PDServer.
+func (s *GrpcServer) Watch(request *pdpb.WatchRequest, stream pdpb.PD_WatchServer) error {
+	return nil
+}

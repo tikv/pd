@@ -747,28 +747,28 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 // RegionsInfo for export
 type RegionsInfo struct {
 	t            syncutil.RWMutex
-	tree         *regionTree
+	tree         *RegionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
 	st           syncutil.RWMutex
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
-	leaders      map[uint64]*regionTree // storeID -> sub regionTree
-	followers    map[uint64]*regionTree // storeID -> sub regionTree
-	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
-	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	leaders      map[uint64]*RegionTree // storeID -> sub RegionTree
+	followers    map[uint64]*RegionTree // storeID -> sub RegionTree
+	learners     map[uint64]*RegionTree // storeID -> sub RegionTree
+	witnesses    map[uint64]*RegionTree // storeID -> sub RegionTree
+	pendingPeers map[uint64]*RegionTree // storeID -> sub RegionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:         newRegionTree(),
+		tree:         NewRegionTree(),
 		regions:      make(map[uint64]*regionItem),
 		subRegions:   make(map[uint64]*regionItem),
-		leaders:      make(map[uint64]*regionTree),
-		followers:    make(map[uint64]*regionTree),
-		learners:     make(map[uint64]*regionTree),
-		witnesses:    make(map[uint64]*regionTree),
-		pendingPeers: make(map[uint64]*regionTree),
+		leaders:      make(map[uint64]*RegionTree),
+		followers:    make(map[uint64]*RegionTree),
+		learners:     make(map[uint64]*RegionTree),
+		witnesses:    make(map[uint64]*RegionTree),
+		pendingPeers: make(map[uint64]*RegionTree),
 	}
 }
 
@@ -875,7 +875,7 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 	return nil
 }
 
-// SetRegion sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
+// SetRegion sets the RegionInfo to RegionTree and regionMap and return the update info of subtree.
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
 	defer r.t.Unlock()
@@ -894,7 +894,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		origin = item.RegionInfo
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
-			// Delete itself in regionTree so that overlaps will not contain itself.
+			// Delete itself in RegionTree so that overlaps will not contain itself.
 			// Because the regionItem is reused, there is no need to delete it in the regionMap.
 			idx := -1
 			for i, o := range ol {
@@ -910,7 +910,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
 		} else {
-			// If the range is not changed, only the statistical on the regionTree needs to be updated.
+			// If the range is not changed, only the statistical on the RegionTree needs to be updated.
 			r.tree.updateStat(origin, region)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
@@ -939,7 +939,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	defer r.st.Unlock()
 	if origin != nil {
 		if rangeChanged || !origin.peersEqualTo(region) {
-			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
+			// If the range or peers have changed, the sub RegionTree needs to be cleaned up.
 			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTreeLocked(origin)
 		} else {
@@ -958,10 +958,10 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*RegionTree, storeID uint64, item *regionItem) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			store = newRegionTree()
+			store = NewRegionTree()
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
@@ -979,7 +979,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		}
 	}
 
-	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
+	setPeers := func(peersMap map[uint64]*RegionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
 			setPeer(peersMap, storeID, item)
@@ -994,7 +994,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 }
 
 func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
-	updatePeerStat := func(peersMap map[uint64]*regionTree, storeID uint64) {
+	updatePeerStat := func(peersMap map[uint64]*RegionTree, storeID uint64) {
 		if tree, ok := peersMap[storeID]; ok {
 			tree.updateStat(origin, region)
 		}
@@ -1008,7 +1008,7 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 		}
 	}
 
-	updatePeersStat := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
+	updatePeersStat := func(peersMap map[uint64]*RegionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			updatePeerStat(peersMap, peer.GetStoreId())
 		}
@@ -1032,7 +1032,7 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*regionItem {
 	return r.tree.overlaps(&regionItem{RegionInfo: region})
 }
 
-// RemoveRegion removes RegionInfo from regionTree and regionMap
+// RemoveRegion removes RegionInfo from RegionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
 	defer r.t.Unlock()
@@ -1044,16 +1044,16 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	r.tree = newRegionTree()
+	r.tree = NewRegionTree()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
-	r.leaders = make(map[uint64]*regionTree)
-	r.followers = make(map[uint64]*regionTree)
-	r.learners = make(map[uint64]*regionTree)
-	r.witnesses = make(map[uint64]*regionTree)
-	r.pendingPeers = make(map[uint64]*regionTree)
+	r.leaders = make(map[uint64]*RegionTree)
+	r.followers = make(map[uint64]*RegionTree)
+	r.learners = make(map[uint64]*RegionTree)
+	r.witnesses = make(map[uint64]*RegionTree)
+	r.pendingPeers = make(map[uint64]*RegionTree)
 }
 
 // RemoveRegionFromSubTree removes RegionInfo from regionSubTrees
@@ -1078,7 +1078,7 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 	delete(r.subRegions, region.GetMeta().GetId())
 }
 
-// RemoveRegionIfExist removes RegionInfo from regionTree and regionMap if exists.
+// RemoveRegionIfExist removes RegionInfo from RegionTree and regionMap if exists.
 func (r *RegionsInfo) RemoveRegionIfExist(id uint64) {
 	if region := r.GetRegion(id); region != nil {
 		r.RemoveRegion(region)
@@ -1139,7 +1139,7 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 	return true
 }
 
-// GetRegionByKey searches RegionInfo from regionTree
+// GetRegionByKey searches RegionInfo from RegionTree
 func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
@@ -1150,7 +1150,7 @@ func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
 	return r.getRegionLocked(region.GetID())
 }
 
-// GetPrevRegionByKey searches previous RegionInfo from regionTree
+// GetPrevRegionByKey searches previous RegionInfo from RegionTree
 func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()

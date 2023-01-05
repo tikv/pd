@@ -85,6 +85,21 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
+// NewTestItem creates a item for test.
+func NewTestItem(start, end []byte) *pdpb.Item {
+	return &pdpb.Item{
+		Item: &pdpb.Item_RegionStat{
+			RegionStat: &pdpb.RegionStats{
+				Region: &metapb.Region{
+					StartKey:    start,
+					EndKey:      end,
+					RegionEpoch: &metapb.RegionEpoch{},
+				},
+			},
+		},
+	}
+}
+
 // NewStoreInfoWithDisk is created with all disk infos.
 func NewStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
