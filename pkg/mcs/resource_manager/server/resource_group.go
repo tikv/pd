@@ -88,7 +88,7 @@ func (rg *ResourceGroup) CheckAndInit() error {
 	if len(rg.Name) == 0 || len(rg.Name) > 32 {
 		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}
-	if rg.Mode != rmpb.GroupMode_RUMode && rg.Mode != rmpb.GroupMode_NativeMode {
+	if rg.Mode != rmpb.GroupMode_RUMode && rg.Mode != rmpb.GroupMode_RawMode {
 		return errors.New("invalid resource group mode")
 	}
 	if rg.Mode == rmpb.GroupMode_RUMode {
@@ -99,12 +99,12 @@ func (rg *ResourceGroup) CheckAndInit() error {
 			return errors.New("invalid resource group settings, RU mode should not set resource settings")
 		}
 	}
-	if rg.Mode == rmpb.GroupMode_NativeMode {
+	if rg.Mode == rmpb.GroupMode_RawMode {
 		if rg.ResourceSettings == nil {
 			rg.ResourceSettings = &NativeResourceSettings{}
 		}
 		if rg.RUSettings != nil {
-			return errors.New("invalid resource group settings, native mode should not set RU settings")
+			return errors.New("invalid resource group settings, Raw mode should not set RU settings")
 		}
 	}
 	return nil
@@ -126,9 +126,9 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		}
 		rg.RUSettings.RRU.patch(metaGroup.GetRUSettings().GetRRU())
 		rg.RUSettings.WRU.patch(metaGroup.GetRUSettings().GetWRU())
-	case rmpb.GroupMode_NativeMode:
+	case rmpb.GroupMode_RawMode:
 		if metaGroup.GetResourceSettings() == nil {
-			return errors.New("invalid resource group settings, native mode should set resource settings")
+			return errors.New("invalid resource group settings, Raw mode should set resource settings")
 		}
 		rg.ResourceSettings.CPU.patch(metaGroup.GetResourceSettings().GetCpu())
 		rg.ResourceSettings.IOReadBandwidth.patch(metaGroup.GetResourceSettings().GetIoRead())
@@ -162,7 +162,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 			}
 			rg.RUSettings = ruSettings
 		}
-	case rmpb.GroupMode_NativeMode:
+	case rmpb.GroupMode_RawMode:
 		if settings := group.GetResourceSettings(); settings != nil {
 			resourceSettings = &NativeResourceSettings{
 				CPU: GroupTokenBucket{
@@ -196,10 +196,10 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			},
 		}
 		return group
-	case rmpb.GroupMode_NativeMode: // Native mode
+	case rmpb.GroupMode_RawMode: // Raw mode
 		group := &rmpb.ResourceGroup{
 			Name: rg.Name,
-			Mode: rmpb.GroupMode_NativeMode,
+			Mode: rmpb.GroupMode_RawMode,
 			ResourceSettings: &rmpb.GroupResourceSettings{
 				Cpu:     rg.ResourceSettings.CPU.TokenBucket,
 				IoRead:  rg.ResourceSettings.IOReadBandwidth.TokenBucket,

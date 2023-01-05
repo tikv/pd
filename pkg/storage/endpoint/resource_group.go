@@ -14,18 +14,25 @@
 
 package endpoint
 
+import (
+	"path"
+
+	"github.com/gogo/protobuf/proto"
+)
+
 // ResourceGroupStorage defines the storage operations on the rule.
 type ResourceGroupStorage interface {
 	LoadResourceGroups(f func(k, v string)) error
-	SaveResourceGroup(prefix string, groupPayload interface{}) error
+	SaveResourceGroup(prefix string, msg proto.Message) error
 	DeleteResourceGroup(prefix string) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
 // SaveResourceGroup stores a resource group to storage.
-func (se *StorageEndpoint) SaveResourceGroup(prefix string, payload interface{}) error {
-	return se.saveJSON(resourceGroupPath, prefix, payload)
+func (se *StorageEndpoint) SaveResourceGroup(prefix string, msg proto.Message) error {
+	path := path.Join(resourceGroupPath, prefix)
+	return se.saveProto(path, msg)
 }
 
 // DeleteResourceGroup removes a resource group from storage.

@@ -70,7 +70,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
@@ -83,7 +83,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
@@ -95,7 +95,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
@@ -106,8 +106,8 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, true, false,
-			`{"name":"test3","mode":1}`,
+		{"test3", rmpb.GroupMode_RawMode, true, false,
+			`{"name":"test3","mode":2}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
@@ -118,8 +118,8 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, false, true,
-			`{"name":"test3","mode":1,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+		{"test3", rmpb.GroupMode_RawMode, false, true,
+			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.ResourceSettings = &rmpb.GroupResourceSettings{
 					Cpu: &rmpb.TokenBucket{
