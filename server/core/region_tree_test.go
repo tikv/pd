@@ -121,7 +121,7 @@ func newRegionWithStat(start, end string, size, keys int64) *RegionInfo {
 
 func TestRegionTreeStat(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	re.Equal(int64(0), tree.totalSize)
 	updateNewItem(tree, newRegionWithStat("a", "b", 1, 2))
 	re.Equal(int64(1), tree.totalSize)
@@ -137,7 +137,7 @@ func TestRegionTreeStat(t *testing.T) {
 
 func TestRegionTreeMerge(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	updateNewItem(tree, newRegionWithStat("a", "b", 1, 2))
 	updateNewItem(tree, newRegionWithStat("b", "c", 3, 4))
 	re.Equal(int64(4), tree.totalSize)
@@ -147,7 +147,7 @@ func TestRegionTreeMerge(t *testing.T) {
 
 func TestRegionTree(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 
 	re.Nil(tree.search([]byte("a")))
 
@@ -225,7 +225,7 @@ func TestRegionTree(t *testing.T) {
 	re.Equal(regionE, tree.search([]byte("e")))
 }
 
-func updateRegions(re *require.Assertions, tree *regionTree, regions []*RegionInfo) {
+func updateRegions(re *require.Assertions, tree *RegionTree, regions []*RegionInfo) {
 	for _, region := range regions {
 		updateNewItem(tree, region)
 		re.Equal(region, tree.search(region.GetStartKey()))
@@ -239,7 +239,7 @@ func updateRegions(re *require.Assertions, tree *regionTree, regions []*RegionIn
 
 func TestRegionTreeSplitAndMerge(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	regions := []*RegionInfo{newRegionItem([]byte{}, []byte{}).RegionInfo}
 
 	// Byte will underflow/overflow if n > 7.
@@ -270,7 +270,7 @@ func TestRegionTreeSplitAndMerge(t *testing.T) {
 
 func TestRandomRegion(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	r := tree.RandomRegion(nil)
 	re.Nil(r)
 
@@ -311,7 +311,7 @@ func TestRandomRegion(t *testing.T) {
 
 func TestRandomRegionDiscontinuous(t *testing.T) {
 	re := require.New(t)
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	r := tree.RandomRegion([]KeyRange{NewKeyRange("c", "f")})
 	re.Nil(r)
 
@@ -354,12 +354,37 @@ func TestRandomRegionDiscontinuous(t *testing.T) {
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
 }
 
-func updateNewItem(tree *regionTree, region *RegionInfo) {
+func TestRegionTreeStoreInterface(t *testing.T) {
+	re := require.New(t)
+	tree := NewRegionTree()
+
+	regionA := NewTestRegionInfo([]byte("a"), []byte("b"))
+	tree.Add(regionA)
+	res, _ := tree.List("a", "z", 10)
+	re.Len(res, 1)
+	regionB := NewTestRegionInfo([]byte("b"), []byte("c"))
+	tree.Add(regionB)
+	res, _ = tree.List("a", "z", 10)
+	re.Len(res, 2)
+	regionC := NewTestRegionInfo([]byte("a"), []byte("c"))
+	tree.Update(regionC)
+	res, _ = tree.List("a", "z", 10)
+	re.Len(res, 1)
+	r, _ := tree.GetByKey("a")
+	re.Equal(regionC, r)
+	tree.Delete(regionC)
+	res, _ = tree.List("a", "z", 10)
+	re.Len(res, 0)
+	r, _ = tree.GetByKey("a")
+	re.Empty(r)
+}
+
+func updateNewItem(tree *RegionTree, region *RegionInfo) {
 	item := &regionItem{RegionInfo: region}
 	tree.update(item, false)
 }
 
-func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {
+func checkRandomRegion(re *require.Assertions, tree *RegionTree, regions []*RegionInfo, ranges []KeyRange) {
 	keys := make(map[string]struct{})
 	for i := 0; i < 10000 && len(keys) < len(regions); i++ {
 		re := tree.RandomRegion(ranges)
@@ -383,12 +408,12 @@ func newRegionItem(start, end []byte) *regionItem {
 }
 
 type mockRegionTreeData struct {
-	tree  *regionTree
+	tree  *RegionTree
 	items []*RegionInfo
 }
 
 func (m *mockRegionTreeData) clearTree() *mockRegionTreeData {
-	m.tree = newRegionTree()
+	m.tree = NewRegionTree()
 	return m
 }
 
@@ -401,7 +426,7 @@ func (m *mockRegionTreeData) shuffleItems() *mockRegionTreeData {
 }
 
 func mock1MRegionTree() *mockRegionTreeData {
-	data := &mockRegionTreeData{newRegionTree(), make([]*RegionInfo, 1000000)}
+	data := &mockRegionTreeData{NewRegionTree(), make([]*RegionInfo, 1000000)}
 	for i := 0; i < 1_000_000; i++ {
 		region := &RegionInfo{meta: &metapb.Region{Id: uint64(i), StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
 		updateNewItem(data.tree, region)
@@ -413,7 +438,7 @@ func mock1MRegionTree() *mockRegionTreeData {
 const MaxCount = 1_000_000
 
 func BenchmarkRegionTreeSequentialInsert(b *testing.B) {
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	for i := 0; i < b.N; i++ {
 		item := &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
 		updateNewItem(tree, item)
@@ -430,7 +455,7 @@ func BenchmarkRegionTreeRandomInsert(b *testing.B) {
 }
 
 func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
-	tree := newRegionTree()
+	tree := NewRegionTree()
 	var items []*RegionInfo
 	for i := 0; i < MaxCount; i++ {
 		var startKey, endKey int
