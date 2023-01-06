@@ -67,7 +67,7 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 		return err
 	}
 	m.Lock()
-	if err := m.storage().SaveResourceGroup(group.Name, group); err != nil {
+	if err := group.persistSettings(m.storage()); err != nil {
 		return err
 	}
 	m.groups[group.Name] = group
@@ -91,7 +91,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	if m.storage().SaveResourceGroup(group.Name, newGroup); err != nil {
+	if err := newGroup.persistSettings(m.storage()); err != nil {
 		return err
 	}
 	m.groups[group.Name] = newGroup
