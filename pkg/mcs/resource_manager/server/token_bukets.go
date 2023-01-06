@@ -15,6 +15,8 @@
 package server
 
 import (
+	"fmt"
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -27,27 +29,25 @@ const defaultInitialTokens = 10 * 10000
 
 const defaultMaxTokens = 1e7
 
-const defaultLoanMaxPeriod = 10 * time.Second
-
-var loanReserveRatio float64 = 0.05
+var reserveRatio float64 = 0.05
 
 // GroupTokenBucket is a token bucket for a resource group.
 // TODO: statistics Consumption
 type GroupTokenBucket struct {
 	*rmpb.TokenBucket `json:"token_bucket,omitempty"`
-	Consumption       *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
-	LastUpdate        *time.Time                `json:"last_update,omitempty"`
-	Initialized       bool                      `json:"initialized"`
-	LoanExpireTime    *time.Time                `json:"loan_time,omitempty"`
-	LoanMaxPeriod     time.Duration             `json:"loan_max_perio,omitempty"`
-	MaxTokens         float64                   `json:"max_tokens,omitempty"`
+	// MaxTokens limits the number of tokens that can be accumulated
+	MaxTokens float64 `json:"max_tokens,omitempty"`
+
+	Consumption *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
+	LastUpdate  *time.Time                `json:"last_update,omitempty"`
+	Initialized bool                      `json:"initialized"`
 }
 
+// NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 	return GroupTokenBucket{
-		TokenBucket:   tokenBucket,
-		MaxTokens:     defaultMaxTokens,
-		LoanMaxPeriod: defaultLoanMaxPeriod,
+		TokenBucket: tokenBucket,
+		MaxTokens:   defaultMaxTokens,
 	}
 }
 
@@ -88,13 +88,9 @@ func (t *GroupTokenBucket) update(now time.Time) {
 		t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 		t.LastUpdate = &now
 	}
-	if t.Tokens >= 0 {
-		t.LoanExpireTime = nil
+	if t.Tokens > t.MaxTokens {
+		t.Tokens = t.MaxTokens
 	}
-	if t.Tokens > defaultMaxTokens {
-		t.Tokens = defaultMaxTokens
-	}
-
 }
 
 // request requests tokens from the token bucket.
@@ -103,13 +99,13 @@ func (t *GroupTokenBucket) request(
 ) (*rmpb.TokenBucket, int64) {
 	var res rmpb.TokenBucket
 	res.Settings = &rmpb.TokenLimitSettings{}
-	// TODO: consider the shares for dispatch the fill rate
-	res.Settings.Fillrate = 0
-
+	// FillRate is used for the token server unavailable in abnormal situation.
+	res.Settings.FillRate = 0
 	if neededTokens <= 0 {
 		return &res, 0
 	}
 
+	// If the current tokens can directly meet the requirement, returns the need token
 	if t.Tokens >= neededTokens {
 		t.Tokens -= neededTokens
 		// granted the total request tokens
@@ -117,36 +113,32 @@ func (t *GroupTokenBucket) request(
 		return &res, 0
 	}
 
+	// Firstly allocate the remaining tokens
 	var grantedTokens float64
 	if t.Tokens > 0 {
 		grantedTokens = t.Tokens
-		t.Tokens = 0
 		neededTokens -= grantedTokens
 	}
 
-	now := time.Now()
-	var periodFilled float64
-	var trickleTime int64 = int64(targetPeriodMs)
-	if t.LoanExpireTime != nil && t.LoanExpireTime.After(now) {
-		duration := t.LoanExpireTime.Sub(now)
-		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * duration.Seconds()
-		trickleTime = duration.Milliseconds()
-	} else {
-		now.Add(t.LoanMaxPeriod)
-		t.LoanExpireTime = &now
-		periodFilled = float64(t.Settings.Fillrate) * (1 - loanReserveRatio) * t.LoanMaxPeriod.Seconds()
+	var trickleTime = time.Duration(targetPeriodMs) * time.Millisecond
+	availableRate := float64(t.Settings.FillRate)
+	if debt := -t.Tokens; debt > 0 {
+		fmt.Println(debt)
+		debt -= float64(t.Settings.FillRate) * trickleTime.Seconds()
+		if debt > 0 {
+			debtRate := debt / float64(targetPeriodMs/1000)
+			availableRate -= debtRate
+			availableRate = math.Max(availableRate, reserveRatio*float64(t.Settings.FillRate))
+		}
 	}
-	periodFilled += t.Tokens
-	if periodFilled <= float64(t.Settings.Fillrate)*loanReserveRatio {
-		periodFilled = float64(t.Settings.Fillrate) * loanReserveRatio
-	}
-	if periodFilled >= neededTokens {
+
+	consumptionDuration := time.Duration(float64(time.Second) * (neededTokens / availableRate))
+	if consumptionDuration <= trickleTime {
 		grantedTokens += neededTokens
-		t.Tokens -= neededTokens
 	} else {
-		grantedTokens += periodFilled
-		t.Tokens -= periodFilled
+		grantedTokens += availableRate * trickleTime.Seconds()
 	}
+	t.Tokens -= grantedTokens
 	res.Tokens = grantedTokens
-	return &res, trickleTime
+	return &res, trickleTime.Milliseconds()
 }
