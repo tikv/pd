@@ -151,6 +151,8 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	c.AddCommand(NewSplitBucketSchedulerCommand())
+	c.AddCommand(NewBalanceWitnessSchedulerCommand())
+	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	return c
 }
 
@@ -350,6 +352,38 @@ func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
 	}
 	return c
+}
+
+// NewBalanceWitnessSchedulerCommand returns a command to add a balance-witness-scheduler.
+func NewBalanceWitnessSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-witness-scheduler",
+		Short: "add a scheduler to balance witness",
+		Run:   addSchedulerForBalanceWitnessCommandFunc,
+	}
+	return c
+}
+
+// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-shceudler.
+func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "transfer-witness-leader-scheduler",
+		Short: "add a scheduler to transfer witness leader",
+		Run:   addSchedulerForTransferWitnessLeaderCommandFunc,
+	}
+	return c
+}
+
+func addSchedulerForBalanceWitnessCommandFunc(cmd *cobra.Command, args []string) {
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	postJSON(cmd, schedulersPrefix, input)
+}
+
+func addSchedulerForTransferWitnessLeaderCommandFunc(cmd *cobra.Command, args []string) {
+	input := make(map[string]interface{})
+	input["name"] = cmd.Name()
+	postJSON(cmd, schedulersPrefix, input)
 }
 
 func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, args []string) {
