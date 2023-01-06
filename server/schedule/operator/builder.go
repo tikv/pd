@@ -555,14 +555,14 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
 		return fmt.Sprintf("demote peer: store %s", b.toDemote)
-	case len(b.targetLeaderStoreIDs) != 0:
-		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
-	case b.originLeaderStoreID != b.targetLeaderStoreID:
-		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	case len(b.toWitness) > 0:
 		return fmt.Sprintf("switch peer: store %s to witness", b.toWitness)
 	case len(b.toNonWitness) > 0:
 		return fmt.Sprintf("switch peer: store %s to non-witness", b.toNonWitness)
+	case len(b.targetLeaderStoreIDs) != 0:
+		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
+	case b.originLeaderStoreID != b.targetLeaderStoreID:
+		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:
 		return ""
 	}

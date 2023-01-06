@@ -57,8 +57,6 @@ func init() {
 }
 
 const (
-	// balanceRegionRetryLimit is the limit to retry schedule for selected store.
-	balanceRegionRetryLimit = 10
 	// BalanceRegionName is balance region scheduler name.
 	BalanceRegionName = "balance-region-scheduler"
 	// BalanceRegionType is balance region scheduler type.
@@ -86,7 +84,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
-		retryQuota:    newRetryQuota(balanceRegionRetryLimit, defaultMinRetryLimit, defaultRetryQuotaAttenuation),
+		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		opController:  opController,
 		counter:       balanceRegionCounter,
@@ -191,21 +189,21 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
 			solver.region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-				baseRegionFilters...)
+				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()))...)
 			if solver.region == nil {
 				// Then pick the region that has a follower in the source store.
 				solver.region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, pendingFilter)...)
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
 			}
 			if solver.region == nil {
 				// Then pick the region has the leader in the source store.
 				solver.region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, pendingFilter)...)
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
 			}
 			if solver.region == nil {
 				// Finally, pick learner.
 				solver.region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, pendingFilter)...)
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
 			}
 			if solver.region == nil {
 				schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
