@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	// GroupSettingsPathPrefix is the prefix of the resource group path to store group settings.
-	GroupSettingsPathPrefix = "/settings"
+	// groupSettingsPathPrefix is the prefix of the resource group path to store group settings.
+	groupSettingsPathPrefix = "/settings"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
@@ -104,7 +104,7 @@ func (rg *ResourceGroup) CheckAndInit() error {
 			rg.ResourceSettings = &NativeResourceSettings{}
 		}
 		if rg.RUSettings != nil {
-			return errors.New("invalid resource group settings, Raw mode should not set RU settings")
+			return errors.New("invalid resource group settings, raw mode should not set RU settings")
 		}
 	}
 	return nil
@@ -128,7 +128,7 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		rg.RUSettings.WRU.patch(metaGroup.GetRUSettings().GetWRU())
 	case rmpb.GroupMode_RawMode:
 		if metaGroup.GetResourceSettings() == nil {
-			return errors.New("invalid resource group settings, Raw mode should set resource settings")
+			return errors.New("invalid resource group settings, raw mode should set resource settings")
 		}
 		rg.ResourceSettings.CPU.patch(metaGroup.GetResourceSettings().GetCpu())
 		rg.ResourceSettings.IOReadBandwidth.patch(metaGroup.GetResourceSettings().GetIoRead())
@@ -215,5 +215,5 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroup(path.Join(GroupSettingsPathPrefix, rg.Name), metaGroup)
+	return storage.SaveResourceGroup(path.Join(groupSettingsPathPrefix, rg.Name), metaGroup)
 }
