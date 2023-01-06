@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,7 +46,7 @@ const (
 	queryUnit            = 1 * units.KiB
 	regionReportInterval = 60 // 60s
 	storeReportInterval  = 10 // 10s
-	capacity             = 2 * units.TiB
+	capacity             = 4 * units.TiB
 )
 
 var clusterID uint64
@@ -124,8 +125,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	log.Info("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regions *Regions) {
-	storesStats := regions.collectStoresStats(cfg.StoreCount)
+func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
@@ -147,9 +147,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, regio
 			for {
 				select {
 				case <-heartbeatTicker.C:
-					cctx, cancel := context.WithCancel(ctx)
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: storesStats[storeID]})
-					cancel()
+					stores.heartbeat(ctx, cli, storeID)
 				case <-ctx.Done():
 					return
 				}
@@ -333,30 +331,47 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
 }
 
-func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
-	stores := make([]*pdpb.StoreStats, storeCount+1)
+// Stores contains store stats with lock.
+type Stores struct {
+	stat []atomic.Value
+}
+
+func newStores(storeCount int) *Stores {
+	return &Stores{
+		stat: make([]atomic.Value, storeCount+1),
+	}
+}
+
+func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
+}
+
+func (s *Stores) update(rs *Regions) {
+	stats := make([]*pdpb.StoreStats, len(s.stat))
 	now := uint64(time.Now().Unix())
-	for i := 1; i <= storeCount; i++ {
-		stores[i] = &pdpb.StoreStats{
+	for i := range stats {
+		stats[i] = &pdpb.StoreStats{
 			StoreId:    uint64(i),
 			Capacity:   capacity,
 			Available:  capacity,
 			QueryStats: &pdpb.QueryStats{},
 			PeerStats:  make([]*pdpb.PeerStat, 0),
 			Interval: &pdpb.TimeInterval{
-				StartTimestamp: now,
-				EndTimestamp:   now + storeReportInterval,
+				StartTimestamp: now - storeReportInterval,
+				EndTimestamp:   now,
 			},
 		}
 	}
 	for _, region := range rs.regions {
 		for _, peer := range region.Region.Peers {
-			store := stores[peer.StoreId]
+			store := stats[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
 			store.Available -= region.ApproximateSize
 			store.RegionCount += 1
 		}
-		store := stores[region.Leader.StoreId]
+		store := stats[region.Leader.StoreId]
 		if region.BytesWritten != 0 {
 			store.BytesWritten += region.BytesWritten
 			store.BytesRead += region.BytesRead
@@ -374,7 +389,9 @@ func (rs *Regions) collectStoresStats(storeCount int) []*pdpb.StoreStats {
 			})
 		}
 	}
-	return stores
+	for i := range stats {
+		s.stat[i].Store(stats[i])
+	}
 }
 
 func main() {
@@ -418,8 +435,10 @@ func main() {
 	regions := new(Regions)
 	regions.init(cfg)
 	log.Info("finish init regions")
+	stores := newStores(cfg.StoreCount)
+	stores.update(regions)
 	bootstrap(ctx, cli)
-	putStores(ctx, cfg, cli, regions)
+	putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
@@ -458,6 +477,7 @@ func main() {
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg.Replica)
+			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-ctx.Done():
 			log.Info("Got signal to exit")
 			switch sig {

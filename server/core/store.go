@@ -154,6 +154,11 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	return s.rawStats.GetSlowScore()
 }
 
+// WitnessScore returns the store's witness score.
+func (s *StoreInfo) WitnessScore(delta int64) float64 {
+	return float64(int64(s.GetWitnessCount()) + delta)
+}
+
 // IsSlow checks if the slow score reaches the threshold.
 func (s *StoreInfo) IsSlow() bool {
 	s.mu.RLock()

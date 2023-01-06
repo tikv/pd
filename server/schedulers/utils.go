@@ -35,6 +35,7 @@ const (
 	leaderTolerantSizeRatio      float64 = 5.0
 	minTolerantSizeRatio         float64 = 1.0
 	influenceAmp                 int64   = 5
+	defaultMaxRetryLimit                 = 10
 	defaultMinRetryLimit                 = 1
 	defaultRetryQuotaAttenuation         = 2
 )
@@ -107,6 +108,9 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	case core.RegionKind:
 		sourceDelta := influence*influenceAmp - tolerantResource
 		score = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+	case core.WitnessKind:
+		sourceDelta := influence - tolerantResource
+		score = p.source.WitnessScore(sourceDelta)
 	}
 	return score
 }
@@ -135,6 +139,9 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	case core.RegionKind:
 		targetDelta := influence*influenceAmp + tolerantResource
 		score = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+	case core.WitnessKind:
+		targetDelta := influence + tolerantResource
+		score = p.target.WitnessScore(targetDelta)
 	}
 	return score
 }
@@ -166,7 +173,7 @@ func (p *solver) getTolerantResource() int64 {
 		return p.tolerantSource
 	}
 
-	if p.kind.Resource == core.LeaderKind && p.kind.Policy == core.ByCount {
+	if (p.kind.Resource == core.LeaderKind || p.kind.Resource == core.WitnessKind) && p.kind.Policy == core.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
 	} else {
 		regionSize := p.GetAverageRegionSize()
@@ -329,11 +336,11 @@ type retryQuota struct {
 	limits map[uint64]int
 }
 
-func newRetryQuota(initialLimit, minLimit, attenuation int) *retryQuota {
+func newRetryQuota() *retryQuota {
 	return &retryQuota{
-		initialLimit: initialLimit,
-		minLimit:     minLimit,
-		attenuation:  attenuation,
+		initialLimit: defaultMaxRetryLimit,
+		minLimit:     defaultMinRetryLimit,
+		attenuation:  defaultRetryQuotaAttenuation,
 		limits:       make(map[uint64]int),
 	}
 }

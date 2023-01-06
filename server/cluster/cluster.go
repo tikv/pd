@@ -1007,9 +1007,19 @@ func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange)
 	return c.core.RandLearnerRegions(storeID, ranges)
 }
 
+// RandWitnessRegions returns some random regions that has a witness peer on the store.
+func (c *RaftCluster) RandWitnessRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandWitnessRegions(storeID, ranges)
+}
+
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (c *RaftCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	return c.core.GetLeaderStore(region)
+}
+
+// GetNonWitnessVoterStores returns all stores that contains the region's non-witness voter peer.
+func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.StoreInfo {
+	return c.core.GetNonWitnessVoterStores(region)
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.

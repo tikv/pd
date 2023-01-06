@@ -18,7 +18,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 
-	// init API gorup
+	// init API group
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1"
 )
 

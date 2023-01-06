@@ -56,6 +56,14 @@ var balanceLeaderCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance leader scheduler.",
 	}, []string{"type", "store"})
 
+var balanceWitnessCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "balance_witness",
+		Help:      "Counter of balance witness scheduler.",
+	}, []string{"type", "store"})
+
 var balanceRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -128,6 +136,7 @@ func init() {
 	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
