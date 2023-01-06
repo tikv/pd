@@ -453,7 +453,7 @@ loopFits:
 	}
 	// If hasUnhealthyFit is false, it is safe to delete the OrphanPeer.
 	if !hasUnhealthyFit {
-		ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
+		ruleCheckerRemoveOrphanPeerCounter.Inc()
 		return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, fit.OrphanPeers[0].StoreId)
 	}
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
@@ -461,7 +461,7 @@ loopFits:
 	if len(fit.OrphanPeers) >= 2 {
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
-				ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 		}
