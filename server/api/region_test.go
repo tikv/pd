@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
@@ -168,11 +169,15 @@ func (suite *regionTestSuite) TestRegion() {
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
-	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipSleep", `return(true)`))
+	r := newTestRegionInfo(2, 1, []byte("a"), []byte(""))
 	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
 	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
-	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
+	tu.Eventually(re, func() bool {
+		return !suite.svr.GetRaftCluster().IsLastRegionStatsEmpty()
+	})
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
@@ -199,6 +204,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
+	time.Sleep(150 * time.Millisecond)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
 	r5 := &RegionsInfo{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
@@ -207,6 +213,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
+	time.Sleep(150 * time.Millisecond)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r6))
@@ -215,11 +222,13 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(re, suite.svr, r)
+	time.Sleep(150 * time.Millisecond)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
 	suite.Equal(histKeys, r7)
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipSleep"))
 }
 
 func (suite *regionTestSuite) TestRegions() {

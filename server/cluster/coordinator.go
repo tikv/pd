@@ -46,12 +46,15 @@ import (
 const (
 	runSchedulerCheckInterval  = 3 * time.Second
 	checkSuspectRangesInterval = 100 * time.Millisecond
+	collectRegionStatsInterval = 100 * time.Millisecond
 	collectFactor              = 0.9
 	collectTimeout             = 5 * time.Minute
 	maxScheduleRetries         = 10
 	maxLoadConfigRetries       = 10
 
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	patrolScanRegionLimit = 128  // It takes about 14 minutes to iterate 1 million regions.
+	statsScanRegionLimit  = 1000 // It takes about 3.5 minutes to iterate 2 million regions.
+	defaultScrapInterval  = 15 * time.Second
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -145,13 +148,11 @@ func (c *coordinator) patrolRegions() {
 		if len(regions) == 0 {
 			continue
 		}
-		// Updates the label level isolation statistics.
-		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
-		failpoint.Inject("break-patrol", func() {
+		failpoint.Inject("breakPatrol", func() {
 			failpoint.Break()
 		})
 	}
@@ -185,6 +186,54 @@ func (c *coordinator) checkWaitingRegions() {
 	for _, item := range items {
 		region := c.cluster.GetRegion(item.Key)
 		c.tryAddOperators(region)
+	}
+}
+
+func (c *coordinator) collectRegionStats() {
+	defer logutil.LogPanic()
+
+	defer c.wg.Done()
+	ticker := time.NewTicker(collectRegionStatsInterval)
+	defer ticker.Stop()
+	timer := time.NewTimer(defaultScrapInterval)
+	defer timer.Stop()
+	log.Info("coordinator starts collect region stats")
+	var key []byte
+	start := time.Now()
+	for {
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			log.Info("collect region stats has been stopped")
+			return
+		}
+
+		regions := c.cluster.ScanRegions(key, nil, statsScanRegionLimit)
+		length := len(regions)
+		if length == 0 {
+			c.cluster.collectStatsMetrics()
+			// Resets the scan key.
+			key = nil
+			continue
+		}
+		key = regions[length-1].GetEndKey()
+		c.cluster.updateRegionStats(regions)
+		if len(key) == 0 {
+			c.cluster.collectStatsMetrics()
+			failpoint.Inject("skipSleep", func() {
+				start = time.Time{}
+			})
+			if time.Since(start) < defaultScrapInterval {
+				timer.Reset(defaultScrapInterval - time.Since(start))
+				select {
+				case <-c.ctx.Done():
+					return
+				case <-timer.C:
+				}
+			}
+			collectRegionStatsGauge.Set(time.Since(start).Seconds())
+			start = time.Now()
+		}
 	}
 }
 
@@ -410,9 +459,10 @@ func (c *coordinator) run() {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	// Starts to patrol regions.
 	go c.patrolRegions()
+	go c.collectRegionStats()
 	// Checks suspect key ranges
 	go c.checkSuspectRanges()
 	go c.drivePushOperator()

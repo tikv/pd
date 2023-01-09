@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
@@ -100,7 +101,9 @@ func TestRegion(t *testing.T) {
 		core.SetRegionVersion(1), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
 	)
 	defer cluster.Destroy()
-
+	tu.Eventually(re, func() bool {
+		return !leaderServer.GetRaftCluster().IsLastRegionStatsEmpty()
+	})
 	var testRegionsCases = []struct {
 		args   []string
 		expect []*core.RegionInfo
@@ -198,6 +201,7 @@ func TestRegion(t *testing.T) {
 
 	// Test region range-holes.
 	r5 := pdctl.MustPutRegion(re, cluster, 5, 1, []byte("x"), []byte("z"))
+	time.Sleep(150 * time.Millisecond)
 	output, err := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "region", "range-holes"}...)
 	re.NoError(err)
 	rangeHoles := new([][]string)
