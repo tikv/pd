@@ -67,15 +67,15 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		addSuccess     bool
 		modifySuccess  bool
 		expectMarshal  string
-		modifySettings func(*rmpb.GroupSettings)
+		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test1","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 10000,
+							FillRate: 10000,
 						},
 					},
 				}
@@ -83,48 +83,48 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 20000,
+							FillRate: 20000,
 						},
 					},
 				}
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 30000,
+							FillRate: 30000,
 						},
 					},
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, true, false,
-			`{"name":"test3","mode":1}`,
-			func(gs *rmpb.GroupSettings) {
+		{"test3", rmpb.GroupMode_RawMode, true, false,
+			`{"name":"test3","mode":2}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 10000,
+							FillRate: 10000,
 						},
 					},
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, false, true,
-			`{"name":"test3","mode":1,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fillrate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+		{"test3", rmpb.GroupMode_RawMode, false, true,
+			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.ResourceSettings = &rmpb.GroupResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 1000000,
+							FillRate: 1000000,
 						},
 					},
 				}
@@ -145,9 +145,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 	for i, tcase := range testCasesSet1 {
 		group := &rmpb.ResourceGroup{
 			Name: tcase.name,
-			Settings: &rmpb.GroupSettings{
-				Mode: tcase.mode,
-			},
+			Mode: tcase.mode,
 		}
 		// Create Resource Group
 		resp, err := grpcclient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
@@ -158,7 +156,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		}
 
 		// Modify Resource Group
-		tcase.modifySettings(group.Settings)
+		tcase.modifySettings(group)
 		mresp, err := grpcclient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
 		checkErr(err, tcase.modifySuccess)
 		if tcase.modifySuccess {
@@ -195,9 +193,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		// Create Resource Group
 		group := &rmpb.ResourceGroup{
 			Name: tcase.name,
-			Settings: &rmpb.GroupSettings{
-				Mode: tcase.mode,
-			},
+			Mode: tcase.mode,
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
@@ -212,7 +208,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		}
 
 		// Modify Resource Group
-		tcase.modifySettings(group.Settings)
+		tcase.modifySettings(group)
 		modifyJSON, err := json.Marshal(group)
 		re.NoError(err)
 		req, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))

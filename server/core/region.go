@@ -373,6 +373,16 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
+// GetStoreWitness returns the witness peer in specified store.
+func (r *RegionInfo) GetStoreWitness(storeID uint64) *metapb.Peer {
+	for _, peer := range r.witnesses {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
 // GetStoreIDs returns a map indicate the region distributed.
 func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
@@ -403,6 +413,18 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 		}
 	}
 	return nil
+}
+
+// GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
+func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
+	peers := r.GetVoters()
+	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
+	for _, peer := range peers {
+		if !peer.IsWitness {
+			nonWitnesses[peer.GetStoreId()] = peer
+		}
+	}
+	return nonWitnesses
 }
 
 // GetDiffFollowers returns the followers which is not located in the same
@@ -474,9 +496,27 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 	return (*metapb.Buckets)(buckets)
 }
 
+// GetStorePeerApproximateSize returns the approximate size of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateSize
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
+}
+
+// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateKeys
 }
 
 // GetApproximateKeys returns the approximate keys of the region.
@@ -1333,6 +1373,20 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*R
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
+}
+
+// RandWitnessRegion randomly gets a store's witness region.
+func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegion(ranges)
+}
+
+// RandWitnessRegions randomly gets a store's n witness regions.
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
