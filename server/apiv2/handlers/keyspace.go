@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -278,7 +279,7 @@ func UpdateKeyspaceState(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	targetState, ok := keyspacepb.KeyspaceState_value[param.State]
+	targetState, ok := keyspacepb.KeyspaceState_value[strings.ToUpper(param.State)]
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errors.Errorf("unknown target state: %s", param.State))
 		return

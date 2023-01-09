@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
@@ -107,29 +107,33 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
 	for _, created := range keyspaces {
 		// Should NOT allow archiving ENABLED keyspace.
-		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, "ARCHIVED")
+		success, _ := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "archived"})
 		re.False(success)
 		// Disabling an ENABLED keyspace is allowed.
-		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
+		success, disabled := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_DISABLED, disabled.State)
 		// Disabling an already DISABLED keyspace should not result in any change.
-		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
+		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
+		// Tombstoning a DISABLED keyspace should not be allowed.
+		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
+		re.False(success)
 		// Archiving a DISABLED keyspace should be allowed.
-		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, "ARCHIVED")
+		success, archived := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "archived"})
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, archived.State)
-		// Modifying ARCHIVED keyspace is not allowed.
-		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "DISABLED")
+		// Enabling an ARCHIVED keyspace is not allowed.
+		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "enabled"})
 		re.False(success)
-		// Using illegal state is not allowed.
-		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, "UNKNOWN")
-		re.False(success)
+		// Tombstoning an ARCHIVED keyspace is allowed.
+		success, tombstone := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
+		re.True(success)
+		re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, tombstone.State)
 	}
 	// Changing default keyspace's state is NOT allowed.
-	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, "DISABLED")
+	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
 	re.False(success)
 }
 
@@ -168,19 +172,18 @@ func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, toke
 	return resp
 }
 
-func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name, newState string) (bool, *keyspacepb.KeyspaceMeta) {
-	request := handlers.UpdateStateParam{State: newState}
+func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateStateParam) (bool, *keyspacepb.KeyspaceMeta) {
 	data, err := json.Marshal(request)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPut, server.GetAddr()+keyspacesPrefix+"/"+name+"/state", bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	httpResp, err := dialClient.Do(httpReq)
 	re.NoError(err)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != http.StatusOK {
 		return false, nil
 	}
-	data, err = io.ReadAll(resp.Body)
+	data, err = io.ReadAll(httpResp.Body)
 	re.NoError(err)
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
