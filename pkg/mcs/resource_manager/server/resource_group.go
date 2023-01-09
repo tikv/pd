@@ -172,43 +172,25 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	return rg
 }
 
-// UpdateRRU updates the RRU of the resource group.
-func (rg *ResourceGroup) UpdateRRU(now time.Time) {
-	rg.Lock()
-	defer rg.Unlock()
-	if rg.RUSettings != nil {
-		rg.RUSettings.RRU.update(now)
-	}
-}
-
-// UpdateWRU updates the WRU of the resource group.
-func (rg *ResourceGroup) UpdateWRU(now time.Time) {
-	rg.Lock()
-	defer rg.Unlock()
-	if rg.RUSettings != nil {
-		rg.RUSettings.WRU.update(now)
-	}
-}
-
 // RequestRRU requests the RRU of the resource group.
-func (rg *ResourceGroup) RequestRRU(neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+func (rg *ResourceGroup) RequestRRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RRU.request(neededTokens, targetPeriodMs)
+	tb, trickleTimeMs := rg.RUSettings.RRU.request(now, neededTokens, targetPeriodMs)
 	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_RRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // RequestWRU requests the WRU of the resource group.
-func (rg *ResourceGroup) RequestWRU(neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+func (rg *ResourceGroup) RequestWRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.WRU.request(neededTokens, targetPeriodMs)
+	tb, trickleTimeMs := rg.RUSettings.WRU.request(now, neededTokens, targetPeriodMs)
 	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_WRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
