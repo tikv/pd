@@ -14,3 +14,6 @@ require (
 	go.uber.org/zap v1.20.0
 	google.golang.org/grpc v1.43.0
 )
+
+// TODO: remove after kvproto merge
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20230109085749-856e7a77d349
