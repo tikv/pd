@@ -223,18 +223,32 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	value, err := txn.kv.Load(key)
-	// If Load failed, preserve the failure behavior of base Load.
+	key = path.Join(txn.kv.rootPath, key)
+	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
 	if err != nil {
-		return value, err
+		return "", err
 	}
-	// If load successful, must make sure value stays the same before commit.
-	fullKey := path.Join(txn.kv.rootPath, key)
-	condition := clientv3.Compare(clientv3.Value(fullKey), "=", value)
+	var condition clientv3.Cmp
+	var value string
+	switch respLen := len(resp.Kvs); {
+	case respLen == 0:
+		// If target key does not contain a value, pin the CreateRevision of the key to 0.
+		// Returned value should be empty string.
+		value = ""
+		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
+	case respLen == 1:
+		// If target key has value, must make sure it stays the same at the time of commit.
+		value = string(resp.Kvs[0].Value)
+		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+	default:
+		// If response contains multiple kvs, error occurred.
+		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+	}
+	// Append the check condition to transaction.
 	txn.mu.Lock()
 	defer txn.mu.Unlock()
 	txn.conditions = append(txn.conditions, condition)
-	return value, err
+	return value, nil
 }
 
 // LoadRange loads the target range from etcd,
