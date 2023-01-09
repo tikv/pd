@@ -705,8 +705,8 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 			re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
 			ThresholdsUpdateInterval = 0
 			re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
-			ThresholdsUpdateInterval = 8 * time.Second
 		}
+		ThresholdsUpdateInterval = 8 * time.Second
 	}
 	testWithUpdateInterval(8 * time.Second)
 	testWithUpdateInterval(0)
