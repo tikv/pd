@@ -263,6 +263,7 @@ const (
 	Add ActionType = iota
 	Remove
 	Update
+	ActionTypeLen
 )
 
 func (t ActionType) String() string {

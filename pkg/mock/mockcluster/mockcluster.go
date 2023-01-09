@@ -678,7 +678,7 @@ func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.Sto
 	store := mc.GetStore(storeID)
 	newStats := typeutil.DeepClone(store.GetStoreStats(), core.StoreStatsFactory)
 	update(newStats)
-	now := time.Now().Second()
+	now := time.Now().Unix()
 	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
