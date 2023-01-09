@@ -24,7 +24,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bytedance/gopkg/util/gctuner"
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -280,7 +282,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	c.wg.Add(9)
+	c.wg.Add(10)
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -290,9 +292,39 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()
 	go c.runUpdateStoreStats()
+	go c.startGCTuner()
 	c.running = true
 
 	return nil
+}
+
+// startGCTuner
+func (c *RaftCluster) startGCTuner() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	tick := time.NewTicker(10 * time.Second)
+	defer tick.Stop()
+	lastThreshold := uint64(0)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("gc tuner is stopped")
+			return
+		case <-tick.C:
+			t := c.opt.GetGCTunerThreshold()
+			if t != lastThreshold {
+				lastThreshold = t
+				if t == 0 {
+					gctuner.Tuning(0)
+					log.Info("disable gc tuner")
+				} else {
+					gctuner.Tuning(t * units.GiB)
+					log.Info("gc tuner changes threshold", zap.Uint64("threshold", t))
+				}
+			}
+		}
+	}
 }
 
 // runSyncConfig runs the job to sync tikv config.
