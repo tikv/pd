@@ -78,6 +78,10 @@ func (t *GroupTokenBucket) update(now time.Time) {
 		if t.Tokens < defaultInitialTokens {
 			t.Tokens = defaultInitialTokens
 		}
+		// TODO: If we support init or modify MaxTokens in the future, we can move following code.
+		if t.Tokens > t.MaxTokens {
+			t.MaxTokens = t.Tokens
+		}
 		t.LastUpdate = &now
 		t.Initialized = true
 		return
@@ -121,6 +125,19 @@ func (t *GroupTokenBucket) request(
 
 	var trickleTime = time.Duration(targetPeriodMs) * time.Millisecond
 	availableRate := float64(t.Settings.FillRate)
+	// When there are debt, the allotment will match the fill rate.
+	// We will have a threshold, beyond which the token allocation will be a minimum.
+	// the current threshold is fill rate * target period * 2.
+	// 				|
+	// fill rate	|· · · · · · · · ·
+	// 				|					·
+	//				|						·
+	// 				| 				  			·
+	// 				|								·
+	// reserve rate |									· · · ·
+	// 				|
+	// rate		0 	-----------------------------------------------
+	// 				debt 		period token		2*period token
 	if debt := -t.Tokens; debt > 0 {
 		debt -= float64(t.Settings.FillRate) * trickleTime.Seconds()
 		if debt > 0 {
