@@ -19,11 +19,20 @@ package plan
 type Plan interface {
 	GetStep() int
 	GetStatus() *Status
+	GetResource(int) uint64
 
 	Clone(ops ...Option) Plan // generate plan for clone option
 	SetResource(interface{})
+	// SetResourceWithStep is used to set resource for specific step.
+	// The meaning of step is different for different plans.
+	// Such as balancePlan, pickSource = 0, pickRegion = 1, pickTarget = 2
+	SetResourceWithStep(resource interface{}, step int)
 	SetStatus(*Status)
 }
+
+// Summary is used to analyse plan simply.
+// It will return the status of store.
+type Summary func([]Plan) (map[uint64]Status, bool, error)
 
 // Collector is a plan collector
 type Collector struct {
@@ -76,5 +85,12 @@ func SetStatus(status *Status) Option {
 func SetResource(resource interface{}) Option {
 	return func(plan Plan) {
 		plan.SetResource(resource)
+	}
+}
+
+// SetResourceWithStep is used to generate Resource for plan
+func SetResourceWithStep(resource interface{}, step int) Option {
+	return func(plan Plan) {
+		plan.SetResourceWithStep(resource, step)
 	}
 }

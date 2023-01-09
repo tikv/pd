@@ -1,4 +1,4 @@
-FROM golang:1.18-alpine as builder
+FROM golang:1.19-alpine as builder
 
 RUN apk add --no-cache \
     make \
@@ -32,6 +32,9 @@ COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-recover /pd-recover
 COPY --from=builder /jq /usr/local/bin/jq
+
+RUN apk add --no-cache \
+    curl
 
 EXPOSE 2379 2380
 

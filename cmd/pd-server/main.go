@@ -27,9 +27,9 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/metricutil"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -39,6 +39,10 @@ import (
 
 	// Register schedulers.
 	_ "github.com/tikv/pd/server/schedulers"
+
+	// Register Service
+	_ "github.com/tikv/pd/pkg/mcs/registry"
+	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
 )
 
 func main() {

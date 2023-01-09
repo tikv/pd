@@ -15,8 +15,18 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/plan"
+)
+
+const (
+	pickSource = iota
+	pickRegion
+	pickTarget
+	// We can think of shouldBalance as a filtering step for target, except that the current implementation is separate.
+	// shouldBalance
+	// createOperator
 )
 
 type balanceSchedulerPlan struct {
@@ -42,15 +52,36 @@ func (p *balanceSchedulerPlan) GetStep() int {
 func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
 	switch p.step {
 	// for balance-region/leader scheduler, the first step is selecting stores as source candidates.
-	case 0:
+	case pickSource:
 		p.source = resource.(*core.StoreInfo)
 	// the second step is selecting region from source store.
-	case 1:
+	case pickRegion:
 		p.region = resource.(*core.RegionInfo)
 	// the third step is selecting stores as target candidates.
-	case 2:
+	case pickTarget:
 		p.target = resource.(*core.StoreInfo)
 	}
+}
+
+func (p *balanceSchedulerPlan) SetResourceWithStep(resource interface{}, step int) {
+	p.step = step
+	p.SetResource(resource)
+}
+
+func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
+	if p.step < step {
+		return 0
+	}
+	// Please use with care. Add a nil check if need in the future
+	switch step {
+	case pickSource:
+		return p.source.GetID()
+	case pickRegion:
+		return p.region.GetID()
+	case pickTarget:
+		return p.target.GetID()
+	}
+	return 0
 }
 
 func (p *balanceSchedulerPlan) GetStatus() *plan.Status {
@@ -66,17 +97,84 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 		status: p.status,
 	}
 	plan.step = p.step
-	if p.step > 0 {
+	if p.step > pickSource {
 		plan.source = p.source
 	}
-	if p.step > 1 {
+	if p.step > pickRegion {
 		plan.region = p.region
 	}
-	if p.step > 2 {
+	if p.step > pickTarget {
 		plan.target = p.target
 	}
 	for _, opt := range opts {
 		opt(plan)
 	}
 	return plan
+}
+
+// BalancePlanSummary is used to summarize for BalancePlan
+func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error) {
+	// storeStatusCounter is used to count the number of various statuses of each store
+	storeStatusCounter := make(map[uint64]map[plan.Status]int)
+	// statusCounter is used to count the number of status which is regarded as best status of each store
+	statusCounter := make(map[uint64]plan.Status)
+	storeMaxStep := make(map[uint64]int)
+	normal := true
+	for _, pi := range plans {
+		p, ok := pi.(*balanceSchedulerPlan)
+		if !ok {
+			return nil, false, errs.ErrDiagnosticLoadPlan
+		}
+		step := p.GetStep()
+		// We can simply think of createOperator as a filtering step for target in BalancePlanSummary.
+		if step > pickTarget {
+			step = pickTarget
+		}
+		var store uint64
+		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
+		// and consider the failure as the status of source store.
+		if step == pickRegion {
+			store = p.source.GetID()
+		} else {
+			store = p.GetResource(step)
+		}
+		maxStep, ok := storeMaxStep[store]
+		if !ok {
+			maxStep = -1
+		}
+		if step > maxStep {
+			storeStatusCounter[store] = make(map[plan.Status]int)
+			storeMaxStep[store] = step
+		} else if step < maxStep {
+			continue
+		}
+		if !p.status.IsNormal() {
+			normal = false
+		}
+		storeStatusCounter[store][*p.status]++
+	}
+
+	for id, store := range storeStatusCounter {
+		max := 0
+		curStat := *plan.NewStatus(plan.StatusOK)
+		for stat, c := range store {
+			if balancePlanStatusComparer(max, curStat, c, stat) {
+				max = c
+				curStat = stat
+			}
+		}
+		statusCounter[id] = curStat
+	}
+	return statusCounter, normal, nil
+}
+
+// balancePlanStatusComparer returns true if new status is better than old one.
+func balancePlanStatusComparer(oldStatusCount int, oldStatus plan.Status, newStatusCount int, newStatus plan.Status) bool {
+	if newStatus.Priority() != oldStatus.Priority() {
+		return newStatus.Priority() > oldStatus.Priority()
+	}
+	if newStatusCount != oldStatusCount {
+		return newStatusCount > oldStatusCount
+	}
+	return newStatus.StatusCode < oldStatus.StatusCode
 }

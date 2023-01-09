@@ -29,13 +29,13 @@ import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/metricutil"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
@@ -246,14 +246,15 @@ const (
 	defaultEnablePlacementRules = true
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
+	defaultEnableWitness        = false
 
 	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
-	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
-	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
@@ -549,7 +550,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
-	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+	adjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
@@ -650,6 +651,8 @@ type ScheduleConfig struct {
 	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
+	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
+	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
@@ -669,6 +672,8 @@ type ScheduleConfig struct {
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
+	// WitnessScheduleLimit is the max coexist witness schedules.
+	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
@@ -740,6 +745,9 @@ type ScheduleConfig struct {
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// on ebs-based BR we need to disable it with TTL
+	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
@@ -764,6 +772,12 @@ type ScheduleConfig struct {
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	// EnableDiagnostic is the the option to enable using diagnostic
+	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// EnableWitness is the option to enable using witness
+	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -789,10 +803,13 @@ const (
 	defaultMaxPendingPeerCount       = 64
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
+	defaultSwitchWitnessInterval     = time.Hour
+	defaultEnableDiagnostic          = false
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
+	defaultWitnessScheduleLimit      = 2048
 	defaultReplicaScheduleLimit      = 64
 	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
@@ -807,6 +824,7 @@ const (
 	defaultLeaderSchedulePolicy        = "count"
 	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
+	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
 	defaultHotRegionsWriteInterval     = 10 * time.Minute
 	defaultHotRegionsReservedDays      = 7
@@ -825,6 +843,7 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		adjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
 	adjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	adjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	adjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	adjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	adjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
@@ -834,6 +853,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+	}
+	if !meta.IsDefined("witness-schedule-limit") {
+		adjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
 	}
 	if !meta.IsDefined("replica-schedule-limit") {
 		adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -862,11 +884,21 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
+	if !meta.IsDefined("enable-tikv-split-region") {
+		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
+	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
 	adjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	adjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
+	if !meta.IsDefined("enable-diagnostic") {
+		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
+
+	if !meta.IsDefined("enable-witness") {
+		c.EnableWitness = defaultEnableWitness
+	}
 
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
@@ -1026,6 +1058,7 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
+	{Type: "balance-witness"},
 	{Type: "hot-region"},
 	{Type: "split-bucket"},
 }
@@ -1268,6 +1301,26 @@ func (c *Config) GetZapLogProperties() *log.ZapProperties {
 // GetConfigFile gets the config file.
 func (c *Config) GetConfigFile() string {
 	return c.configFile
+}
+
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (c *Config) IsLocalTSOEnabled() bool {
+	return c.EnableLocalTSO
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
+	return c.TSOUpdatePhysicalInterval.Duration
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (c *Config) GetTSOSaveInterval() time.Duration {
+	return c.TSOSaveInterval.Duration
+}
+
+// GetTLSConfig returns the TLS config.
+func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
+	return &c.Security.TLSConfig
 }
 
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.

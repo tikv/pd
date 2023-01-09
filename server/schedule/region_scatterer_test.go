@@ -27,12 +27,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type sequencer struct {
@@ -567,6 +567,92 @@ func TestRegionFromDifferentGroups(t *testing.T) {
 		re.LessOrEqual(max-min, uint64(2))
 	}
 	check(scatterer.ordinaryEngine.selectedPeer)
+}
+
+func TestRegionHasLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 8 stores.
+	voterCount := uint64(6)
+	storeCount := uint64(8)
+	for i := uint64(1); i <= voterCount; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z1"})
+	}
+	for i := voterCount + 1; i <= 8; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
+	}
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z1"},
+			},
+		},
+	})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z2"},
+			},
+		},
+	})
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		_, err := scatterer.Scatter(tc.AddRegionWithLearner(uint64(i), uint64(1), []uint64{uint64(2), uint64(3)}, []uint64{7}), "group")
+		re.NoError(err)
+	}
+	check := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= max; i++ {
+			count := ss.TotalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		re.LessOrEqual(max-min, uint64(2))
+	}
+	check(scatterer.ordinaryEngine.selectedPeer)
+	checkLeader := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= voterCount; i++ {
+			count := ss.TotalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		re.LessOrEqual(max-2, uint64(regionCount)/voterCount)
+		re.LessOrEqual(min-1, uint64(regionCount)/voterCount)
+		for i := voterCount + 1; i <= storeCount; i++ {
+			count := ss.TotalCountByStore(i)
+			re.LessOrEqual(count, uint64(0))
+		}
+	}
+	checkLeader(scatterer.ordinaryEngine.selectedLeader)
 }
 
 // TestSelectedStores tests if the peer count has changed due to the picking strategy.

@@ -130,6 +130,11 @@ type Client interface {
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
 
+	// GetExternalTimestamp returns external timestamp
+	GetExternalTimestamp(ctx context.Context) (uint64, error)
+	// SetExternalTimestamp sets external timestamp
+	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
+
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// Close closes the client.
@@ -324,8 +329,8 @@ const (
 	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = time.Second
-	maxRetryTimes          = 5
+	retryInterval          = 500 * time.Millisecond
+	maxRetryTimes          = 6
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -698,12 +703,11 @@ func (c *client) handleDispatcher(
 	dc string,
 	tbc *tsoBatchController) {
 	var (
-		retryTimeConsuming time.Duration
-		err                error
-		streamAddr         string
-		stream             pdpb.PD_TsoClient
-		streamCtx          context.Context
-		cancel             context.CancelFunc
+		err        error
+		streamAddr string
+		stream     pdpb.PD_TsoClient
+		streamCtx  context.Context
+		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
 		opts           []opentracing.StartSpanOption
@@ -760,6 +764,7 @@ func (c *client) handleDispatcher(
 	}
 
 	// Loop through each batch of TSO requests and send them for processing.
+	streamLoopTimer := time.NewTimer(c.option.timeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -782,6 +787,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
+		streamLoopTimer.Reset(c.option.timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
@@ -792,24 +798,22 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[pd] tso stream is not ready", zap.String("dc", dc))
-				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-				if retryTimeConsuming >= c.option.timeout {
-					err = errs.ErrClientCreateTSOStream.FastGenByArgs("retry timeout")
-					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.ScheduleCheckLeader()
-					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
-					retryTimeConsuming = 0
-					continue tsoBatchLoop
+				if c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
+					continue streamChoosingLoop
 				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
-				case <-time.After(time.Second):
-					retryTimeConsuming += time.Second
-					continue
+				case <-streamLoopTimer.C:
+					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
+					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
+					c.ScheduleCheckLeader()
+					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					continue tsoBatchLoop
+				case <-time.After(retryInterval):
+					continue streamChoosingLoop
 				}
 			}
-			retryTimeConsuming = 0
 			select {
 			case <-streamCtx.Done():
 				log.Info("[pd] tso stream is canceled", zap.String("dc", dc), zap.String("stream-addr", streamAddr))
@@ -903,7 +907,7 @@ type connectionContext struct {
 	cancel context.CancelFunc
 }
 
-func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) {
+func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnect
 	if c.allowTSOFollowerProxy(dc) {
@@ -911,7 +915,9 @@ func (c *client) updateConnectionCtxs(updaterCtx context.Context, dc string, con
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
+		return false
 	}
+	return true
 }
 
 // tryConnect will try to connect to the TSO allocator leader. If the connection becomes unreachable
@@ -927,6 +933,8 @@ func (c *client) tryConnect(
 		networkErrNum uint64
 		err           error
 		stream        pdpb.PD_TsoClient
+		url           string
+		cc            *grpc.ClientConn
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
 		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
@@ -942,9 +950,11 @@ func (c *client) tryConnect(
 			return true
 		})
 	}
-	cc, url := c.getAllocatorClientConnByDCLocation(dc)
 	// retry several times before falling back to the follower when the network problem happens
+
 	for i := 0; i < maxRetryTimes; i++ {
+		c.ScheduleCheckLeader()
+		cc, url = c.getAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {
@@ -1878,6 +1888,35 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 		}
 	}()
 	return globalConfigWatcherCh, err
+}
+
+func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
+	resp, err := c.getClient().GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{
+		Header: c.requestHeader(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return 0, errors.Errorf("[pd]" + resErr.Message)
+	}
+	return resp.GetTimestamp(), nil
+}
+
+func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
+	resp, err := c.getClient().SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{
+		Header:    c.requestHeader(),
+		Timestamp: timestamp,
+	})
+	if err != nil {
+		return err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return nil
 }
 
 func (c *client) respForErr(observer prometheus.Observer, start time.Time, err error, header *pdpb.ResponseHeader) error {

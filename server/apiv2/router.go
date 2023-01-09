@@ -28,7 +28,7 @@ import (
 
 var once sync.Once
 
-var group = server.ServiceGroup{
+var group = server.APIServiceGroup{
 	Name:       "core",
 	IsCore:     true,
 	Version:    "v2",
@@ -47,7 +47,7 @@ const apiV2Prefix = "/pd/api/v2/"
 // @license.name   Apache 2.0
 // @license.url    http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath       /pd/api/v2
-func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, error) {
+func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, server.APIServiceGroup, error) {
 	once.Do(func() {
 		// See https://github.com/pingcap/tidb-dashboard/blob/f8ecb64e3d63f4ed91c3dca7a04362418ade01d8/pkg/apiserver/apiserver.go#L84
 		// These global modification will be effective only for the first invoke.

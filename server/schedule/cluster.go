@@ -35,4 +35,6 @@ type Cluster interface {
 
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
+	SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64)
+	RecordOpStepWithTTL(regionID uint64)
 }

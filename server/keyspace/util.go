@@ -18,6 +18,7 @@ import (
 	"regexp"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 )
 
 const (
@@ -33,21 +34,30 @@ var (
 	// ErrKeyspaceExists indicates target keyspace already exists.
 	// Used when creating a new keyspace.
 	ErrKeyspaceExists   = errors.New("keyspace already exists")
-	errKeyspaceArchived = errors.New("keyspace already archived")
-	errArchiveEnabled   = errors.New("cannot archive ENABLED keyspace")
 	errModifyDefault    = errors.New("cannot modify default keyspace's state")
 	errIllegalOperation = errors.New("unknown operation")
+
+	// stateTransitionTable lists all allowed next state for the given current state.
+	// Note that transit from any state to itself is allowed for idempotence.
+	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
+		keyspacepb.KeyspaceState_ENABLED:   {keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED},
+		keyspacepb.KeyspaceState_DISABLED:  {keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_ARCHIVED},
+		keyspacepb.KeyspaceState_ARCHIVED:  {keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE},
+		keyspacepb.KeyspaceState_TOMBSTONE: {keyspacepb.KeyspaceState_TOMBSTONE},
+	}
+	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
+	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
 )
 
 // validateID check if keyspace falls within the acceptable range.
 // It throws errIllegalID when input id is our of range,
 // or if it collides with reserved id.
-func validateID(spaceID uint32) error {
-	if spaceID > spaceIDMax {
-		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", spaceID, spaceIDMax)
+func validateID(id uint32) error {
+	if id > spaceIDMax {
+		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, spaceIDMax)
 	}
-	if spaceID == DefaultKeyspaceID {
-		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", spaceID)
+	if id == DefaultKeyspaceID {
+		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
 	}
 	return nil
 }
@@ -69,11 +79,11 @@ func validateName(name string) error {
 	return nil
 }
 
-// SpaceIDHash is used to hash the spaceID inside the lockGroup.
+// keyspaceIDHash is used to hash the spaceID inside the lockGroup.
 // A simple mask is applied to spaceID to use its last byte as map key,
 // limiting the maximum map length to 256.
 // Since keyspaceID is sequentially allocated, this can also reduce the chance
 // of collision when comparing with random hashes.
-func SpaceIDHash(spaceID uint32) uint32 {
-	return spaceID & 0xFF
+func keyspaceIDHash(id uint32) uint32 {
+	return id & 0xFF
 }

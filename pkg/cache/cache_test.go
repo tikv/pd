@@ -28,10 +28,10 @@ func TestExpireRegionCache(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cache := NewIDTTL(ctx, time.Second, 2*time.Second)
+	cache := NewIDTTL(ctx, 10*time.Millisecond, 20*time.Millisecond)
 	// Test Pop
-	cache.PutWithTTL(9, "9", 5*time.Second)
-	cache.PutWithTTL(10, "10", 5*time.Second)
+	cache.PutWithTTL(9, "9", 50*time.Millisecond)
+	cache.PutWithTTL(10, "10", 50*time.Millisecond)
 	re.Equal(2, cache.Len())
 	k, v, success := cache.pop()
 	re.True(success)
@@ -50,17 +50,17 @@ func TestExpireRegionCache(t *testing.T) {
 	re.True(ok)
 	re.Equal(expV, v2.(string))
 
-	cache.PutWithTTL(11, "11", time.Second)
-	time.Sleep(5 * time.Second)
+	cache.PutWithTTL(11, "11", 10*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	k, v, success = cache.pop()
 	re.False(success)
 	re.Nil(k)
 	re.Nil(v)
 
 	// Test Get
-	cache.PutWithTTL(1, 1, time.Second)
-	cache.PutWithTTL(2, "v2", 5*time.Second)
-	cache.PutWithTTL(3, 3.0, 5*time.Second)
+	cache.PutWithTTL(1, 1, 10*time.Millisecond)
+	cache.PutWithTTL(2, "v2", 50*time.Millisecond)
+	cache.PutWithTTL(3, 3.0, 50*time.Millisecond)
 
 	value, ok := cache.Get(1)
 	re.True(ok)
@@ -78,7 +78,7 @@ func TestExpireRegionCache(t *testing.T) {
 
 	re.Equal(sortIDs(cache.GetAllID()), []uint64{1, 2, 3})
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(20 * time.Millisecond)
 
 	value, ok = cache.Get(1)
 	re.False(ok)
@@ -219,6 +219,39 @@ func TestFifoCache(t *testing.T) {
 	cache.Remove()
 	cache.Remove()
 	re.Equal(0, cache.Len())
+}
+
+func TestFifoFromLastSameElems(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	type testStruct struct {
+		value string
+	}
+	cache := NewFIFO(4)
+	cache.Put(1, &testStruct{value: "1"})
+	cache.Put(1, &testStruct{value: "2"})
+	cache.Put(1, &testStruct{value: "3"})
+	fun := func() []*Item {
+		return cache.FromLastSameElems(
+			func(i interface{}) (bool, string) {
+				result, ok := i.(*testStruct)
+				if result == nil {
+					return ok, ""
+				}
+				return ok, result.value
+			})
+	}
+	items := fun()
+	re.Equal(1, len(items))
+	cache.Put(1, &testStruct{value: "3"})
+	cache.Put(2, &testStruct{value: "3"})
+	items = fun()
+	re.Equal(3, len(items))
+	re.Equal("3", items[0].Value.(*testStruct).value)
+	cache.Put(1, &testStruct{value: "2"})
+	items = fun()
+	re.Equal(1, len(items))
+	re.Equal("2", items[0].Value.(*testStruct).value)
 }
 
 func TestTwoQueueCache(t *testing.T) {

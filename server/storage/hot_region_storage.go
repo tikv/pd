@@ -32,10 +32,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/storage/kv"
 	"go.uber.org/zap"
 )
 
@@ -45,7 +44,7 @@ import (
 // Close() must be called after the use.
 type HotRegionStorage struct {
 	*kv.LevelDBKV
-	ekm                     *encryptionkm.KeyManager
+	ekm                     *encryption.Manager
 	hotRegionLoopWg         sync.WaitGroup
 	batchHotInfo            map[string]*HistoryHotRegion
 	hotRegionInfoCtx        context.Context
@@ -137,7 +136,7 @@ func (h HotRegionType) String() string {
 func NewHotRegionsStorage(
 	ctx context.Context,
 	filePath string,
-	ekm *encryptionkm.KeyManager,
+	ekm *encryption.Manager,
 	hotRegionStorageHandler HotRegionStorageHandler,
 ) (*HotRegionStorage, error) {
 	levelDB, err := kv.NewLevelDBKV(filePath)
@@ -228,13 +227,13 @@ func (h *HotRegionStorage) backgroundFlush() {
 	}
 }
 
-// NewIterator return a iterator which can traverse all data as reqeust.
+// NewIterator return a iterator which can traverse all data as request.
 func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime int64) HotRegionStorageIterator {
 	iters := make([]iterator.Iterator, len(requireTypes))
 	for index, requireType := range requireTypes {
 		requireType = strings.ToLower(requireType)
 		startKey := HotRegionStorePath(requireType, startTime, 0)
-		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
+		endKey := HotRegionStorePath(requireType, endTime, math.MaxUint64)
 		iter := h.LevelDBKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}
@@ -368,7 +367,7 @@ func (h *HotRegionStorage) delete(reservedDays int) error {
 // HotRegionStorageIterator iterates over a historyHotRegion.
 type HotRegionStorageIterator struct {
 	iters                []iterator.Iterator
-	encryptionKeyManager *encryptionkm.KeyManager
+	encryptionKeyManager *encryption.Manager
 }
 
 // Next moves the iterator to the next key/value pair.

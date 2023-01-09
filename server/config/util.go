@@ -55,6 +55,11 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 	return nil
 }
 
+// ValidateLabelKey checks the legality of the label key.
+func ValidateLabelKey(key string) error {
+	return validateFormat(key, keyFormat)
+}
+
 // ValidateURLWithScheme checks the format of the URL.
 func ValidateURLWithScheme(rawURL string) error {
 	u, err := url.ParseRequestURI(rawURL)

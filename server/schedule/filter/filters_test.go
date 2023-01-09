@@ -89,7 +89,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 		{"_id", "notExists", []string{}, plan.StatusOK},
 	}
 	for _, testCase := range testCases {
-		filter := NewLabelConstaintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
+		filter := NewLabelConstraintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
 		re.Equal(testCase.res, filter.Source(testCluster.GetOpts(), store).StatusCode)
 	}
 }
@@ -108,6 +108,7 @@ func TestRuleFitFilter(t *testing.T) {
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
+		{StoreId: 7, Id: 7, IsWitness: true},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
 	testCases := []struct {
@@ -119,20 +120,31 @@ func TestRuleFitFilter(t *testing.T) {
 	}{
 		{1, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
 		{2, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
-		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		// store 3 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
+		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusOK},
+		// the labels of store 4 and store 3 are same, so the isolation score will decrease.
 		{4, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
-		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
+		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
+		// store 7 and store 1 is the peers of this region, but it's a witness, so it won't allow transferring leader to store 7.
+		{7, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
 	}
 	// Init cluster
 	for _, testCase := range testCases {
 		testCluster.AddLabelsStore(testCase.storeID, testCase.regionCount, testCase.labels)
 	}
 	for _, testCase := range testCases {
-		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1)
+		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
+
+	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
+	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
 }
 
 func TestStoreStateFilter(t *testing.T) {
@@ -207,26 +219,26 @@ func TestStoreStateFilterReason(t *testing.T) {
 	check := func(store *core.StoreInfo, testCases []testCase) {
 		for _, testCase := range testCases {
 			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			re.Equal(testCase.sourceReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
 			filters[testCase.filterIdx].Source(opt, store)
-			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason)
+			re.Equal(testCase.targetReason, filters[testCase.filterIdx].(*StoreStateFilter).Reason.String())
 		}
 	}
 
 	// No reason catched
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 	testCases := []testCase{
-		{2, "", ""},
+		{2, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
-		{0, "disconnected", "disconnected"},
-		{1, "", ""},
-		{2, "disconnected", "disconnected"},
-		{3, "", ""},
+		{0, "store-state-disconnect-filter", "store-state-disconnect-filter"},
+		{1, "store-state-ok-filter", "store-state-ok-filter"},
+		{2, "store-state-disconnect-filter", "store-state-disconnect-filter"},
+		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
@@ -234,10 +246,10 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, "", ""},
-		{1, "busy", "busy"},
-		{2, "busy", "busy"},
-		{3, "", ""},
+		{0, "store-state-ok-filter", "store-state-ok-filter"},
+		{1, "store-state-busy-filter", "store-state-busy-filter"},
+		{2, "store-state-busy-filter", "store-state-busy-filter"},
+		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)
 }
@@ -335,10 +347,10 @@ func TestPlacementGuard(t *testing.T) {
 	store := testCluster.GetStore(1)
 
 	re.IsType(NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store))
+		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 	testCluster.SetEnablePlacementRules(true)
-	re.IsType(newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store))
+	re.IsType(newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1),
+		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 }
 
 func TestSpecialUseFilter(t *testing.T) {

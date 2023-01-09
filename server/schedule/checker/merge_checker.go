@@ -23,7 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -101,11 +101,8 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// when pd just started, it will load region meta from region storage,
-	// but the size for these loaded region info is 0
-	// pd don't know the real size of one region until the first heartbeat of the region
-	// thus here when size is 0, just skip.
-	if region.GetApproximateSize() == 0 {
-		checkerCounter.WithLabelValues("merge_checker", "skip").Inc()
+	if region.GetLeader() == nil {
+		checkerCounter.WithLabelValues("merge_checker", "skip-uninit-region").Inc()
 		return nil
 	}
 

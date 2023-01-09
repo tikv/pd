@@ -46,7 +46,7 @@ var tolerantResourceStatus = prometheus.NewGaugeVec(
 		Subsystem: "scheduler",
 		Name:      "tolerant_resource",
 		Help:      "Store status for schedule",
-	}, []string{"scheduler", "source", "target"})
+	}, []string{"scheduler"})
 
 var balanceLeaderCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
@@ -54,6 +54,14 @@ var balanceLeaderCounter = prometheus.NewCounterVec(
 		Subsystem: "scheduler",
 		Name:      "balance_leader",
 		Help:      "Counter of balance leader scheduler.",
+	}, []string{"type", "store"})
+
+var balanceWitnessCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "balance_witness",
+		Help:      "Counter of balance witness scheduler.",
 	}, []string{"type", "store"})
 
 var balanceRegionCounter = prometheus.NewCounterVec(
@@ -109,14 +117,24 @@ var hotPendingStatus = prometheus.NewGaugeVec(
 		Namespace: "pd",
 		Subsystem: "scheduler",
 		Name:      "hot_pending",
-		Help:      "Counter of direction of balance related schedulers.",
+		Help:      "Pending influence status in hot region scheduler.",
 	}, []string{"type", "source", "target"})
+
+var hotPeerHist = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_peer",
+		Help:      "Bucketed histogram of the scheduling hot peer.",
+		Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
+	}, []string{"type", "rw", "dim"})
 
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
@@ -125,4 +143,5 @@ func init() {
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
+	prometheus.MustRegister(hotPeerHist)
 }

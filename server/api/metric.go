@@ -20,7 +20,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tikv/pd/pkg/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 )
 

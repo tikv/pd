@@ -21,7 +21,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 func testGCSafePoints() ([]string, []uint64) {
@@ -102,7 +102,7 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoint))
 	}
 	// enabling failpoint to make expired key removal immediately observable
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
 	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime)
 	re.NoError(err)
 	re.Equal(serviceSafePoints[0], minSafePoint)
@@ -121,7 +121,7 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
 	re.NoError(err)
 	re.Nil(ssp)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys"))
 }
 
 func TestRemoveServiceSafePoint(t *testing.T) {

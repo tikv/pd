@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/keyspace"
 )
@@ -52,7 +53,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
 	for _, expected := range metas {
-		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.Name)
+		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
 		re.Equal(expected, loaded)
 	}
@@ -62,23 +63,19 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	// Loading default keyspace should be successful.
 	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
 	re.NoError(err)
-	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.Id)
-	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.Name)
+	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.GetId())
+	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.GetName())
 }
 
-func (suite *clientTestSuite) TestWatchKeyspace() {
-	// Flush test storage before running TestWatchKeyspace.
-	suite.TearDownSuite()
-	suite.SetupSuite()
+func (suite *clientTestSuite) TestWatchKeyspaces() {
 	re := suite.Require()
-	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
 	re.NoError(err)
-	// First batch of watchChan message should contain all existing keyspaces, including the default.
+	// First batch of watchChan message should contain all existing keyspaces.
 	initialLoaded := <-watchChan
-	re.Equal(len(initialKeyspaces)+1, len(initialLoaded))
 	for i := range initialKeyspaces {
-		re.Equal(initialKeyspaces[i], initialLoaded[i+1])
+		re.Contains(initialLoaded, initialKeyspaces[i])
 	}
 	// Each additional message contains extra put events.
 	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
@@ -118,4 +115,75 @@ func (suite *clientTestSuite) TestWatchKeyspace() {
 	re.NoError(err)
 	loaded = <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
+}
+
+func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, index int, state keyspacepb.KeyspaceState) *keyspacepb.KeyspaceMeta {
+	manager := server.GetKeyspaceManager()
+	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:   fmt.Sprintf("test_keyspace%d", index),
+		Config: nil,
+		Now:    0, // Use 0 to indicate unchanged keyspace.
+	})
+	re.NoError(err)
+	switch state {
+	case keyspacepb.KeyspaceState_ENABLED:
+	case keyspacepb.KeyspaceState_DISABLED:
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, 0)
+		re.NoError(err)
+	case keyspacepb.KeyspaceState_ARCHIVED:
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, 0)
+		re.NoError(err)
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, 0)
+		re.NoError(err)
+	case keyspacepb.KeyspaceState_TOMBSTONE:
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_DISABLED, 0)
+		re.NoError(err)
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_ARCHIVED, 0)
+		re.NoError(err)
+		meta, err = manager.UpdateKeyspaceStateByID(meta.GetId(), keyspacepb.KeyspaceState_TOMBSTONE, 0)
+		re.NoError(err)
+	default:
+		re.Fail("unknown keyspace state")
+	}
+	return meta
+}
+
+func (suite *clientTestSuite) TestUpdateKeyspaceState() {
+	re := suite.Require()
+	allStates := []keyspacepb.KeyspaceState{
+		keyspacepb.KeyspaceState_ENABLED,
+		keyspacepb.KeyspaceState_DISABLED,
+		keyspacepb.KeyspaceState_ARCHIVED,
+		keyspacepb.KeyspaceState_TOMBSTONE,
+	}
+	allowedTransitions := map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
+		keyspacepb.KeyspaceState_ENABLED:   {keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED},
+		keyspacepb.KeyspaceState_DISABLED:  {keyspacepb.KeyspaceState_DISABLED, keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_ARCHIVED},
+		keyspacepb.KeyspaceState_ARCHIVED:  {keyspacepb.KeyspaceState_ARCHIVED, keyspacepb.KeyspaceState_TOMBSTONE},
+		keyspacepb.KeyspaceState_TOMBSTONE: {keyspacepb.KeyspaceState_TOMBSTONE},
+	}
+	// Use index to avoid collision with other tests.
+	index := 1000
+	for _, originState := range allStates {
+		for _, targetState := range allStates {
+			meta := mustCreateKeyspaceAtState(re, suite.srv, index, originState)
+			updated, err := suite.client.UpdateKeyspaceState(suite.ctx, meta.GetId(), targetState)
+			if slice.Contains(allowedTransitions[originState], targetState) {
+				// If transition is allowed, then update must be successful.
+				re.NoError(err)
+				if originState != targetState {
+					// If changing state, then must record stateChangedAt.
+					re.NotEqual(updated.GetStateChangedAt(), meta.GetStateChangedAt())
+				} else {
+					// Otherwise the request should be idempotent.
+					re.Equal(updated, meta)
+				}
+			} else {
+				// If operation is not allowed, then update must fail, returned meta must be nil.
+				re.Error(err)
+				re.Nil(updated)
+			}
+			index++
+		}
+	}
 }

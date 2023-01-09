@@ -26,7 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type testBalanceSpeedCase struct {
@@ -71,12 +71,14 @@ func TestInfluenceAmp(t *testing.T) {
 	basePlan := NewBalanceSchedulerPlan()
 	solver := newSolver(basePlan, kind, tc, influence)
 	solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.True(solver.shouldBalance(""))
 
 	// It will not schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
 	tc.AddRegionStore(1, int(100+influenceAmp+2))
 	solver.source = tc.GetStore(1)
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.False(solver.shouldBalance(""))
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
 }
@@ -157,6 +159,7 @@ func TestShouldBalance(t *testing.T) {
 		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 		solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+		solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 		re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 	}
 
@@ -170,6 +173,7 @@ func TestShouldBalance(t *testing.T) {
 			basePlan := NewBalanceSchedulerPlan()
 			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 			solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+			solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 			re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 		}
 	}
@@ -184,7 +188,7 @@ func TestTolerantRatio(t *testing.T) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	// create a region to control average region size.
 	re.NotNil(tc.AddLeaderRegion(1, 1, 2))
-	regionSize := int64(96 * units.MiB)
+	regionSize := int64(96)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tbl := []struct {
@@ -222,7 +226,10 @@ func TestTolerantRatio(t *testing.T) {
 		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, t.kind, tc, operator.OpInfluence{})
 		solver.region = region
-		re.Equal(t.expectTolerantResource(t.kind), solver.getTolerantResource())
+
+		sourceScore := t.expectTolerantResource(t.kind)
+		targetScore := solver.getTolerantResource()
+		re.Equal(sourceScore, targetScore)
 	}
 }
 
@@ -259,6 +266,11 @@ func (suite *balanceLeaderSchedulerTestSuite) schedule() []*operator.Operator {
 	return ops
 }
 
+func (suite *balanceLeaderSchedulerTestSuite) dryRun() []plan.Plan {
+	_, plans := suite.lb.Schedule(suite.tc, true)
+	return plans
+}
+
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	suite.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
@@ -286,6 +298,10 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	suite.tc.UpdateLeaderCount(4, 10)
 	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
 	suite.Empty(suite.schedule())
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(3, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
 
 	// Stores:     1    2    3    4
 	// Leaders:    7    8    9   16
@@ -306,6 +322,11 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() 
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
 	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.Empty(suite.schedule())
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(3, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
+
 	suite.tc.SetLeaderSchedulePolicy(core.BySize.String())
 	suite.NotEmpty(suite.schedule())
 }
@@ -422,6 +443,11 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceFilter() {
 	// store 2 becomes the store with least leaders.
 	suite.tc.SetStoreDown(1)
 	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
+	plans := suite.dryRun()
+	suite.NotEmpty(plans)
+	suite.Equal(0, plans[0].GetStep())
+	suite.Equal(plan.StatusStoreDown, int(plans[0].GetStatus().StatusCode))
+	suite.Equal(uint64(1), plans[0].GetResource(0))
 
 	// Test healthFilter.
 	// If store 2 is busy, it will be filtered,
@@ -614,17 +640,24 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
 	suite.NoError(err)
 	ops, _ := lb.Schedule(suite.tc, false)
 	suite.Equal(uint64(1), ops[0].RegionID())
-	suite.tc.RemoveRegion(suite.tc.GetRegion(1))
+	r := suite.tc.GetRegion(1)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
 	suite.tc.AddLeaderRegionWithRange(2, "p", "r", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	suite.Equal(uint64(2), ops[0].RegionID())
-	suite.tc.RemoveRegion(suite.tc.GetRegion(2))
+	r = suite.tc.GetRegion(2)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
+
 	suite.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	suite.Empty(ops)
-	suite.tc.RemoveRegion(suite.tc.GetRegion(3))
+	r = suite.tc.GetRegion(3)
+	suite.tc.RemoveRegion(r)
+	suite.tc.RemoveRegionFromSubTree(r)
 	suite.tc.AddLeaderRegionWithRange(4, "", "", 1, 2, 3, 4)
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -757,18 +790,19 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
-
+	tc.SetStoreUp(1)
 	// test region replicate not match
 	opt.SetMaxReplicas(3)
 	ops, plans := sb.Schedule(tc, true)
-	re.Len(plans, 100)
+	re.Len(plans, 101)
 	re.Empty(ops)
-	re.Equal(int(plans[0].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
+	re.Equal(int(plans[1].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
 
+	tc.SetStoreOffline(1)
 	opt.SetMaxReplicas(1)
 	ops, plans = sb.Schedule(tc, true)
 	re.NotEmpty(ops)
-	re.Len(plans, 3)
+	re.Len(plans, 4)
 	re.True(plans[0].GetStatus().IsOK())
 }
 
@@ -1200,7 +1234,7 @@ func TestRandomMergeSchedule(t *testing.T) {
 	defer cancel()
 
 	opt := config.NewTestOptions()
-	// TODO: enable palcementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMergeScheduleLimit(1)
@@ -1236,7 +1270,7 @@ func TestScatterRangeBalance(t *testing.T) {
 	defer cancel()
 
 	opt := config.NewTestOptions()
-	// TODO: enable palcementrules
+	// TODO: enable placementrules
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -1276,7 +1310,8 @@ func TestScatterRangeBalance(t *testing.T) {
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 	for i := 0; i < 100; i++ {
 		_, err := tc.AllocPeer(1)
@@ -1292,9 +1327,9 @@ func TestScatterRangeBalance(t *testing.T) {
 
 	scheduleAndApplyOperator(tc, hb, 100)
 	for i := 1; i <= 5; i++ {
-		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		leaderCount := tc.GetStoreLeaderCount(uint64(i))
 		re.LessOrEqual(leaderCount, 12)
-		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
+		regionCount = tc.GetStoreRegionCount(uint64(i))
 		re.LessOrEqual(regionCount, 32)
 	}
 }
@@ -1344,7 +1379,8 @@ func TestBalanceLeaderLimit(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 0; i < 100; i++ {
@@ -1365,14 +1401,14 @@ func TestBalanceLeaderLimit(t *testing.T) {
 	maxLeaderCount := 0
 	minLeaderCount := 99
 	for i := 1; i <= 5; i++ {
-		leaderCount := tc.Regions.GetStoreLeaderCount(uint64(i))
+		leaderCount := tc.GetStoreLeaderCount(uint64(i))
 		if leaderCount < minLeaderCount {
 			minLeaderCount = leaderCount
 		}
 		if leaderCount > maxLeaderCount {
 			maxLeaderCount = leaderCount
 		}
-		regionCount = tc.Regions.GetStoreRegionCount(uint64(i))
+		regionCount = tc.GetStoreRegionCount(uint64(i))
 		re.LessOrEqual(regionCount, 32)
 	}
 	re.Greater(maxLeaderCount-minLeaderCount, 10)
@@ -1454,7 +1490,8 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			core.SetApproximateSize(96),
 		)
 
-		tc.Regions.SetRegion(regionInfo)
+		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
+		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
 	for i := 1; i <= 3; i++ {

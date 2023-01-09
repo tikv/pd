@@ -24,8 +24,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/server/id"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -281,7 +281,7 @@ func TestRegionWriteRate(t *testing.T) {
 		{10, 3, 500, 0, 0},
 	}
 	for _, testCase := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(testCase.interval))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(0, testCase.interval))
 		bytesRate, keysRate := r.GetWriteRate()
 		re.Equal(testCase.expectBytesRate, bytesRate)
 		re.Equal(testCase.expectKeysRate, keysRate)
@@ -367,25 +367,25 @@ func TestNeedSync(t *testing.T) {
 
 func TestRegionMap(t *testing.T) {
 	re := require.New(t)
-	rm := newRegionMap()
-	check(re, rm)
-	rm.AddNew(regionInfo(1))
-	check(re, rm, 1)
+	rm := make(map[uint64]*regionItem)
+	checkMap(re, rm)
+	rm[1] = &regionItem{RegionInfo: regionInfo(1)}
+	checkMap(re, rm, 1)
 
-	rm.AddNew(regionInfo(2))
-	rm.AddNew(regionInfo(3))
-	check(re, rm, 1, 2, 3)
+	rm[2] = &regionItem{RegionInfo: regionInfo(2)}
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	checkMap(re, rm, 1, 2, 3)
 
-	rm.AddNew(regionInfo(3))
-	rm.Delete(4)
-	check(re, rm, 1, 2, 3)
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	delete(rm, 4)
+	checkMap(re, rm, 1, 2, 3)
 
-	rm.Delete(3)
-	rm.Delete(1)
-	check(re, rm, 2)
+	delete(rm, 3)
+	delete(rm, 1)
+	checkMap(re, rm, 2)
 
-	rm.AddNew(regionInfo(3))
-	check(re, rm, 2, 3)
+	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	checkMap(re, rm, 2, 3)
 }
 
 func regionInfo(id uint64) *RegionInfo {
@@ -398,13 +398,13 @@ func regionInfo(id uint64) *RegionInfo {
 	}
 }
 
-func check(re *require.Assertions, rm regionMap, ids ...uint64) {
+func checkMap(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) {
 	// Check Get.
 	for _, id := range ids {
-		re.Equal(id, rm.Get(id).region.GetID())
+		re.Equal(id, rm[id].GetID())
 	}
 	// Check Len.
-	re.Equal(len(ids), rm.Len())
+	re.Equal(len(ids), len(rm))
 	// Check id set.
 	expect := make(map[uint64]struct{})
 	for _, id := range ids {
@@ -412,7 +412,7 @@ func check(re *require.Assertions, rm regionMap, ids ...uint64) {
 	}
 	set1 := make(map[uint64]struct{})
 	for _, r := range rm {
-		set1[r.region.GetID()] = struct{}{}
+		set1[r.GetID()] = struct{}{}
 	}
 	re.Equal(expect, set1)
 }
@@ -457,17 +457,21 @@ func TestSetRegion(t *testing.T) {
 		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
+		if i%3 == 0 {
+			peer2.IsWitness = true
+		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
 			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
 			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
 		}, peer1)
-		regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 
 	peer1 := &metapb.Peer{StoreId: uint64(4), Id: uint64(101)}
-	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102)}
+	peer2 := &metapb.Peer{StoreId: uint64(5), Id: uint64(102), Role: metapb.PeerRole_Learner}
 	peer3 := &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
@@ -475,16 +479,17 @@ func TestSetRegion(t *testing.T) {
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
 	}, peer1)
-	region.learners = append(region.learners, peer2)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged := regions.SetRegion(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
 	re.Len(regions.GetRegions(), 97)
 
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	peer1 = &metapb.Peer{StoreId: uint64(2), Id: uint64(101)}
-	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102)}
+	peer2 = &metapb.Peer{StoreId: uint64(3), Id: uint64(102), Role: metapb.PeerRole_Learner}
 	peer3 = &metapb.Peer{StoreId: uint64(1), Id: uint64(103)}
 	region = NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
@@ -492,9 +497,9 @@ func TestSetRegion(t *testing.T) {
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
 	}, peer1)
-	region.learners = append(region.learners, peer2)
 	region.pendingPeers = append(region.pendingPeers, peer3)
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(97, regions.tree.length())
 	re.Len(regions.GetRegions(), 97)
@@ -503,7 +508,8 @@ func TestSetRegion(t *testing.T) {
 	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
 	re.NotNil(regions.GetRegion(21))
 	re.NotNil(regions.GetRegion(18))
-	regions.SetRegion(region)
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
 	re.Len(regions.GetRegions(), 96)
@@ -517,8 +523,9 @@ func TestSetRegion(t *testing.T) {
 		SetApproximateSize(30),
 		SetWrittenBytes(40),
 		SetWrittenKeys(10),
-		SetReportInterval(5))
-	regions.SetRegion(region)
+		SetReportInterval(0, 5))
+	origin, overlaps, rangeChanged = regions.SetRegion(region)
+	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	checkRegions(re, regions)
 	re.Equal(96, regions.tree.length())
 	re.Len(regions.GetRegions(), 96)
@@ -573,33 +580,21 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	leaderMap := make(map[uint64]uint64)
 	followerMap := make(map[uint64]uint64)
 	learnerMap := make(map[uint64]uint64)
+	witnessMap := make(map[uint64]uint64)
 	pendingPeerMap := make(map[uint64]uint64)
 	for _, item := range regions.GetRegions() {
-		if leaderCount, ok := leaderMap[item.leader.StoreId]; ok {
-			leaderMap[item.leader.StoreId] = leaderCount + 1
-		} else {
-			leaderMap[item.leader.StoreId] = 1
-		}
+		leaderMap[item.leader.StoreId]++
 		for _, follower := range item.GetFollowers() {
-			if followerCount, ok := followerMap[follower.StoreId]; ok {
-				followerMap[follower.StoreId] = followerCount + 1
-			} else {
-				followerMap[follower.StoreId] = 1
-			}
+			followerMap[follower.StoreId]++
 		}
 		for _, learner := range item.GetLearners() {
-			if learnerCount, ok := learnerMap[learner.StoreId]; ok {
-				learnerMap[learner.StoreId] = learnerCount + 1
-			} else {
-				learnerMap[learner.StoreId] = 1
-			}
+			learnerMap[learner.StoreId]++
+		}
+		for _, witness := range item.GetWitnesses() {
+			witnessMap[witness.StoreId]++
 		}
 		for _, pendingPeer := range item.GetPendingPeers() {
-			if pendingPeerCount, ok := pendingPeerMap[pendingPeer.StoreId]; ok {
-				pendingPeerMap[pendingPeer.StoreId] = pendingPeerCount + 1
-			} else {
-				pendingPeerMap[pendingPeer.StoreId] = 1
-			}
+			pendingPeerMap[pendingPeer.StoreId]++
 		}
 	}
 	for key, value := range regions.leaders {
@@ -610,6 +605,9 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	}
 	for key, value := range regions.learners {
 		re.Equal(int(learnerMap[key]), value.length())
+	}
+	for key, value := range regions.witnesses {
+		re.Equal(int(witnessMap[key]), value.length())
 	}
 	for key, value := range regions.pendingPeers {
 		re.Equal(int(pendingPeerMap[key]), value.length())
@@ -638,7 +636,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -691,6 +690,38 @@ func BenchmarkAddRegion(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		regions.SetRegion(items[i])
+		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
+		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
+	}
+}
+
+func BenchmarkRegionFromHeartbeat(b *testing.B) {
+	peers := make([]*metapb.Peer, 0, 3)
+	for i := uint64(1); i <= 3; i++ {
+		peers = append(peers, &metapb.Peer{
+			Id:      i,
+			StoreId: i,
+		})
+	}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 2,
+				Version: 1,
+			},
+		},
+		Leader:          peers[0],
+		Term:            5,
+		ApproximateSize: 10,
+		PendingPeers:    []*metapb.Peer{peers[1]},
+		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		RegionFromHeartbeat(regionReq)
 	}
 }

@@ -15,49 +15,73 @@
 package storage
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 func TestSaveLoadKeyspace(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
-
+	// Store test keyspace id and meta.
 	keyspaces := makeTestKeyspaces()
-	for _, keyspace := range keyspaces {
-		re.NoError(storage.SaveKeyspace(keyspace))
-	}
+	err := storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		for _, keyspace := range keyspaces {
+			re.NoError(storage.SaveKeyspaceID(txn, keyspace.Id, keyspace.Name))
+			re.NoError(storage.SaveKeyspaceMeta(txn, keyspace))
+		}
+		return nil
+	})
+	re.NoError(err)
+	// Test load keyspace id and meta
+	err = storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		for _, expectedMeta := range keyspaces {
+			loadSuccess, id, err := storage.LoadKeyspaceID(txn, expectedMeta.Name)
+			re.NoError(err)
+			re.True(loadSuccess)
+			re.Equal(expectedMeta.Id, id)
+			// Test load keyspace.
+			loadedMeta, err := storage.LoadKeyspaceMeta(txn, expectedMeta.Id)
+			re.NoError(err)
+			re.Equal(expectedMeta, loadedMeta)
+		}
+		return nil
+	})
+	re.NoError(err)
 
-	for _, keyspace := range keyspaces {
-		spaceID := keyspace.GetId()
-		loadedKeyspace := &keyspacepb.KeyspaceMeta{}
-		// Test load keyspace.
-		success, err := storage.LoadKeyspace(spaceID, loadedKeyspace)
-		re.True(success)
+	err = storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		// Loading a non-existing keyspace id should be unsuccessful but no error.
+		loadSuccess, id, err := storage.LoadKeyspaceID(txn, "non-existing keyspace")
 		re.NoError(err)
-		re.Equal(keyspace, loadedKeyspace)
-		// Test remove keyspace.
-		re.NoError(storage.RemoveKeyspace(spaceID))
-		success, err = storage.LoadKeyspace(spaceID, loadedKeyspace)
-		// Loading a non-existing keyspace should be unsuccessful.
-		re.False(success)
-		// Loading a non-existing keyspace should not return error.
+		re.False(loadSuccess)
+		re.Zero(id)
+		// Loading a non-existing keyspace meta should be unsuccessful but no error.
+		meta, err := storage.LoadKeyspaceMeta(txn, 999)
 		re.NoError(err)
-	}
+		re.Nil(meta)
+		return nil
+	})
+	re.NoError(err)
 }
 
 func TestLoadRangeKeyspaces(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
+	// Store test keyspace meta.
 	keyspaces := makeTestKeyspaces()
-	for _, keyspace := range keyspaces {
-		re.NoError(storage.SaveKeyspace(keyspace))
-	}
+	err := storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		for _, keyspace := range keyspaces {
+			re.NoError(storage.SaveKeyspaceMeta(txn, keyspace))
+		}
+		return nil
+	})
+	re.NoError(err)
 
 	// Load all keyspaces.
 	loadedKeyspaces, err := storage.LoadRangeKeyspace(keyspaces[0].GetId(), 0)
@@ -73,29 +97,6 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 	loadedKeyspace3, err := storage.LoadRangeKeyspace(1, 1)
 	re.NoError(err)
 	re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
-}
-
-func TestSaveLoadKeyspaceID(t *testing.T) {
-	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
-
-	ids := []uint32{100, 200, 300}
-	names := []string{"keyspace1", "keyspace2", "keyspace3"}
-	for i := range ids {
-		re.NoError(storage.SaveKeyspaceIDByName(ids[i], names[i]))
-	}
-
-	for i := range names {
-		success, id, err := storage.LoadKeyspaceIDByName(names[i])
-		re.NoError(err)
-		re.True(success)
-		re.Equal(ids[i], id)
-	}
-	// Loading non-existing id should return false, 0, nil.
-	success, id, err := storage.LoadKeyspaceIDByName("non-existing")
-	re.NoError(err)
-	re.False(success)
-	re.Equal(uint32(0), id)
 }
 
 func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {

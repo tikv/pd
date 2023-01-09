@@ -31,7 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	tu "github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -223,6 +223,10 @@ func (suite *regionTestSuite) TestRegionCheck() {
 }
 
 func (suite *regionTestSuite) TestRegions() {
+	r := NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
+	suite.Nil(r.Leader.Peer)
+	suite.Len(r.Leader.RoleName, 0)
+
 	rs := []*core.RegionInfo{
 		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
 		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
@@ -287,7 +291,8 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	suite.Len(regionIDs, r6.Count)
 }
 
-func (suite *regionTestSuite) TestTopFlow() {
+func (suite *regionTestSuite) TestTop() {
+	// Top flow.
 	re := suite.Require()
 	r1 := newTestRegionInfo(1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	mustRegionHeartbeat(re, suite.svr, r1)
@@ -302,22 +307,32 @@ func (suite *regionTestSuite) TestTopFlow() {
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
-}
-
-func (suite *regionTestSuite) TestTopSize() {
-	re := suite.Require()
+	// Top size.
 	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
 	opt := core.SetApproximateSize(1000)
-	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
+	r1 = newTestRegionInfo(1, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r1)
 	opt = core.SetApproximateSize(900)
-	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
+	r2 = newTestRegionInfo(2, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	opt = core.SetApproximateSize(800)
-	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
+	r3 = newTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	// query with limit
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=%d", suite.urlPrefix, 2), []uint64{7, 8})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
+	// Top CPU usage.
+	baseOpt = []core.RegionCreateOption{core.SetRegionConfVer(4), core.SetRegionVersion(4)}
+	opt = core.SetCPUUsage(100)
+	r1 = newTestRegionInfo(1, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r1)
+	opt = core.SetCPUUsage(300)
+	r2 = newTestRegionInfo(2, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r2)
+	opt = core.SetCPUUsage(500)
+	r3 = newTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r3)
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {

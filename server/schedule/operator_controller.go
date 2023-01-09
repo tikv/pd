@@ -22,13 +22,12 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/eraftpb"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
@@ -119,6 +118,9 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
+			if op.ContainNonWitnessStep() {
+				oc.cluster.RecordOpStepWithTTL(op.RegionID())
+			}
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -482,16 +484,13 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			log.Info("missing store", zap.Uint64("store-id", storeID))
 			continue
 		}
+		limit := store.GetStoreLimit()
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := store.GetStoreLimit(v)
-			if storeLimit == nil {
-				continue
-			}
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			storeLimit.Take(stepCost)
+			limit.Take(stepCost, v)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -654,95 +653,12 @@ func (oc *OperatorController) SendScheduleCommand(region *core.RegionInfo, step 
 		zap.Stringer("step", step),
 		zap.String("source", source))
 
-	var cmd *pdpb.RegionHeartbeatResponse
-	switch st := step.(type) {
-	case operator.TransferLeader:
-		peers := make([]*metapb.Peer, 0, len(st.ToStores))
-		for _, storeID := range st.ToStores {
-			peers = append(peers, region.GetStorePeer(storeID))
-		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			TransferLeader: &pdpb.TransferLeader{
-				Peer:  region.GetStorePeer(st.ToStore),
-				Peers: peers,
-			},
-		}
-	case operator.AddPeer:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.AddLearner:
-		if region.GetStorePeer(st.ToStore) != nil {
-			// The newly added peer is pending.
-			return
-		}
-		cmd = addLearnerNode(st.PeerID, st.ToStore)
-	case operator.PromoteLearner:
-		cmd = addNode(st.PeerID, st.ToStore)
-	case operator.RemovePeer:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeer: &pdpb.ChangePeer{
-				ChangeType: eraftpb.ConfChangeType_RemoveNode,
-				Peer:       region.GetStorePeer(st.FromStore),
-			},
-		}
-	case operator.MergeRegion:
-		if st.IsPassive {
-			return
-		}
-		cmd = &pdpb.RegionHeartbeatResponse{
-			Merge: &pdpb.Merge{
-				Target: st.ToRegion,
-			},
-		}
-	case operator.SplitRegion:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			SplitRegion: &pdpb.SplitRegion{
-				Policy: st.Policy,
-				Keys:   st.SplitKeys,
-			},
-		}
-	case operator.ChangePeerV2Enter:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeerV2: st.GetRequest(),
-		}
-	case operator.ChangePeerV2Leave:
-		cmd = &pdpb.RegionHeartbeatResponse{
-			ChangePeerV2: &pdpb.ChangePeerV2{},
-		}
-	default:
-		log.Error("unknown operator step", zap.Reflect("step", step), errs.ZapError(errs.ErrUnknownOperatorStep))
+	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.cluster.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
+	cmd := step.GetCmd(region, useConfChangeV2)
+	if cmd == nil {
 		return
 	}
 	oc.hbStreams.SendMsg(region, cmd)
-}
-
-func addNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddNode,
-			Peer: &metapb.Peer{
-				Id:      id,
-				StoreId: storeID,
-				Role:    metapb.PeerRole_Voter,
-			},
-		},
-	}
-}
-
-func addLearnerNode(id, storeID uint64) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{
-			ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
-			Peer: &metapb.Peer{
-				Id:      id,
-				StoreId: storeID,
-				Role:    metapb.PeerRole_Learner,
-			},
-		},
-	}
 }
 
 func (oc *OperatorController) pushFastOperator(op *operator.Operator) {
@@ -915,6 +831,10 @@ func (oc *OperatorController) ExceedStoreLimit(ops ...*operator.Operator) bool {
 
 // exceedStoreLimitLocked returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
 func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) bool {
+	// The operator with Urgent priority, like admin operators, should ignore the store limit check.
+	if len(ops) != 0 && ops[0].GetPriorityLevel() == core.Urgent {
+		return false
+	}
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {
@@ -926,7 +846,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost) {
+			if !limiter.Available(stepCost, v) {
 				return true
 			}
 		}
@@ -935,18 +855,15 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-	if s.GetStoreLimit(limitType) == nil {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	return s.GetStoreLimit(limitType)
+
+	limit := s.GetStoreLimit()
+	limit.Reset(ratePerSec, limitType)
+	return limit
 }

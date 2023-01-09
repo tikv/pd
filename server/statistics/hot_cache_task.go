@@ -20,20 +20,8 @@ import (
 	"github.com/tikv/pd/server/core"
 )
 
-type flowItemTaskKind uint32
-
-const (
-	checkPeerTaskType flowItemTaskKind = iota
-	checkExpiredTaskType
-	collectUnReportedPeerTaskType
-	collectRegionStatsTaskType
-	isRegionHotTaskType
-	collectMetricsTaskType
-)
-
-// flowItemTask indicates the task in flowItem queue
-type flowItemTask interface {
-	taskType() flowItemTaskKind
+// FlowItemTask indicates the task in flowItem queue
+type FlowItemTask interface {
 	runTask(cache *hotPeerCache)
 }
 
@@ -43,15 +31,11 @@ type checkPeerTask struct {
 }
 
 // NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) flowItemTask {
+func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
 	return &checkPeerTask{
 		peerInfo:   peerInfo,
 		regionInfo: regionInfo,
 	}
-}
-
-func (t *checkPeerTask) taskType() flowItemTaskKind {
-	return checkPeerTaskType
 }
 
 func (t *checkPeerTask) runTask(cache *hotPeerCache) {
@@ -66,14 +50,10 @@ type checkExpiredTask struct {
 }
 
 // NewCheckExpiredItemTask creates task to collect expired items
-func NewCheckExpiredItemTask(region *core.RegionInfo) flowItemTask {
+func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
 	return &checkExpiredTask{
 		region: region,
 	}
-}
-
-func (t *checkExpiredTask) taskType() flowItemTaskKind {
-	return checkExpiredTaskType
 }
 
 func (t *checkExpiredTask) runTask(cache *hotPeerCache) {
@@ -90,16 +70,12 @@ type collectUnReportedPeerTask struct {
 }
 
 // NewCollectUnReportedPeerTask creates task to collect unreported peers
-func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) flowItemTask {
+func NewCollectUnReportedPeerTask(storeID uint64, regions map[uint64]*core.RegionInfo, interval uint64) FlowItemTask {
 	return &collectUnReportedPeerTask{
 		storeID:  storeID,
 		regions:  regions,
 		interval: interval,
 	}
-}
-
-func (t *collectUnReportedPeerTask) taskType() flowItemTaskKind {
-	return collectUnReportedPeerTaskType
 }
 
 func (t *collectUnReportedPeerTask) runTask(cache *hotPeerCache) {
@@ -121,10 +97,6 @@ func newCollectRegionStatsTask(minDegree int) *collectRegionStatsTask {
 	}
 }
 
-func (t *collectRegionStatsTask) taskType() flowItemTaskKind {
-	return collectRegionStatsTaskType
-}
-
 func (t *collectRegionStatsTask) runTask(cache *hotPeerCache) {
 	t.ret <- cache.RegionStats(t.minDegree)
 }
@@ -139,30 +111,26 @@ func (t *collectRegionStatsTask) waitRet(ctx context.Context) map[uint64][]*HotP
 	}
 }
 
-type isRegionHotTask struct {
+type checkRegionHotTask struct {
 	region       *core.RegionInfo
 	minHotDegree int
 	ret          chan bool
 }
 
-func newIsRegionHotTask(region *core.RegionInfo, minDegree int) *isRegionHotTask {
-	return &isRegionHotTask{
+func newCheckRegionHotTask(region *core.RegionInfo, minDegree int) *checkRegionHotTask {
+	return &checkRegionHotTask{
 		region:       region,
 		minHotDegree: minDegree,
 		ret:          make(chan bool, 1),
 	}
 }
 
-func (t *isRegionHotTask) taskType() flowItemTaskKind {
-	return isRegionHotTaskType
-}
-
-func (t *isRegionHotTask) runTask(cache *hotPeerCache) {
+func (t *checkRegionHotTask) runTask(cache *hotPeerCache) {
 	t.ret <- cache.isRegionHotWithAnyPeers(t.region, t.minHotDegree)
 }
 
 // TODO: do we need a wait-return timeout?
-func (t *isRegionHotTask) waitRet(ctx context.Context) bool {
+func (t *checkRegionHotTask) waitRet(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		return false
@@ -172,19 +140,40 @@ func (t *isRegionHotTask) waitRet(ctx context.Context) bool {
 }
 
 type collectMetricsTask struct {
-	typ string
 }
 
-func newCollectMetricsTask(typ string) *collectMetricsTask {
-	return &collectMetricsTask{
-		typ: typ,
-	}
-}
-
-func (t *collectMetricsTask) taskType() flowItemTaskKind {
-	return collectMetricsTaskType
+func newCollectMetricsTask() *collectMetricsTask {
+	return &collectMetricsTask{}
 }
 
 func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
-	cache.collectMetrics(t.typ)
+	cache.collectMetrics()
+}
+
+type getHotPeerStatTask struct {
+	regionID uint64
+	storeID  uint64
+	ret      chan *HotPeerStat
+}
+
+func newGetHotPeerStatTask(regionID, storeID uint64) *getHotPeerStatTask {
+	return &getHotPeerStatTask{
+		regionID: regionID,
+		storeID:  storeID,
+		ret:      make(chan *HotPeerStat, 1),
+	}
+}
+
+func (t *getHotPeerStatTask) runTask(cache *hotPeerCache) {
+	t.ret <- cache.getHotPeerStat(t.regionID, t.storeID)
+}
+
+// TODO: do we need a wait-return timeout?
+func (t *getHotPeerStatTask) waitRet(ctx context.Context) *HotPeerStat {
+	select {
+	case <-ctx.Done():
+		return nil
+	case r := <-t.ret:
+		return r
+	}
 }

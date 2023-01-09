@@ -25,12 +25,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	tu "github.com/tikv/pd/pkg/testutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
@@ -124,8 +124,8 @@ func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Sto
 		}
 	}
 	for _, s := range ss {
-		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
-		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
+		obtained := typeutil.DeepClone(s.Store.Store, core.StoreFactory)
+		expected := typeutil.DeepClone(mapWant[obtained.Id], core.StoreFactory)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
 		re.Equal(expected, obtained)

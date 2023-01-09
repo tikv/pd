@@ -68,6 +68,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(1, stats.Down)
 	re.Equal(1, stats.Offline)
 	re.Equal(0, stats.RegionCount)
+	re.Equal(0, stats.WitnessCount)
 	re.Equal(0, stats.Unhealthy)
 	re.Equal(0, stats.Disconnect)
 	re.Equal(1, stats.Tombstone)

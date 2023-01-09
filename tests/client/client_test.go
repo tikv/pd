@@ -27,21 +27,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -345,6 +345,69 @@ func TestTSOFollowerProxy(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
+func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+
+	var wg sync.WaitGroup
+	var maxUnavailableTime, leaderReadyTime time.Time
+	getTsoFunc := func() {
+		defer wg.Done()
+		var lastTS uint64
+		for i := 0; i < tsoRequestRound; i++ {
+			var physical, logical int64
+			var ts uint64
+			physical, logical, err = cli.GetTS(context.Background())
+			ts = tsoutil.ComposeTS(physical, logical)
+			if err != nil {
+				maxUnavailableTime = time.Now()
+				continue
+			}
+			re.NoError(err)
+			re.Less(lastTS, ts)
+			lastTS = ts
+		}
+	}
+
+	// test resign pd leader or stop pd leader
+	wg.Add(1 + 1)
+	go getTsoFunc()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		leader.Stop()
+		cluster.WaitLeader()
+		leaderReadyTime = time.Now()
+		cluster.RunServers([]*tests.TestServer{leader})
+	}()
+	wg.Wait()
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+
+	// test kill pd leader pod or network of leader is unreachable
+	wg.Add(1 + 1)
+	maxUnavailableTime, leaderReadyTime = time.Time{}, time.Time{}
+	go getTsoFunc()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+		leader.Stop()
+		cluster.WaitLeader()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+		leaderReadyTime = time.Now()
+	}()
+	wg.Wait()
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 }
 
 func TestGlobalAndLocalTSO(t *testing.T) {
@@ -1064,7 +1127,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Mark the store as offline.
 	err = cluster.RemoveStore(store.GetId(), false)
 	suite.NoError(err)
-	offlineStore := proto.Clone(store).(*metapb.Store)
+	offlineStore := typeutil.DeepClone(store, core.StoreFactory)
 	offlineStore.State = metapb.StoreState_Offline
 	offlineStore.NodeState = metapb.NodeState_Removing
 
@@ -1341,7 +1404,6 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
-			fmt.Println(err)
 			return false
 		}
 		resp, err := suite.client.GetOperator(context.Background(), regionID)

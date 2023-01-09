@@ -31,18 +31,20 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -174,6 +176,51 @@ func TestDamagedRegion(t *testing.T) {
 	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
 	re.NoError(err1)
 	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+}
+
+func TestStaleRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+		},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 10,
+			Version: 10,
+		},
+	}
+
+	// To put region.
+	regionInfoA := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(err)
+	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/decEpoch", `return(true)`))
+	tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/decEpoch"))
+	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
+	err = tc.HandleRegionHeartbeat(regionInfoA)
+	re.NoError(err)
 }
 
 func TestGetPutConfig(t *testing.T) {
@@ -726,7 +773,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// PUT GET failed
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed", `return(true)`))
 	replicationCfg.MaxReplicas = 7
 	scheduleCfg.MaxSnapshotCount = 20
 	pdServerCfg.UseRegionStorage = false
@@ -740,13 +787,13 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Empty(persistOptions.GetLabelPropertyConfig()[typ])
 
 	// DELETE failed
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed"))
 	re.NoError(svr.SetReplicationConfig(*replicationCfg))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed", `return(true)`))
 	re.Error(svr.DeleteLabelProperty(typ, labelKey, labelValue))
 	re.Equal("testKey", persistOptions.GetLabelPropertyConfig()[typ][0].Key)
 	re.Equal("testValue", persistOptions.GetLabelPropertyConfig()[typ][0].Value)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/kv/etcdSaveFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/etcdSaveFailed"))
 }
 
 func TestLoadClusterInfo(t *testing.T) {
@@ -1247,20 +1294,24 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 		}
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
+
+	time.Sleep(50 * time.Millisecond)
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 
-func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64, interval time.Duration) {
-	time.Sleep(interval)
-	ts := rc.GetMinResolvedTS()
-	re.Equal(expect, ts)
+func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetMinResolvedTS()
+		return expect == ts
+	}, time.Second*10, time.Millisecond*50)
 }
 
-func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64, interval time.Duration) {
-	time.Sleep(interval)
-	ts2, err := rc.GetStorage().LoadMinResolvedTS()
-	re.NoError(err)
-	re.Equal(expect, ts2)
+func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts2, err := rc.GetStorage().LoadMinResolvedTS()
+		re.NoError(err)
+		return expect == ts2
+	}, time.Second*10, time.Millisecond*50)
 }
 
 func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
@@ -1268,7 +1319,6 @@ func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.Raf
 	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
 	err := svr.SetPDServerConfig(*cfg)
 	re.NoError(err)
-	time.Sleep(time.Millisecond + interval)
 }
 
 func TestMinResolvedTS(t *testing.T) {
@@ -1319,7 +1369,6 @@ func TestMinResolvedTS(t *testing.T) {
 	// default run job
 	re.NotEqual(rc.GetOpts().GetMinResolvedTSPersistenceInterval(), 0)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
-	time.Sleep(config.DefaultMinResolvedTSPersistenceInterval) // wait sync
 	re.Equal(time.Duration(0), rc.GetOpts().GetMinResolvedTSPersistenceInterval())
 
 	// case1: cluster is no initialized
@@ -1333,14 +1382,13 @@ func TestMinResolvedTS(t *testing.T) {
 	// case2: add leader peer to store1 but no run job
 	// min resolved ts should be zero
 	putRegionWithLeader(re, rc, id, store1)
-	checkMinResolvedTS(re, rc, 0, cluster.DefaultMinResolvedTSPersistenceInterval)
+	checkMinResolvedTS(re, rc, 0)
 
 	// case3: add leader peer to store1 and run job
 	// min resolved ts should be store1TS
-	interval := time.Millisecond
-	setMinResolvedTSPersistenceInterval(re, rc, svr, interval)
-	checkMinResolvedTS(re, rc, store1TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store1TS, interval)
+	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinResolvedTS(re, rc, store1TS)
+	checkMinResolvedTSFromStorage(re, rc, store1TS)
 
 	// case4: add tiflash store
 	// min resolved ts should no change
@@ -1355,16 +1403,15 @@ func TestMinResolvedTS(t *testing.T) {
 	// case6: set store1 to tombstone
 	// min resolved ts should change to store 3
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
-	time.Sleep(interval) // wait sync
-	checkMinResolvedTS(re, rc, store3TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
 
 	// case7: add a store with leader peer but no report min resolved ts
 	// min resolved ts should be no change
 	store4 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, 0, store3TS)
 	putRegionWithLeader(re, rc, id, store4)
-	checkMinResolvedTS(re, rc, store3TS, interval)
-	checkMinResolvedTSFromStorage(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
 	resetStoreState(re, rc, store4, metapb.StoreState_Tombstone)
 
 	// case8: set min resolved ts persist interval to zero
@@ -1374,9 +1421,9 @@ func TestMinResolvedTS(t *testing.T) {
 	store5 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store5TS, store3TS)
 	resetStoreState(re, rc, store3, metapb.StoreState_Tombstone)
 	putRegionWithLeader(re, rc, id, store5)
-	checkMinResolvedTS(re, rc, store3TS, interval)
+	checkMinResolvedTS(re, rc, store3TS)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
-	checkMinResolvedTS(re, rc, store5TS, interval)
+	checkMinResolvedTS(re, rc, store5TS)
 }
 
 // See https://github.com/tikv/pd/issues/4941
@@ -1438,4 +1485,115 @@ func TestTransferLeaderBack(t *testing.T) {
 	// check store count
 	re.Equal(meta, rc.GetMetaCluster())
 	re.Equal(3, rc.GetStoreCount())
+}
+
+func TestExternalTimestamp(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	store := &metapb.Store{
+		Id:      1,
+		Version: "v6.0.0",
+		Address: "127.0.0.1:" + strconv.Itoa(int(1)),
+	}
+	resp, err := putStore(grpcPDClient, clusterID, store)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(100 * time.Millisecond)
+
+	ts := uint64(233)
+	{ // case1: set external timestamp
+		req := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: ts,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+
+		req2 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
+
+	{ // case2: set external timestamp less than now
+		req := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: ts - 1,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+
+		req2 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp2, err := grpcPDClient.GetExternalTimestamp(context.Background(), req2)
+		re.NoError(err)
+		re.Equal(ts, resp2.GetTimestamp())
+	}
+
+	{ // case3: set external timestamp larger than global ts
+		tsoClient, err := grpcPDClient.Tso(ctx)
+		re.NoError(err)
+		defer tsoClient.CloseSend()
+		// get external ts
+		req := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp, err := grpcPDClient.GetExternalTimestamp(context.Background(), req)
+		re.NoError(err)
+		ts = resp.GetTimestamp()
+		// get global ts
+		req2 := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      1,
+			DcLocation: tso.GlobalDCLocation,
+		}
+		re.NoError(tsoClient.Send(req2))
+		resp2, err := tsoClient.Recv()
+		re.NoError(err)
+		globalTS := resp2.GetTimestamp()
+		// set external ts larger than global ts
+		unexpectedTS := tsoutil.ComposeTS(globalTS.Physical+1000, 0) // add 1000ms to avoid test running too slow
+		req3 := &pdpb.SetExternalTimestampRequest{
+			Header:    testutil.NewRequestHeader(clusterID),
+			Timestamp: unexpectedTS,
+		}
+		_, err = grpcPDClient.SetExternalTimestamp(context.Background(), req3)
+		re.NoError(err)
+		// get external ts again
+		req4 := &pdpb.GetExternalTimestampRequest{
+			Header: testutil.NewRequestHeader(clusterID),
+		}
+		resp4, err := grpcPDClient.GetExternalTimestamp(context.Background(), req4)
+		re.NoError(err)
+		// get global ts again
+		req5 := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      1,
+			DcLocation: tso.GlobalDCLocation,
+		}
+		re.NoError(tsoClient.Send(req5))
+		resp5, err := tsoClient.Recv()
+		re.NoError(err)
+		currentGlobalTS := tsoutil.GenerateTS(resp5.GetTimestamp())
+		// check external ts should not be larger than global ts
+		re.Equal(1, tsoutil.CompareTimestampUint64(unexpectedTS, currentGlobalTS))
+		re.Equal(ts, resp4.GetTimestamp())
+	}
 }

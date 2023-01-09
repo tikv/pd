@@ -38,10 +38,12 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
-	// Include peer addition or removal. This means that this operator may take a long time.
+	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
 	OpLeader
+	// Include witness transfer.
+	OpWitness
 	opMax
 )
 
@@ -54,6 +56,7 @@ var flagToName = map[OpKind]string{
 	OpReplica:   "replica",
 	OpMerge:     "merge",
 	OpRange:     "range",
+	OpWitness:   "witness",
 }
 
 var nameToFlag = map[string]OpKind{

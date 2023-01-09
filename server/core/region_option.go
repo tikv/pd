@@ -50,6 +50,32 @@ func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	}
 }
 
+// WithWitness sets the witness for the region.
+func WithWitness(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.IsWitness = true
+			}
+		}
+	}
+}
+
+// WithWitnesses sets the witnesses for the region.
+func WithWitnesses(witnesses []*metapb.Peer) RegionCreateOption {
+	return func(region *RegionInfo) {
+		peers := region.meta.GetPeers()
+		for i := range peers {
+			for _, l := range witnesses {
+				if peers[i].GetId() == l.GetId() {
+					peers[i].IsWitness = true
+					break
+				}
+			}
+		}
+	}
+}
+
 // WithLearners sets the learners for the region.
 func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -155,6 +181,13 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// SetCPUUsage sets the CPU usage of the region.
+func SetCPUUsage(v uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.cpuUsage = v
+	}
+}
+
 // SetWrittenBytes sets the written bytes for the region.
 func SetWrittenBytes(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -215,10 +248,29 @@ func SetWrittenQuery(v uint64) RegionCreateOption {
 	return SetQueryStats(q)
 }
 
-// SetQueryStats sets the query stats for the region.
+// SetQueryNum sets the read and write query with specific num.
+// This func is only used for test and simulator.
+func SetQueryNum(read, write uint64) RegionCreateOption {
+	r := RandomKindReadQuery(read)
+	w := RandomKindWriteQuery(write)
+	q := mergeQueryStat(r, w)
+	return SetQueryStats(q)
+}
+
+// SetQueryStats sets the query stats for the region, it will cover previous statistic.
+// This func is only used for unit test.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.QueryStats = v
+		region.queryStats = v
+	}
+}
+
+// AddQueryStats sets the query stats for the region, it will preserve previous statistic.
+// This func is only used for test and simulator.
+func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
+	return func(region *RegionInfo) {
+		q := mergeQueryStat(region.queryStats, v)
+		region.queryStats = q
 	}
 }
 
@@ -237,9 +289,10 @@ func SetApproximateKeys(v int64) RegionCreateOption {
 }
 
 // SetReportInterval sets the report interval for the region.
-func SetReportInterval(v uint64) RegionCreateOption {
+// This func is only used for test.
+func SetReportInterval(start, end uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.interval = &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: v}
+		region.interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
 	}
 }
 
@@ -291,12 +344,12 @@ func WithAddPeer(peer *metapb.Peer) RegionCreateOption {
 	}
 }
 
-// WithPromoteLearner promotes the learner.
-func WithPromoteLearner(peerID uint64) RegionCreateOption {
+// WithRole changes the role.
+func WithRole(peerID uint64, role metapb.PeerRole) RegionCreateOption {
 	return func(region *RegionInfo) {
 		for _, p := range region.GetPeers() {
 			if p.GetId() == peerID {
-				p.Role = metapb.PeerRole_Voter
+				p.Role = role
 			}
 		}
 	}
@@ -325,4 +378,28 @@ func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.fromHeartbeat = fromHeartbeat
 	}
+}
+
+func mergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
+	if q1 == nil && q2 == nil {
+		return &pdpb.QueryStats{}
+	}
+	if q1 == nil {
+		return q2
+	}
+	if q2 == nil {
+		return q1
+	}
+	q2.GC += q1.GC
+	q2.Get += q1.Get
+	q2.Scan += q1.Scan
+	q2.Coprocessor += q1.Coprocessor
+	q2.Delete += q1.Delete
+	q2.DeleteRange += q1.DeleteRange
+	q2.Put += q1.Put
+	q2.Prewrite += q1.Prewrite
+	q2.AcquirePessimisticLock += q1.AcquirePessimisticLock
+	q2.Commit += q1.Commit
+	q2.Rollback += q1.Rollback
+	return q2
 }

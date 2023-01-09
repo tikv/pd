@@ -16,21 +16,23 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID           uint64
-	Status       metapb.StoreState
-	Labels       []*metapb.StoreLabel
-	Capacity     uint64
-	Available    uint64
-	LeaderWeight float32
-	RegionWeight float32
-	Version      string
+	ID                uint64
+	Status            metapb.StoreState
+	Labels            []*metapb.StoreLabel
+	Capacity          uint64
+	LeaderWeight      float32
+	RegionWeight      float32
+	Version           string
+	HasExtraUsedSpace bool
 }
 
 // Region is used to simulate a region.
@@ -55,6 +57,8 @@ type Case struct {
 	TableNumber     int
 
 	Checker CheckerFunc // To check the schedule is finished.
+	Rules   []*placement.Rule
+	Labels  typeutil.StringSlice
 }
 
 // IDAllocator is used to alloc unique ID.
@@ -83,17 +87,22 @@ var IDAllocator idAllocator
 
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{
-	"balance-leader":           newBalanceLeader,
-	"redundant-balance-region": newRedundantBalanceRegion,
-	"add-nodes":                newAddNodes,
-	"add-nodes-dynamic":        newAddNodesDynamic,
-	"delete-nodes":             newDeleteNodes,
-	"region-split":             newRegionSplit,
-	"region-merge":             newRegionMerge,
-	"hot-read":                 newHotRead,
-	"hot-write":                newHotWrite,
-	"makeup-down-replicas":     newMakeupDownReplicas,
-	"import-data":              newImportData,
+	"balance-leader":            newBalanceLeader,
+	"redundant-balance-region":  newRedundantBalanceRegion,
+	"add-nodes":                 newAddNodes,
+	"add-nodes-dynamic":         newAddNodesDynamic,
+	"delete-nodes":              newDeleteNodes,
+	"region-split":              newRegionSplit,
+	"region-merge":              newRegionMerge,
+	"hot-read":                  newHotRead,
+	"hot-write":                 newHotWrite,
+	"makeup-down-replicas":      newMakeupDownReplicas,
+	"import-data":               newImportData,
+	"diagnose-rule1":            newRule1,
+	"diagnose-rule2":            newRule2,
+	"diagnose-label-not-match1": newLabelNotMatch1,
+	"diagnose-label-isolation1": newLabelIsolation1,
+	"diagnose-label-isolation2": newLabelIsolation2,
 }
 
 // NewCase creates a new case.

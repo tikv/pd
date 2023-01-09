@@ -21,14 +21,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
 	manager := NewRuleManager(store, nil, nil)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})
@@ -89,6 +89,17 @@ func TestAdjustRule(t *testing.T) {
 		Role:        "voter",
 		Count:       3,
 	}, "group"))
+
+	re.Error(manager.adjustRule(&Rule{
+		GroupID:          "tiflash",
+		ID:               "id",
+		StartKeyHex:      hex.EncodeToString(codec.EncodeBytes([]byte{0})),
+		EndKeyHex:        hex.EncodeToString(codec.EncodeBytes([]byte{1})),
+		Role:             "learner",
+		Count:            1,
+		IsWitness:        true,
+		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
+	}, "tiflash"))
 }
 
 func TestLeaderCheck(t *testing.T) {
