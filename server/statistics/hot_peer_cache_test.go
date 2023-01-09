@@ -669,72 +669,47 @@ func TestUnstableData(t *testing.T) {
 // Previously, there was a mixed use of dim and kind, which caused inconsistencies in write-related statistics.
 func TestHotPeerCacheTopNThreshold(t *testing.T) {
 	re := require.New(t)
-
-	cache := NewHotPeerCache(Write)
-	now := time.Now()
-	for id := uint64(0); id < 100; id++ {
-		meta := &metapb.Region{
-			Id:    id,
-			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
-		}
-		region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
-		for i := 0; i < 10; i++ {
-			start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
-			end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
-			newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
-				StartTimestamp: start,
-				EndTimestamp:   end,
-			}))
-			newPeer := core.NewPeerInfo(meta.Peers[0], region.GetLoads(), end-start)
-			stat := cache.checkPeerFlow(newPeer, newRegion)
-			if stat != nil {
-				cache.updateStat(stat)
+	testWithUpdateInterval := func(interval time.Duration) {
+		cache := NewHotPeerCache(Write)
+		now := time.Now()
+		for id := uint64(0); id < 100; id++ {
+			meta := &metapb.Region{
+				Id:    id,
+				Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
+			}
+			region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
+			for i := 0; i < 10; i++ {
+				start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
+				end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
+				newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
+					StartTimestamp: start,
+					EndTimestamp:   end,
+				}))
+				newPeer := core.NewPeerInfo(meta.Peers[0], region.GetLoads(), end-start)
+				stat := cache.checkPeerFlow(newPeer, newRegion)
+				if stat != nil {
+					cache.updateStat(stat)
+				}
+			}
+			if ThresholdsUpdateInterval == 0 {
+				if id < 60 {
+					re.Equal(MinHotThresholds[RegionWriteKeys], cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
+				}
+				re.Equal(int(id), cache.thresholdsOfStore[1].topNLen)
 			}
 		}
+		if ThresholdsUpdateInterval != 0 {
+			re.Contains(cache.peersOfStore, uint64(1))
+			re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
+			re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
+			ThresholdsUpdateInterval = 0
+			re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
+			ThresholdsUpdateInterval = 8 * time.Second
+		}
 	}
+	testWithUpdateInterval(8 * time.Second)
+	testWithUpdateInterval(0)
 
-	re.Contains(cache.peersOfStore, uint64(1))
-	re.True(typeutil.Float64Equal(4000, cache.peersOfStore[1].GetTopNMin(ByteDim).(*HotPeerStat).GetLoad(ByteDim)))
-	re.Equal(32.0, cache.calcHotThresholds(1)[KeyDim]) // no update, threshold still be the value at first times.
-	ThresholdsUpdateInterval = 0
-	defer func() {
-		ThresholdsUpdateInterval = 8 * time.Second
-	}()
-	re.Equal(3200.0, cache.calcHotThresholds(1)[KeyDim])
-}
-
-func TestHotPeerCacheTopNLen(t *testing.T) {
-	re := require.New(t)
-	ThresholdsUpdateInterval = 0
-	defer func() {
-		ThresholdsUpdateInterval = 8 * time.Second
-	}()
-	cache := NewHotPeerCache(Write)
-	now := time.Now()
-	for id := uint64(0); id < 100; id++ {
-		meta := &metapb.Region{
-			Id:    id,
-			Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
-		}
-		region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
-		for i := 0; i < 10; i++ {
-			start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
-			end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
-			newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
-				StartTimestamp: start,
-				EndTimestamp:   end,
-			}))
-			newPeer := core.NewPeerInfo(meta.Peers[0], region.GetLoads(), end-start)
-			stat := cache.checkPeerFlow(newPeer, newRegion)
-			if stat != nil {
-				cache.updateStat(stat)
-			}
-		}
-		if id < 60 {
-			re.Equal(MinHotThresholds[RegionWriteKeys], cache.calcHotThresholds(1)[KeyDim]) // num<topN, threshold still be default
-		}
-		re.Equal(int(id), cache.thresholdsOfStore[1].topNLen)
-	}
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
