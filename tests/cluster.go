@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -217,6 +218,13 @@ func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 		return nil
 	}
 	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
+}
+
+// GetKeyspaceManager returns the current TestServer's Keyspace Manager.
+func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetKeyspaceManager()
 }
 
 // GetCluster returns PD cluster.

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -48,8 +49,15 @@ func TestKeyspaceTestSuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	suite.manager = NewKeyspaceManager(store, allocator)
+	suite.manager = NewKeyspaceManager(store, nil, allocator)
 	suite.NoError(suite.manager.Bootstrap())
+}
+
+func (suite *keyspaceTestSuite) SetupSuite() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/keyspace/skipSplitRegion", "return(true)"))
+}
+func (suite *keyspaceTestSuite) TearDownSuite() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/keyspace/skipSplitRegion"))
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
