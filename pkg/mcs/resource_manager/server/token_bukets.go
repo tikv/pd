@@ -15,7 +15,6 @@
 package server
 
 import (
-	"fmt"
 	"math"
 	"time"
 
@@ -25,9 +24,10 @@ import (
 
 const defaultRefillRate = 10000
 
-const defaultInitialTokens = 10 * 10000
-
-const defaultMaxTokens = 1e7
+const (
+	defaultInitialTokens = 10 * 10000
+	defaultMaxTokens     = 1e7
+)
 
 var reserveRatio float64 = 0.05
 
@@ -78,6 +78,10 @@ func (t *GroupTokenBucket) update(now time.Time) {
 		if t.Tokens < defaultInitialTokens {
 			t.Tokens = defaultInitialTokens
 		}
+		// TODO: If we support init or modify MaxTokens in the future, we can move following code.
+		if t.Tokens > t.MaxTokens {
+			t.MaxTokens = t.Tokens
+		}
 		t.LastUpdate = &now
 		t.Initialized = true
 		return
@@ -100,7 +104,6 @@ func (t *GroupTokenBucket) request(
 	var res rmpb.TokenBucket
 	res.Settings = &rmpb.TokenLimitSettings{}
 	// FillRate is used for the token server unavailable in abnormal situation.
-	res.Settings.FillRate = 0
 	if neededTokens <= 0 {
 		return &res, 0
 	}
@@ -122,8 +125,20 @@ func (t *GroupTokenBucket) request(
 
 	var trickleTime = time.Duration(targetPeriodMs) * time.Millisecond
 	availableRate := float64(t.Settings.FillRate)
+	// When there are debt, the allotment will match the fill rate.
+	// We will have a threshold, beyond which the token allocation will be a minimum.
+	// the current threshold is fill rate * target period * 2.
+	// 				|
+	// fill rate	|· · · · · · · · ·
+	// 				|					·
+	//				|						·
+	// 				| 				  			·
+	// 				|								·
+	// reserve rate |									· · · ·
+	// 				|
+	// rate		0 	-----------------------------------------------
+	// 				debt 		period token		2*period token
 	if debt := -t.Tokens; debt > 0 {
-		fmt.Println(debt)
 		debt -= float64(t.Settings.FillRate) * trickleTime.Seconds()
 		if debt > 0 {
 			debtRate := debt / float64(targetPeriodMs/1000)
