@@ -84,13 +84,17 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
-// NewStoreInfoWithAvailable is created with available and capacity
-func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+// NewStoreInfoWithDisk is created with all disk infos.
+func NewStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity
 	stats.Available = available
+<<<<<<< HEAD
 	usedSize := capacity - available
 	regionSize := (float64(usedSize) * amp) / mb
+=======
+	stats.UsedSize = used
+>>>>>>> 74136a911 (core: scoreV2 conside the extra file (#5819))
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
@@ -100,6 +104,13 @@ func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *Sto
 		SetRegionSize(int64(regionSize)),
 	)
 	return store
+}
+
+// NewStoreInfoWithAvailable is created with available and capacity
+func NewStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+	usedSize := capacity - available
+	regionSize := (float64(usedSize) * amp) / units.MiB
+	return NewStoreInfoWithDisk(id, usedSize, available, capacity, uint64(regionSize))
 }
 
 // NewStoreInfoWithLabel is create a store with specified labels.
