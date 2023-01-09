@@ -42,6 +42,8 @@ const (
 	OpRegion
 	// Include leader transfer.
 	OpLeader
+	// Include witness transfer.
+	OpWitness
 	opMax
 )
 
@@ -54,6 +56,7 @@ var flagToName = map[OpKind]string{
 	OpReplica:   "replica",
 	OpMerge:     "merge",
 	OpRange:     "range",
+	OpWitness:   "witness",
 }
 
 var nameToFlag = map[string]OpKind{
