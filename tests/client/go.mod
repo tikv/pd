@@ -166,3 +166,6 @@ replace (
 	google.golang.org/grpc v1.43.0 => google.golang.org/grpc v1.26.0
 	google.golang.org/protobuf v1.26.0 => github.com/golang/protobuf v1.3.4
 )
+
+// TODO: remove after kvproto merge
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20230109085749-856e7a77d349
