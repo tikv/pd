@@ -670,6 +670,7 @@ func TestUnstableData(t *testing.T) {
 func TestHotPeerCacheTopNThreshold(t *testing.T) {
 	re := require.New(t)
 	testWithUpdateInterval := func(interval time.Duration) {
+		ThresholdsUpdateInterval = interval
 		cache := NewHotPeerCache(Write)
 		now := time.Now()
 		for id := uint64(0); id < 100; id++ {
@@ -709,7 +710,6 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 	}
 	testWithUpdateInterval(8 * time.Second)
 	testWithUpdateInterval(0)
-
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
