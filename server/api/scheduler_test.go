@@ -218,6 +218,56 @@ func (suite *scheduleTestSuite) TestAPI() {
 		{name: "balance-region-scheduler"},
 		{name: "shuffle-leader-scheduler"},
 		{name: "shuffle-region-scheduler"},
+		{name: "transfer-witness-leader-scheduler"},
+		{
+			name: "balance-witness-scheduler",
+			extraTestFunc: func(name string) {
+				resp := make(map[string]interface{})
+				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+				suite.Equal(4.0, resp["batch"])
+				dataMap := make(map[string]interface{})
+				dataMap["batch"] = 3
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				body, err := json.Marshal(dataMap)
+				suite.NoError(err)
+				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				resp = make(map[string]interface{})
+				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+				suite.Equal(3.0, resp["batch"])
+				// update again
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.StatusOK(re),
+					tu.StringEqual(re, "\"no changed\"\n"))
+				suite.NoError(err)
+				// update invalidate batch
+				dataMap = map[string]interface{}{}
+				dataMap["batch"] = 100
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
+				suite.NoError(err)
+				resp = make(map[string]interface{})
+				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+				suite.Equal(3.0, resp["batch"])
+				// empty body
+				err = tu.CheckPostJSON(testDialClient, updateURL, nil,
+					tu.Status(re, http.StatusInternalServerError),
+					tu.StringEqual(re, "\"unexpected end of JSON input\"\n"))
+				suite.NoError(err)
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "\"config item not found\"\n"))
+				suite.NoError(err)
+			},
+		},
 		{
 			name:        "grant-leader-scheduler",
 			createdName: "grant-leader-scheduler",

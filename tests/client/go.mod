@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20221221093947-0a9b14f1fc26
+	github.com/pingcap/kvproto v0.0.0-20230105060948-64890fa4f6c1
 	github.com/stretchr/testify v1.8.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
