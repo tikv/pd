@@ -233,6 +233,7 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage  = true
+	defaultEnableWatch       = false
 	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
 	maxTraceFlowRoundByDigit = 5 // 0.1 MB
@@ -1169,12 +1170,17 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// EnableWatch enables the watch mechanism.
+	EnableWatch bool `toml:"enable-watch" json:"enable-watch,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
+	}
+	if !meta.IsDefined("enable-watch") {
+		c.EnableWatch = defaultEnableWatch
 	}
 	if !meta.IsDefined("key-type") {
 		c.KeyType = defaultKeyType

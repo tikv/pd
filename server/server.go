@@ -1350,7 +1350,10 @@ func (s *Server) leaderLoop() {
 			go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
-				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+				if !s.persistOptions.IsWatchEnabled() {
+					syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+				}
+				// TODO: enable watch mechanism.
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.

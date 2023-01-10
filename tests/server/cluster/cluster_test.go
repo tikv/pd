@@ -759,6 +759,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	replicationCfg.MaxReplicas = 5
 	scheduleCfg.MaxSnapshotCount = 10
 	pdServerCfg.UseRegionStorage = true
+	pdServerCfg.EnableWatch = true
 	typ, labelKey, labelValue := "testTyp", "testKey", "testValue"
 	re.NoError(svr.SetScheduleConfig(*scheduleCfg))
 	re.NoError(svr.SetPDServerConfig(*pdServerCfg))
@@ -767,6 +768,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re.Equal(5, persistOptions.GetMaxReplicas())
 	re.Equal(uint64(10), persistOptions.GetMaxSnapshotCount())
 	re.True(persistOptions.IsUseRegionStorage())
+	re.True(persistOptions.IsWatchEnabled())
 	re.Equal("testKey", persistOptions.GetLabelPropertyConfig()[typ][0].Key)
 	re.Equal("testValue", persistOptions.GetLabelPropertyConfig()[typ][0].Value)
 	re.NoError(svr.DeleteLabelProperty(typ, labelKey, labelValue))

@@ -102,13 +102,15 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
-	syncer.mu.streams = make(map[string]ServerStream)
 	return syncer
 }
 
 // RunServer runs the server of the region syncer.
 // regionNotifier is used to get the changed regions.
 func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
+	s.mu.Lock()
+	s.mu.streams = make(map[string]ServerStream)
+	s.mu.Unlock()
 	var requests []*metapb.Region
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer

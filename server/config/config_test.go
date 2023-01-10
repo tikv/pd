@@ -60,6 +60,7 @@ func TestReloadConfig(t *testing.T) {
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
+	opt.GetPDServerConfig().EnableWatch = true
 	re.NoError(opt.Persist(storage))
 
 	// Add a new default enable scheduler "shuffle-leader"
@@ -74,6 +75,7 @@ func TestReloadConfig(t *testing.T) {
 	schedulers := newOpt.GetSchedulers()
 	re.Len(schedulers, len(DefaultSchedulers))
 	re.True(newOpt.IsUseRegionStorage())
+	re.True(newOpt.IsWatchEnabled())
 	for i, s := range schedulers {
 		re.Equal(DefaultSchedulers[i].Type, s.Type)
 		re.False(s.Disable)

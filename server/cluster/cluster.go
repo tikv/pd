@@ -482,7 +482,10 @@ func (c *RaftCluster) runCoordinator() {
 func (c *RaftCluster) syncRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.regionSyncer.RunServer(c.ctx, c.changedRegionNotifier())
+	if !c.GetOpts().IsWatchEnabled() {
+		c.regionSyncer.RunServer(c.ctx, c.changedRegionNotifier())
+	}
+	// TODO: support watch mechanism
 }
 
 func (c *RaftCluster) runReplicationMode() {

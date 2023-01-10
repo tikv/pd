@@ -537,6 +537,11 @@ func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
 }
 
+// IsWatchEnabled returns if the watch is enabled.
+func (o *PersistOptions) IsWatchEnabled() bool {
+	return o.GetPDServerConfig().EnableWatch
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveDownReplica
