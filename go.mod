@@ -7,7 +7,6 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/aws/aws-sdk-go v1.35.3
 	github.com/axw/gocov v1.0.0
-	github.com/bytedance/gopkg v0.0.0-20221122125632-68358b8ecec6
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
