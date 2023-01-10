@@ -28,6 +28,17 @@ type JointStateChecker struct {
 	cluster schedule.Cluster
 }
 
+const jointStateCheckerName = "joint_state_checker"
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	jointCheckCounter                 = checkerCounter.WithLabelValues(jointStateCheckerName, "check")
+	jointCheckerPausedCounter         = checkerCounter.WithLabelValues(jointStateCheckerName, "paused")
+	jointCheckerFailedCounter         = checkerCounter.WithLabelValues(jointStateCheckerName, "create-operator-fail")
+	jointCheckerNewOpCounter          = checkerCounter.WithLabelValues(jointStateCheckerName, "new-operator")
+	jointCheckerTransferLeaderCounter = checkerCounter.WithLabelValues(jointStateCheckerName, "transfer-leader")
+)
+
 // NewJointStateChecker creates a joint state checker.
 func NewJointStateChecker(cluster schedule.Cluster) *JointStateChecker {
 	return &JointStateChecker{
@@ -37,9 +48,9 @@ func NewJointStateChecker(cluster schedule.Cluster) *JointStateChecker {
 
 // Check verifies a region's role, creating an Operator if need.
 func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
-	checkerCounter.WithLabelValues("joint_state_checker", "check").Inc()
+	jointCheckCounter.Inc()
 	if c.IsPaused() {
-		checkerCounter.WithLabelValues("joint_state_checker", "paused").Inc()
+		jointCheckerPausedCounter.Inc()
 		return nil
 	}
 	if !core.IsInJointState(region.GetPeers()...) {
@@ -47,13 +58,13 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	op, err := operator.CreateLeaveJointStateOperator(operator.OpDescLeaveJointState, c.cluster, region)
 	if err != nil {
-		checkerCounter.WithLabelValues("joint_state_checker", "create-operator-fail").Inc()
+		jointCheckerFailedCounter.Inc()
 		log.Debug("fail to create leave joint state operator", errs.ZapError(err))
 		return nil
 	} else if op != nil {
-		checkerCounter.WithLabelValues("joint_state_checker", "new-operator").Inc()
+		jointCheckerNewOpCounter.Inc()
 		if op.Len() > 1 {
-			checkerCounter.WithLabelValues("joint_state_checker", "transfer-leader").Inc()
+			jointCheckerTransferLeaderCounter.Inc()
 		}
 		op.SetPriorityLevel(core.High)
 	}

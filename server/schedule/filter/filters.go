@@ -40,6 +40,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 					counter.inc(source, filters[i].Type(), s.GetID(), 0)
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
+					// todo: pre-allocate gauge metrics
 					filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
 				}
 				if collector != nil {

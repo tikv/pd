@@ -37,6 +37,13 @@ const (
 	ShuffleHotRegionType = "shuffle-hot-region"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	shuffleHotRegionCounter            = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "schedule")
+	shuffleHotRegionNewOperatorCounter = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "new-operator")
+	shuffleHotRegionSkipCounter        = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "skip")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(ShuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -119,7 +126,7 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) 
 }
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
 	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, core.LeaderKind)])
@@ -176,9 +183,9 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 			return nil
 		}
 		op.SetPriorityLevel(core.Low)
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+		op.Counters = append(op.Counters, shuffleHotRegionNewOperatorCounter)
 		return []*operator.Operator{op}
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+	shuffleHotRegionSkipCounter.Inc()
 	return nil
 }
