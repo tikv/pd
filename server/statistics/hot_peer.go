@@ -18,6 +18,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -126,18 +127,20 @@ func (stat *HotPeerStat) Less(dim int, than TopNItem) bool {
 }
 
 // Log is used to output some info
-func (stat *HotPeerStat) Log(str string, level func(msg string, fields ...zap.Field)) {
-	level(str,
-		zap.Uint64("region-id", stat.RegionID),
-		zap.Bool("is-leader", stat.isLeader),
-		zap.Float64s("loads", stat.GetLoads()),
-		zap.Float64s("loads-instant", stat.Loads),
-		zap.Int("hot-degree", stat.HotDegree),
-		zap.Int("hot-anti-count", stat.AntiCount),
-		zap.Duration("sum-interval", stat.getIntervalSum()),
-		zap.Bool("allow-inherited", stat.allowInherited),
-		zap.String("action-type", stat.actionType.String()),
-		zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
+func (stat *HotPeerStat) Log(str string) {
+	if log.GetLevel() <= zap.DebugLevel {
+		log.Debug(str,
+			zap.Uint64("region-id", stat.RegionID),
+			zap.Bool("is-leader", stat.isLeader),
+			zap.Float64s("loads", stat.GetLoads()),
+			zap.Float64s("loads-instant", stat.Loads),
+			zap.Int("hot-degree", stat.HotDegree),
+			zap.Int("hot-anti-count", stat.AntiCount),
+			zap.Duration("sum-interval", stat.getIntervalSum()),
+			zap.Bool("allow-inherited", stat.allowInherited),
+			zap.String("action-type", stat.actionType.String()),
+			zap.Time("last-transfer-leader-time", stat.lastTransferLeaderTime))
+	}
 }
 
 // IsNeedCoolDownTransferLeader use cooldown time after transfer leader to avoid unnecessary schedule
