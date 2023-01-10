@@ -32,6 +32,14 @@ const (
 	ShuffleLeaderType = "shuffle-leader"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	shuffleLeaderCounter              = schedulerCounter.WithLabelValues(ShuffleLeaderName, "schedule")
+	shuffleLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(ShuffleLeaderName, "new-operator")
+	shuffleLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-target-store")
+	shuffleLeaderNoFollowerCounter    = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-follower")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -108,19 +116,19 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	shuffleLeaderCounter.Inc()
 	targetStore := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetOpts(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
+		shuffleLeaderNoTargetStoreCounter.Inc()
 		return nil, nil
 	}
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	region := filter.SelectOneRegion(cluster.RandFollowerRegions(targetStore.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
+		shuffleLeaderNoFollowerCounter.Inc()
 		return nil, nil
 	}
 	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), []uint64{}, operator.OpAdmin)
@@ -129,6 +137,6 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		return nil, nil
 	}
 	op.SetPriorityLevel(core.Low)
-	op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+	op.Counters = append(op.Counters, shuffleLeaderNewOperatorCounter)
 	return []*operator.Operator{op}, nil
 }
