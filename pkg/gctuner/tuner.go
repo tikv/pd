@@ -20,9 +20,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	util "github.com/tikv/pd/pkg/gogc"
-
 	"github.com/pingcap/log"
+	util "github.com/tikv/pd/pkg/gogc"
 	"go.uber.org/zap"
 )
 

@@ -19,12 +19,10 @@ import (
 	"runtime/debug"
 	"time"
 
-	util "github.com/tikv/pd/pkg/gogc"
-
-	"github.com/tikv/pd/pkg/memory"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	util "github.com/tikv/pd/pkg/gogc"
+	"github.com/tikv/pd/pkg/memory"
 	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 )
