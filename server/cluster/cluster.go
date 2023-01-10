@@ -24,9 +24,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bytedance/gopkg/util/gctuner"
 	"github.com/coreos/go-semver/semver"
-	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,7 +32,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/logutil"
+	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/netutil"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/slice"
@@ -305,24 +305,57 @@ func (c *RaftCluster) startGCTuner() {
 
 	tick := time.NewTicker(10 * time.Second)
 	defer tick.Stop()
-	lastThreshold := uint64(0)
+	totalMem, err := memory.MemTotal()
+	if err != nil {
+		log.Fatal("fail to get MemTotal:%s", zap.Error(err))
+	}
+	log.Info("MemTotal", zap.Uint64("totalMem", totalMem))
+	cfg := c.opt.GetPDServerConfig()
+	enableGCTuner := cfg.EnableGOGCTuner
+	memoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
+	gcThresholdBytes := uint64(float64(memoryLimitBytes) * cfg.GCTunerThreshold)
+	memoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
+	memoryLimitGCTriggerBytes := uint64(float64(memoryLimitBytes) * memoryLimitGCTriggerRatio)
+	updateGCTuner := func() {
+		gctuner.Tuning(gcThresholdBytes)
+		gctuner.EnableGOGCTuner.Store(enableGCTuner)
+		log.Info("updateGCTuner", zap.Bool("enableGCTuner", enableGCTuner),
+			zap.Uint64("gcThresholdBytes", gcThresholdBytes))
+	}
+	updateGCMemLimit := func() {
+		memory.ServerMemoryLimit.Store(memoryLimitBytes)
+		gctuner.GlobalMemoryLimitTuner.SetPercentage(memoryLimitGCTriggerRatio)
+		log.Info("updateGCMemLimit", zap.Uint64("memoryLimitBytes", memoryLimitBytes),
+			zap.Float64("memoryLimitGCTriggerRatio", memoryLimitGCTriggerRatio))
+	}
+	updateGCTuner()
+	updateGCMemLimit()
+	checkAndUpdateIfCfgChange := func() {
+		cfg := c.opt.GetPDServerConfig()
+		thisEnableGCTuner := cfg.EnableGOGCTuner
+		thisMemoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
+		thisGCThresholdBytes := uint64(float64(thisMemoryLimitBytes) * cfg.GCTunerThreshold)
+		thisMemoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
+		thisMemoryLimitGCTriggerBytes := uint64(float64(thisMemoryLimitBytes) * thisMemoryLimitGCTriggerRatio)
+		if thisEnableGCTuner != enableGCTuner || thisGCThresholdBytes != gcThresholdBytes {
+			enableGCTuner = thisEnableGCTuner
+			gcThresholdBytes = thisGCThresholdBytes
+			updateGCTuner()
+		}
+		if thisMemoryLimitBytes != memoryLimitBytes || thisMemoryLimitGCTriggerBytes != memoryLimitGCTriggerBytes {
+			memoryLimitBytes = thisMemoryLimitBytes
+			memoryLimitGCTriggerBytes = thisMemoryLimitGCTriggerBytes
+			memoryLimitGCTriggerRatio = thisMemoryLimitGCTriggerRatio
+			updateGCMemLimit()
+		}
+	}
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("gc tuner is stopped")
 			return
 		case <-tick.C:
-			t := c.opt.GetGCTunerThreshold()
-			if t != lastThreshold {
-				lastThreshold = t
-				if t == 0 {
-					gctuner.Tuning(0)
-					log.Info("disable gc tuner")
-				} else {
-					gctuner.Tuning(t * units.GiB)
-					log.Info("gc tuner changes threshold", zap.Uint64("threshold", t))
-				}
-			}
+			checkAndUpdateIfCfgChange()
 		}
 	}
 }

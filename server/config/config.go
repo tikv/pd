@@ -261,7 +261,16 @@ const (
 
 	defaultMaxMovableHotPeerSize = int64(512)
 
-	defaultGCTunerThreshold = 0
+	defaultServerMemoryLimit          = 0.8
+	minServerMemoryLimit              = 0.01
+	maxServerMemoryLimit              = 0.99
+	defaultServerMemoryLimitGCTrigger = 0.7
+	minServerMemoryLimitGCTrigger     = 0.5
+	maxServerMemoryLimitGCTrigger     = 0.99
+	defaultEnableGOGCTuner            = true
+	defaultGCTunerThreshold           = 0.6
+	minGCTunerThreshold               = 0.01
+	maxGCTunerThreshold               = 0.9
 )
 
 // Special keys for Labels
@@ -1152,8 +1161,14 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// ServerMemoryLimit indicates the memory limit of current process.
+	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
+	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
+	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner"`
 	// GCTunerThreshold is the threshold of GC tuner.
-	GCTunerThreshold uint64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 }
 
 func (c *PDServerConfig) adjust(meta *configMetaData) error {
@@ -1179,8 +1194,32 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
+	if !meta.IsDefined("server-memory-limit") {
+		adjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit {
+		c.ServerMemoryLimit = minServerMemoryLimit
+	} else if c.ServerMemoryLimit > maxServerMemoryLimit {
+		c.ServerMemoryLimit = maxServerMemoryLimit
+	}
+	if !meta.IsDefined("server-memory-limit-gc-trigger") {
+		adjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
+	} else if c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
+	}
+	if !meta.IsDefined("enable-gogc-tuner") {
+		c.EnableGOGCTuner = defaultEnableGOGCTuner
+	}
 	if !meta.IsDefined("gc-tuner-threshold") {
-		adjustUint64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+		adjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold {
+		c.GCTunerThreshold = minGCTunerThreshold
+	} else if c.GCTunerThreshold > maxGCTunerThreshold {
+		c.GCTunerThreshold = maxGCTunerThreshold
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
