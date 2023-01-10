@@ -21,14 +21,16 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
-const defaultRefillRate = 10000
-
 const (
+	defaultRefillRate    = 10000
 	defaultInitialTokens = 10 * 10000
 	defaultMaxTokens     = 1e7
 )
 
-var reserveRatio float64 = 0.05
+const (
+	defaultReserveRatio    = 0.05
+	defaultLoanCoefficient = 2
+)
 
 // GroupTokenBucket is a token bucket for a resource group.
 // TODO: statistics Consumption
@@ -139,19 +141,18 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	//               |
 	// grant_rate 0  ------------------------------------------------------------------------------------
 	//         loan      ***    k*period_token    (k+k-1)*period_token    ***      (k+k+1...+1)*period_token
-	k := 3
-	p := make([]float64, k)
-	p[0] = float64(k) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
-	for i := 1; i < k; i++ {
-		p[i] = float64(k-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
+	p := make([]float64, defaultLoanCoefficient)
+	p[0] = float64(defaultLoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
+	for i := 1; i < defaultLoanCoefficient; i++ {
+		p[i] = float64(defaultLoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
 	}
-	for i := 0; i < k && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
+	for i := 0; i < defaultLoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
 		loan := -t.Tokens
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
-		fillRate := float64(k-i) * float64(t.Settings.FillRate)
+		fillRate := float64(defaultLoanCoefficient-i) * float64(t.Settings.FillRate)
 		if roundReserveTokens > neededTokens {
 			t.Tokens -= neededTokens
 			grantedTokens += neededTokens
@@ -172,11 +173,10 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			}
 		}
 	}
-	if grantedTokens < reserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() {
-		res.Tokens -= reserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() - grantedTokens
-		grantedTokens = reserveRatio * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
+	if grantedTokens < defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() {
+		t.Tokens -= defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() - grantedTokens
+		grantedTokens = defaultReserveRatio * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
 	}
-
 	res.Tokens = grantedTokens
 	return &res, targetPeriodTime.Milliseconds()
 }
