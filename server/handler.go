@@ -304,6 +304,11 @@ func (h *Handler) AddBalanceWitnessScheduler() error {
 	return h.AddScheduler(schedulers.BalanceWitnessType)
 }
 
+// AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
+func (h *Handler) AddTransferWitnessLeaderScheduler() error {
+	return h.AddScheduler(schedulers.TransferWitnessLeaderType)
+}
+
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
 	return h.AddScheduler(schedulers.BalanceRegionType)
